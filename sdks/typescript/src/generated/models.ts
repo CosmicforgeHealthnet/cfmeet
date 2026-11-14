@@ -7461,6 +7461,13 @@ export namespace Messaging {
       };
       usableProfiles: { [key: string]: Array<SecurityProfile> };
       contextsWithoutUsableProfile: Array<ContextClass>;
+      e2eeProductionRelease?: null | ({
+          decisionId: string;
+          decidedAt: string;
+          independentAssessment: "NOT_PERFORMED" | "IN_PROGRESS" | "COMPLETED";
+          assessmentReference: string | null;
+          acceptedResidualRisks: Array<string>;
+        });
     };
   };
   export type PresenceSettings = {

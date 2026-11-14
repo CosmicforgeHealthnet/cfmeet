@@ -2118,7 +2118,7 @@
           "minimum": 1
         },
         "deployment": {
-          "description": "What THIS deployment can run (1.23.0): PRIVATE_E2EE needs E2EE devices, MANAGED the managed key ring. usableProfiles lists, per enabled context, the allowed profiles that are actually available; contextsWithoutUsableProfile names enabled contexts in which no conversation can currently be created. A policy update that would leave a context it configures without a usable profile is refused (VALIDATION_ERROR).",
+          "description": "What THIS deployment can run (1.23.0): PRIVATE_E2EE needs E2EE devices, MANAGED the managed key ring. usableProfiles lists, per enabled context, the allowed profiles that are actually available; contextsWithoutUsableProfile names enabled contexts in which no conversation can currently be created. A policy update that would leave a context it configures without a usable profile is refused (VALIDATION_ERROR). 1.24.0: e2eeProductionRelease is the owner's production release decision for personal E2EE (decision id, date, the ACTUAL independent-assessment status and the accepted residual risks); null outside production or while E2EE devices are disabled. It is never a certification claim.",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -2206,6 +2206,63 @@
               "items": {
                 "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ContextClass"
               }
+            },
+            "e2eeProductionRelease": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "decisionId",
+                    "decidedAt",
+                    "independentAssessment",
+                    "assessmentReference",
+                    "acceptedResidualRisks"
+                  ],
+                  "properties": {
+                    "decisionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "decidedAt": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    },
+                    "independentAssessment": {
+                      "enum": [
+                        "NOT_PERFORMED",
+                        "IN_PROGRESS",
+                        "COMPLETED"
+                      ]
+                    },
+                    "assessmentReference": {
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "acceptedResidualRisks": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    }
+                  }
+                }
+              ]
             }
           }
         }

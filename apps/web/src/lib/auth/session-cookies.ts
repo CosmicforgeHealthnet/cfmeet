@@ -145,3 +145,16 @@ export function accountRefreshUrl(apiUrl: string | undefined): string {
   const base = (apiUrl || "http://localhost:3001/api/v1").replace(/\/+$/, "");
   return `${base}/auth/refresh`;
 }
+
+/**
+ * A well-formed device proof from the browser's refresh request (multi-device policy), or
+ * null. Only its shape is checked here; the account authority verifies the signature.
+ */
+export function deviceProofOf(body: unknown): { issuedAt: number; nonce: string; signature: string } | null {
+  const p = (body as { device_proof?: unknown } | null)?.device_proof as Record<string, unknown> | undefined;
+  if (!p || typeof p !== "object") return null;
+  const { issuedAt, nonce, signature } = p;
+  const token = (v: unknown, max: number) => typeof v === "string" && v.length > 0 && v.length <= max && /^[A-Za-z0-9_-]+$/.test(v);
+  if (typeof issuedAt !== "number" || !Number.isInteger(issuedAt) || !token(nonce, 128) || !token(signature, 128)) return null;
+  return { issuedAt, nonce: nonce as string, signature: signature as string };
+}

@@ -167,6 +167,37 @@ function IncomingTransfers({ engine }: { engine: MessagingEngine }) {
   );
 }
 
+// A new browser asking to join the account must be seen where the user is: typing the code
+// it shows is the check against a browser signed in with a stolen password (ADR 0060).
+function IncomingLinks({ engine }: { engine: MessagingEngine }) {
+  const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+  const [codes, setCodes] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  if (s.phase !== "ready" || s.incomingLinks.length === 0) return null;
+  const run = async (action: () => Promise<unknown>) => {
+    setError(null);
+    try { await action(); } catch { setError("That code doesn't match the new browser. Check it and try again."); }
+  };
+  return (
+    <section className="space-y-2 border-b border-border bg-primary/5 px-4 py-3" aria-label="New browsers asking to use your account">
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {s.incomingLinks.map((l) => (
+        <div key={l.linkId} className="flex flex-wrap items-center gap-3" data-testid="incoming-link">
+          <Shield className="size-5 shrink-0 text-primary" />
+          <p className="min-w-0 flex-1 text-sm">A new browser wants to use private messaging on your account. If it&apos;s yours, enter the code it shows.</p>
+          <input aria-label="Code shown on the new browser" inputMode="numeric" maxLength={6} data-testid="incoming-link-code"
+            value={codes[l.linkId] ?? ""} onChange={(e) => setCodes({ ...codes, [l.linkId]: e.target.value.replace(/\D/g, "") })}
+            className="h-9 w-28 rounded-full px-3 text-center font-mono tracking-widest ring-1 ring-border" />
+          <div className="flex gap-2">
+            <button type="button" className="h-9 rounded-full px-4 text-sm font-semibold text-foreground ring-1 ring-border hover:bg-muted" data-testid="reject-link" onClick={() => void run(() => engine.rejectLink(l.linkId))}>Not me</button>
+            <button type="button" disabled={(codes[l.linkId] ?? "").length !== 6} className="h-9 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60" data-testid="approve-link" onClick={() => void run(() => engine.approveLink(l.linkId, codes[l.linkId] ?? ""))}>Approve</button>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function DevicePanel({ engine }: { engine: MessagingEngine }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [recovering, setRecovering] = useState(false);
@@ -189,6 +220,9 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">Turn on private messaging in this browser</p>
           <p className="text-xs text-muted-foreground">{s.detail ?? "Your encryption keys are made here and never leave this browser."}</p>
+          {s.accountLink ? (
+            <p className="mt-1 text-sm">Code for your other device: <span className="font-mono font-semibold tracking-widest" data-testid="account-link-code">{s.accountLink.comparisonCode}</span></p>
+          ) : null}
         </div>
         <button type="button" data-testid="register-device" disabled={busy || s.phase === "registering"} onClick={() => void run(() => registration.mutateAsync())}
           className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
@@ -984,6 +1018,7 @@ function PersonalMessages() {
     <div className="flex h-full min-h-[32rem] flex-col bg-background" data-testid="messages-page">
       <ConnectionBanner engine={engine} />
       <IncomingTransfers engine={engine} />
+      <IncomingLinks engine={engine} />
       {s.phase !== "loading" && s.phase !== "ready" ? (
         <section className="border-b border-border px-4 py-3" aria-label="Secure messaging setup">
           <DevicePanel engine={engine} />

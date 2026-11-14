@@ -46,6 +46,11 @@ export interface SessionManagerOptions {
   legacy?: LegacyTokenCookies | null;
   now?: () => number;
   basePath?: string;
+  /**
+   * Multi-device policy (ADR 0060): a proof of this browser's device key for the refresh of
+   * a device-bound sign-in, or null. Called inside the cross-tab refresh lock.
+   */
+  refreshProof?: () => Promise<unknown | null>;
 }
 
 /** The session cannot be continued: the user must sign in again. */
@@ -174,7 +179,8 @@ export function createSessionManager(options: SessionManagerOptions) {
     const run = async (): Promise<string> => {
       let response;
       try {
-        response = await options.fetchImpl(`${base}/refresh`, request("POST", {}));
+        const deviceProof = options.refreshProof ? await options.refreshProof().catch(() => null) : null;
+        response = await options.fetchImpl(`${base}/refresh`, request("POST", deviceProof ? { device_proof: deviceProof } : {}));
       } catch {
         throw new SessionUnavailableError(0);
       }

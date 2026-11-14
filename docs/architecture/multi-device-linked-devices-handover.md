@@ -4,6 +4,25 @@ The backend is live behind the Meeting Service at `https://api.cfmeet.com`. Deci
 
 Nothing here requires a phone number, SMS or a phone scanning a QR code. Meetings and Calling never require device declaration or E2EE.
 
+## 0. What the web client already does
+
+The shipped web client (`apps/web`) implements the browser side:
+
+| Piece | Where |
+|---|---|
+| Per-account, non-extractable Ed25519 device key and installation id in IndexedDB (`cfmeet-account-device`) | `src/lib/auth/account-device-core.ts`, `src/lib/auth/account-device.ts` |
+| Device declaration before E2EE enrollment | `MessagingEngine.registerDevice` → `ensureTrustedAccountDevice` |
+| Link request with the 6-digit code shown in the existing setup step | `DevicePanel`, `data-testid=account-link-code` |
+| Approval banner on trusted browsers | `IncomingLinks` |
+| `REFRESH` proofs, sent through `/api/session/refresh` | `session-core.ts` `refreshProof`; `deviceProofOf` in the route |
+
+Not yet in the web UI:
+
+* the email step-up screen;
+* the device list and revoke screen.
+
+Mobile (`apps/mobile`) still has to adopt the whole of §3.
+
 ## 1. Concepts
 
 | Term | Meaning |

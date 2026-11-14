@@ -27,6 +27,9 @@ import { messagingClientAccessToken, messagingSessionDeviceToken } from "@/servi
 import { messagingService as identityApi, relay } from "@/services/v2/messaging.service";
 import { b64u } from "./api";
 import { MessagingApiError } from "./errors";
+import { accountDevice } from "@/lib/auth/account-device";
+import type { LinkView } from "@/lib/auth/account-device-core";
+import { accountSession } from "@/lib/auth/session";
 import type { Colleague, MessagingIdentity } from "@/types/messaging";
 import { CryptoClient, CryptoWorkerError, type StoredRecord } from "./crypto-client";
 import { ManagedConversationState, emptyRefresh, type ConversationEvent, type ManagedRecord, type Refresh, type ServerMessage as ManagedServerMessage } from "./managed-store";
@@ -102,8 +105,18 @@ export type IncomingTransfer = {
   expiresAt: string;
 };
 
+/** A new browser's request to be linked to the account (multi-device policy). */
+export type AccountLink = { linkId: string; comparisonCode: string; expiresAt: string };
+
+/** A link request from a new device, shown on a trusted device (code typed by the user). */
+export type IncomingLink = { linkId: string; platform: string; label: string | null; expiresAt: string; keyThumbprint: string };
+
 export type EngineSnapshot = {
   phase: Phase;
+  /** This browser waits for a trusted device to approve it (shows the code). */
+  accountLink: AccountLink | null;
+  /** New devices of the account waiting for this (trusted) browser's approval. */
+  incomingLinks: IncomingLink[];
   detail: string | null;
   connection: Connection;
   identity: MessagingIdentity | null;
@@ -169,6 +182,14 @@ const SESSION_DEVICE_KEY = "cfmeet.messaging.session-device.";
 const TYPING_THROTTLE_MS = 3000;
 const KEY_PACKAGE_STOCK = 10;
 const POLL_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_POLL_MS) || 15_000);
+/** A new browser checks whether a trusted device approved it. */
+const LINK_POLL_MS = 2_000;
+
+/** The API error code of an Account authority call (axios), if any. */
+function accountErrorCode(e: unknown): string | null {
+  const code = (e as { response?: { data?: { error?: { code?: unknown } } } })?.response?.data?.error?.code;
+  return typeof code === "string" ? code : null;
+}
 /** How often a member device checks an encrypted group for members' new devices. */
 const DEVICE_CHECK_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_DEVICE_CHECK_MS) || 30_000);
 const MESSAGING_URL = process.env.NEXT_PUBLIC_MESSAGING_URL ?? "";
@@ -207,6 +228,8 @@ export class MessagingEngine {
   static active: MessagingEngine | null = null;
   private snapshot: EngineSnapshot = {
     phase: "loading",
+    accountLink: null,
+    incomingLinks: [],
     detail: null,
     connection: "disconnected",
     identity: null,
@@ -368,6 +391,7 @@ export class MessagingEngine {
 
   stop(): void {
     this.stopped = true;
+    this.stopLinkWatch();
     if (MessagingEngine.active === this) MessagingEngine.active = null;
     if (typeof window !== "undefined") {
       window.removeEventListener("offline", this.onOffline);
@@ -409,6 +433,7 @@ export class MessagingEngine {
       await this.refreshConversations();
       await this.checkWelcomes();
       await this.checkIncomingTransfers();
+      await this.checkIncomingLinks();
       // Realtime is the fast path; a periodic catch-up also lets member devices add new
       // devices and commit pending removals of encrypted groups.
       for (const id of this.server.keys()) this.scheduleSync(id);
@@ -439,6 +464,8 @@ export class MessagingEngine {
     if (!this.crypto || !this.snapshot.identity) return;
     this.set({ phase: "registering", detail: null });
     try {
+      // Multi-device policy: only a trusted device of the account may hold an E2EE device.
+      if (!(await this.ensureTrustedAccountDevice(label))) return;
       const challenge = await identityApi.registrationChallenge();
       await this.crypto.call("generate", { deviceId: challenge.deviceId });
       const kp = await this.crypto.call<Uint8Array>("registrationKeyPackage", {
@@ -1877,6 +1904,105 @@ export class MessagingEngine {
   private async renderOrSync(id: string): Promise<void> {
     const conv = this.server.get(id);
     if (conv?.securityProfile === "PRIVATE_E2EE") await this.renderE2ee(id);
+  }
+
+  // ------------------------------------------------------- account device (ADR 0060)
+
+  private linkTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Declares this browser's account device for the current sign-in. Trusted: continue.
+   * Untrusted: start a link request (the user approves it from a trusted device by typing
+   * the code shown here) and finish the registration once approved.
+   */
+  private async ensureTrustedAccountDevice(label: string): Promise<boolean> {
+    const token = await accountSession.getAccessToken();
+    if (!token) throw new MessagingApiError(401, "AUTHENTICATION_REQUIRED", null);
+    let view;
+    try {
+      view = await accountDevice.declare(token, label);
+    } catch (e) {
+      const code = accountErrorCode(e);
+      if (code === "DEVICE_DECLARATION_REFUSED") {
+        this.set({ phase: "needs-device", detail: "To turn on private messaging, sign out and sign in again on this browser." });
+        return false;
+      }
+      if (code === "WEB_DEVICE_LIMIT_REACHED") {
+        this.set({ phase: "needs-device", detail: "Your account already uses the maximum number of browsers. Remove one under Security & devices on another device." });
+        return false;
+      }
+      throw e;
+    }
+    if (!view) {
+      this.set({ phase: "needs-device", detail: "This browser cannot keep a secure device key. Use an up-to-date browser for private messaging." });
+      return false;
+    }
+    if (view.trust === "TRUSTED" && view.state === "ACTIVE") return true;
+    const link = await accountDevice.requestLink();
+    this.set({
+      phase: "needs-device",
+      accountLink: { linkId: link.linkId, comparisonCode: link.comparisonCode ?? "", expiresAt: link.expiresAt },
+      detail: "Approve this browser on a device where you already use private messaging. Enter the code shown here.",
+    });
+    this.watchLink(link.linkId, label);
+    return false;
+  }
+
+  private watchLink(linkId: string, label: string): void {
+    if (this.linkTimer) clearInterval(this.linkTimer);
+    this.linkTimer = setInterval(() => void (async () => {
+      if (this.stopped) return this.stopLinkWatch();
+      try {
+        const link = await accountDevice.linkStatus(linkId);
+        if (link.status === "APPROVED") {
+          this.stopLinkWatch();
+          await accountDevice.completeLink(linkId);
+          this.set({ accountLink: null, detail: null });
+          await this.registerDevice(label);
+        } else if (link.status !== "PENDING") {
+          this.stopLinkWatch();
+          this.set({ accountLink: null, detail: "The request to link this browser ended. Try again." });
+        }
+      } catch {
+        // retried on the next tick; an expired link answers DEVICE_LINK_INVALID
+        if (Date.parse(this.snapshot.accountLink?.expiresAt ?? "") < Date.now()) {
+          this.stopLinkWatch();
+          this.set({ accountLink: null, detail: "The request to link this browser expired. Try again." });
+        }
+      }
+    })(), LINK_POLL_MS);
+  }
+
+  private stopLinkWatch(): void {
+    if (this.linkTimer) clearInterval(this.linkTimer);
+    this.linkTimer = null;
+  }
+
+  /** TRUSTED browser: new devices of the account waiting for approval. */
+  async checkIncomingLinks(): Promise<void> {
+    if (this.snapshot.phase !== "ready") return;
+    try {
+      const links = await accountDevice.pendingLinks();
+      this.set({
+        incomingLinks: links.map((l: LinkView) => ({ linkId: l.linkId, platform: l.platform ?? "WEB", label: l.label ?? null, expiresAt: l.expiresAt, keyThumbprint: l.keyThumbprint ?? "" })),
+      });
+    } catch {
+      // Untrusted or unclassified sign-ins cannot approve devices: nothing to show.
+      if (this.snapshot.incomingLinks.length) this.set({ incomingLinks: [] });
+    }
+  }
+
+  /** TRUSTED browser: the user typed the code the new device shows. */
+  async approveLink(linkId: string, comparisonCode: string): Promise<void> {
+    const link = this.snapshot.incomingLinks.find((l) => l.linkId === linkId);
+    if (!link) return;
+    await accountDevice.approveLink({ linkId, deviceId: "", status: "PENDING", expiresAt: link.expiresAt, keyThumbprint: link.keyThumbprint }, comparisonCode);
+    this.set({ incomingLinks: this.snapshot.incomingLinks.filter((l) => l.linkId !== linkId) });
+  }
+
+  async rejectLink(linkId: string): Promise<void> {
+    await accountDevice.rejectLink(linkId);
+    this.set({ incomingLinks: this.snapshot.incomingLinks.filter((l) => l.linkId !== linkId) });
   }
 
   /** SOURCE: requests addressed to this device, each with the code the user compares. */

@@ -15,7 +15,8 @@
 // Steps: device registration; an end-to-end encrypted conversation created in the UI;
 // encrypted send / receive; XSS payloads rendered as text; reload (encrypted local
 // state); offline delivery; network loss and reconnect; an encrypted attachment;
-// new chats are private-only (the new-chat dialog offers no MANAGED choice); a second device added to the
+// new chats are private-only (the new-chat dialog offers no MANAGED choice); a second browser linked by a
+// trusted browser (comparison code, ADR 0060), then a second device added to the
 // group, its history recovered device-to-device with comparison codes; device removal
 // erasing local state; CSP / Trusted Types / worker integrity; expired session.
 import { test, before, after } from "node:test";
@@ -312,7 +313,18 @@ async function journey() {
   //          is recovered device-to-device after both devices show the same code.
   const bob2 = await open("bob");
   pages.bob2 = bob2.page;
-  await register(bob2.page);
+  // Multi-device policy (ADR 0060): a second browser is untrusted until one of Bob's trusted
+  // devices approves it by typing the code the new browser shows; then setup completes.
+  await phase(bob2.page, "needs-device");
+  await bob2.page.click("[data-testid=register-device]");
+  const linkCode = (await bob2.page.locator("[data-testid=account-link-code]").textContent({ timeout: T })).trim();
+  assert.match(linkCode, /^\d{6}$/, "the new browser shows a 6-digit linking code");
+  await bob.page.locator("[data-testid=incoming-link]").waitFor({ timeout: 2 * T });
+  await bob.page.fill("[data-testid=incoming-link-code]", linkCode);
+  await bob.page.click("[data-testid=approve-link]");
+  await bob.page.locator("[data-testid=incoming-link]").waitFor({ state: "detached", timeout: T });
+  await phase(bob2.page, "ready");
+  step("second browser linked by a trusted browser (comparison code)", { linkCode: "######" });
   await openConversation(bob2.page, "PRIVATE_E2EE");
   await bob2.page.locator("[data-testid=e2ee-unavailable]").waitFor({ state: "detached", timeout: 3 * T });
   await bob2.page.locator("[data-testid=message][data-state=before-join]").first().waitFor({ timeout: T });

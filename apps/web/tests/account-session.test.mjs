@@ -282,3 +282,90 @@ test("no source file writes an account token to a JS-readable cookie, localStora
     "the pre-Section 17 cookie token store is gone",
   );
 });
+
+// ---------------------------------------------------------------- multi-device (ADR 0060)
+import { createAccountDevice, proofStatement, sessionIdOf } from "../src/lib/auth/account-device-core.ts";
+import { deviceProofOf } from "../src/lib/auth/session-cookies.ts";
+
+function memoryDevice(api = {}) {
+  const store = new Map();
+  let current = null;
+  const calls = [];
+  const device = createAccountDevice({
+    subtle: globalThis.crypto.subtle,
+    randomBytes: (n) => globalThis.crypto.getRandomValues(new Uint8Array(n)),
+    load: async (a) => store.get(a) ?? null,
+    save: async (a, d) => { store.set(a, d); },
+    loadCurrent: async () => current,
+    saveCurrent: async (a) => { current = a; },
+    api: {
+      declare: async (body) => { calls.push(["declare", body]); return { device: { deviceId: "d1", trust: "TRUSTED", state: "ACTIVE", keyThumbprint: "", deviceClass: "WEB", platform: "WEB", primary: false } }; },
+      ...api,
+    },
+  });
+  return { device, calls, stored: () => store.get(current), store };
+}
+
+const claimsJwt = (claims) => `h.${b64(claims)}.s`;
+
+test("the browser device key is non-extractable and its proofs follow the server statement", async () => {
+  const { device, calls, stored } = memoryDevice();
+  const view = await device.declare(claimsJwt({ sub: "acct-a", sid: "11111111-2222-3333-4444-555555555555" }));
+  assert.equal(view.deviceId, "d1");
+  const s = stored();
+  assert.equal(s.privateKey.extractable, false, "private key never exportable");
+  assert.equal(s.sessionId, "11111111-2222-3333-4444-555555555555");
+  const [, body] = calls[0];
+  assert.equal(body.deviceClass, "WEB");
+  assert.match(body.installationId, /^web-[A-Za-z0-9_-]{16,}$/);
+  // The signature verifies over exactly the documented statement.
+  const pub = await crypto.subtle.importKey("raw", Buffer.from(body.publicKey, "base64url"), { name: "Ed25519" }, true, ["verify"]);
+  const thumb = Buffer.from(await crypto.subtle.digest("SHA-256", Buffer.from(body.publicKey, "base64url"))).toString("hex");
+  const statement = proofStatement("DECLARE", thumb, s.sessionId, body.proof.issuedAt, body.proof.nonce);
+  assert.ok(statement.startsWith("cfmeet-account-device-proof:v1\nDECLARE\n"));
+  assert.ok(await crypto.subtle.verify({ name: "Ed25519" }, pub, Buffer.from(body.proof.signature, "base64url"), new TextEncoder().encode(statement)));
+  // Refresh proofs are bound to the declared sign-in, with a fresh nonce each time.
+  const r1 = await device.refreshProof();
+  const r2 = await device.refreshProof();
+  assert.notEqual(r1.nonce, r2.nonce);
+  const refreshStatement = proofStatement("REFRESH", thumb, s.sessionId, r1.issuedAt, r1.nonce);
+  assert.ok(await crypto.subtle.verify({ name: "Ed25519" }, pub, Buffer.from(r1.signature, "base64url"), new TextEncoder().encode(refreshStatement)));
+});
+
+test("an undeclared browser sends no refresh proof; each account gets its own key", async () => {
+  const { device, store } = memoryDevice();
+  assert.equal(await device.refreshProof(), null);
+  await device.declare(claimsJwt({ sub: "acct-a", sid: "s-a" }));
+  await device.declare(claimsJwt({ sub: "acct-b", sid: "s-b" }));
+  assert.notDeepEqual(store.get("acct-a").publicKey, store.get("acct-b").publicKey, "never one key for two accounts");
+  assert.equal(store.get("acct-a").installationId === store.get("acct-b").installationId, false);
+  assert.equal(sessionIdOf(claimsJwt({ sid: "abc" })), "abc");
+  assert.equal(sessionIdOf("not-a-jwt"), null);
+});
+
+test("the session manager sends the device proof with the refresh", async () => {
+  const sent = [];
+  const token = claimsJwt({ exp: Math.floor(Date.now() / 1000) + 900 });
+  const manager = createSessionManager({
+    fetchImpl: async (url, init) => { sent.push([url, init]); return new Response(JSON.stringify({ access_token: token }), { status: 200 }); },
+    readHint: () => "session",
+    refreshProof: async () => ({ issuedAt: 1, nonce: "n", signature: "s" }),
+  });
+  await manager.refreshAccessToken();
+  assert.deepEqual(JSON.parse(sent[0][1].body), { device_proof: { issuedAt: 1, nonce: "n", signature: "s" } });
+  const plain = createSessionManager({
+    fetchImpl: async (url, init) => { sent.push([url, init]); return new Response(JSON.stringify({ access_token: token }), { status: 200 }); },
+    readHint: () => "session",
+    refreshProof: async () => { throw new Error("no IndexedDB"); },
+  });
+  await plain.refreshAccessToken();
+  assert.deepEqual(JSON.parse(sent[1][1].body), {}, "a failing proof provider never blocks the refresh");
+});
+
+test("the refresh route forwards only a well-formed device proof", () => {
+  assert.deepEqual(deviceProofOf({ device_proof: { issuedAt: 5, nonce: "abc_-", signature: "xyz" } }), { issuedAt: 5, nonce: "abc_-", signature: "xyz" });
+  for (const bad of [null, {}, { device_proof: "x" }, { device_proof: { issuedAt: "5", nonce: "a", signature: "b" } },
+    { device_proof: { issuedAt: 5, nonce: "a b", signature: "b" } }, { device_proof: { issuedAt: 5, nonce: "a", signature: "x".repeat(200) } }]) {
+    assert.equal(deviceProofOf(bad), null, JSON.stringify(bad));
+  }
+});
