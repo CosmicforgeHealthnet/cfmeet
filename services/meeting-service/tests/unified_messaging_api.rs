@@ -639,7 +639,10 @@ async fn the_client_relay_forwards_only_allowlisted_operations_for_the_caller() 
     assert_eq!(v["environmentId"], json!(gw.env));
     assert!(v.get("tenantId").is_some() && v.get("applicationId").is_some());
     // The caller's own display name (calling clients name themselves on calls they start).
-    assert!(v["displayName"].as_str().is_some_and(|n| !n.is_empty()), "{v}");
+    assert!(
+        v["displayName"].as_str().is_some_and(|n| !n.is_empty()),
+        "{v}"
+    );
 }
 
 /// Blueprint Section 13 (MSG-001/002/003): walks the Messaging consumer contract and

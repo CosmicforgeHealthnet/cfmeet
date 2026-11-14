@@ -160,8 +160,7 @@ pub struct ProviderParticipant {
     pub generation: Option<i32>,
     /// Permissions currently applied to the connection.
     pub permissions: MediaPermissions,
-    /// The connection has joined the room (provider state JOINED or ACTIVE; not JOINING or
-    /// DISCONNECTED).
+    /// The connection is fully established (not merely joining).
     pub active: bool,
     pub published_audio: bool,
     pub published_video: bool,

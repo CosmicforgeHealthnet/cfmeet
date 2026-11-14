@@ -833,14 +833,10 @@ fn participant(v: &Value) -> Option<ProviderParticipant> {
         can_publish_data: bool_field(&permission, "can_publish_data", "canPublishData"),
         can_subscribe: bool_field(&permission, "can_subscribe", "canSubscribe"),
     };
-    // LiveKit ParticipantInfo.State: JOINING 0, JOINED 1, ACTIVE 2, DISCONNECTED 3. The
-    // `participant_joined` webhook reports JOINED (ACTIVE follows once ICE completes); a
-    // joined, admitted connection is the evidence a Call connects on, so JOINED counts.
-    // Waiting for ACTIVE left the Call ANSWERED until the 15 s reconcile tick.
     let state = v.get("state");
     let active = match state {
-        Some(Value::String(s)) => s == "ACTIVE" || s == "JOINED",
-        Some(Value::Number(n)) => matches!(n.as_i64(), Some(1) | Some(2)),
+        Some(Value::String(s)) => s == "ACTIVE",
+        Some(Value::Number(n)) => n.as_i64() == Some(2),
         _ => false,
     };
     let generation = v
@@ -1678,24 +1674,6 @@ mod tests {
         let p = event.participant.unwrap();
         assert_eq!(p.generation, Some(2));
         assert!(p.active && p.permissions.can_publish_audio && !p.permissions.can_publish_video);
-        // The participant_joined webhook carries JOINED (ACTIVE comes later): already joined.
-        for (state, joined) in [
-            (r#""JOINED""#, true),
-            ("1", true),
-            ("2", true),
-            (r#""JOINING""#, false),
-            ("0", false),
-            (r#""DISCONNECTED""#, false),
-            ("3", false),
-        ] {
-            let b = body.replace(r#""state":"ACTIVE""#, &format!(r#""state":{state}"#));
-            let p = adapter
-                .verify_event(Some(&signed(&b, SECRET)), b.as_bytes())
-                .unwrap()
-                .participant
-                .unwrap();
-            assert_eq!(p.active, joined, "{state}");
-        }
         // Calling's own server-side recorder (kind EGRESS) is neither a session nor an
         // unknown connection to quarantine; a client identity claiming nothing is.
         let recorder = body.replace(
