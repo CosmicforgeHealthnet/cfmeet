@@ -254,6 +254,14 @@ def network_state():
         'sysctl': sysctl, 'firewall_media_rules': firewall})
 
 
+def calling_key_matches(api_key):
+    """Whether a LiveKit key id is the one Calling verifies callbacks with (boolean only)."""
+    try:
+        return bool(api_key) and Path('/opt/cfmeet-core/secrets/calling-livekit-api-key').read_text().strip() == api_key
+    except OSError:
+        return None
+
+
 def livekit_config(public_ip):
     import yaml
     config = yaml.safe_load(Path('/opt/livekit/livekit.yaml').read_text()) or {}
@@ -278,7 +286,8 @@ def livekit_config(public_ip):
         'loopback_or_internal_host': [bool(t.hostname) and (t.hostname in ('127.0.0.1', 'localhost') or '.' not in t.hostname)
                                       for t in targets],
         'api_key_set': bool(webhook.get('api_key')),
-        'api_key_in_keys': bool(webhook.get('api_key')) and webhook.get('api_key') in (config.get('keys') or {})})
+        'api_key_in_keys': bool(webhook.get('api_key')) and webhook.get('api_key') in (config.get('keys') or {}),
+        'api_key_is_callings': calling_key_matches(webhook.get('api_key'))})
     container = json.loads(sh('docker', 'inspect', 'lk-server') or '[{}]')[0]
     host = container.get('HostConfig', {})
     emit('livekitConfig', {'rtc': safe_rtc, 'turn': {k: turn.get(k) for k in ('enabled', 'udp_port', 'tls_port', 'external_tls')},
