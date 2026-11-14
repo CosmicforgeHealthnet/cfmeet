@@ -52,7 +52,7 @@ function VerifyTokenContent() {
   return (
     <VerifyModal
       email={email}
-      title="Reset Password"
+      title="Enter your reset code"
       maskedEmail
       showReturnToLogin={true}
       onVerify={handleVerify}
@@ -67,9 +67,7 @@ export default function VerifyTokenPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center bg-muted">
-          <div className="text-muted-foreground">Loading...</div>
-        </div>
+        <p className="text-muted-foreground">Loading…</p>
       }
     >
       <VerifyTokenContent />

@@ -13,12 +13,16 @@ interface JoinMeetingInputProps {
   className?: string;
   inputClassName?: string;
   buttonClassName?: string;
+  placeholder?: string;
+  inputId?: string;
 }
 
 export default function JoinMeetingInput({
   className,
   inputClassName,
   buttonClassName,
+  placeholder = "Enter Link or Code",
+  inputId,
 }: JoinMeetingInputProps) {
   const router = useRouter();
   const [joinInput, setJoinInput] = useState("");
@@ -40,7 +44,8 @@ export default function JoinMeetingInput({
   return (
     <div className="w-full"><div className={cn("flex w-full gap-2", className)}>
       <Input
-        placeholder="Enter Link or Code"
+        id={inputId}
+        placeholder={placeholder}
         className={cn("flex-1", inputClassName)}
         value={joinInput}
         onChange={(e) => setJoinInput(e.target.value)}

@@ -290,11 +290,11 @@ test("credential actions follow the effective state", () => {
 test("error presentation: contract codes win over the status family", () => {
   assert.equal(describeError({ status: 404, code: "INVITATION_INVALID" }).detail.includes("invalid"), true);
   assert.equal(describeError({ status: 403, code: "INVITATION_EMAIL_MISMATCH" }).detail.includes("different email"), true);
-  assert.equal(describeError({ status: 403, code: "ORGANIZATION_RESTRICTED" }).title, "Workspace state");
-  assert.equal(describeError({ status: 403, code: "PERMISSION_DENIED" }).title, "Not allowed");
+  assert.equal(describeError({ status: 403, code: "ORGANIZATION_RESTRICTED" }).title, "Your workspace can't do this right now");
+  assert.equal(describeError({ status: 403, code: "PERMISSION_DENIED" }).title, "You don't have permission for this");
   assert.equal(describeError({ status: 409, code: "VERSION_CONFLICT" }).action, "reload");
   assert.equal(describeError({ status: 401, code: "AUTHENTICATION_REQUIRED" }).action, "signin");
-  assert.equal(describeError({ kind: "unavailable", message: "m" }).title, "Developer Platform not available in this environment");
+  assert.equal(describeError({ kind: "unavailable", message: "m" }).title, "The developer console isn't on here");
   assert.equal(describeError({ kind: "network" }).action, "retry");
   assert.equal(describeError({ kind: "session", code: "SESSION_UNAVAILABLE", status: 0 }).action, "retry");
   const limited = describeError({ status: 429, retryAfterSeconds: 3, requestId: "r" });

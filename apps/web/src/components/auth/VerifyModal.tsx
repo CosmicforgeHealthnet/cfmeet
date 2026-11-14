@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
-import AuthHeader from "./AuthHeader";
+import { Mail } from "lucide-react";
 import { useVerifyEmail } from "@/hooks";
 import type { ApiErrorResponse } from "@/types/auth";
 import { AxiosError } from "axios";
@@ -46,6 +46,14 @@ const VerifyModal = ({
   const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   const [resendMessage, setResendMessage] = useState("");
+  // Resend cooldown so the code can't be requested in a burst.
+  const [cooldown, setCooldown] = useState(30);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const displayEmail = maskedEmail ? maskEmail(email) : email;
 
@@ -96,7 +104,8 @@ const VerifyModal = ({
 
     try {
       await onResend();
-      setResendMessage("A new code has been sent to your email");
+      setResendMessage("A new code is on its way to your inbox.");
+      setCooldown(30);
     } catch (err) {
       const axiosError = err as AxiosError<ApiErrorResponse>;
       setError(
@@ -106,94 +115,83 @@ const VerifyModal = ({
     }
   };
 
+  const loading = externalLoading !== undefined ? externalLoading : verifyEmail.isPending;
+
   return (
-    <div className="relative z-10 flex flex-col items-center w-full max-w-[520px]">
-      <div className="bg-card rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6 flex flex-col items-center">
-        {/* Header */}
-        <AuthHeader title={title} subtitle="Enter OTP code" />
+    <div>
+      <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+        <Mail className="size-6" aria-hidden />
+      </span>
+      <h1 className="mt-6 text-3xl font-bold tracking-tight text-foreground">{title === "Verify your Email" ? "Check your email" : title}</h1>
+      <p className="mt-2 text-base text-muted-foreground">
+        We sent a 6-digit code to{" "}
+        {displayEmail ? <span className="font-semibold text-foreground">{displayEmail}</span> : "your email"}. Enter it below.
+      </p>
 
-        <div className="text-center mb-2 space-y-1">
-          <p className="text-sm text-muted-foreground">
-            We sent you a 6-digit code via your email
-          </p>
-          <p className="text-sm font-bold text-foreground">{displayEmail}</p>
-        </div>
-
-        {/* OTP Input Group */}
-        <form
-          className="w-full flex flex-col items-start space-y-2"
-          onSubmit={handleSubmit}
+      <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
+        <InputOTP
+          maxLength={6}
+          value={otp}
+          onChange={(value) => {
+            setOtp(value);
+            setError("");
+          }}
+          containerClassName="w-full"
+          aria-label="6-digit code"
+          autoComplete="one-time-code"
         >
-          <InputOTP
-            maxLength={6}
-            value={otp}
-            onChange={(value) => {
-              setOtp(value);
-              setError("");
-            }}
-            containerClassName="group flex items-center justify-between w-full"
-          >
-            <InputOTPGroup className="flex justify-between w-full">
-              {[0, 1, 2, 3, 4, 5].map((index) => (
-                <InputOTPSlot
-                  key={index}
-                  index={index}
-                  className="w-9 h-8 sm:w-11 sm:h-9 md:w-13 md:h-10 rounded-sm border-none bg-primary/10 text-foreground text-lg sm:text-xl"
-                />
-              ))}
-            </InputOTPGroup>
-          </InputOTP>
+          <InputOTPGroup className="flex w-full justify-between gap-2">
+            {[0, 1, 2, 3, 4, 5].map((index) => (
+              <InputOTPSlot
+                key={index}
+                index={index}
+                className="h-14 flex-1 rounded-xl border border-border bg-background text-xl font-semibold text-foreground first:rounded-xl last:rounded-xl"
+              />
+            ))}
+          </InputOTPGroup>
+        </InputOTP>
 
-          {/* Error - below OTP input */}
-          {(error || customError) && (
-            <div className="w-full bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2">
-              {customError || error}
-            </div>
-          )}
-
-          {/* Success message */}
-          {resendMessage && (
-            <div className="w-full bg-green-50 border border-green-200 text-green-600 text-sm rounded-lg px-4 py-2">
-              {resendMessage}
-            </div>
-          )}
-
-          <div>
-            <p className="text-sm text-muted-foreground">
-              Didn&apos;t receive code?{" "}
-              <Button
-                type="button"
-                className="text-primary font-bold p-1"
-                variant="link"
-                onClick={handleResend}
-                disabled={!onResend}
-              >
-                Resend!
-              </Button>
-            </p>
+        {(error || customError) && (
+          <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {customError || error}
           </div>
-
-          {/* Submit Button */}
-          <Button
-            type="submit"
-            size="lg"
-            className="w-full"
-            loading={
-              externalLoading !== undefined
-                ? externalLoading
-                : verifyEmail.isPending
-            }
-          >
-            Submit Code
-          </Button>
-        </form>
-
-        {showReturnToLogin && (
-          <Link href="/login" className="mt-2 text-sm ">
-            <Button variant="link"> Return to Log In Page</Button>{" "}
-          </Link>
         )}
-      </div>
+        {resendMessage && (
+          <div role="status" className="rounded-xl border border-[var(--success)]/30 bg-[var(--success)]/10 px-4 py-3 text-sm text-foreground">
+            {resendMessage}
+          </div>
+        )}
+
+        <Button type="submit" className="h-12 w-full rounded-xl text-base shadow-none hover:brightness-100" loading={loading}>
+          Verify
+        </Button>
+      </form>
+
+      <p className="mt-6 text-center text-sm text-muted-foreground">
+        Didn&apos;t get the code?{" "}
+        {onResend ? (
+          cooldown > 0 ? (
+            <span className="tabular-nums">Resend in {cooldown}s</span>
+          ) : (
+            <button type="button" onClick={handleResend} className="font-semibold text-primary hover:underline">
+              Resend code
+            </button>
+          )
+        ) : (
+          "Check your spam folder."
+        )}
+      </p>
+
+      <p className="mt-8 border-t border-border pt-6 text-center text-sm text-muted-foreground">
+        {showReturnToLogin ? (
+          <Link href="/login" className="font-semibold text-primary hover:underline">Back to sign in</Link>
+        ) : (
+          <>
+            Wrong email?{" "}
+            <Link href="/signup" className="font-semibold text-primary hover:underline">Start again</Link>
+          </>
+        )}
+      </p>
     </div>
   );
 };

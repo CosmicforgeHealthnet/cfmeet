@@ -39,7 +39,10 @@ export function useSpaces() {
   return useQuery({
     queryKey: spaceKeys.list(),
     queryFn: () => spacesService.list(),
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    // Live / ended status changes often: re-check on every visit and on focus.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -51,6 +54,9 @@ export function useSpace(id: string) {
     queryKey: spaceKeys.detail(id),
     queryFn: () => spacesService.get(id),
     enabled: !!id,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }
 

@@ -4,7 +4,8 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthInput from "@/components/auth/AuthInput";
 import { Button } from "@/components/ui/button";
-import AuthHeader from "@/components/auth/AuthHeader";
+import Link from "next/link";
+import { KeyRound } from "lucide-react";
 import { AxiosError } from "axios";
 import type { ApiErrorResponse } from "@/types/auth";
 import { authService } from "@/services/auth.service";
@@ -52,56 +53,37 @@ const ForgotPasswordPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted px-4">
-      <div className="relative z-10 bg-background rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6">
-        {/* Header */}
-        <AuthHeader
-          title="Forgot Password?"
-          subtitle="Enter your email to receive a password reset code."
+    <div>
+      <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+        <KeyRound className="size-6" aria-hidden />
+      </span>
+      <h1 className="mt-6 text-3xl font-bold tracking-tight text-foreground">Forgot your password?</h1>
+      <p className="mt-2 text-base text-muted-foreground">
+        Enter your account email and we&apos;ll send you a code to reset it.
+      </p>
+
+      <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
+        <AuthInput
+          label="Email"
+          type="email"
+          autoComplete="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setError("");
+          }}
+          error={error}
         />
+        <Button type="submit" className="h-12 w-full rounded-xl text-base shadow-none hover:brightness-100" disabled={isLoading}>
+          {isLoading ? "Sending…" : "Send reset code"}
+        </Button>
+      </form>
 
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2 mb-4">
-            {error}
-          </div>
-        )}
-
-        {/* Form */}
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <AuthInput
-            label="Email"
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              setError("");
-            }}
-            error={error}
-          />
-
-          <Button
-            type="submit"
-            size="lg"
-            className="w-full"
-            disabled={isLoading}
-          >
-            {isLoading ? "Sending..." : "Send Reset Code"}
-          </Button>
-        </form>
-
-        {/* Back to Login */}
-        <div className="text-center mt-4">
-          <Button
-            variant="link"
-            onClick={() => router.push("/login")}
-            className="text-sm"
-          >
-            ← Back to Login
-          </Button>
-        </div>
-      </div>
+      <p className="mt-8 border-t border-border pt-6 text-center text-sm text-muted-foreground">
+        Remembered it?{" "}
+        <Link href="/login" className="font-semibold text-primary hover:underline">Back to sign in</Link>
+      </p>
     </div>
   );
 };

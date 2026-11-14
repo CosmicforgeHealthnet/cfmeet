@@ -1,123 +1,103 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
-import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Menu, X } from "lucide-react";
 import { useDashboardNavigation } from "@/lib/use-dashboard-navigation";
 import ProfileMenu from "./ProfileMenu";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { isActivePath } from "./AppSidebar";
+import { OPEN_MENU_EVENT } from "./MobileTabs";
 
+/** Phone menu drawer (opened by the "More" tab): the same content and styling as the desktop sidebar. */
 export default function MobileSidebar() {
   const menu = useDashboardNavigation();
-  const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  return (
-    <>
-      {/* Menu trigger button — top-right, only on mobile */}
-      {!open && (
-        <button
-          onClick={() => setOpen(true)}
-          className="fixed top-4 right-4 z-40 w-10 h-10 rounded-full bg-sidebar shadow-sm flex items-center justify-center text-primary md:hidden"
-          aria-label="Open menu"
-        >
-          <Menu size={20} />
-        </button>
-      )}
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(OPEN_MENU_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_MENU_EVENT, onOpen);
+  }, []);
 
-      {/* Backdrop */}
+  // Close on navigation and on Escape.
+  useEffect(() => setOpen(false), [pathname]);
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [open]);
+
+  return (
+    <div className="md:hidden">
       <div
-        className={cn(
-          "fixed inset-0 z-50 bg-black/30 transition-opacity duration-300 md:hidden",
-          open
-            ? "opacity-100 pointer-events-auto"
-            : "opacity-0 pointer-events-none",
-        )}
+        aria-hidden
         onClick={() => setOpen(false)}
+        className={cn(
+          "fixed inset-0 z-50 bg-black/40 transition-opacity duration-300",
+          open ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
       />
 
-      {/* Drawer panel — slides from LEFT */}
       <aside
+        aria-label="Menu"
+        aria-hidden={!open}
+        inert={!open}
         className={cn(
-          "fixed top-0 left-0 z-50 h-full w-[220px] transition-transform duration-300 ease-in-out md:hidden",
+          "fixed inset-y-0 left-0 z-50 flex w-[280px] max-w-[85vw] flex-col border-r border-border bg-sidebar shadow-2xl transition-transform duration-300 ease-out",
           open ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        {/* Inner container matching AppSidebar design */}
-        <div className="h-[calc(100vh-2rem)] my-4 ml-4 bg-sidebar rounded-[40px] shadow-sm flex flex-col">
-          {/* Top row: Logo + Close button */}
-          <div className="h-16 flex items-center justify-between pl-5 pr-4">
-            {/* Light mode full logo */}
-            <Image
-              src="/light-mode-cf-meet.png"
-              alt="CF Meet Logo"
-              width={120}
-              height={32}
-              className="h-8 w-auto object-contain object-left dark:hidden"
-              priority
-            />
-            {/* Dark mode full logo */}
-            <Image
-              src="/dark-mode-cfmeet.png"
-              alt="CF Meet Logo"
-              width={120}
-              height={32}
-              className="h-8 w-auto object-contain object-left hidden dark:block"
-              priority
-            />
-            <button
-              onClick={() => setOpen(false)}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"
-              aria-label="Close menu"
-            >
-              <X size={18} />
-            </button>
-          </div>
+        <div className="flex h-16 items-center justify-between px-4">
+          <Image src="/light-mode-cf-meet.png" alt="CF Meet" width={120} height={40} className="h-8 w-auto dark:hidden" />
+          <Image src="/dark-mode-cfmeet.png" alt="CF Meet" width={120} height={40} className="hidden h-8 w-auto dark:block" />
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close menu"
+            className="flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
 
-          {/* Nav */}
-          <nav className="mt-6 space-y-1 flex-1">
+        <div className="px-4 pb-2">
+          <WorkspaceSwitcher expanded />
+        </div>
+
+        <nav aria-label="Main" className="no-scrollbar flex-1 overflow-y-auto px-3 py-2">
+          <ul className="space-y-1">
             {menu.map(({ label, icon: Icon, href }) => {
-              const isActive =
-                href === "/dashboard"
-                  ? pathname === "/dashboard"
-                  : pathname.startsWith(href);
+              const active = isActivePath(pathname, href);
               return (
-                <button
-                  key={label}
-              title={label}
-              aria-label={label}
-                  onClick={() => {
-                    router.push(href);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "relative w-full flex items-center gap-3 px-5 py-3 transition-colors",
-                    isActive ? "text-primary" : "text-muted-foreground",
-                  )}
-                >
-                  <Icon className="w-5 h-5" />
-                  <span className="text-sm font-medium">{label}</span>
-
-                  {isActive && (
-                    <span className="absolute right-0 top-1/2 -translate-y-1/2 h-6 w-[3px] bg-primary rounded-full" />
-                  )}
-                </button>
+                <li key={label}>
+                  <Link
+                    href={href}
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => setOpen(false)}
+                    className={cn(
+                      "flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors",
+                      active ? "bg-primary/10 font-semibold text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="size-5 shrink-0" strokeWidth={active ? 2.4 : 2} aria-hidden />
+                    {label}
+                  </Link>
+                </li>
               );
             })}
-          </nav>
+          </ul>
+        </nav>
 
-          {/* Bottom Section */}
-          <div className="pb-8 px-5 space-y-4">
-            <WorkspaceSwitcher expanded={true} />
-            <ThemeToggle />
-            <ProfileMenu expanded={true} mobile={true} />
-          </div>
+        <div className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <ProfileMenu expanded mobile />
         </div>
       </aside>
-    </>
+    </div>
   );
 }

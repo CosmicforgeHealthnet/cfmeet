@@ -6,9 +6,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import AuthInput from "@/components/auth/AuthInput";
 import { Button } from "@/components/ui/button";
-import AuthHeader from "./AuthHeader";
 import { Checkbox } from "../ui/checkbox";
-import Divider from "./Divider";
 import { useLogin } from "@/hooks";
 import type { ApiErrorResponse } from "@/types/auth";
 import { AxiosError } from "axios";
@@ -106,28 +104,43 @@ const LoginModal = () => {
   };
 
   return (
-    <div className="relative z-10 bg-card rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6">
-      {/* Header */}
-      <AuthHeader title="Welcome Back" subtitle="Log in to your account." />
+    <div>
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">Welcome back</h1>
+      <p className="mt-2 text-base text-muted-foreground">Sign in to your CF Meet account.</p>
+
+      <Button
+        type="button"
+        variant="outline"
+        className="mt-6 h-12 w-full rounded-xl border-border bg-background font-semibold text-foreground shadow-none hover:bg-muted"
+        onClick={authService.initiateGoogleOAuth}
+      >
+        <Image src="/GoogleLogo.png" alt="" width={20} height={20} className="size-5" />
+        Continue with Google
+      </Button>
+
+      <div className="my-5 flex items-center gap-3 text-xs uppercase tracking-wider text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        or
+        <span className="h-px flex-1 bg-border" />
+      </div>
 
       {notice && !errors.general && (
-        <div role="status" className="bg-muted border border-border text-sm rounded-lg px-4 py-2 mb-3">
+        <div role="status" className="mb-4 rounded-xl border border-border bg-muted px-4 py-3 text-sm">
           {notice}
         </div>
       )}
 
-      {/* General Error */}
       {errors.general && (
-        <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2 mb-3">
+        <div role="alert" className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {errors.general}
         </div>
       )}
 
-      {/* Form Fields */}
-      <form className="space-y-3" onSubmit={handleSubmit}>
+      <form className="space-y-5" onSubmit={handleSubmit} noValidate>
         <AuthInput
           label="Email"
           type="email"
+          autoComplete="email"
           placeholder="you@example.com"
           value={form.email}
           onChange={handleChange("email")}
@@ -136,80 +149,45 @@ const LoginModal = () => {
         <AuthInput
           label="Password"
           type="password"
+          autoComplete="current-password"
           placeholder="Enter your password"
           value={form.password}
           onChange={handleChange("password")}
           error={errors.password}
         />
 
-        {/* Forgot Password */}
-        <div className="flex justify-end">
-          <Link
-            href="/forgot-password"
-            className="text-sm text-primary font-semibold hover:underline"
-          >
-            Forgot Password?
+        <div className="flex items-center justify-between">
+          <label htmlFor="remember-me" className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
+            <Checkbox
+              id="remember-me"
+              checked={rememberMe}
+              onCheckedChange={(checked) => setRememberMe(checked === true)}
+            />
+            Remember me
+          </label>
+          <Link href="/forgot-password" className="text-sm font-semibold text-primary hover:underline">
+            Forgot password?
           </Link>
         </div>
 
-        {/* Remember Me Checkbox */}
-        <div className="flex items-center gap-3 py-1">
-          <Checkbox
-            id="remember-me"
-            checked={rememberMe}
-            onCheckedChange={(checked) => setRememberMe(checked === true)}
-          />
-          <label
-            htmlFor="remember-me"
-            className="text-sm text-primary cursor-pointer"
-          >
-            Remember Me
-          </label>
-        </div>
-
-        {/* Main Log In Button */}
-        <Button
-          type="submit"
-          size="lg"
-          className="w-full"
-          loading={login.isPending}
-        >
-          Log In
+        <Button type="submit" className="h-12 w-full rounded-xl text-base shadow-none hover:brightness-100" loading={login.isPending}>
+          Sign in
         </Button>
       </form>
 
-      {/* Signup Redirect */}
-      <div className="text-center md:mt-2 text-[12px] md:text-[14px] space-x-1">
-        <p>
-          Don&apos;t have an account?{" "}
-          <Link href="/signup">
-            <Button variant="link" className="p-1 text-[14px] md:text-[16px]">
-              Sign Up
-            </Button>
-          </Link>
-        </p>
-      </div>
+      <p className="mt-6 text-center text-sm text-muted-foreground">
+        New to CF Meet?{" "}
+        <Link href="/signup" className="font-semibold text-primary hover:underline">
+          Create an account
+        </Link>
+      </p>
 
-      {/* Divider */}
-      <Divider text="OR" />
-
-      {/* Google Sign In */}
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full border-border text-muted-foreground hover:bg-muted rounded-2xl group"
-        onClick={authService.initiateGoogleOAuth}
-      >
-        <div className="relative w-5 h-5 group-hover:scale-110 transition-transform">
-          <Image
-            src="/GoogleLogo.png"
-            alt="Google"
-            fill
-            className="object-contain"
-          />
-        </div>
-        Continue with Google
-      </Button>
+      <p className="mt-6 border-t border-border pt-5 text-center text-sm text-muted-foreground">
+        Joining a meeting?{" "}
+        <Link href="/join" className="font-semibold text-foreground hover:text-primary hover:underline">
+          Join as a guest
+        </Link>
+      </p>
     </div>
   );
 };

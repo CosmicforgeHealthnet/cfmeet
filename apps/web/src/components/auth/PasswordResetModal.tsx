@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import AuthHeader from "./AuthHeader";
+import { LockKeyhole } from "lucide-react";
 import AuthInput from "@/components/auth/AuthInput";
 import { Button } from "@/components/ui/button";
 import { authService } from "@/services/auth.service";
@@ -77,49 +77,46 @@ const PasswordResetModal = ({ email, token }: PasswordResetModalProps) => {
   };
 
   return (
-    <div className="relative z-10 bg-card rounded-[40px] shadow-2xl w-full p-6 md:p-9">
-      {/* Header */}
-      <AuthHeader title="Password Reset!" subtitle="Create New Password." />
+    <div>
+      <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+        <LockKeyhole className="size-6" aria-hidden />
+      </span>
+      <h1 className="mt-6 text-3xl font-bold tracking-tight text-foreground">Set a new password</h1>
+      <p className="mt-2 text-base text-muted-foreground">Choose a password you haven&apos;t used here before.</p>
 
-      {/* General Error */}
       {errors.general && (
-        <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2 mb-4">
+        <div role="alert" className="mt-6 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {errors.general}
         </div>
       )}
 
-      {/* Form */}
-      <form className="space-y-2" onSubmit={handleSubmit}>
+      <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
         <AuthInput
-          label="Password"
+          label="New password"
           type="password"
-          placeholder="Create a Password"
+          autoComplete="new-password"
+          placeholder="At least 8 characters"
           value={form.password}
           onChange={handleChange("password")}
           error={errors.password}
         />
-
         <AuthInput
-          label="Confirm Password"
+          label="Confirm new password"
           type="password"
-          placeholder="Confirm your password"
+          autoComplete="new-password"
+          placeholder="Re-enter your password"
           value={form.confirmPassword}
           onChange={handleChange("confirmPassword")}
           error={errors.confirmPassword}
         />
-
-        {/* Submit Button */}
-        <Button size="lg" className="w-full mt-4" disabled={isLoading}>
-          {isLoading ? "Resetting..." : "Submit"}
+        <Button className="h-12 w-full rounded-xl text-base shadow-none hover:brightness-100" disabled={isLoading}>
+          {isLoading ? "Saving…" : "Reset password"}
         </Button>
       </form>
 
-      {/* Back to Login */}
-      <div className="text-center mt-6">
-        <Link href="/login">
-          <Button variant="link">Return to Log In Page</Button>{" "}
-        </Link>
-      </div>
+      <p className="mt-8 border-t border-border pt-6 text-center text-sm text-muted-foreground">
+        <Link href="/login" className="font-semibold text-primary hover:underline">Back to sign in</Link>
+      </p>
     </div>
   );
 };

@@ -1,5 +1,7 @@
 "use client";
 
+import { NiceSelect } from "@/components/ui/nice-select";
+
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -122,14 +124,7 @@ function OwnershipTransfer({ org }: { org: BusinessOrganization }) {
       <div className="flex flex-wrap items-end gap-2">
         <label className="grid gap-1 text-sm">
           <span className="font-medium">New owner</span>
-          <select className="h-10 min-w-56 rounded-md border border-input bg-background px-2" value={target} onChange={(e) => { setTarget(e.target.value); setConfirm(false); }}>
-            <option value="">Choose a member…</option>
-            {candidates.map((m) => (
-              <option key={m.id} value={m.id}>
-                Account {shortId(m.userId)} · {memberRole(m)}
-              </option>
-            ))}
-          </select>
+          <NiceSelect className="min-w-56" value={target} placeholder="Choose a member…" onChange={(v) => { setTarget(v); setConfirm(false); }} options={candidates.map((m) => ({ value: m.id, label: `Account ${shortId(m.userId)}`, hint: memberRole(m) }))} />
         </label>
         {confirm ? (
           <>

@@ -29,7 +29,7 @@ export default function ConnectInvite({ token }: { token: string }) {
       <div className="w-full max-w-md space-y-4 rounded-2xl bg-background p-8 shadow-lg">
         <h1 className="text-xl font-bold">Connect on CF Meet</h1>
         {!valid ? <p role="alert" className="text-sm text-destructive">This invite link is not valid.</p> : null}
-        {valid && resolve.isPending ? <p className="flex items-center gap-2 text-sm"><Spinner /> Checking the invite…</p> : null}
+        {valid && resolve.isPending ? <div role="status" className="flex items-center gap-2 text-sm"><Spinner /> Checking the invite…</div> : null}
         {unauthenticated ? (
           <p className="text-sm">Sign in to connect. <Link className="text-primary underline" href="/login">Sign in</Link>, then open this link again.</p>
         ) : resolve.error ? (

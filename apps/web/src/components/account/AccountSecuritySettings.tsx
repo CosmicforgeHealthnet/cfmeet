@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff } from "lucide-react";
+import { Check, Eye, EyeOff, Globe, Laptop, LogOut, Smartphone } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,10 +28,10 @@ export default function AccountSecuritySettings() {
 function PasswordInput({ id, label, value, onChange, autoComplete }: { id: string; label: string; value: string; onChange: (v: string) => void; autoComplete: string }) {
   const [shown, setShown] = useState(false);
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
       <div className="relative">
-        <Input id={id} type={shown ? "text" : "password"} value={value} autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} className="pr-10" />
+        <Input id={id} type={shown ? "text" : "password"} value={value} autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} className="h-11 rounded-xl pr-11" />
         <button
           type="button"
           aria-label={shown ? `Hide ${label}` : `Show ${label}`}
@@ -77,22 +78,24 @@ function ChangePassword() {
   };
 
   return (
-    <div className="space-y-6 rounded-2xl border border-border bg-card p-6 shadow-sm">
+    <div className="space-y-5 rounded-2xl border border-border bg-card p-5 sm:p-6">
       <div>
-        <h2 className="mb-1 text-lg font-semibold">Change password</h2>
-        <p className="text-sm text-muted-foreground">Changing your password signs you out on every device, including this one.</p>
+        <h2 className="text-base font-semibold">Password</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">Changing it signs you out everywhere, including here.</p>
       </div>
-      {error && (
-        <div role="alert" className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
-          {error}
-        </div>
-      )}
-      <form onSubmit={(e) => void submit(e)} className="max-w-xl space-y-4">
+      {error && <div role="alert" className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
+      <form onSubmit={(e) => void submit(e)} className="max-w-md space-y-4">
         <PasswordInput id="current-password" label="Current password" value={current} onChange={setCurrent} autoComplete="current-password" />
         <PasswordInput id="new-password" label="New password" value={next} onChange={setNext} autoComplete="new-password" />
-        <p className="text-xs text-muted-foreground">8–72 characters with upper- and lowercase letters, a number and a special character.</p>
+        <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+          {RULES.map(([label, test]) => {
+            const ok = test(next);
+            return <li key={label} className={cn("flex items-center gap-1.5", ok ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}><span className={cn("flex size-4 items-center justify-center rounded-full", ok ? "bg-emerald-500 text-white" : "ring-1 ring-border")}>{ok && <Check className="size-3" strokeWidth={3} />}</span>{label}</li>;
+          })}
+        </ul>
         <PasswordInput id="confirm-password" label="Confirm new password" value={confirm} onChange={setConfirm} autoComplete="new-password" />
-        <Button type="submit" loading={pending} disabled={pending || !current || !next || !confirm}>
+        {confirm && next !== confirm ? <p className="text-xs text-destructive">The passwords don&apos;t match yet.</p> : null}
+        <Button type="submit" className="rounded-full" loading={pending} disabled={pending || !current || !next || !confirm}>
           Change password
         </Button>
       </form>
@@ -100,7 +103,23 @@ function ChangePassword() {
   );
 }
 
-const formatTime = (value: string | null | undefined) => (value ? new Date(value).toLocaleString() : "—");
+const RULES: [string, (v: string) => boolean][] = [
+  ["8 or more characters", (v) => v.length >= 8 && v.length <= 72],
+  ["A capital letter", (v) => /[A-Z]/.test(v)],
+  ["A small letter", (v) => /[a-z]/.test(v)],
+  ["A number", (v) => /\d/.test(v)],
+  ["A symbol, like ! or #", (v) => /[^A-Za-z0-9]/.test(v)],
+];
+
+function ago(value: string | null | undefined) {
+  if (!value) return "—";
+  const mins = Math.round((Date.now() - Date.parse(value)) / 60000);
+  if (mins < 2) return "Active now";
+  if (mins < 60) return `Active ${mins} min ago`;
+  if (mins < 24 * 60) return `Active ${Math.round(mins / 60)} h ago`;
+  return `Active ${new Date(value).toLocaleDateString([], { day: "numeric", month: "short" })}`;
+}
+const deviceIcon = (label?: string | null) => (/iphone|android|mobile|ios/i.test(label ?? "") ? Smartphone : /mac|windows|linux|chrome|edge|firefox|safari/i.test(label ?? "") ? Laptop : Globe);
 
 function Sessions() {
   const router = useRouter();
@@ -137,60 +156,48 @@ function Sessions() {
   const active = (sessions.data ?? []).filter((s) => s.status === "ACTIVE");
 
   return (
-    <div className="space-y-4 rounded-2xl border border-border bg-card p-6 shadow-sm">
+    <div className="space-y-4 rounded-2xl border border-border bg-card p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="mb-1 text-lg font-semibold">Where you are signed in</h2>
-          <p className="text-sm text-muted-foreground">Sign out any session you do not recognise.</p>
+          <h2 className="text-base font-semibold">Where you&apos;re signed in</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Sign out anything you don&apos;t recognise.</p>
         </div>
         {everywhere === "confirm" ? (
           <div className="flex gap-2">
-            <Button size="sm" variant="destructive" onClick={() => void revokeAll()}>
-              Confirm: sign out everywhere
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => setEverywhere("idle")}>
-              Cancel
-            </Button>
+            <button type="button" onClick={() => setEverywhere("idle")} className="h-9 rounded-full px-4 text-sm font-semibold hover:bg-muted">Cancel</button>
+            <button type="button" onClick={() => void revokeAll()} className="h-9 rounded-full bg-destructive px-4 text-sm font-semibold text-white hover:bg-destructive/90">Sign out everywhere</button>
           </div>
         ) : (
-          <Button size="sm" variant="outline" loading={everywhere === "pending"} disabled={everywhere === "pending"} onClick={() => setEverywhere("confirm")}>
-            Sign out everywhere
-          </Button>
+          <button type="button" disabled={everywhere === "pending"} onClick={() => setEverywhere("confirm")} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold text-destructive ring-1 ring-destructive/30 hover:bg-destructive/10 disabled:opacity-50"><LogOut className="size-4" />{everywhere === "pending" ? "Signing out…" : "Sign out everywhere"}</button>
         )}
       </div>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-      {sessions.isLoading && <p role="status" className="text-sm">Loading sessions…</p>}
+      {error && <p role="alert" className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p>}
+      {sessions.isLoading && <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-muted" />)}</div>}
       {sessions.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          Sessions could not be loaded.{" "}
-          <Button size="sm" variant="outline" onClick={() => void sessions.refetch()}>
-            Retry
-          </Button>
+        <p role="alert" className="flex items-center gap-3 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <span className="flex-1">Your devices couldn&apos;t load.</span>
+          <button type="button" className="font-semibold hover:underline" onClick={() => void sessions.refetch()}>Try again</button>
         </p>
       )}
       {sessions.data && active.length === 0 && <p className="text-sm text-muted-foreground">No active sessions.</p>}
       {active.length > 0 && (
-        <ul className="divide-y divide-border rounded-md border border-border">
-          {active.map((s) => (
-            <li key={s.sessionId} className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
-              <div className="min-w-0">
-                <p className="font-medium">
-                  {s.clientLabel || "Unknown device"}
-                  {s.current && <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">This browser</span>}
-                </p>
-                <p className="text-muted-foreground">
-                  {s.authMethod} sign-in {formatTime(s.authenticatedAt)} · last active {formatTime(s.lastRefreshedAt ?? s.createdAt)} · ends by {formatTime(s.expiresAt)}
-                </p>
-              </div>
-              <Button size="sm" variant="outline" disabled={revoke.isPending} onClick={() => void revokeOne(s)}>
-                {s.current ? "Sign out" : "Sign out session"}
-              </Button>
-            </li>
-          ))}
+        <ul className="divide-y divide-border">
+          {[...active].sort((a, b) => Number(b.current) - Number(a.current)).map((s) => {
+            const Icon = deviceIcon(s.clientLabel);
+            return (
+              <li key={s.sessionId} className="flex items-center gap-3 py-3">
+                <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", s.current ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}><Icon className="size-5" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-2 truncate text-sm font-semibold">
+                    <span className="truncate">{s.clientLabel || "Unknown device"}</span>
+                    {s.current && <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">This device</span>}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">{s.current ? "You're using it now" : ago(s.lastRefreshedAt ?? s.createdAt)} · signed in with {s.authMethod?.toLowerCase() === "google" ? "Google" : "password"}</p>
+                </div>
+                <button type="button" disabled={revoke.isPending} onClick={() => void revokeOne(s)} className="h-9 shrink-0 rounded-full px-3.5 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">Sign out</button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

@@ -6,6 +6,9 @@ import { useProfile } from "@/hooks";
 import { Spinner } from "@/components/ui/spinner";
 import AppSidebar from "./AppSidebar";
 import MobileSidebar from "./MobileSidebar";
+import TopBar from "./TopBar";
+import MobileTabs from "./MobileTabs";
+import CommandPalette from "./CommandPalette";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { useSessionWatch } from "@/lib/auth/use-session-watch";
 
@@ -50,16 +53,21 @@ export default function DashboardLayout({
 
   return (
     <WorkspaceProvider>
-      <div className="flex h-screen bg-background overflow-hidden">
-        {/* Desktop sidebar */}
+      <div className="flex h-screen overflow-hidden bg-background">
+        {/* Desktop / tablet rail */}
         <div className="hidden md:block">
           <AppSidebar />
         </div>
 
-        <main className="flex-1 bg-background overflow-y-auto">{children}</main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar />
+          <main className="flex-1 overflow-y-auto bg-muted/40 pb-20 md:pb-0 dark:bg-background">{children}</main>
+        </div>
 
-        {/* Mobile slide-in sidebar */}
+        {/* Phone: bottom tabs + full menu drawer behind "More" */}
+        <MobileTabs />
         <MobileSidebar />
+        <CommandPalette />
       </div>
     </WorkspaceProvider>
   );

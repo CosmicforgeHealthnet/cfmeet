@@ -6,6 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { NiceSelect } from "@/components/ui/nice-select";
+import { TimeZoneField } from "@/components/meetings/ScheduleFields";
+import { viewerTimeZone } from "@/lib/meeting-time";
+import { BadgeCheck, Check, Mail } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -36,18 +40,14 @@ export default function AccountProfileSettings() {
 
   if (profile.isLoading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <Spinner />
-      </div>
+      <div className="space-y-4" aria-busy="true"><div className="h-28 animate-pulse rounded-2xl bg-muted" /><div className="h-80 animate-pulse rounded-2xl bg-muted" /></div>
     );
   }
   if (profile.isError || !profile.data) {
     return (
-      <div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">
-        Your profile could not be loaded.{" "}
-        <Button size="sm" variant="outline" onClick={() => void profile.refetch()}>
-          Retry
-        </Button>
+      <div role="alert" className="flex items-center gap-3 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <span className="flex-1">Your profile couldn&apos;t load.</span>
+        <button type="button" className="font-semibold hover:underline" onClick={() => void profile.refetch()}>Try again</button>
       </div>
     );
   }
@@ -86,59 +86,103 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
   };
 
   const field = (id: keyof ProfileForm, label: string, hint?: string, placeholder?: string) => (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       <Label htmlFor={`profile-${id}`}>{label}</Label>
-      <Input id={`profile-${id}`} value={form[id]} onChange={set(id)} placeholder={placeholder} aria-invalid={!!problems[id]} />
+      <Input id={`profile-${id}`} value={form[id]} onChange={set(id)} placeholder={placeholder} aria-invalid={!!problems[id]} className="h-11 rounded-xl" />
       {problems[id] ? <p className="text-xs text-destructive">{problems[id]}</p> : hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
+  const name = form.displayName.trim() || profile.effectiveDisplayName || form.username;
+  const avatar = form.avatarUrl.trim().startsWith("https://") && !problems.avatarUrl ? form.avatarUrl.trim() : null;
+  const deviceZone = viewerTimeZone();
 
   return (
-    <div className="space-y-6 rounded-2xl border border-border bg-card p-6 shadow-sm">
-      <div>
-        <h2 className="mb-1 text-lg font-semibold">Profile</h2>
-        <p className="text-sm text-muted-foreground">Other people see your display name ({profile.effectiveDisplayName}).</p>
-      </div>
+    <form onSubmit={(e) => void submit(e)} className="space-y-6">
+      {/* Identity card */}
+      <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-card p-5 sm:p-6">
+        {avatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={avatar} alt="" className="size-16 shrink-0 rounded-full object-cover" />
+        ) : (
+          <span className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xl font-semibold text-primary">{name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")}</span>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-lg font-semibold">{name}</p>
+          <p className="flex items-center gap-1.5 truncate text-sm text-muted-foreground"><Mail className="size-3.5 shrink-0" />{profile.email}{profile.emailVerified ? <BadgeCheck className="size-4 shrink-0 text-primary" aria-label="Verified" /> : null}</p>
+          <p className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
+            <span className="rounded-full bg-muted px-2 py-0.5 font-medium capitalize text-muted-foreground">Signs in with {profile.authType.toLowerCase() === "google" ? "Google" : "password"}</span>
+            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">{accountStatusLabel(normalizeAccountStatus(profile.status))}</span>
+            {!profile.emailVerified && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">Email not verified</span>}
+          </p>
+        </div>
+      </section>
+
       {error && (
-        <div role="alert" className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
-          {error.code === "USERNAME_TAKEN" ? "That username is already taken." : error.message ?? "Your profile could not be saved."}
+        <div role="alert" className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error.code === "USERNAME_TAKEN" ? "That username is already taken. Try another." : error.message ?? "Your profile couldn't be saved."}
         </div>
       )}
-      {saved && (
-        <div role="status" className="rounded-lg border border-green-100 bg-green-50 px-4 py-3 text-sm text-green-600">
-          Profile saved.
+
+      <section className="space-y-5 rounded-2xl border border-border bg-card p-5 sm:p-6">
+        <div>
+          <h2 className="text-base font-semibold">About you</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">People see your display name in meetings and chats.</p>
         </div>
-      )}
-      <form onSubmit={(e) => void submit(e)} className="grid max-w-2xl gap-4 sm:grid-cols-2">
-        <div className="space-y-1 sm:col-span-2">
-          <Label htmlFor="profile-email">Email address</Label>
-          <Input id="profile-email" value={profile.email} disabled className="bg-muted text-muted-foreground" />
-          <p className="text-xs text-muted-foreground">{profile.emailVerified ? "Verified." : "Not verified yet."} Email cannot be changed here.</p>
+        <div className="grid gap-5 sm:grid-cols-2">
+          {field("displayName", "Display name", "Up to 64 characters.", profile.username)}
+          {field("username", "Username", "3–50 letters, numbers or underscores.")}
+          <div className="sm:col-span-2">{field("avatarUrl", "Profile photo link", "Optional. A https:// link to an image.", "https://")}</div>
         </div>
-        {field("username", "Username", "3–50 letters, digits or underscores.")}
-        {field("displayName", "Display name", "Optional, up to 64 characters.")}
-        {field("timezone", "Time zone", "IANA name, e.g. Europe/London. Empty: your device's zone.", "Europe/London")}
-        {field("locale", "Language", "e.g. en or en-GB. Empty: your device's language.", "en")}
-        <div className="sm:col-span-2">{field("avatarUrl", "Avatar image URL", "Optional https:// address.", "https://")}</div>
-        <div className="grid grid-cols-2 gap-4 sm:col-span-2">
-          <div className="space-y-1">
-            <Label>Sign-in method</Label>
-            <div className="rounded-md border border-border bg-muted px-3 py-2 text-sm capitalize">{profile.authType}</div>
+      </section>
+
+      <section className="space-y-5 rounded-2xl border border-border bg-card p-5 sm:p-6">
+        <div>
+          <h2 className="text-base font-semibold">Region</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Used for meeting times and the app&apos;s language.</p>
+        </div>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <TimeZoneField id="profile-timezone" label="Time zone" value={form.timezone || deviceZone} onChange={(zone) => { setForm((f) => ({ ...f, timezone: zone })); setSaved(false); }} />
+            {form.timezone ? (
+              <button type="button" onClick={() => { setForm((f) => ({ ...f, timezone: "" })); setSaved(false); }} className="text-xs font-semibold text-primary hover:underline">Use this device&apos;s time zone</button>
+            ) : <p className="text-xs text-muted-foreground">Following this device ({deviceZone.replaceAll("_", " ")}).</p>}
+            {problems.timezone ? <p className="text-xs text-destructive">{problems.timezone}</p> : null}
           </div>
-          <div className="space-y-1">
-            <Label>Status</Label>
-            <div className="rounded-md border border-border bg-muted px-3 py-2 text-sm">{accountStatusLabel(normalizeAccountStatus(profile.status))}</div>
+          <div className="space-y-1.5">
+            <NiceSelect label="Language" value={form.locale} onChange={(v) => { setForm((f) => ({ ...f, locale: v })); setSaved(false); }}
+              options={[{ value: "", label: "Same as this device" }, ...LANGUAGES.filter((l) => l.value !== "" ), ...(form.locale && !LANGUAGES.some((l) => l.value === form.locale) ? [{ value: form.locale, label: form.locale }] : [])]} />
+            {problems.locale ? <p className="text-xs text-destructive">{problems.locale}</p> : null}
           </div>
         </div>
-        <div className="sm:col-span-2">
-          <Button type="submit" loading={update.isPending} disabled={update.isPending || !changed || Object.keys(problems).length > 0}>
-            Save changes
-          </Button>
-        </div>
-      </form>
-    </div>
+      </section>
+
+      {/* Save bar: only when there is something to save */}
+      <div className={`sticky bottom-20 z-10 flex items-center justify-between gap-3 rounded-2xl border border-border bg-card/95 px-4 py-3 shadow-lg backdrop-blur transition-all md:bottom-4 ${changed || saved ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0"}`}>
+        <p className="text-sm text-muted-foreground">{saved && !changed ? <span className="flex items-center gap-1.5 font-medium text-emerald-600"><Check className="size-4" />Saved</span> : "You have unsaved changes."}</p>
+        {changed && (
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setForm(profileForm(profile))} className="h-9 rounded-full px-4 text-sm font-semibold hover:bg-muted">Discard</button>
+            <Button type="submit" className="rounded-full" loading={update.isPending} disabled={update.isPending || Object.keys(problems).length > 0}>Save changes</Button>
+          </div>
+        )}
+      </div>
+    </form>
   );
 }
+
+const LANGUAGES = [
+  { value: "en", label: "English" },
+  { value: "en-GB", label: "English (UK)" },
+  { value: "fr", label: "Français" },
+  { value: "es", label: "Español" },
+  { value: "pt", label: "Português" },
+  { value: "de", label: "Deutsch" },
+  { value: "ar", label: "العربية" },
+  { value: "yo", label: "Yorùbá" },
+  { value: "ha", label: "Hausa" },
+  { value: "ig", label: "Igbo" },
+  { value: "sw", label: "Kiswahili" },
+];
 
 function DangerZone({ profile }: { profile: AccountProfile }) {
   const router = useRouter();
@@ -175,14 +219,11 @@ function DangerZone({ profile }: { profile: AccountProfile }) {
   };
 
   return (
-    <div className="space-y-4 rounded-2xl border border-red-100 bg-red-50 p-6 dark:border-red-900 dark:bg-red-950/40">
-      <div>
-        <h2 className="mb-1 text-lg font-semibold text-red-700">Danger zone</h2>
-      </div>
-      <div className="flex flex-col justify-between gap-4 rounded-xl border border-red-100 bg-card p-4 sm:flex-row sm:items-center">
+    <div className="rounded-2xl border border-destructive/30 bg-card p-5 sm:p-6">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div className="space-y-1">
-          <p className="font-medium">Deactivate account</p>
-          <p className="text-sm text-muted-foreground">Signs you out everywhere and stops you from signing in. Reactivation needs CF Meet support.</p>
+          <p className="font-semibold text-destructive">Deactivate account</p>
+          <p className="text-sm text-muted-foreground">Signs you out everywhere and stops you signing in. Only CF Meet support can turn it back on.</p>
         </div>
         <Dialog
           open={open}
@@ -194,7 +235,7 @@ function DangerZone({ profile }: { profile: AccountProfile }) {
           }}
         >
           <DialogTrigger asChild>
-            <Button variant="destructive" className="w-full sm:w-auto">
+            <Button variant="outline" className="w-full rounded-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive sm:w-auto">
               Deactivate
             </Button>
           </DialogTrigger>

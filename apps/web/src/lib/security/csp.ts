@@ -93,9 +93,11 @@ export function buildCsp(o: CspOptions): string {
     "base-uri": ["'none'"],
     "form-action": ["'self'"],
     "frame-ancestors": ["'none'"],
-    "require-trusted-types-for": ["'script'"],
     "trusted-types": TRUSTED_TYPES_POLICIES.concat(["'allow-duplicates'"]),
   };
+  // Enforced outside `next dev` only: in development Trusted Types also blocks the eval()
+  // React's dev tooling relies on (the 'unsafe-eval' above), which floods the console.
+  if (!o.dev) directives["require-trusted-types-for"] = ["'script'"];
   if (!o.dev && o.secure) directives["upgrade-insecure-requests"] = [];
   return Object.entries(directives)
     .map(([k, v]) => (v.length ? `${k} ${v.join(" ")}` : k))

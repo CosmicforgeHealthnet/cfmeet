@@ -7,12 +7,21 @@ import { useRouter } from "next/navigation";
 import AuthInput from "@/components/auth/AuthInput";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import AuthHeader from "./AuthHeader";
-import Divider from "./Divider";
 import { useRegister } from "@/hooks";
 import type { ApiErrorResponse } from "@/types/auth";
 import { AxiosError } from "axios";
 import { authService } from "@/services/auth.service";
+import { Check } from "lucide-react";
+
+/** Mirrors the server's password rules (accepted symbols: !@#$%^&*(),.?:{}|<>). */
+const SYMBOLS = /[!@#$%^&*(),.?:{}|<>]/;
+const PASSWORD_RULES: [string, (v: string) => boolean][] = [
+  ["8+ characters", (v) => v.length >= 8],
+  ["A capital letter", (v) => /[A-Z]/.test(v)],
+  ["A small letter", (v) => /[a-z]/.test(v)],
+  ["A number", (v) => /\d/.test(v)],
+  ["A symbol like ! @ # ?", (v) => SYMBOLS.test(v)],
+];
 
 const SignupModal = () => {
   const router = useRouter();
@@ -53,16 +62,13 @@ const SignupModal = () => {
 
     if (!form.password) {
       newErrors.password = "Password is required";
-    } else if (form.password.length < 8) {
-      newErrors.password = "Password must be at least 8 characters";
+    } else if (!PASSWORD_RULES.every(([, test]) => test(form.password))) {
+      newErrors.password = "Your password doesn't meet all the rules below yet.";
     }
 
-    if (form.password !== form.confirm_password) {
-      newErrors.confirm_password = "Passwords do not match";
-    }
 
     if (!agreed) {
-      newErrors.terms = "You must accept the Terms & Conditions";
+      newErrors.terms = "Please agree to the Terms of Service and Privacy Policy";
     }
 
     setErrors(newErrors);
@@ -78,7 +84,8 @@ const SignupModal = () => {
       username: form.username.trim(),
       email: form.email.trim(),
       password: form.password.trim(),
-      confirm_password: form.confirm_password.trim(),
+      // One password field with show/hide (modern pattern); the API still takes a confirmation.
+      confirm_password: form.password.trim(),
     };
 
     register.mutate(trimmedForm, {
@@ -87,35 +94,48 @@ const SignupModal = () => {
       },
       onError: (error) => {
         const axiosError = error as AxiosError<ApiErrorResponse>;
-        const message =
-          axiosError.response?.data?.error?.message ||
-          "Registration failed. Please try again.";
-        setErrors({ general: message });
+        const raw = axiosError.response?.data?.error?.message || "Registration failed. Please try again.";
+        // Server messages can carry a field prefix like "__all__: " or "password: ".
+        const message = raw.replace(/^[_a-z]+:\s*/i, "");
+        setErrors(/password/i.test(raw) ? { password: message } : { general: message });
       },
     });
   };
 
-  return (
-    <div className="relative z-10 bg-card rounded-2xl sm:rounded-[40px] shadow-2xl w-full max-w-[520px] px-5 py-6 sm:p-8 md:p-12 my-4 sm:my-6">
-      {/* Header */}
-      <AuthHeader
-        title="Create Your Account"
-        subtitle="Welcome! Let's get you Started."
-      />
 
-      {/* General Error */}
+  return (
+    <div>
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">Create your account</h1>
+      <p className="mt-2 text-base text-muted-foreground">Meet, call and message with CF Meet. It&apos;s free.</p>
+
+      <Button
+        type="button"
+        variant="outline"
+        className="mt-6 h-12 w-full rounded-xl border-border bg-background font-semibold text-foreground shadow-none hover:bg-muted"
+        onClick={authService.initiateGoogleOAuth}
+      >
+        <Image src="/GoogleLogo.png" alt="" width={20} height={20} className="size-5" />
+        Continue with Google
+      </Button>
+
+      <div className="my-5 flex items-center gap-3 text-xs uppercase tracking-wider text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        or
+        <span className="h-px flex-1 bg-border" />
+      </div>
+
       {errors.general && (
-        <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2 mb-3">
+        <div role="alert" className="mb-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {errors.general}
         </div>
       )}
 
-      {/* Form Fields */}
-      <form className="space-y-3" onSubmit={handleSubmit}>
+      <form className="space-y-4" onSubmit={handleSubmit} noValidate>
         <AuthInput
           label="Username"
           type="text"
-          placeholder="Enter your preferred Username"
+          autoComplete="nickname"
+          placeholder="e.g. ada_nwosu"
           value={form.username}
           onChange={handleChange("username")}
           error={errors.username}
@@ -123,100 +143,65 @@ const SignupModal = () => {
         <AuthInput
           label="Email"
           type="email"
+          autoComplete="email"
           placeholder="you@example.com"
           value={form.email}
           onChange={handleChange("email")}
           error={errors.email}
         />
-        <AuthInput
-          label="Password"
-          type="password"
-          placeholder="Create a Password"
-          value={form.password}
-          onChange={handleChange("password")}
-          error={errors.password}
-        />
-        <AuthInput
-          label="Confirm Password"
-          type="password"
-          placeholder="Confirm your password"
-          value={form.confirm_password}
-          onChange={handleChange("confirm_password")}
-          error={errors.confirm_password}
-        />
+        <div className="space-y-2">
+          <AuthInput
+            label="Password"
+            type="password"
+            autoComplete="new-password"
+            placeholder="Create a password"
+            value={form.password}
+            onChange={handleChange("password")}
+            error={errors.password}
+          />
+          <ul className="grid grid-cols-2 gap-x-3 gap-y-1.5 pt-1 text-sm" aria-label="Password rules">
+            {PASSWORD_RULES.map(([label, test]) => {
+              const ok = test(form.password);
+              return (
+                <li key={label} className={`flex items-center gap-1.5 ${ok ? "text-[var(--success)]" : "text-muted-foreground"}`}>
+                  <Check className={`size-4 shrink-0 ${ok ? "" : "opacity-40"}`} aria-hidden />{label}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
 
-        {/* Terms Checkbox */}
         <div className="space-y-1">
-          <div className="flex items-center gap-3 py-1">
+          <label htmlFor="terms" className="flex cursor-pointer items-start gap-2.5 text-sm text-muted-foreground">
             <Checkbox
               id="terms"
+              className="mt-0.5"
               checked={agreed}
               onCheckedChange={(checked) => {
                 setAgreed(checked === true);
                 setErrors((prev) => ({ ...prev, terms: "" }));
               }}
             />
-            <label
-              htmlFor="terms"
-              className="text-sm text-muted-foreground cursor-pointer"
-            >
-              I accept the{" "}
-              <Link
-                href="#"
-                className="text-primary font-semibold hover:underline"
-              >
-                Terms & Condition
-              </Link>
-            </label>
-          </div>
-          {errors.terms && (
-            <p className="text-red-500 text-xs">{errors.terms}</p>
-          )}
+            <span>
+              I agree to the{" "}
+              <Link href="/terms" className="font-semibold text-primary hover:underline">Terms of Service</Link> and{" "}
+              <Link href="/privacy" className="font-semibold text-primary hover:underline">Privacy Policy</Link>
+            </span>
+          </label>
+          {errors.terms && <p className="text-sm text-destructive">{errors.terms}</p>}
         </div>
 
-        {/* Main Sign Up Button */}
-        <Button
-          type="submit"
-          size="lg"
-          className="w-full"
-          loading={register.isPending}
-        >
-          Sign Up
+        <Button type="submit" className="h-12 w-full rounded-xl text-base shadow-none hover:brightness-100" loading={register.isPending}>
+          Create account
         </Button>
       </form>
 
-      {/* Login Redirect */}
-      <div className="text-center md:mt-2 text-[12px] md:text-[14px] space-x-1">
-        <p className="">
-          Already have an account?
-          <Link href="/login">
-            <Button variant="link" className="p-1 text-[14px] md:text-[16px]">
-              Log In
-            </Button>
-          </Link>
-        </p>
-      </div>
-
-      {/* Divider */}
-      <Divider text="OR" />
-
-      {/* Google Sign In */}
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full border-border text-muted-foreground hover:bg-muted rounded-2xl group"
-        onClick={authService.initiateGoogleOAuth}
-      >
-        <div className="relative w-5 h-5 group-hover:scale-110 transition-transform">
-          <Image
-            src="/GoogleLogo.png"
-            alt="Google"
-            fill
-            className="object-contain"
-          />
-        </div>
-        Continue with Google
-      </Button>
+      <p className="mt-6 text-center text-sm text-muted-foreground">
+        Already have an account?{" "}
+        <Link href="/login" className="font-semibold text-primary hover:underline">
+          Sign in
+        </Link>
+      </p>
     </div>
   );
 };

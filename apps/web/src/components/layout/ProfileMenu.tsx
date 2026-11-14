@@ -3,7 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Settings, LogOut } from "lucide-react";
+import { Settings, LogOut, Sun, Moon, Monitor } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useLogout, useProfile } from "@/hooks";
 import {
   Dialog,
@@ -31,6 +32,7 @@ export default function ProfileMenu({
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const { data: user } = useProfile();
+  const { theme, setTheme } = useTheme();
 
   const initials = user?.username
     ? user.username.slice(0, 2).toUpperCase()
@@ -86,6 +88,32 @@ export default function ProfileMenu({
             <Settings className="w-4 h-4" />
             My Account
           </button>
+
+          <div className="my-1 border-t border-border px-3 pb-1 pt-2.5">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">Theme</p>
+            <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1" role="radiogroup" aria-label="Theme">
+              {[
+                { value: "light", label: "Light", icon: Sun },
+                { value: "dark", label: "Dark", icon: Moon },
+                { value: "system", label: "System", icon: Monitor },
+              ].map(({ value, label, icon: Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === value}
+                  onClick={() => setTheme(value)}
+                  className={cn(
+                    "flex flex-col items-center gap-1 rounded-md py-1.5 text-[11px] font-medium transition-colors",
+                    theme === value ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4" aria-hidden />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <button
             data-testid="logout-open"

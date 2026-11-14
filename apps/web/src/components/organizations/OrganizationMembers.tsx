@@ -1,5 +1,7 @@
 "use client";
 
+import { NiceSelect } from "@/components/ui/nice-select";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -21,6 +23,7 @@ import {
 import { PERSONAL_WORKSPACE_ID } from "@/lib/workspace/workspace-core";
 import type { BusinessOrganization, OrganizationMemberResponse } from "@/types/generated/meeting-service";
 import { OrgError, Section, formatDateTime } from "./shared";
+const niceLabel = (v: string) => v ? v.charAt(0) + v.slice(1).toLowerCase().replaceAll("_", " ") : "All";
 
 const PAGE_SIZE = 25;
 
@@ -114,30 +117,8 @@ function MemberRow({ org, member }: { org: BusinessOrganization; member: Organiz
       </div>
       {manageable && (
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            aria-label={`Role of ${shortId(member.userId)}`}
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-            value={nextRole}
-            onChange={(e) => setNextRole(e.target.value)}
-          >
-            {(roles.includes(role as never) ? roles : [role, ...roles]).map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label={`Status of ${shortId(member.userId)}`}
-            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-            value={nextStatus}
-            onChange={(e) => setNextStatus(e.target.value)}
-          >
-            {MEMBERSHIP_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s === "REMOVED" ? "REMOVED (ends membership)" : s}
-              </option>
-            ))}
-          </select>
+          <NiceSelect className="w-40" value={nextRole} onChange={setNextRole} options={(roles.includes(role as never) ? roles : [role, ...roles]).map((r) => ({ value: r, label: niceLabel(r) }))} />
+          <NiceSelect className="w-48" value={nextStatus} onChange={setNextStatus} options={MEMBERSHIP_STATUSES.map((s) => ({ value: s, label: s === "REMOVED" ? "Removed (ends membership)" : niceLabel(s) }))} />
           <Button size="sm" disabled={!changed || update.isPending} onClick={save}>
             {update.isPending ? "Saving…" : "Save"}
           </Button>

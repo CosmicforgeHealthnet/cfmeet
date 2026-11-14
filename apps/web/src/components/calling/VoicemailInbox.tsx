@@ -1,5 +1,11 @@
 "use client";
 
+import { Popover } from "radix-ui";
+import { MoreHorizontal } from "lucide-react";
+import { NiceSelect } from "@/components/ui/nice-select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+
 /**
  * VoicemailInbox — the signed-in user's own voicemail (CAL-006).
  *
@@ -58,64 +64,102 @@ export default function VoicemailInbox() {
     } catch (e) { setError(callingErrorMessage(e)); }
   };
 
-  if (mailboxes.isPending) return <div className="flex items-center gap-2"><Spinner /> Loading voicemail…</div>;
-  if (mailboxes.error) return <p role="alert" className="text-sm text-destructive">{callingErrorMessage(mailboxes.error)}</p>;
+  const [deleting, setDeleting] = useState<VoicemailMessage | null>(null);
+  const unread = list.filter((m) => m.readState === "UNREAD").length;
+
+  if (mailboxes.isPending) return <div className="space-y-2 pt-2">{[0, 1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-2xl bg-muted" />)}</div>;
+  if (mailboxes.error) return <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{callingErrorMessage(mailboxes.error)}</p>;
   if (!mailboxes.data.mailboxes.length) {
     return (
-      <div className="space-y-2 py-6 text-center">
-        <Voicemail className="mx-auto size-8 text-muted-foreground" />
-        <p className="font-medium">No voicemail box</p>
-        <p className="text-sm text-muted-foreground">Voicemail boxes are set up by your organization&apos;s calling administrator. Messages left for you will appear here.</p>
+      <div className="flex flex-col items-center px-4 py-12 text-center">
+        <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary"><Voicemail className="size-6" /></span>
+        <p className="mt-4 font-semibold">No voicemail box yet</p>
+        <p className="mt-1 text-sm text-muted-foreground">Your organization&apos;s calling admin sets these up. Messages left for you will show here.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-3 pt-1">
+      <div className="flex items-center gap-2">
         {mailboxes.data.mailboxes.length > 1 ? (
-          <select aria-label="Mailbox" value={mailboxId} onChange={(e) => { setChosen(e.target.value); setPlaying(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm">
-            {mailboxes.data.mailboxes.map((m) => <option key={m.mailboxId} value={m.mailboxId}>{m.displayLabel}</option>)}
-          </select>
-        ) : <h2 className="font-semibold">{mailboxes.data.mailboxes[0].displayLabel}</h2>}
-        <div className="ml-auto flex gap-2">
-          <Button size="sm" variant={filter === "UNREAD" ? "default" : "outline"} onClick={() => setFilter(filter === "UNREAD" ? undefined : "UNREAD")}>Unread</Button>
-          <Button size="icon" variant="ghost" aria-label="Refresh voicemail" onClick={() => void messages.refetch()}><RefreshCw className="size-4" /></Button>
-        </div>
+          <NiceSelect className="min-w-0 flex-1" value={mailboxId} onChange={(v) => { setChosen(v); setPlaying(null); }} options={mailboxes.data.mailboxes.map((m) => ({ value: m.mailboxId, label: m.displayLabel }))} />
+        ) : <p className="min-w-0 flex-1 truncate text-sm font-semibold">{mailboxes.data.mailboxes[0].displayLabel}</p>}
+        <button type="button" aria-pressed={filter === "UNREAD"} onClick={() => setFilter(filter === "UNREAD" ? undefined : "UNREAD")} className={cn("h-8 shrink-0 rounded-full px-3 text-xs font-semibold transition-colors", filter === "UNREAD" ? "bg-primary/10 text-primary" : "bg-muted/60 text-muted-foreground hover:bg-muted")}>Unread{unread ? ` ${unread}` : ""}</button>
+        <button type="button" aria-label="Refresh voicemail" title="Refresh" onClick={() => void messages.refetch()} className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><RefreshCw className={cn("size-4", messages.isFetching && "animate-spin")} /></button>
       </div>
-      {mailboxes.data.truncated ? <p className="text-xs text-muted-foreground">Some shared mailboxes could not be checked. Ask your administrator if one is missing.</p> : null}
-      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-      {messages.isPending ? <Spinner /> : messages.error ? <p role="alert" className="text-sm text-destructive">{callingErrorMessage(messages.error)}</p> : list.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">{filter ? "No unread messages." : "No voicemail messages."}</p>
+      {mailboxes.data.truncated ? <p className="text-xs text-muted-foreground">Some shared mailboxes couldn&apos;t be checked. Ask your admin if one is missing.</p> : null}
+      {error ? <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      {messages.isPending ? <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-16 animate-pulse rounded-2xl bg-muted" />)}</div> : messages.error ? <p role="alert" className="text-sm text-destructive">{callingErrorMessage(messages.error)}</p> : list.length === 0 ? (
+        <div className="flex flex-col items-center px-4 py-10 text-center">
+          <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><Voicemail className="size-5" /></span>
+          <p className="mt-3 font-semibold">{filter ? "All caught up" : "No voicemail"}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{filter ? "You've listened to everything." : "When someone leaves a message, it shows up here."}</p>
+        </div>
       ) : (
-        <ul className="divide-y divide-border">
-          {list.map((message) => (
-            <li key={message.messageId} className="space-y-2 py-3">
-              <div className="flex flex-wrap items-center gap-3">
-                {message.readState === "UNREAD" ? <Mail className="size-4 text-primary" aria-label="Unread" /> : <MailOpen className="size-4 text-muted-foreground" aria-label="Read" />}
-                <div className="min-w-0 flex-1">
-                  <p className={`truncate text-sm ${message.readState === "UNREAD" ? "font-semibold" : ""}`}>{names.data?.[message.callerPrincipalId] ?? "CF Meet user"}</p>
-                  <p className="text-xs text-muted-foreground">{new Date(message.receivedAt).toLocaleString()} {message.durationMs !== null ? `· ${duration(message.durationMs)}` : ""} {message.state !== "READY" ? `· ${message.state.toLowerCase()}` : ""}</p>
+        <ul className="space-y-1">
+          {list.map((message) => {
+            const unreadMsg = message.readState === "UNREAD";
+            const name = names.data?.[message.callerPrincipalId] ?? "CF Meet user";
+            const isPlaying = playing?.messageId === message.messageId;
+            return (
+              <li key={message.messageId} className={cn("rounded-2xl px-2.5 py-2.5 transition-colors", isPlaying ? "bg-primary/5" : "hover:bg-muted/60")}>
+                <div className="flex items-center gap-3">
+                  <button type="button" aria-label={`Play message from ${name}`} disabled={message.state !== "READY" || media.isPending} onClick={() => void play(message)}
+                    className={cn("relative flex size-11 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40", isPlaying ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary hover:bg-primary/15")}>
+                    <Play className="size-5" />
+                    {unreadMsg && <span className="absolute -right-0.5 -top-0.5 size-3 rounded-full bg-primary ring-2 ring-background" aria-label="Unread" />}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className={cn("truncate text-[15px]", unreadMsg ? "font-bold" : "font-semibold")}>{name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {new Date(message.receivedAt).toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
+                      {message.durationMs !== null ? ` · ${duration(message.durationMs)}` : ""}
+                      {message.state !== "READY" ? ` · ${message.state.toLowerCase()}` : ""}
+                    </p>
+                  </div>
+                  <Popover.Root>
+                    <Popover.Trigger asChild><button type="button" aria-label="More" className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><MoreHorizontal className="size-4" /></button></Popover.Trigger>
+                    <Popover.Portal>
+                      <Popover.Content align="end" sideOffset={4} className="z-50 w-48 rounded-xl border border-border bg-popover p-1.5 shadow-xl">
+                        <Popover.Close asChild>
+                          <button type="button" disabled={readState.isPending} onClick={() => readState.mutate({ messageId: message.messageId, body: { expectedVersion: message.version, readState: message.readState === "READ" ? "UNREAD" : "READ" } }, { onError: (e) => setError(callingErrorMessage(e)) })} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted">
+                            {unreadMsg ? <MailOpen className="size-4 text-muted-foreground" /> : <Mail className="size-4 text-muted-foreground" />}Mark as {unreadMsg ? "heard" : "new"}
+                          </button>
+                        </Popover.Close>
+                        <Popover.Close asChild>
+                          <button type="button" onClick={() => setDeleting(message)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-destructive hover:bg-muted"><Trash2 className="size-4" />Delete</button>
+                        </Popover.Close>
+                      </Popover.Content>
+                    </Popover.Portal>
+                  </Popover.Root>
                 </div>
-                <Button size="sm" variant="outline" disabled={message.state !== "READY" || media.isPending} onClick={() => void play(message)}><Play className="size-4" /> Play</Button>
-                <Button size="sm" variant="ghost" disabled={readState.isPending} onClick={() => readState.mutate({ messageId: message.messageId, body: { expectedVersion: message.version, readState: message.readState === "READ" ? "UNREAD" : "READ" } }, { onError: (e) => setError(callingErrorMessage(e)) })}>
-                  Mark {message.readState === "READ" ? "unread" : "read"}
-                </Button>
-                <Button size="icon" variant="ghost" aria-label="Delete message" disabled={remove.isPending} onClick={() => {
-                  if (!window.confirm("Delete this voicemail?")) return;
-                  remove.mutate({ messageId: message.messageId, expectedVersion: message.version }, { onError: (e) => setError(callingErrorMessage(e)) });
-                  if (playing?.messageId === message.messageId) setPlaying(null);
-                }}><Trash2 className="size-4" /></Button>
-              </div>
-              {playing?.messageId === message.messageId ? (
-                // A new short-lived signed URL is requested for each playback.
-                <audio controls autoPlay src={playing.url} className="w-full" onError={() => setError("The recording could not be played. Try again.")} />
-              ) : null}
-            </li>
-          ))}
+                {isPlaying ? (
+                  // A new short-lived signed URL is requested for each playback.
+                  <audio controls autoPlay src={playing.url} className="mt-2 h-10 w-full" onError={() => setError("The recording couldn't be played. Try again.")} />
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       )}
-      {messages.hasNextPage ? <Button variant="ghost" className="w-full" disabled={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}>Load more</Button> : null}
+      {messages.hasNextPage ? <button type="button" disabled={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()} className="mx-auto block h-9 rounded-full px-4 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-50">{messages.isFetchingNextPage ? "Loading…" : "Show older messages"}</button> : null}
+
+      <Dialog open={!!deleting} onOpenChange={(v) => !v && setDeleting(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader className="text-left"><DialogTitle>Delete this voicemail?</DialogTitle><DialogDescription>It&apos;s removed for good.</DialogDescription></DialogHeader>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={() => setDeleting(null)} className="h-10 rounded-full px-4 text-sm font-semibold hover:bg-muted">Cancel</button>
+            <button type="button" disabled={remove.isPending} onClick={() => {
+              if (!deleting) return;
+              remove.mutate({ messageId: deleting.messageId, expectedVersion: deleting.version }, { onError: (e) => setError(callingErrorMessage(e)) });
+              if (playing?.messageId === deleting.messageId) setPlaying(null);
+              setDeleting(null);
+            }} className="h-10 rounded-full bg-destructive px-5 text-sm font-semibold text-white hover:bg-destructive/90">Delete</button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+
 }

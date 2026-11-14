@@ -245,6 +245,8 @@ export class MessagingEngine {
   private timers: ReturnType<typeof setInterval>[] = [];
   private reconnectDelay = 1000;
   private stopped = false;
+  /** Bumped by every start(); an older start() that resumes after a stop() must not keep going. */
+  private generation = 0;
   private pendingSends = new Map<string, MessageView[]>();
   private deviceChecks = new Map<string, number>();
   private lastWaitingTopUp = 0;
@@ -296,6 +298,8 @@ export class MessagingEngine {
 
   async start(cryptoFactory?: () => CryptoClient): Promise<void> {
     this.stopped = false;
+    const generation = ++this.generation;
+    const stale = () => this.stopped || generation !== this.generation;
     MessagingEngine.active = this;
     if (typeof window !== "undefined") {
       window.addEventListener("offline", this.onOffline);
@@ -303,16 +307,33 @@ export class MessagingEngine {
     }
     try {
       const identity = await identityApi.me();
+      // Stopped (or restarted) while waiting: don't create a worker nobody will ever close.
+      if (stale()) return;
       this.set({ identity });
       this.outbox = new MessageOutbox(browserOutboxStorage(identity.principalId));
       this.outbox.subscribe(() => {
         for (const id of this.loadedManaged) this.renderManaged(id);
       });
-      this.crypto = cryptoFactory ? cryptoFactory() : new CryptoClient();
-      const opened = await this.crypto.call<{ status: string; deviceId?: string }>("open", {
+      const crypto = cryptoFactory ? cryptoFactory() : new CryptoClient();
+      this.crypto = crypto;
+      const openArgs = {
         account: identity.principalId,
         scope: { tenantId: identity.tenantId, applicationId: identity.applicationId, environmentId: identity.environmentId },
-      });
+      };
+      let opened = await this.crypto.call<{ status: string; deviceId?: string }>("open", openArgs);
+      // The previous page instance in THIS tab (navigating back, or React's dev double-mount)
+      // releases the lock only when its worker has fully shut down: wait briefly before
+      // concluding that another tab really holds it.
+      for (let attempt = 0; opened.status === "LOCKED" && attempt < 6 && !stale(); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        opened = await this.crypto.call<{ status: string; deviceId?: string }>("open", openArgs);
+      }
+      if (stale()) {
+        // This start was overtaken by stop() / a newer start(): always release its own worker (and lock).
+        if (this.crypto === crypto) this.crypto = null;
+        crypto.terminate();
+        return;
+      }
       if (opened.status === "LOCKED") {
         this.set({ phase: "locked", detail: "Messaging is open in another tab of this browser." });
         return;
