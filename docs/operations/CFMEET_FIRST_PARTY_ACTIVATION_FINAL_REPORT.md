@@ -289,3 +289,34 @@ All of these were verified disabled by certify; none is represented as operation
 * mobile push.
 
 The gateway refuses `numbering`, `sms` and `privacy-relay` (`NOT_ROUTED`). The code and internal tests of these features remain in the repository. No simulated telecom result is used as evidence anywhere in this report.
+
+## 13. Follow-up, 2026-11-14: gateway docs, contact names, Calling and Messaging fixes
+
+Deployed release: **`8a64b480a5654725be8e3e2caca3b9193ec9da44`**, coordinated release [43625227084](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43625227084). Services whose build inputs did not change kept their images (platform-access, for example). The verdict in §0 is unchanged: personal E2EE messaging remains blocked (§11.1).
+
+### 13.1 What changed in production
+
+| Item | Change | Production evidence |
+|---|---|---|
+| Developer Console Docs | `/discovery`, `/openapi.json`, `/openapi/{domain}.json` and `/docs` at `https://api.cfmeet.com` route to the API Gateway (read-only: GET/OPTIONS) | `activate-gateway-docs` [43630780918](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43630780918): 18/18 (discovery, aggregate and per-domain OpenAPI, docs, CORS for the web origins, POST refused, gateway `/health` and `/ready` not public, internal paths not public) |
+| Personal contact names | `POST /api/v2/messaging/principals/names` also names the caller's CONNECTED, unblocked Hub contacts (with their private alias). Hub contacts still expose no principal ids | `communications-verify` [43632078323](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43632078323): 21/21, including `connected_contact_named_for_calls` |
+| Calls connected 10-15 s late | **Root cause:** production LiveKit had no `webhook:` block. Calling never received `participant_joined` and connected every Call on its periodic reconcile instead. Fix: new `livekit-webhook` operation. It adds exactly one webhook block (Calling's own LiveKit key, Calling's callback URL on the core network) and restarts LiveKit only when no participant is active, with automatic rollback. It then proves a signed delivery end to end | Before: `media-diagnose` [43625229998](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43625229998) showed 0 provider callbacks in 7 days; 36/36 connected Calls had no join event; answer-to-connect p50 15.8 s, p90 22.9 s. Applied: [43630419249](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43630419249) (regression PASS; probe callbacks recorded). After: [43631470047](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43631470047), where 9 of 10 new Calls reached CONNECTED within 2 s of the processed join (join-to-connect p50 −0.06 s, p90 0.68 s; webhook delivery p50 0.35 s) |
+| Invitations polled with an expired signaling credential | A genuine but expired credential now gets `401 SIGNALING_CREDENTIAL_EXPIRED` (`WWW-Authenticate: Bearer … error="invalid_token"`). Forged, foreign and not-yet-valid tokens keep the uniform `AUTHENTICATION_FAILED` | Deployed. Covered by Calling unit and contract tests in CI; no production probe uses an expired credential |
+| Recordings 403 for members | `GET /v1/calls/{id}` returns `canViewRecordings` (the credential holds `enterprise.recording.read`) | Deployed. Covered by CI; enterprise acceptance [43630777416](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43630777416): 21/21 with real media |
+| Caller name on incoming calls | `call.incoming` and `GET /v1/calling/invitations` carry `callerDisplayName`. The Hub launch sends the profile name; the web adapter sets it from the verified account, never from the client | Deployed. Covered by CI (Communications' fake Calling refuses a launch without the name); the Hub launch journey passed in production |
+| Messaging policy vs deployment | `GET` of the policy reports `deployment` (profiles this deployment can run, usable profiles, contexts without a usable profile). An update that would leave a configured context without an available profile is refused with the reason (for example `E2EE_DEVICES_DISABLED`) | Deployed. Covered by Messaging integration tests in CI |
+
+### 13.2 Not done: owner decisions
+
+* **Production E2EE devices** (David: "enable E2EE devices in production"). Messaging's configuration refuses `MESSAGING_E2EE_DEVICES_ENABLED=true` in production pending the external cryptographic assessment (§11.1). It was **not** enabled. Until it is, the policy allows only PRIVATE_E2EE for personal chats, so nobody can start a new personal chat; the policy now reports this as `E2EE_DEVICES_DISABLED`. Two ways to unblock:
+  * the owner accepts production E2EE without the external assessment;
+  * the owner allows MANAGED (server-readable) personal chats.
+
+  Both change the security posture and need an explicit owner decision.
+
+### 13.3 Tooling and CI fixes in this follow-up
+
+* **Web Messaging journey.** Updated to follow the redesigned Messages UI (e4e96041). Device status now lives in the "Security & devices" sheet, and new chats are private-only, so the journey no longer creates a MANAGED chat and instead asserts that no security-profile choice is offered. The XSS check now targets message content rather than the app's own Lucide icons. Green: [43624406645](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43624406645).
+* **communications-verify.** Accepts a service that the coordinated release kept (build inputs unchanged).
+* **media-diagnose.** Reports, as counts only: LiveKit callback delivery and processing, the answer-to-connect path, and redacted webhook facts.
+* **Reverted change.** A first attempt at the slow-connect issue (treating a JOINED LiveKit participant as joined) was reverted before deployment. It rested on a wrong premise, and the RTC certification caught it.
