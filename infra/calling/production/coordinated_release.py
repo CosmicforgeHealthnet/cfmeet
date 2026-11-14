@@ -883,30 +883,51 @@ def toc_entries(dump, major):
     return [line for line in listing.splitlines() if line.strip() and not line.startswith(';')]
 
 
+def docker_step(args, step, input=None):
+    """production.run with a diagnosable failure: the step and a safe stderr tail (no credentials
+    are ever passed to these throwaway, network-less containers)."""
+    proc = subprocess.run(args, input=input, capture_output=True, text=True)
+    if proc.returncode:
+        raise RuntimeError('subprocess failed: %s [%s] (exit %d): %s' % (
+            ' '.join(args[:2]), step, proc.returncode, safe_stderr(proc.stderr)))
+    return proc.stdout.strip()
+
+
 def restore_test(dump, major, expected, run_id, label):
-    """Restore into a throwaway, network-less PostgreSQL and compare every migration history."""
+    """Restore into a throwaway, network-less PostgreSQL and compare every migration history.
+
+    The image's entrypoint first runs a temporary server on the Unix socket only (initdb and
+    init scripts), stops it and starts the real one. Readiness over the socket can therefore
+    report the temporary server; the real server is the only one listening on TCP, so readiness
+    and every step use 127.0.0.1 (the loopback exists with --network none)."""
     name = 'cfmeet-restore-test-%s-%s' % (run_id, label)
     _own(name)
-    p.run('docker', 'run', '-d', '--name', name, '--network', 'none', '--memory', '512m',
-          '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgres:%d-alpine' % major)
+    tcp = ['-h', '127.0.0.1', '-U', 'postgres']
+    docker_step(['docker', 'run', '-d', '--name', name, '--network', 'none', '--memory', '512m',
+                 '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', 'postgres:%d-alpine' % major], 'restore container ' + label)
     try:
-        for _ in range(60):
-            try:
-                p.run('docker', 'exec', name, 'pg_isready', '-q', '-U', 'postgres')
+        for _ in range(120):
+            if subprocess.run(['docker', 'exec', name, 'pg_isready', '-q'] + tcp, capture_output=True).returncode == 0:
                 break
-            except RuntimeError:
-                time.sleep(1)
-        p.run('docker', 'exec', name, 'createdb', '-U', 'postgres', 'restore_test')
-        run_binary(['docker', 'exec', '-i', name, 'pg_restore', '-U', 'postgres', '-d', 'restore_test',
+            time.sleep(1)
+        else:
+            raise RuntimeError('Restore test PostgreSQL did not become ready: ' + label)
+        docker_step(['docker', 'exec', name, 'createdb'] + tcp + ['restore_test'], 'createdb ' + label)
+        run_binary(['docker', 'exec', '-i', name, 'pg_restore'] + tcp + ['-d', 'restore_test',
                     '--no-owner', '--no-privileges'], stdin_path=dump, step='restore test ' + label)
-        sql = lambda q: p.run('docker', 'exec', '-i', name, 'psql', '-XAtq', '-U', 'postgres', '-d', 'restore_test', input=q)
+        sql = lambda q: docker_step(['docker', 'exec', '-i', name, 'psql', '-XAtq'] + tcp + ['-d', 'restore_test'],
+                                    'restore query ' + label, input=q)
         restored = {t: v['applied'] for t, v in history_state(sql).items()}
         if restored != expected:
             raise RuntimeError('Restore test history mismatch: ' + label)
         tables = int(sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='public';"))
         return {'status': 'PASS', 'tables': tables, 'histories': restored}
     finally:
-        remove(name)
+        # Never mask the step's own failure with a cleanup failure.
+        try:
+            remove(name)
+        except RuntimeError:
+            emit('restoreTestCleanup', {'container': name, 'removed': False})
 
 
 def backup(sha, run_id, restore_labels=('meeting-service', 'organizations', 'platform-access')):

@@ -494,6 +494,39 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         self.assertEqual(tuple(options), cr.OPERATIONS)
 
 
+class RestoreTest(unittest.TestCase):
+    def test_readiness_and_every_step_use_tcp_never_the_init_socket(self):
+        # Releases 43589841572 / 43609024085: socket readiness can report the entrypoint's
+        # temporary init server, so createdb raced its shutdown. Only the real server listens on TCP.
+        calls = []
+
+        class Done:
+            returncode = 0
+            stdout = ''
+
+        def fake_run(args, **kwargs):
+            calls.append(list(args))
+            return Done()
+
+        def fake_step(args, step, input=None):
+            calls.append(list(args))
+            if 'psql' in args:
+                return '0' if 'information_schema' in (input or '') else ''
+            return ''
+
+        with patch.object(cr, '_own', lambda *a, **k: None), patch.object(cr.subprocess, 'run', fake_run), \
+                patch.object(cr, 'docker_step', fake_step), \
+                patch.object(cr, 'run_binary', lambda args, **k: calls.append(list(args))), \
+                patch.object(cr, 'history_state', lambda sql: {}), patch.object(cr, 'remove', lambda name: None):
+            result = cr.restore_test('/dev/null', 16, {}, '1-1', 'organizations')
+        self.assertEqual(result['status'], 'PASS')
+        execs = [c for c in calls if c[:2] == ['docker', 'exec']]
+        self.assertTrue(execs)
+        for c in execs:
+            self.assertIn('127.0.0.1', c, c)
+        self.assertIn('pg_isready', execs[0])
+
+
 class SafeStderr(unittest.TestCase):
     def test_failures_name_the_step_and_never_print_credentials_or_row_values(self):
         raw = (b'pg_restore: error: could not execute query: ERROR:  duplicate key value violates unique constraint\n'
