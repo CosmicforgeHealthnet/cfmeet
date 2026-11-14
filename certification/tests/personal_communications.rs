@@ -1839,3 +1839,59 @@ async fn contact_names_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     assert!(names(&c, vec![a.principal, b.principal]).await?.is_empty());
     Ok(())
 }
+
+/// The production multi-device E2EE acceptance client (`cfmeet-e2ee-acceptance`, run by
+/// `messaging-e2ee-verify` against api.cfmeet.com) passes end to end against the REAL Account,
+/// Platform Access, Communications, Calling and Messaging processes: linked devices, primary
+/// mobile replacement, Hub and Messaging fan-out, MLS removal, future-only history.
+#[tokio::test]
+async fn production_e2ee_acceptance_client_passes_against_real_services() -> anyhow::Result<()> {
+    let mut s = PersonalStack::start().await?;
+    let result = std::panic::AssertUnwindSafe(e2ee_client_journey(&mut s))
+        .catch_unwind()
+        .await;
+    if !matches!(&result, Ok(Ok(()))) {
+        s.dump_logs();
+    }
+    s.close().await;
+    match result {
+        Ok(r) => r,
+        Err(p) => std::panic::resume_unwind(p),
+    }
+}
+
+async fn e2ee_client_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
+    let mut accounts = vec![];
+    for _ in 0..2 {
+        let email = format!("e2ee-{}@acceptance.invalid", Uuid::new_v4().simple());
+        let password = format!("P9!{}", Uuid::new_v4().simple());
+        let username = format!("e2ee{}", &Uuid::new_v4().simple().to_string()[..10]);
+        let r = request(s, "meeting-service", None, None, Method::POST, "/api/v1/auth/register",
+            Some(json!({"email": email, "username": username, "password": password, "confirm_password": password}))).await?;
+        if !(200..300).contains(&r.status) {
+            bail!("account setup failed: {}", r.status);
+        }
+        accounts.push(json!({"email": email, "password": password}));
+    }
+    let file = s.write("e2ee-accounts.json", &serde_json::to_string(&accounts)?)?;
+    let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_cfmeet-e2ee-acceptance"))
+        .env("CFMEET_BASE_URL", &s.urls["meeting-service"])
+        .env("CFMEET_E2EE_ACCOUNTS", &file)
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env("no_proxy", "127.0.0.1,localhost")
+        .output()
+        .await?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    eprintln!("{}", String::from_utf8_lossy(&out.stderr));
+    let line = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("E2EE_ACCEPTANCE_REPORT "))
+        .context("acceptance report")?;
+    let report: Value = serde_json::from_str(line)?;
+    println!("EVIDENCE e2ee-acceptance-client TEST {report}");
+    if report["verdict"] != "PASS" || !out.status.success() {
+        bail!("acceptance client failed: {}", report["failure"]);
+    }
+    assert!(report["checks"].as_object().is_some_and(|c| c.len() >= 14));
+    Ok(())
+}

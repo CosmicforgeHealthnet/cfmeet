@@ -47,7 +47,13 @@ impl Resp {
 }
 
 impl Api {
-    async fn call(&self, method: Method, path: &str, token: Option<&str>, body: Option<Value>) -> anyhow::Result<Resp> {
+    async fn call(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+    ) -> anyhow::Result<Resp> {
         let mut r = self
             .http
             .request(method, format!("{}{path}", self.base))
@@ -66,10 +72,22 @@ impl Api {
             body: serde_json::from_str(&text).unwrap_or(Value::Null),
         })
     }
-    async fn ok(&self, method: Method, path: &str, token: Option<&str>, body: Option<Value>, expect: &[u16], what: &str) -> anyhow::Result<Value> {
+    async fn ok(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+        expect: &[u16],
+        what: &str,
+    ) -> anyhow::Result<Value> {
         let r = self.call(method, path, token, body).await?;
         if !expect.contains(&r.status) {
-            bail!("{what}: expected {expect:?}, got {} {:?}", r.status, r.code());
+            bail!(
+                "{what}: expected {expect:?}, got {} {:?}",
+                r.status,
+                r.code()
+            );
         }
         Ok(r.body)
     }
@@ -136,13 +154,30 @@ impl Journey {
         eprintln!("PASS {name}");
     }
 
-    async fn sign_in(&self, a: &Account, name: &'static str, class: &'static str, platform: &'static str) -> anyhow::Result<Signin> {
+    async fn sign_in(
+        &self,
+        a: &Account,
+        name: &'static str,
+        class: &'static str,
+        platform: &'static str,
+    ) -> anyhow::Result<Signin> {
         let login = self
             .api
-            .ok(Method::POST, "/api/v1/auth/login", None, Some(json!({"email": a.email, "password": a.password})), &[200], "sign in")
+            .ok(
+                Method::POST,
+                "/api/v1/auth/login",
+                None,
+                Some(json!({"email": a.email, "password": a.password})),
+                &[200],
+                "sign in",
+            )
             .await?;
-        let access = login["access_token"].as_str().context("access token")?.to_string();
-        let claims: Value = serde_json::from_slice(&B64.decode(access.split('.').nth(1).context("jwt")?)?)?;
+        let access = login["access_token"]
+            .as_str()
+            .context("access token")?
+            .to_string();
+        let claims: Value =
+            serde_json::from_slice(&B64.decode(access.split('.').nth(1).context("jwt")?)?)?;
         let mut seed = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut seed);
         Ok(Signin {
@@ -166,7 +201,14 @@ impl Journey {
         });
         let v = self
             .api
-            .ok(Method::POST, "/api/v2/me/devices/current", Some(&s.access), Some(body), &[200], "declare device")
+            .ok(
+                Method::POST,
+                "/api/v2/me/devices/current",
+                Some(&s.access),
+                Some(body),
+                &[200],
+                "declare device",
+            )
             .await?;
         s.device = Some(uuid_of(&v["device"]["deviceId"])?);
         Ok(v["device"].clone())
@@ -176,15 +218,33 @@ impl Journey {
     async fn link(&self, new: &Signin, approver: &Signin) -> anyhow::Result<Value> {
         let link = self
             .api
-            .ok(Method::POST, "/api/v2/me/device-links", Some(&new.access),
-                Some(json!({"proof": new.proof("LINK_REQUEST", &new.device.unwrap().to_string())})), &[201], "link request")
+            .ok(
+                Method::POST,
+                "/api/v2/me/device-links",
+                Some(&new.access),
+                Some(json!({"proof": new.proof("LINK_REQUEST", &new.device.unwrap().to_string())})),
+                &[201],
+                "link request",
+            )
             .await?;
         let id = link["linkId"].as_str().context("link id")?.to_string();
         let listed = self
             .api
-            .ok(Method::GET, "/api/v2/me/device-links", Some(&approver.access), None, &[200], "pending links")
+            .ok(
+                Method::GET,
+                "/api/v2/me/device-links",
+                Some(&approver.access),
+                None,
+                &[200],
+                "pending links",
+            )
             .await?;
-        let pending = listed["links"].as_array().context("links")?.iter().find(|l| l["linkId"] == json!(id)).context("pending link listed")?;
+        let pending = listed["links"]
+            .as_array()
+            .context("links")?
+            .iter()
+            .find(|l| l["linkId"] == json!(id))
+            .context("pending link listed")?;
         if pending.get("comparisonCode").is_some() {
             bail!("the comparison code is listed to another device");
         }
@@ -202,17 +262,49 @@ impl Journey {
                 &[200], "approve link")
             .await?;
         self.api
-            .ok(Method::POST, &format!("/api/v2/me/device-links/{id}/complete"), Some(&new.access),
-                Some(json!({"proof": new.proof("LINK_COMPLETE", &id)})), &[200], "complete link")
+            .ok(
+                Method::POST,
+                &format!("/api/v2/me/device-links/{id}/complete"),
+                Some(&new.access),
+                Some(json!({"proof": new.proof("LINK_COMPLETE", &id)})),
+                &[200],
+                "complete link",
+            )
             .await
     }
 
     async fn policy(&self, s: &Signin) -> anyhow::Result<Value> {
-        self.api.ok(Method::GET, "/api/v2/me/device-policy", Some(&s.access), None, &[200], "device policy").await
+        self.api
+            .ok(
+                Method::GET,
+                "/api/v2/me/device-policy",
+                Some(&s.access),
+                None,
+                &[200],
+                "device policy",
+            )
+            .await
     }
 
-    async fn relay(&self, s: &Signin, method: Method, path: &str, body: Option<Value>, expect: &[u16], what: &str) -> anyhow::Result<Value> {
-        self.api.ok(method, &format!("/api/v2/messaging/relay/v1/{path}"), Some(&s.access), body, expect, what).await
+    async fn relay(
+        &self,
+        s: &Signin,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        expect: &[u16],
+        what: &str,
+    ) -> anyhow::Result<Value> {
+        self.api
+            .ok(
+                method,
+                &format!("/api/v2/messaging/relay/v1/{path}"),
+                Some(&s.access),
+                body,
+                expect,
+                what,
+            )
+            .await
     }
 
     /// Enroll a Messaging E2EE device for this sign-in, publish `packages` KeyPackages and link
@@ -220,7 +312,14 @@ impl Journey {
     async fn enroll(&self, s: &Signin, packages: usize) -> anyhow::Result<Mls> {
         let ch = self
             .api
-            .ok(Method::POST, "/api/v2/messaging/devices/registration-challenges", Some(&s.access), Some(json!({})), &[201], "E2EE challenge")
+            .ok(
+                Method::POST,
+                "/api/v2/messaging/devices/registration-challenges",
+                Some(&s.access),
+                Some(json!({})),
+                &[201],
+                "E2EE challenge",
+            )
             .await?;
         let device = Device::generate(uuid_of(&ch["deviceId"])?)?;
         let nonce: [u8; 32] = hex::decode(ch["nonce"].as_str().context("nonce")?)?
@@ -228,14 +327,31 @@ impl Journey {
             .map_err(|_| anyhow::anyhow!("nonce length"))?;
         let kp = device.registration_key_package(uuid_of(&ch["challengeId"])?, &nonce)?;
         self.api
-            .ok(Method::POST, "/api/v2/messaging/devices", Some(&s.access),
-                Some(json!({"challengeId": ch["challengeId"], "keyPackage": B64.encode(kp)})), &[201], "E2EE device registration")
+            .ok(
+                Method::POST,
+                "/api/v2/messaging/devices",
+                Some(&s.access),
+                Some(json!({"challengeId": ch["challengeId"], "keyPackage": B64.encode(kp)})),
+                &[201],
+                "E2EE device registration",
+            )
             .await?;
         if packages > 0 {
-            let kps: Vec<String> = (0..packages).map(|_| device.key_package().map(|k| B64.encode(k))).collect::<Result<_, _>>()?;
+            let kps: Vec<String> = (0..packages)
+                .map(|_| device.key_package().map(|k| B64.encode(k)))
+                .collect::<Result<_, _>>()?;
             self.api
-                .ok(Method::POST, &format!("/api/v2/messaging/devices/{}/key-packages", device.device_id()), Some(&s.access),
-                    Some(json!({"keyPackages": kps})), &[201], "publish KeyPackages")
+                .ok(
+                    Method::POST,
+                    &format!(
+                        "/api/v2/messaging/devices/{}/key-packages",
+                        device.device_id()
+                    ),
+                    Some(&s.access),
+                    Some(json!({"keyPackages": kps})),
+                    &[201],
+                    "publish KeyPackages",
+                )
                 .await?;
         }
         self.api
@@ -243,29 +359,80 @@ impl Journey {
                 Some(json!({"platform": s.platform, "label": format!("acceptance {}", s.name), "chatDeviceId": device.device_id()})),
                 &[200, 201], "Hub device link")
             .await?;
-        Ok(Mls { device, group: None, cursor: 0 })
+        Ok(Mls {
+            device,
+            group: None,
+            cursor: 0,
+        })
     }
 
-    async fn account(&self, email: &str, password: &str, first: &mut Option<Signin>) -> anyhow::Result<Account> {
-        let mut s = self.sign_in(&Account { email: email.into(), password: password.into(), principal: Uuid::nil(), cfmeet_id: String::new(), scope: (Uuid::nil(), Uuid::nil(), Uuid::nil()) }, "web-1", "WEB", "WEB").await?;
+    async fn account(
+        &self,
+        email: &str,
+        password: &str,
+        first: &mut Option<Signin>,
+    ) -> anyhow::Result<Account> {
+        let mut s = self
+            .sign_in(
+                &Account {
+                    email: email.into(),
+                    password: password.into(),
+                    principal: Uuid::nil(),
+                    cfmeet_id: String::new(),
+                    scope: (Uuid::nil(), Uuid::nil(), Uuid::nil()),
+                },
+                "web-1",
+                "WEB",
+                "WEB",
+            )
+            .await?;
         let d = self.declare(&mut s).await?;
         if d["trust"] != "TRUSTED" || d["trustedVia"] != "BOOTSTRAP" {
             bail!("the first browser of a fresh account is not the bootstrap trusted device");
         }
-        let me = self.api.ok(Method::GET, "/api/v2/messaging/me", Some(&s.access), None, &[200], "messaging identity").await?;
-        let profile = self.api.ok(Method::GET, "/api/v2/communications/me", Some(&s.access), None, &[200], "communications profile").await?;
+        let me = self
+            .api
+            .ok(
+                Method::GET,
+                "/api/v2/messaging/me",
+                Some(&s.access),
+                None,
+                &[200],
+                "messaging identity",
+            )
+            .await?;
+        let profile = self
+            .api
+            .ok(
+                Method::GET,
+                "/api/v2/communications/me",
+                Some(&s.access),
+                None,
+                &[200],
+                "communications profile",
+            )
+            .await?;
         let account = Account {
             email: email.into(),
             password: password.into(),
             principal: uuid_of(&me["principalId"])?,
             cfmeet_id: profile["cfMeetId"].as_str().context("cfMeetId")?.into(),
-            scope: (uuid_of(&me["tenantId"])?, uuid_of(&me["applicationId"])?, uuid_of(&me["environmentId"])?),
+            scope: (
+                uuid_of(&me["tenantId"])?,
+                uuid_of(&me["applicationId"])?,
+                uuid_of(&me["environmentId"])?,
+            ),
         };
         *first = Some(s);
         Ok(account)
     }
 
-    fn aad(a: &Account, conversation: &str, client_message_id: Uuid, sender: Uuid) -> anyhow::Result<Vec<u8>> {
+    fn aad(
+        a: &Account,
+        conversation: &str,
+        client_message_id: Uuid,
+        sender: Uuid,
+    ) -> anyhow::Result<Vec<u8>> {
         Ok(application_message_aad(&ApplicationMessageBinding {
             tenant_id: a.scope.0,
             application_id: a.scope.1,
@@ -276,15 +443,39 @@ impl Journey {
         }))
     }
 
-    async fn send(&mut self, a: &Account, s: &Signin, m: &mut Mls, text: &str) -> anyhow::Result<(Value, Vec<u8>)> {
+    async fn send(
+        &mut self,
+        a: &Account,
+        s: &Signin,
+        m: &mut Mls,
+        text: &str,
+    ) -> anyhow::Result<(Value, Vec<u8>)> {
         let cid = self.conversation.clone().context("conversation")?;
         let id = Uuid::new_v4();
         let aad = Self::aad(a, &cid, id, m.device.device_id())?;
         let group = m.group.as_mut().context("group")?;
         let ciphertext = m.device.encrypt(group, &aad, text.as_bytes())?;
         let payload = json!({"clientMessageId": id, "deviceId": m.device.device_id(), "epoch": group.epoch(), "ciphertext": B64.encode(&ciphertext)});
-        let sent = self.relay(s, Method::POST, &format!("conversations/{cid}/messages"), Some(payload.clone()), &[201], "send encrypted").await?;
-        let again = self.relay(s, Method::POST, &format!("conversations/{cid}/messages"), Some(payload), &[200, 201], "retry send").await?;
+        let sent = self
+            .relay(
+                s,
+                Method::POST,
+                &format!("conversations/{cid}/messages"),
+                Some(payload.clone()),
+                &[201],
+                "send encrypted",
+            )
+            .await?;
+        let again = self
+            .relay(
+                s,
+                Method::POST,
+                &format!("conversations/{cid}/messages"),
+                Some(payload),
+                &[200, 201],
+                "retry send",
+            )
+            .await?;
         if again["messageId"] != sent["messageId"] {
             bail!("a retried delivery created a second message");
         }
@@ -298,12 +489,23 @@ impl Journey {
     async fn receive(&self, s: &Signin, m: &mut Mls) -> anyhow::Result<Vec<String>> {
         let cid = self.conversation.clone().context("conversation")?;
         let list = self
-            .relay(s, Method::GET, &format!("conversations/{cid}/messages?afterSequence={}&limit=100", m.cursor), None, &[200], "fetch messages")
+            .relay(
+                s,
+                Method::GET,
+                &format!(
+                    "conversations/{cid}/messages?afterSequence={}&limit=100",
+                    m.cursor
+                ),
+                None,
+                &[200],
+                "fetch messages",
+            )
             .await?;
         let mut out = vec![];
         for msg in list["messages"].as_array().context("messages")? {
             m.cursor = msg["sequence"].as_i64().context("sequence")?;
-            if msg["lifecycle"] != "ACTIVE" || msg["senderDeviceId"] == json!(m.device.device_id()) {
+            if msg["lifecycle"] != "ACTIVE" || msg["senderDeviceId"] == json!(m.device.device_id())
+            {
                 continue;
             }
             let group = m.group.as_mut().context("group")?;
@@ -320,15 +522,33 @@ impl Journey {
 
     /// `by` adds the devices of `targets` (claimed per principal) with one commit; each target
     /// joins from its Welcome.
-    async fn add(&self, by_s: &Signin, by: &mut Mls, principals: &[Uuid], targets: &mut [(&Signin, &mut Mls)]) -> anyhow::Result<()> {
+    async fn add(
+        &self,
+        by_s: &Signin,
+        by: &mut Mls,
+        principals: &[Uuid],
+        targets: &mut [(&Signin, &mut Mls)],
+    ) -> anyhow::Result<()> {
         let cid = self.conversation.clone().context("conversation")?;
         let claim = self
-            .relay(by_s, Method::POST, &format!("conversations/{cid}/mls/key-package-claims"), Some(json!({"principalIds": principals})), &[200], "claim KeyPackages")
+            .relay(
+                by_s,
+                Method::POST,
+                &format!("conversations/{cid}/mls/key-package-claims"),
+                Some(json!({"principalIds": principals})),
+                &[200],
+                "claim KeyPackages",
+            )
             .await?;
         let mut packages = vec![];
         let mut ids = vec![];
         for (_, t) in targets.iter() {
-            let k = claim["keyPackages"].as_array().context("packages")?.iter().find(|k| k["deviceId"] == json!(t.device.device_id())).context("a KeyPackage per target device")?;
+            let k = claim["keyPackages"]
+                .as_array()
+                .context("packages")?
+                .iter()
+                .find(|k| k["deviceId"] == json!(t.device.device_id()))
+                .context("a KeyPackage per target device")?;
             packages.push(B64.decode(k["keyPackage"].as_str().context("kp")?)?);
             ids.push(t.device.device_id());
         }
@@ -346,11 +566,41 @@ impl Journey {
         by.device.accept_pending_commit(group)?;
         by.cursor = r["sequence"].as_i64().context("sequence")?;
         for (s, t) in targets.iter_mut() {
-            let w = self.relay(s, Method::GET, &format!("messaging/devices/{}/welcomes", t.device.device_id()), None, &[200], "welcomes").await?;
-            let welcome = w["welcomes"].as_array().context("welcomes")?.iter().find(|x| x["conversationId"] == json!(cid)).context("own welcome")?.clone();
-            t.group = Some(t.device.join(&B64.decode(welcome["welcome"].as_str().context("bytes")?)?)?);
+            let w = self
+                .relay(
+                    s,
+                    Method::GET,
+                    &format!("messaging/devices/{}/welcomes", t.device.device_id()),
+                    None,
+                    &[200],
+                    "welcomes",
+                )
+                .await?;
+            let welcome = w["welcomes"]
+                .as_array()
+                .context("welcomes")?
+                .iter()
+                .find(|x| x["conversationId"] == json!(cid))
+                .context("own welcome")?
+                .clone();
+            t.group = Some(
+                t.device
+                    .join(&B64.decode(welcome["welcome"].as_str().context("bytes")?)?)?,
+            );
             t.cursor = by.cursor;
-            self.relay(s, Method::POST, &format!("messaging/devices/{}/welcomes/{}/consume", t.device.device_id(), welcome["welcomeId"].as_str().unwrap()), Some(json!({})), &[200], "consume welcome").await?;
+            self.relay(
+                s,
+                Method::POST,
+                &format!(
+                    "messaging/devices/{}/welcomes/{}/consume",
+                    t.device.device_id(),
+                    welcome["welcomeId"].as_str().unwrap()
+                ),
+                Some(json!({})),
+                &[200],
+                "consume welcome",
+            )
+            .await?;
         }
         Ok(())
     }
@@ -358,8 +608,12 @@ impl Journey {
     async fn run(&mut self, accounts: &[(String, String)]) -> anyhow::Result<()> {
         // ---- Devices: web-only bootstrap, web linking, first mobile, untrusted browser.
         let (mut a_web1, mut b_web) = (None, None);
-        let a = self.account(&accounts[0].0, &accounts[0].1, &mut a_web1).await?;
-        let b = self.account(&accounts[1].0, &accounts[1].1, &mut b_web).await?;
+        let a = self
+            .account(&accounts[0].0, &accounts[0].1, &mut a_web1)
+            .await?;
+        let b = self
+            .account(&accounts[1].0, &accounts[1].1, &mut b_web)
+            .await?;
         let (a_web1, b_web) = (a_web1.unwrap(), b_web.unwrap());
         if self.policy(&a_web1).await?["accountState"] != "WEB_ONLY" {
             bail!("a web-only account is not WEB_ONLY");
@@ -375,23 +629,52 @@ impl Journey {
         if self.declare(&mut a_mobile).await?["state"] != "REPLACEMENT_PENDING" {
             bail!("a new mobile was not held for approval");
         }
-        let r = self.api.call(Method::GET, "/api/v2/messaging/me", Some(&a_mobile.access), None).await?;
+        let r = self
+            .api
+            .call(
+                Method::GET,
+                "/api/v2/messaging/me",
+                Some(&a_mobile.access),
+                None,
+            )
+            .await?;
         if (r.status, r.code()) != (403, Some("DEVICE_REPLACEMENT_PENDING")) {
             bail!("a pending mobile had authority: {}", r.status);
         }
         let done = self.link(&a_mobile, &a_web1).await?;
-        if done["device"]["primary"] != true || self.policy(&a_web2).await?["accountState"] != "MOBILE_PRIMARY" {
+        if done["device"]["primary"] != true
+            || self.policy(&a_web2).await?["accountState"] != "MOBILE_PRIMARY"
+        {
             bail!("the approved mobile did not become the primary mobile");
         }
         self.pass("first_mobile_becomes_primary_after_approval_and_web_stays_trusted");
         let mut a_web3 = self.sign_in(&a, "web-3", "WEB", "WEB").await?;
         self.declare(&mut a_web3).await?;
-        let r = self.api.call(Method::POST, "/api/v2/messaging/devices/registration-challenges", Some(&a_web3.access), Some(json!({}))).await?;
+        let r = self
+            .api
+            .call(
+                Method::POST,
+                "/api/v2/messaging/devices/registration-challenges",
+                Some(&a_web3.access),
+                Some(json!({})),
+            )
+            .await?;
         if (r.status, r.code()) != (403, Some("DEVICE_NOT_TRUSTED")) {
-            bail!("an untrusted browser could enroll an E2EE device: {} {:?}", r.status, r.code());
+            bail!(
+                "an untrusted browser could enroll an E2EE device: {} {:?}",
+                r.status,
+                r.code()
+            );
         }
         self.api
-            .ok(Method::POST, &format!("/api/v2/me/devices/{}/revoke", a_web3.device.unwrap()), Some(&a_web3.access), Some(json!({})), &[200], "self revoke")
+            .ok(
+                Method::POST,
+                &format!("/api/v2/me/devices/{}/revoke", a_web3.device.unwrap()),
+                Some(&a_web3.access),
+                Some(json!({})),
+                &[200],
+                "self revoke",
+            )
             .await?;
         self.pass("untrusted_browser_refused_e2ee_enrollment");
 
@@ -400,10 +683,29 @@ impl Journey {
         let mut m_web2 = self.enroll(&a_web2, 1).await?;
         let mut m_mobile = self.enroll(&a_mobile, 1).await?;
         let mut m_b = self.enroll(&b_web, 1).await?;
-        let req = self.api.ok(Method::POST, "/api/v2/communications/contact-requests", Some(&a_web1.access), Some(json!({"cfMeetId": b.cfmeet_id})), &[200], "contact request").await?;
+        let req = self
+            .api
+            .ok(
+                Method::POST,
+                "/api/v2/communications/contact-requests",
+                Some(&a_web1.access),
+                Some(json!({"cfMeetId": b.cfmeet_id})),
+                &[200],
+                "contact request",
+            )
+            .await?;
         self.api
-            .ok(Method::POST, &format!("/api/v2/communications/contact-requests/{}/accept", req["requestId"].as_str().context("request")?),
-                Some(&b_web.access), Some(json!({"expectedVersion": req["version"]})), &[200], "accept contact")
+            .ok(
+                Method::POST,
+                &format!(
+                    "/api/v2/communications/contact-requests/{}/accept",
+                    req["requestId"].as_str().context("request")?
+                ),
+                Some(&b_web.access),
+                Some(json!({"expectedVersion": req["version"]})),
+                &[200],
+                "accept contact",
+            )
             .await?;
         let conv = self
             .relay(&a_web1, Method::POST, "conversations", Some(json!({"contextClass": "DIRECT", "securityProfile": "PRIVATE_E2EE", "counterpartCfMeetId": b.cfmeet_id})), &[200, 201], "create conversation")
@@ -411,12 +713,40 @@ impl Journey {
         if conv["securityProfile"] != "PRIVATE_E2EE" {
             bail!("the conversation is not PRIVATE_E2EE");
         }
-        self.conversation = Some(conv["conversationId"].as_str().context("conversation id")?.to_string());
-        m_web1.group = Some(m_web1.device.create_group(&B64.decode(conv["encryption"]["mlsGroupId"].as_str().context("group id")?)?)?);
-        self.add(&a_web1, &mut m_web1, &[a.principal, b.principal], &mut [(&a_web2, &mut m_web2), (&a_mobile, &mut m_mobile), (&b_web, &mut m_b)]).await?;
+        self.conversation = Some(
+            conv["conversationId"]
+                .as_str()
+                .context("conversation id")?
+                .to_string(),
+        );
+        m_web1.group = Some(
+            m_web1.device.create_group(
+                &B64.decode(
+                    conv["encryption"]["mlsGroupId"]
+                        .as_str()
+                        .context("group id")?,
+                )?,
+            )?,
+        );
+        self.add(
+            &a_web1,
+            &mut m_web1,
+            &[a.principal, b.principal],
+            &mut [
+                (&a_web2, &mut m_web2),
+                (&a_mobile, &mut m_mobile),
+                (&b_web, &mut m_b),
+            ],
+        )
+        .await?;
         let mut leaves = m_web1.group.as_ref().unwrap().member_devices();
         leaves.sort();
-        let mut want = vec![m_web1.device.device_id(), m_web2.device.device_id(), m_mobile.device.device_id(), m_b.device.device_id()];
+        let mut want = vec![
+            m_web1.device.device_id(),
+            m_web2.device.device_id(),
+            m_mobile.device.device_id(),
+            m_b.device.device_id(),
+        ];
         want.sort();
         if leaves != want {
             bail!("the MLS group does not hold exactly one leaf per authorized device");
@@ -426,7 +756,11 @@ impl Journey {
         let tag = Uuid::new_v4().simple().to_string();
         let first = format!("acceptance {tag} from B to every device of A");
         let (_, first_ct) = self.send(&b, &b_web, &mut m_b, &first).await?;
-        for (s, m) in [(&a_web1, &mut m_web1), (&a_web2, &mut m_web2), (&a_mobile, &mut m_mobile)] {
+        for (s, m) in [
+            (&a_web1, &mut m_web1),
+            (&a_web2, &mut m_web2),
+            (&a_mobile, &mut m_mobile),
+        ] {
             if self.receive(s, m).await?.last() != Some(&first) {
                 bail!("{} did not decrypt B's message", s.name);
             }
@@ -434,15 +768,24 @@ impl Journey {
         self.pass("web_and_mobile_devices_of_one_account_decrypt_the_same_message_locally");
         let from_web = format!("acceptance {tag} from web-2");
         self.send(&a, &a_web2, &mut m_web2, &from_web).await?;
-        for (s, m) in [(&b_web, &mut m_b), (&a_web1, &mut m_web1), (&a_mobile, &mut m_mobile)] {
+        for (s, m) in [
+            (&b_web, &mut m_b),
+            (&a_web1, &mut m_web1),
+            (&a_mobile, &mut m_mobile),
+        ] {
             if self.receive(s, m).await?.last() != Some(&from_web) {
                 bail!("{} did not decrypt web-2's message", s.name);
             }
         }
         self.pass("web_to_mobile_and_cross_web_sync_of_encrypted_messages");
         let from_mobile = format!("acceptance {tag} from mobile-a");
-        self.send(&a, &a_mobile, &mut m_mobile, &from_mobile).await?;
-        for (s, m) in [(&a_web1, &mut m_web1), (&a_web2, &mut m_web2), (&b_web, &mut m_b)] {
+        self.send(&a, &a_mobile, &mut m_mobile, &from_mobile)
+            .await?;
+        for (s, m) in [
+            (&a_web1, &mut m_web1),
+            (&a_web2, &mut m_web2),
+            (&b_web, &mut m_b),
+        ] {
             if self.receive(s, m).await?.last() != Some(&from_mobile) {
                 bail!("{} did not decrypt mobile-a's message", s.name);
             }
@@ -456,7 +799,18 @@ impl Journey {
         if replaced["replacedDeviceId"] != json!(a_mobile.device.unwrap()) {
             bail!("the new phone did not replace the previous primary mobile");
         }
-        if self.api.call(Method::GET, "/api/v2/messaging/me", Some(&a_mobile.access), None).await?.status != 401 {
+        if self
+            .api
+            .call(
+                Method::GET,
+                "/api/v2/messaging/me",
+                Some(&a_mobile.access),
+                None,
+            )
+            .await?
+            .status
+            != 401
+        {
             bail!("the replaced phone kept authority");
         }
         for s in [&a_web1, &a_web2] {
@@ -469,8 +823,20 @@ impl Journey {
         let old_device = m_mobile.device.device_id();
         let mut removed = false;
         for _ in 0..120 {
-            let st = self.relay(&a_web1, Method::GET, &format!("conversations/{cid}/mls/state"), None, &[200], "mls state").await?;
-            if st["pendingRemovals"].as_array().is_some_and(|p| p.iter().any(|r| r["deviceId"] == json!(old_device))) {
+            let st = self
+                .relay(
+                    &a_web1,
+                    Method::GET,
+                    &format!("conversations/{cid}/mls/state"),
+                    None,
+                    &[200],
+                    "mls state",
+                )
+                .await?;
+            if st["pendingRemovals"]
+                .as_array()
+                .is_some_and(|p| p.iter().any(|r| r["deviceId"] == json!(old_device)))
+            {
                 removed = true;
                 break;
             }
@@ -479,14 +845,35 @@ impl Journey {
         if !removed {
             bail!("the replaced phone's Messaging device was not revoked (no pending MLS removal)");
         }
-        let hub = self.api.ok(Method::GET, "/api/v2/communications/devices", Some(&a_web1.access), None, &[200], "hub devices").await?;
-        let gone = hub["data"].as_array().context("devices")?.iter().any(|d| d["chatDeviceId"] == json!(old_device) && d["state"] == "REVOKED");
+        let hub = self
+            .api
+            .ok(
+                Method::GET,
+                "/api/v2/communications/devices",
+                Some(&a_web1.access),
+                None,
+                &[200],
+                "hub devices",
+            )
+            .await?;
+        let gone = hub["data"]
+            .as_array()
+            .context("devices")?
+            .iter()
+            .any(|d| d["chatDeviceId"] == json!(old_device) && d["state"] == "REVOKED");
         if !gone {
             bail!("the Hub still lists the replaced phone as active");
         }
         self.pass("replaced_phone_hub_and_messaging_devices_revoked_by_fan_out");
+        // A genuine MLS application message is held until a member commits the removal.
+        let early_id = Uuid::new_v4();
+        let early_aad = Self::aad(&a, &cid, early_id, m_web2.device.device_id())?;
+        let early_group = m_web2.group.as_mut().unwrap();
+        let early = m_web2
+            .device
+            .encrypt(early_group, &early_aad, b"held until the rekey")?;
         let blocked = self
-            .relay(&a_web2, Method::POST, &format!("conversations/{cid}/messages"), Some(json!({"clientMessageId": Uuid::new_v4(), "deviceId": m_web2.device.device_id(), "epoch": m_web2.group.as_ref().unwrap().epoch(), "ciphertext": "AAAA"})), &[409], "send before rekey")
+            .relay(&a_web2, Method::POST, &format!("conversations/{cid}/messages"), Some(json!({"clientMessageId": early_id, "deviceId": m_web2.device.device_id(), "epoch": early_group.epoch(), "ciphertext": B64.encode(&early)})), &[409], "send before rekey")
             .await?;
         if blocked["error"]["code"] != "MLS_REKEY_REQUIRED" {
             bail!("sends were not held until the rekey");
@@ -497,18 +884,30 @@ impl Journey {
         let r = self
             .relay(&a_web1, Method::POST, &format!("conversations/{cid}/mls/commits"), Some(json!({"clientMessageId": Uuid::new_v4(), "deviceId": m_web1.device.device_id(), "epoch": out.epoch, "commit": B64.encode(&out.commit), "removedDeviceIds": [old_device]})), &[201], "removal commit")
             .await?;
-        m_web1.device.accept_pending_commit(m_web1.group.as_mut().unwrap())?;
+        m_web1
+            .device
+            .accept_pending_commit(m_web1.group.as_mut().unwrap())?;
         m_web1.cursor = r["sequence"].as_i64().unwrap_or(m_web1.cursor);
         for (s, m) in [(&a_web2, &mut m_web2), (&b_web, &mut m_b)] {
             self.receive(s, m).await?;
-            if m.group.as_ref().unwrap().epoch() != epoch + 1 || m.group.as_ref().unwrap().member_devices().contains(&old_device) {
+            if m.group.as_ref().unwrap().epoch() != epoch + 1
+                || m.group
+                    .as_ref()
+                    .unwrap()
+                    .member_devices()
+                    .contains(&old_device)
+            {
                 bail!("{} did not process the removal commit", s.name);
             }
         }
         self.pass("web_device_commits_the_mls_removal_and_the_epoch_advances");
         let after = format!("acceptance {tag} after the replacement");
         let (_, after_ct) = self.send(&b, &b_web, &mut m_b, &after).await?;
-        if m_mobile.device.process(m_mobile.group.as_mut().unwrap(), &after_ct).is_ok() {
+        if m_mobile
+            .device
+            .process(m_mobile.group.as_mut().unwrap(), &after_ct)
+            .is_ok()
+        {
             bail!("the removed phone decrypted a message after the rekey");
         }
         for (s, m) in [(&a_web1, &mut m_web1), (&a_web2, &mut m_web2)] {
@@ -523,11 +922,21 @@ impl Journey {
         if m_mobile2.device.signature_public_key() == m_mobile.device.signature_public_key() {
             bail!("the new phone reused the old phone's key");
         }
-        self.add(&a_web1, &mut m_web1, &[a.principal], &mut [(&a_mobile2, &mut m_mobile2)]).await?;
+        self.add(
+            &a_web1,
+            &mut m_web1,
+            &[a.principal],
+            &mut [(&a_mobile2, &mut m_mobile2)],
+        )
+        .await?;
         for (s, m) in [(&a_web2, &mut m_web2), (&b_web, &mut m_b)] {
             self.receive(s, m).await?;
         }
-        if m_mobile2.device.process(m_mobile2.group.as_mut().unwrap(), &first_ct).is_ok() {
+        if m_mobile2
+            .device
+            .process(m_mobile2.group.as_mut().unwrap(), &first_ct)
+            .is_ok()
+        {
             bail!("the new phone decrypted history without an explicit transfer");
         }
         let welcome = format!("acceptance {tag} to the new phone");
@@ -544,7 +953,16 @@ impl Journey {
 
         // ---- Cleanup: sign every device of both accounts out (devices revoked).
         for s in [&a_web1, &b_web] {
-            self.api.ok(Method::POST, "/api/v2/me/sessions/revoke-all", Some(&s.access), Some(json!({})), &[200], "sign out everywhere").await?;
+            self.api
+                .ok(
+                    Method::POST,
+                    "/api/v2/me/sessions/revoke-all",
+                    Some(&s.access),
+                    Some(json!({})),
+                    &[200],
+                    "sign out everywhere",
+                )
+                .await?;
         }
         if self.policy(&a_mobile2).await.is_ok() {
             bail!("sign-out everywhere left a device signed in");
@@ -561,11 +979,23 @@ async fn main() {
         .ok()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok())
-        .map(|v| v.iter().filter_map(|a| Some((a["email"].as_str()?.to_string(), a["password"].as_str()?.to_string()))).collect())
+        .map(|v| {
+            v.iter()
+                .filter_map(|a| {
+                    Some((
+                        a["email"].as_str()?.to_string(),
+                        a["password"].as_str()?.to_string(),
+                    ))
+                })
+                .collect()
+        })
         .unwrap_or_default();
     let mut journey = Journey {
         api: Api {
-            http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().expect("http client"),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("http client"),
             base,
         },
         checks: BTreeMap::new(),
@@ -575,7 +1005,9 @@ async fn main() {
     let result = if accounts.len() == 2 {
         journey.run(&accounts).await
     } else {
-        Err(anyhow::anyhow!("CFMEET_E2EE_ACCOUNTS must list two accounts"))
+        Err(anyhow::anyhow!(
+            "CFMEET_E2EE_ACCOUNTS must list two accounts"
+        ))
     };
     let failure = result.as_ref().err().map(|e| e.to_string());
     let report = json!({
