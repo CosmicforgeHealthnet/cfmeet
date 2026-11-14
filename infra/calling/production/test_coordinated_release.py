@@ -494,5 +494,22 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         self.assertEqual(tuple(options), cr.OPERATIONS)
 
 
+class SafeStderr(unittest.TestCase):
+    def test_failures_name_the_step_and_never_print_credentials_or_row_values(self):
+        raw = (b'pg_restore: error: could not execute query: ERROR:  duplicate key value violates unique constraint\n'
+               b'DETAIL:  Key (slug)=(acme-health) already exists.\n'
+               b'connection to postgresql://svc:s3cret@db:5432/x failed for user "alice@example.com"\n')
+        text = cr.safe_stderr(raw)
+        self.assertIn('Key (slug)=(...)', text)
+        for secret in ('acme-health', 's3cret', 'alice@example.com', 'postgresql://'):
+            self.assertNotIn(secret, text)
+        with self.assertRaisesRegex(RuntimeError, r'sh -c \[restore test organizations\] \(exit 1\): .*duplicate key'):
+            cr.run_binary(['sh', '-c', 'printf "%s" "$0" >&2; exit 1',
+                           'ERROR:  duplicate key value violates unique constraint'], step='restore test organizations')
+
+    def test_long_output_is_bounded(self):
+        self.assertLessEqual(len(cr.safe_stderr(b'x' * 10000 + b'\n' + b'y' * 10000)), 400)
+
+
 if __name__ == '__main__':
     unittest.main()

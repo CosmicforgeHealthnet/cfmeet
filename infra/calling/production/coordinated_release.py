@@ -840,8 +840,20 @@ def planned_new(names=None):
 
 # --- backup ----------------------------------------------------------------------------------
 
-def run_binary(args, stdin_path=None, stdout_path=None):
-    """Like production.run for binary streams; stderr (may hold credentials) is discarded."""
+def safe_stderr(raw, lines=3, limit=400):
+    """The last lines of a tool's stderr, safe to print: URLs (credentials) redacted, quoted and
+    key-value literals masked (they can carry row data), bounded."""
+    text = scrub(raw.decode(errors='replace') if isinstance(raw, bytes) else raw)
+    text = re.sub(r'\(([^()]*)\)=\(([^()]*)\)', r'(\1)=(...)', text)
+    text = re.sub(r'"[^"\n]{1,200}"', '"..."', text)
+    text = re.sub(r"'[^'\n]{1,200}'", "'...'", text)
+    tail = [l.strip() for l in text.splitlines() if l.strip()][-lines:]
+    return ' | '.join(tail)[:limit]
+
+
+def run_binary(args, stdin_path=None, stdout_path=None, step=None):
+    """Like production.run for binary streams. stderr (may hold credentials) is never printed
+    raw: a failure reports only a scrubbed, value-masked tail (safe_stderr)."""
     stdin = open(stdin_path, 'rb') if stdin_path else subprocess.DEVNULL
     stdout = open(stdout_path, 'wb') if stdout_path else subprocess.PIPE
     try:
@@ -852,7 +864,8 @@ def run_binary(args, stdin_path=None, stdout_path=None):
         if stdout_path:
             stdout.close()
     if proc.returncode:
-        raise RuntimeError('subprocess failed: ' + ' '.join(args[:2]))
+        raise RuntimeError('subprocess failed: %s%s (exit %d): %s' % (
+            ' '.join(args[:2]), ' [%s]' % step if step else '', proc.returncode, safe_stderr(proc.stderr)))
     return proc.stdout
 
 
@@ -866,7 +879,7 @@ def sha256(path):
 
 def toc_entries(dump, major):
     listing = run_binary(['docker', 'run', '--rm', '-i', '--network', 'none', 'postgres:%d-alpine' % major,
-                          'pg_restore', '--list'], stdin_path=dump).decode()
+                          'pg_restore', '--list'], stdin_path=dump, step='pg_restore --list').decode()
     return [line for line in listing.splitlines() if line.strip() and not line.startswith(';')]
 
 
@@ -885,7 +898,7 @@ def restore_test(dump, major, expected, run_id, label):
                 time.sleep(1)
         p.run('docker', 'exec', name, 'createdb', '-U', 'postgres', 'restore_test')
         run_binary(['docker', 'exec', '-i', name, 'pg_restore', '-U', 'postgres', '-d', 'restore_test',
-                    '--no-owner', '--no-privileges'], stdin_path=dump)
+                    '--no-owner', '--no-privileges'], stdin_path=dump, step='restore test ' + label)
         sql = lambda q: p.run('docker', 'exec', '-i', name, 'psql', '-XAtq', '-U', 'postgres', '-d', 'restore_test', input=q)
         restored = {t: v['applied'] for t, v in history_state(sql).items()}
         if restored != expected:
@@ -921,13 +934,14 @@ def backup(sha, run_id, restore_labels=('meeting-service', 'organizations', 'pla
             try:
                 run_binary(['docker', 'run', '--rm', '--network', 'container:' + MEETING, '--env-file', str(env),
                             'postgres:%d-alpine' % meeting_major, 'sh', '-c', 'exec pg_dump -Fc "$DATABASE_URL"'],
-                           stdout_path=dump)
+                           stdout_path=dump, step='pg_dump meeting-service')
             finally:
                 env.unlink(missing_ok=True)
             major = meeting_major
         else:
             histories = {t: v['applied'] for t, v in history_state(lambda q, d=db: release.db_sql(d, q)).items()}
-            run_binary(['docker', 'exec', '-u', 'postgres', 'cfmeet-core-db', 'pg_dump', '-Fc', '-d', db], stdout_path=dump)
+            run_binary(['docker', 'exec', '-u', 'postgres', 'cfmeet-core-db', 'pg_dump', '-Fc', '-d', db], stdout_path=dump,
+                       step='pg_dump ' + label)
             major = core_major
         os.chmod(dump, 0o600)
         toc = toc_entries(dump, major)
