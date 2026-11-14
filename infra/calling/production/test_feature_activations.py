@@ -89,6 +89,148 @@ class GatewayFamilies(unittest.TestCase):
         self.assertEqual(cr.ACTIVATIONS['activate-developer-webhooks'][0], ('activate-developer-console',))
 
 
+class GatewayDocs(unittest.TestCase):
+    """activate-gateway-docs: the gateway's public documentation at the api.cfmeet.com edge."""
+
+    DISCOVERY = {'service': 'cfmeet.api-gateway', 'documentation': {'aggregate': '/openapi.json', 'reference': '/docs'},
+                 'families': [{'domain': 'calling', 'enabled': True}, {'domain': 'messaging', 'enabled': True},
+                              {'domain': 'numbering', 'enabled': False}, {'domain': 'sms', 'enabled': False},
+                              {'domain': 'privacy-relay', 'enabled': False}]}
+
+    def test_paths_are_exactly_what_the_gateway_serves_publicly(self):
+        source = (REPO / 'services/api-gateway/src/http/mod.rs').read_text()
+        for path in cr.DOCS_EXACT:
+            self.assertIn('.route("%s", get(' % path, source)
+        self.assertIn('.route("/openapi/:file", get(', source)
+        self.assertEqual(cr.DOCS_PREFIX, '/openapi')
+        # Never the gateway's health / readiness or any /v1, internal or operator path.
+        for path in cr.DOCS_EXACT + (cr.DOCS_PREFIX,):
+            self.assertFalse(path.startswith('/v1') or path in ('/ready', '/health'))
+            for word in ('internal', 'admin', 'operator', 'metrics'):
+                self.assertNotIn(word, path)
+
+    def test_snippet_adds_read_only_documentation_locations_and_keeps_every_family(self):
+        prefixes = cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES
+        with_docs, without = cr.gateway_snippet(prefixes, docs=True), cr.gateway_snippet(prefixes)
+        self.assertTrue(with_docs.startswith(without.rstrip('\n')))
+        for path in cr.DOCS_EXACT:
+            self.assertIn('location = %s {' % path, with_docs)
+            self.assertNotIn('location = %s {' % path, without)
+        self.assertIn('location ^~ /openapi/ {', with_docs)
+        docs_part = with_docs[len(without):]
+        self.assertEqual(docs_part.count('limit_except GET OPTIONS { deny all; }'), 4)
+        self.assertNotIn('/ready', with_docs)
+        self.assertNotIn('/health', with_docs)
+
+    def test_existing_documentation_locations_are_refused(self):
+        paths = cr.DOCS_EXACT + (cr.DOCS_PREFIX,)
+        self.assertEqual(cr.route_collisions(['location /api-docs/ { }', 'location = /docsx { }',
+                                              'location /openapi.jsonx { }'], paths), [])
+        self.assertEqual(cr.route_collisions(['location = /docs {', 'location ^~ /openapi/ {'], paths),
+                         ['/docs', '/openapi'])
+
+    def test_requires_gateway_routing_and_is_listed_in_the_workflow(self):
+        self.assertEqual(cr.ACTIVATIONS['activate-gateway-docs'][0], ('activate-gateway-routing',))
+        self.assertIn('activate-gateway-docs', cr.OPERATIONS)
+
+    def run_activation(self, work, discovery=None, statuses=None, cors=cr.WEB_ORIGINS):
+        snippets = work / 'snippets'
+        snippets.mkdir()
+        (snippets / 'cfmeet-api-gateway.conf').write_text(cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES))
+        site = work / 'site'
+        site.write_text('server { %s }' % cr.GATEWAY_INCLUDE)
+        statuses = dict({'/v1/developer-platform/context': 401, '/ready': 404, '/health': 404, 'POST /discovery': 403},
+                        **(statuses or {}))
+        discovery = self.DISCOVERY if discovery is None else discovery
+
+        def document(url, headers=None, limit=0):
+            path = url[len(cr.PUBLIC):]
+            origin = (headers or {}).get('Origin')
+            h = {'Access-Control-Allow-Origin': origin} if origin in cors else {}
+            if path == '/discovery':
+                return 200, h, json.dumps(discovery).encode()
+            if path == '/openapi.json':
+                return 200, h, json.dumps({'openapi': '3.1.0', 'paths': {'/v1/calls': {}}}).encode()
+            if path == '/docs':
+                return 200, {'Content-Type': 'text/html; charset=utf-8'}, b'<div id="swagger-ui"></div>'
+            if path.startswith('/openapi/'):
+                return statuses.get(path, 200), h, b'{}'
+            return 404, {}, b''
+
+        def status(url, method='GET', headers=None):
+            path = url[len(cr.PUBLIC):]
+            return statuses.get(('POST ' + path) if method == 'POST' else path, 200), {}
+
+        reloads = []
+        with patch.object(cr, 'GATEWAY_SNIPPET', snippets / 'cfmeet-api-gateway.conf'), patch.object(cr, 'SITE', site), \
+                patch.object(cr, 'Path', lambda p: snippets if p == '/etc/nginx/snippets' else Path(p)), \
+                patch.object(cr, 'env_of', lambda n: {'API_GATEWAY_PUBLIC_ROUTING_ENABLED': 'true'}), \
+                patch.object(cr, 'http_document', document), patch.object(cr, 'http_status', status), \
+                patch.object(cr, 'public_smoke', lambda: {'public_swagger': 'PASS'}), \
+                patch.object(cr.p, 'reload_host_nginx', lambda: reloads.append(1)), \
+                patch.object(cr.p, 'regression', lambda: None):
+            try:
+                cr.activate_gateway_docs('a' * 40, '9-1', '')
+                error = None
+            except RuntimeError as e:
+                error = e
+            text = (snippets / 'cfmeet-api-gateway.conf').read_text()
+        return error, text, json.loads((work / 'journal.json').read_text())[-1], reloads
+
+    def test_activation_routes_documentation_keeps_families_and_journals_the_edge_step(self):
+        with isolated_work() as work:
+            journal(work, 'activate-gateway-routing', 'activate-gateway-families')
+            error, text, entry, reloads = self.run_activation(work)
+        self.assertIsNone(error)
+        self.assertEqual(text, cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES, docs=True))
+        self.assertEqual((entry['operation'], entry['status'], entry['components']), ('activate-gateway-docs', 'done', []))
+        self.assertTrue(entry['edge']['docs'])
+        self.assertEqual(len(reloads), 1)
+
+    def test_any_failed_check_restores_the_previous_snippet(self):
+        before = cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES)
+        cases = [dict(discovery=dict(self.DISCOVERY, families=[{'domain': 'sms', 'enabled': True}])),
+                 dict(statuses={'/ready': 200}), dict(statuses={'POST /discovery': 200}),
+                 dict(statuses={'/v1/developer-platform/context': 404}),
+                 dict(cors=cr.WEB_ORIGINS + ('https://evil.example',)), dict(cors=('https://cfmeet.com',)),
+                 dict(statuses={'/openapi/calling.json': 404})]
+        for case in cases:
+            with isolated_work() as work:
+                journal(work, 'activate-gateway-routing', 'activate-gateway-families')
+                error, text, entry, reloads = self.run_activation(work, **case)
+            self.assertRegex(str(error), 'documentation checks failed', case)
+            self.assertEqual(text, before, case)
+            self.assertEqual(entry['status'], 'failed', case)
+            self.assertEqual(len(reloads), 2, case)
+
+    def test_refuses_to_shadow_an_existing_route_before_changing_anything(self):
+        with isolated_work() as work:
+            journal(work, 'activate-gateway-routing')
+            (work / 'snippets').mkdir()
+            (work / 'snippets' / 'cfmeet-calling-routes.conf').write_text('location = /docs { return 200; }')
+            snippet = work / 'snippets' / 'cfmeet-api-gateway.conf'
+            snippet.write_text(cr.gateway_snippet())
+            site = work / 'site'
+            site.write_text('server { %s }' % cr.GATEWAY_INCLUDE)
+            with patch.object(cr, 'GATEWAY_SNIPPET', snippet), patch.object(cr, 'SITE', site), \
+                    patch.object(cr, 'Path', lambda p: work / 'snippets' if p == '/etc/nginx/snippets' else Path(p)), \
+                    patch.object(cr, 'env_of', lambda n: {'API_GATEWAY_PUBLIC_ROUTING_ENABLED': 'true'}):
+                with self.assertRaisesRegex(RuntimeError, 'already serve: /docs'):
+                    cr.activate_gateway_docs('a' * 40, '9-1', '')
+            self.assertEqual(snippet.read_text(), cr.gateway_snippet())
+
+    def test_families_rollback_keeps_the_documentation_and_docs_rollback_keeps_the_families(self):
+        with isolated_work() as work:
+            journal(work, 'activate-gateway-routing', 'activate-gateway-families', 'activate-gateway-docs')
+            snippet = work / 'gateway.conf'
+            snippet.write_text('x')
+            with patch.object(cr, 'GATEWAY_SNIPPET', snippet), patch.object(cr.p, 'reload_host_nginx', lambda: None):
+                cr.undo_gateway_docs({'docs': True})
+                self.assertEqual(snippet.read_text(), cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES))
+        src = (REPO / 'infra/calling/production/coordinated_release.py').read_text()
+        self.assertIn("gateway_snippet(GATEWAY_PREFIXES, docs=done('activate-gateway-docs'))", src)
+
+
 class DeveloperWebhooks(unittest.TestCase):
     def plan(self, calling_state='0,0', migration='0'):
         captured = {}

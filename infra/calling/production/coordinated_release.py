@@ -1353,7 +1353,8 @@ def verify(sha, run_id):
 
 def rollback(sha, run_id):
     journal = load_journal()
-    candidates = [e for e in journal if e['status'] in ('done', 'failed') and (e['components'] or e.get('routing'))]
+    candidates = [e for e in journal if e['status'] in ('done', 'failed')
+                  and (e['components'] or e.get('routing') or e.get('edge'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
@@ -1364,8 +1365,10 @@ def rollback(sha, run_id):
         undo_gateway_routing(entry['routing'])
     if entry['operation'] == 'activate-gateway-families' and GATEWAY_SNIPPET.exists():
         # Families leave the edge before the gateway loses their upstreams (no 5xx window).
-        GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES))
+        GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES, docs=done('activate-gateway-docs')))
         p.reload_host_nginx()
+    if entry.get('edge'):
+        undo_gateway_docs(entry['edge'])
     for component in reversed(entry['components']):
         restore(component, run_id)
         commit(entry)
@@ -1833,7 +1836,8 @@ def activate_gateway_families(sha, run_id, confirm):
     old_snippet = GATEWAY_SNIPPET.read_text()
 
     def post():
-        GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES + FAMILY_PREFIXES))
+        GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES + FAMILY_PREFIXES,
+                                                   docs=done('activate-gateway-docs')))
         try:
             p.reload_host_nginx()
             checks = gateway_family_checks()
@@ -1913,7 +1917,14 @@ GATEWAY_INCLUDE = 'include /etc/nginx/snippets/cfmeet-api-gateway.conf;'
 ROUTES_ANCHOR = 'include /etc/nginx/snippets/cfmeet-calling-routes.conf;'
 
 
-def gateway_snippet(prefixes=GATEWAY_PREFIXES):
+# The API Gateway's public documentation (services/api-gateway/src/docs.rs): the catalogue, the
+# aggregate OpenAPI and the read-only reference are exact paths; the per-domain documents the
+# reference and the catalogue link to live under /openapi/. GET only (and CORS preflight).
+DOCS_EXACT = ('/discovery', '/openapi.json', '/docs')
+DOCS_PREFIX = '/openapi'
+
+
+def gateway_snippet(prefixes=GATEWAY_PREFIXES, docs=False):
     common = ('    proxy_pass http://127.0.0.1:%d;\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n'
               '    proxy_set_header X-Forwarded-Proto https;\n    client_max_body_size 1m;\n    proxy_read_timeout 60s;\n'
               % GATEWAY_RELAY_PORT)
@@ -1924,7 +1935,18 @@ def gateway_snippet(prefixes=GATEWAY_PREFIXES):
         assert prefix.startswith('/v1/') and '/internal' not in prefix and '/admin' not in prefix
         out.append('location = %s {\n%s}' % (prefix, common))
         out.append('location ^~ %s/ {\n%s}' % (prefix, common))
+    if docs:
+        read_only = common + '    limit_except GET OPTIONS { deny all; }\n'
+        out.append('# Public API documentation and discovery (activate-gateway-docs).')
+        for path in DOCS_EXACT:
+            out.append('location = %s {\n%s}' % (path, read_only))
+        out.append('location ^~ %s/ {\n%s}' % (DOCS_PREFIX, read_only))
     return '\n'.join(out) + '\n'
+
+
+def edge_prefixes():
+    """The /v1 families the edge currently routes to the gateway (journal-derived)."""
+    return GATEWAY_PREFIXES + (FAMILY_PREFIXES if done('activate-gateway-families') else ())
 
 
 def route_collisions(texts, prefixes=GATEWAY_PREFIXES):
@@ -2017,6 +2039,104 @@ def activate_gateway_routing(sha, run_id, confirm):
     commit(entry)
 
 
+def http_document(url, headers=None, limit=4 * 2**20):
+    """(status, headers, body bytes) of a bounded GET."""
+    request = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status, dict(response.headers), response.read(limit)
+    except urllib.error.HTTPError as error:
+        return error.code, dict(error.headers), b''
+
+
+def gateway_docs_checks():
+    """The documentation is served by the gateway, with truthful family states, CORS for the web
+    origins only, GET only; gateway health stays private; existing routes are unchanged."""
+    checks = {}
+    status, headers, body = http_document(PUBLIC + '/discovery', {'Origin': 'https://www.cfmeet.com'})
+    try:
+        doc = json.loads(body)
+    except ValueError:
+        doc = {}
+    checks['discovery'] = 'PASS' if status == 200 and doc.get('service') == 'cfmeet.api-gateway' and \
+        doc.get('documentation') == {'aggregate': '/openapi.json', 'reference': '/docs'} else 'FAIL %d' % status
+    families = {f.get('domain'): f for f in doc.get('families', [])}
+    off = [d for d in ('numbering', 'sms', 'privacy-relay') if families.get(d, {}).get('enabled') is not False]
+    checks['discovery: excluded telecom families reported disabled'] = 'PASS' if families and not off else \
+        'FAIL ' + ','.join(off)
+    for origin, allowed in tuple((o, True) for o in WEB_ORIGINS) + (('https://evil.example', False),):
+        _, headers, _ = http_document(PUBLIC + '/discovery', {'Origin': origin})
+        got = {k.lower(): v for k, v in headers.items()}.get('access-control-allow-origin')
+        checks['cors GET /discovery ' + origin] = 'PASS' if (got == origin) == allowed else 'FAIL'
+    status, _, body = http_document(PUBLIC + '/openapi.json')
+    try:
+        aggregate = json.loads(body)
+    except ValueError:
+        aggregate = {}
+    checks['openapi aggregate'] = 'PASS' if status == 200 and str(aggregate.get('openapi', '')).startswith('3.') \
+        and not any(p.startswith('/internal') for p in aggregate.get('paths', {})) else 'FAIL %d' % status
+    status, headers, body = http_document(PUBLIC + '/docs')
+    kind = {k.lower(): v for k, v in headers.items()}.get('content-type', '')
+    checks['docs reference'] = 'PASS' if status == 200 and kind.startswith('text/html') and b'swagger-ui' in body \
+        else 'FAIL %d' % status
+    for domain in [d for d, f in sorted(families.items()) if f.get('enabled')][:3] or ['calling']:
+        status, _, _ = http_document(PUBLIC + '/openapi/%s.json' % domain)
+        checks['openapi domain ' + domain] = 'PASS' if status == 200 else 'FAIL %d' % status
+    status, _ = http_status(PUBLIC + '/discovery', 'POST', {'Content-Type': 'application/json'})
+    checks['documentation is read-only (POST refused)'] = 'PASS' if status in (403, 404, 405) else 'FAIL %d' % status
+    for path in ('/ready', '/health'):
+        status, _ = http_status(PUBLIC + path)
+        checks['gateway %s not public' % path] = 'PASS' if status != 200 else 'FAIL'
+    status, _ = http_status(PUBLIC + '/v1/developer-platform/context')
+    checks['existing gateway family unchanged'] = 'PASS' if status in (401, 403) else 'FAIL %d' % status
+    checks.update(public_smoke())
+    return checks
+
+
+def activate_gateway_docs(sha, run_id, confirm):
+    """Routes the API Gateway's public documentation (/discovery, /openapi.json, /docs and the
+    per-domain /openapi/{domain}.json they link to) at the api.cfmeet.com edge, for the Developer
+    Console's Docs page. Edge only: no container, flag or grant changes. Refuses to shadow an
+    existing location; any failed check restores the previous snippet."""
+    if env_of('api-gateway').get('API_GATEWAY_PUBLIC_ROUTING_ENABLED') != 'true' or not GATEWAY_SNIPPET.exists():
+        raise RuntimeError('Run activate-gateway-routing first')
+    site = SITE.read_text()
+    if GATEWAY_INCLUDE not in site:
+        raise RuntimeError('The gateway snippet is not included by the public site')
+    snippets = [f.read_text() for f in Path('/etc/nginx/snippets').glob('cfmeet-*.conf') if f != GATEWAY_SNIPPET]
+    collisions = route_collisions([site] + snippets, DOCS_EXACT + (DOCS_PREFIX,))
+    if collisions:
+        raise RuntimeError('Existing public routes already serve: ' + ', '.join(collisions))
+    old_snippet = GATEWAY_SNIPPET.read_text()
+    p.write_private(WORK / 'gateway-docs' / run_id / 'snippet.before', old_snippet)
+    entry = begin('activate-gateway-docs', sha, run_id)
+    entry['edge'] = {'docs': True, 'prefixes': list(edge_prefixes())}
+    commit(entry)
+    try:
+        GATEWAY_SNIPPET.write_text(gateway_snippet(edge_prefixes(), docs=True))
+        p.reload_host_nginx()  # nginx -t first
+        checks = gateway_docs_checks()
+        emit('gatewayDocs', checks)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Gateway documentation checks failed')
+        p.regression()
+    except Exception:
+        GATEWAY_SNIPPET.write_text(old_snippet)
+        p.reload_host_nginx()
+        entry['status'] = 'failed'
+        commit(entry)
+        raise
+    entry['status'] = 'done'
+    commit(entry)
+
+
+def undo_gateway_docs(edge):
+    """Removes only the documentation locations; the /v1 families stay as they are."""
+    if GATEWAY_SNIPPET.exists():
+        GATEWAY_SNIPPET.write_text(gateway_snippet(edge_prefixes(), docs=False))
+        p.reload_host_nginx()
+
+
 def undo_gateway_routing(routing, old_snippet=None):
     """Removes only this step's include, snippet and relay; later site changes are kept."""
     SITE.write_text(SITE.read_text().replace('\n    ' + GATEWAY_INCLUDE, ''))
@@ -2050,6 +2170,7 @@ ACTIVATIONS = {
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
     'activate-web-origins': (('activate-gateway-routing',), activate_web_origins),
+    'activate-gateway-docs': (('activate-gateway-routing',), activate_gateway_docs),
     'activate-developer-console': (('activate-developer-platform',), activate_developer_console),
     'activate-developer-webhooks': (('activate-developer-console',), activate_developer_webhooks),
     'activate-gateway-families': (('activate-gateway-routing', 'activate-developer-webhooks'), activate_gateway_families),
