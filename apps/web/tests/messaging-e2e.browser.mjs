@@ -15,7 +15,7 @@
 // Steps: device registration; an end-to-end encrypted conversation created in the UI;
 // encrypted send / receive; XSS payloads rendered as text; reload (encrypted local
 // state); offline delivery; network loss and reconnect; an encrypted attachment;
-// a MANAGED conversation, labelled as server-readable; a second device added to the
+// new chats are private-only (the new-chat dialog offers no MANAGED choice); a second device added to the
 // group, its history recovered device-to-device with comparison codes; device removal
 // erasing local state; CSP / Trusted Types / worker integrity; expired session.
 import { test, before, after } from "node:test";
@@ -108,15 +108,26 @@ async function open(who, { route } = {}) {
   return { ctx, page, errors };
 }
 
+// The device / connection status lives in the "Security & devices" sheet, which stays
+// mounted (hidden) while closed: wait for the state, not for the sheet to be open.
 async function phase(page, p) {
   try {
-    await page.waitForSelector(`[data-testid=device-state][data-phase=${p}]`, { timeout: T });
+    await page.waitForSelector(`[data-testid=device-state][data-phase=${p}]`, { timeout: T, state: "attached" });
   } catch (e) {
     const text = await page.locator("[data-testid=messages-page]").innerText().catch(() => "(no page)");
     throw new Error(`waiting for phase ${p}; the page shows:\n${text}`, { cause: e });
   }
 }
 const violations = (page) => page.evaluate(() => window.__violations);
+const connection = (page, sel) => page.locator(`[data-testid=connection-state]${sel}`).waitFor({ timeout: T, state: "attached" });
+
+/** Picks a person in the new-chat dialog: the checkbox is visually hidden inside its row. */
+async function pick(page, name) {
+  const box = page.locator(`[data-testid=colleague][data-name="${name}"]`);
+  await box.waitFor({ timeout: T, state: "attached" });
+  await page.locator("label", { has: box }).click();
+  assert.ok(await box.isChecked(), `${name} selected`);
+}
 
 async function register(page) {
   await phase(page, "needs-device");
@@ -206,8 +217,7 @@ async function journey() {
 
   // ---- 2. Alice starts an end-to-end encrypted conversation with Bob in the UI.
   await alice.page.click("[data-testid=new-conversation]");
-  await alice.page.locator(`[data-testid=colleague][data-name="${USERS.bob.name}"]`).check({ timeout: T });
-  await alice.page.check("[data-testid=profile-e2ee]");
+  await pick(alice.page, USERS.bob.name);
   await alice.page.click("[data-testid=create-conversation]");
   await alice.page.waitForSelector("[data-testid=conversation][data-profile=PRIVATE_E2EE]", { timeout: T });
   assert.equal(await alice.page.locator("[data-testid=profile-badge]").first().getAttribute("data-profile"), "PRIVATE_E2EE");
@@ -264,13 +274,13 @@ async function journey() {
   step("offline delivery in order", { messages: away.length });
 
   // ---- 7. Network loss and reconnect (cursor resume + REST catch-up).
-  await alice.page.locator("[data-testid=connection-state][data-connection=connected]").waitFor({ timeout: T });
+  await connection(alice.page, "[data-connection=connected]");
   await alice.ctx.setOffline(true);
-  await alice.page.locator("[data-testid=connection-state]:not([data-connection=connected])").waitFor({ timeout: T });
+  await connection(alice.page, ":not([data-connection=connected])");
   const during = `${SECRET} sent during the outage`;
   await send(bob.page, during);
   await alice.ctx.setOffline(false);
-  await alice.page.locator("[data-testid=connection-state][data-connection=connected]").waitFor({ timeout: T });
+  await connection(alice.page, "[data-connection=connected]");
   await shown(alice.page, during);
   step("reconnect", {});
 
@@ -284,18 +294,16 @@ async function journey() {
   assert.ok(readFileSync(await download.path()).equals(fileBody), "decrypted bytes equal the original");
   step("encrypted attachment", { bytes: fileBody.length });
 
-  // ---- 9. A MANAGED conversation is created only on purpose and says it is server-readable.
+  // ---- 9. New chats are private-only: the new-chat dialog offers no MANAGED (server-
+  //          readable) choice, so a user cannot create one by accident from the web app.
   await alice.page.click("[data-testid=new-conversation]");
-  await alice.page.locator(`[data-testid=colleague][data-name="${USERS.bob.name}"]`).check({ timeout: T });
-  await alice.page.check("[data-testid=profile-managed]");
-  await alice.page.click("[data-testid=create-conversation]");
-  await alice.page.waitForSelector("[data-testid=conversation][data-profile=MANAGED]", { timeout: T });
-  const managedText = "managed hello (server-readable)";
-  await send(alice.page, managedText);
-  await openConversation(bob.page, "MANAGED");
-  await shown(bob.page, managedText);
-  assert.match(await bob.page.locator("[data-testid=profile-badge]").first().textContent(), /readable by CF Meet servers/);
-  step("managed conversation labelled", {});
+  const dialog = alice.page.locator("[data-testid=new-conversation-form]");
+  await dialog.waitFor({ timeout: T });
+  await alice.page.locator(`[data-testid=colleague][data-name="${USERS.bob.name}"]`).waitFor({ timeout: T, state: "attached" });
+  assert.equal(await dialog.locator("[data-testid=profile-managed], [data-testid=profile-e2ee], input[type=radio]").count(), 0, "no security-profile choice");
+  await alice.page.keyboard.press("Escape");
+  await dialog.waitFor({ state: "detached", timeout: T });
+  step("new chats are private-only", {});
 
   // ---- 10. Bob's second device: added to the group by a member device, then his history
   //          is recovered device-to-device after both devices show the same code.
