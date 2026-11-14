@@ -267,6 +267,18 @@ def livekit_config(public_ip):
     safe_rtc['stun_server_count'] = len(rtc.get('stun_servers') or [])
     safe_rtc['interfaces_configured'] = bool(rtc.get('interfaces'))
     safe_rtc['ips_configured'] = bool(rtc.get('ips'))
+    webhook = config.get('webhook') or {}
+    urls = [str(u) for u in (webhook.get('urls') or [])]
+    from urllib.parse import urlsplit
+    targets = [urlsplit(u) for u in urls]
+    emit('livekitWebhook', {
+        'configured': bool(urls), 'url_count': len(urls),
+        'calling_callback_path': [t.path == '/internal/provider/media/events' for t in targets],
+        'schemes': [t.scheme for t in targets],
+        'loopback_or_internal_host': [bool(t.hostname) and (t.hostname in ('127.0.0.1', 'localhost') or '.' not in t.hostname)
+                                      for t in targets],
+        'api_key_set': bool(webhook.get('api_key')),
+        'api_key_in_keys': bool(webhook.get('api_key')) and webhook.get('api_key') in (config.get('keys') or {})})
     container = json.loads(sh('docker', 'inspect', 'lk-server') or '[{}]')[0]
     host = container.get('HostConfig', {})
     emit('livekitConfig', {'rtc': safe_rtc, 'turn': {k: turn.get(k) for k in ('enabled', 'udp_port', 'tls_port', 'external_tls')},
