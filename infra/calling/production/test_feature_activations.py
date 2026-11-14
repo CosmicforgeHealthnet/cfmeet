@@ -133,14 +133,14 @@ class GatewayDocs(unittest.TestCase):
         self.assertEqual(cr.ACTIVATIONS['activate-gateway-docs'][0], ('activate-gateway-routing',))
         self.assertIn('activate-gateway-docs', cr.OPERATIONS)
 
-    def run_activation(self, work, discovery=None, statuses=None, cors=cr.WEB_ORIGINS):
+    def run_activation(self, work, discovery=None, statuses=None, cors=cr.WEB_ORIGINS, bodies=None):
         snippets = work / 'snippets'
         snippets.mkdir()
         (snippets / 'cfmeet-api-gateway.conf').write_text(cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES))
         site = work / 'site'
         site.write_text('server { %s }' % cr.GATEWAY_INCLUDE)
-        statuses = dict({'/v1/developer-platform/context': 401, '/ready': 404, '/health': 404, 'POST /discovery': 403},
-                        **(statuses or {}))
+        statuses = dict({'/v1/developer-platform/context': 401, 'POST /discovery': 403}, **(statuses or {}))
+        bodies = dict({'/health': b'{"service":"CosmicForge RTC","status":"healthy"}'}, **(bodies or {}))
         discovery = self.DISCOVERY if discovery is None else discovery
 
         def document(url, headers=None, limit=0):
@@ -155,6 +155,8 @@ class GatewayDocs(unittest.TestCase):
                 return 200, {'Content-Type': 'text/html; charset=utf-8'}, b'<div id="swagger-ui"></div>'
             if path.startswith('/openapi/'):
                 return statuses.get(path, 200), h, b'{}'
+            if path in bodies:
+                return 200, h, bodies[path]
             return 404, {}, b''
 
         def status(url, method='GET', headers=None):
@@ -190,7 +192,9 @@ class GatewayDocs(unittest.TestCase):
     def test_any_failed_check_restores_the_previous_snippet(self):
         before = cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES)
         cases = [dict(discovery=dict(self.DISCOVERY, families=[{'domain': 'sms', 'enabled': True}])),
-                 dict(statuses={'/ready': 200}), dict(statuses={'POST /discovery': 200}),
+                 dict(bodies={'/ready': b'{"status":"ok","service":"api-gateway"}'}),
+                 dict(bodies={'/health': b'{"status":"ok","service":"api-gateway"}'}),
+                 dict(statuses={'POST /discovery': 200}),
                  dict(statuses={'/v1/developer-platform/context': 404}),
                  dict(cors=cr.WEB_ORIGINS + ('https://evil.example',)), dict(cors=('https://cfmeet.com',)),
                  dict(statuses={'/openapi/calling.json': 404})]

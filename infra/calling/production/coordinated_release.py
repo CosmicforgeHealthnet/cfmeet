@@ -2084,9 +2084,11 @@ def gateway_docs_checks():
         checks['openapi domain ' + domain] = 'PASS' if status == 200 else 'FAIL %d' % status
     status, _ = http_status(PUBLIC + '/discovery', 'POST', {'Content-Type': 'application/json'})
     checks['documentation is read-only (POST refused)'] = 'PASS' if status in (403, 404, 405) else 'FAIL %d' % status
+    # The edge's /health is the Meeting Service's own public health route; the gateway's /health
+    # and /ready must never answer there (they identify as "api-gateway").
     for path in ('/ready', '/health'):
-        status, _ = http_status(PUBLIC + path)
-        checks['gateway %s not public' % path] = 'PASS' if status != 200 else 'FAIL'
+        _, _, body = http_document(PUBLIC + path)
+        checks['gateway %s not public' % path] = 'FAIL' if b'api-gateway' in body else 'PASS'
     status, _ = http_status(PUBLIC + '/v1/developer-platform/context')
     checks['existing gateway family unchanged'] = 'PASS' if status in (401, 403) else 'FAIL %d' % status
     checks.update(public_smoke())
