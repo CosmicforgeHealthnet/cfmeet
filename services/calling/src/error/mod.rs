@@ -61,6 +61,8 @@ pub enum ErrorCode {
     RecordingNotAuthorized,
     /// The principal's category may not perform the operation (Part H §10).
     PrincipalNotEligible,
+    /// A genuine signaling credential whose lifetime ended: mint a new one (never retry).
+    SignalingCredentialExpired,
 }
 
 impl ErrorCode {
@@ -100,6 +102,7 @@ impl ErrorCode {
         ErrorCode::ArtifactStorageUnavailable,
         ErrorCode::RecordingNotAuthorized,
         ErrorCode::PrincipalNotEligible,
+        ErrorCode::SignalingCredentialExpired,
     ];
 
     /// Codes that only internal routes return.
@@ -213,6 +216,7 @@ impl ErrorCode {
             ErrorCode::ArtifactStorageUnavailable => "ARTIFACT_STORAGE_UNAVAILABLE",
             ErrorCode::RecordingNotAuthorized => "RECORDING_NOT_AUTHORIZED",
             ErrorCode::PrincipalNotEligible => "PRINCIPAL_NOT_ELIGIBLE",
+            ErrorCode::SignalingCredentialExpired => "SIGNALING_CREDENTIAL_EXPIRED",
         }
     }
 }
@@ -222,6 +226,11 @@ pub enum CallingError {
     /// Normalized authentication failure for every rejection reason.
     #[error("authentication failed")]
     AuthenticationFailed,
+    /// A signaling credential with a valid signature, issuer, audience and purpose whose
+    /// lifetime ended. Distinct so the client mints a new credential instead of retrying the
+    /// same one; it reveals nothing to anyone who did not already hold a genuine credential.
+    #[error("signaling credential expired")]
+    SignalingCredentialExpired,
     /// The authenticated credential lacks a required scope.
     #[error("insufficient scope")]
     InsufficientScope { required: String },
@@ -254,6 +263,7 @@ impl CallingError {
     pub fn code(&self) -> ErrorCode {
         match self {
             CallingError::AuthenticationFailed => ErrorCode::AuthenticationFailed,
+            CallingError::SignalingCredentialExpired => ErrorCode::SignalingCredentialExpired,
             CallingError::InsufficientScope { .. } => ErrorCode::InsufficientScope,
             CallingError::NotFound => ErrorCode::NotFound,
             CallingError::MethodNotAllowed => ErrorCode::MethodNotAllowed,
@@ -270,6 +280,7 @@ impl CallingError {
     pub fn status(&self) -> StatusCode {
         match self {
             CallingError::AuthenticationFailed => StatusCode::UNAUTHORIZED,
+            CallingError::SignalingCredentialExpired => StatusCode::UNAUTHORIZED,
             CallingError::InsufficientScope { .. } => StatusCode::FORBIDDEN,
             CallingError::NotFound => StatusCode::NOT_FOUND,
             CallingError::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
@@ -286,6 +297,9 @@ impl CallingError {
     fn message(&self) -> &'static str {
         match self {
             CallingError::AuthenticationFailed => "Authentication failed.",
+            CallingError::SignalingCredentialExpired => {
+                "The signaling credential has expired; request a new signaling credential."
+            }
             CallingError::InsufficientScope { .. } => {
                 "The credential is not authorized for this operation."
             }
@@ -348,6 +362,14 @@ impl IntoResponse for CallingError {
                 headers.insert(
                     header::WWW_AUTHENTICATE,
                     HeaderValue::from_static("Bearer realm=\"cf-meet-calling\""),
+                );
+            }
+            CallingError::SignalingCredentialExpired => {
+                headers.insert(
+                    header::WWW_AUTHENTICATE,
+                    HeaderValue::from_static(
+                        "Bearer realm=\"cf-meet-calling\", error=\"invalid_token\", error_description=\"expired\"",
+                    ),
                 );
             }
             CallingError::InsufficientScope { required } => {

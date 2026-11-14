@@ -371,11 +371,12 @@ class Call {
   const Call.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Call.create({required String? answeredAt, required String? authorizedAt, required Uuid callId, required String? connectedAt, required int? connectedDurationMs, required String createdAt, required String durationsAsOf, required String? endedAt, required String? endingAt, required CallFailureCategory? failureCategory, required Uuid initiatorPrincipalId, required List<CallInvitation> invitations, required CallKind kind, required List<CallParticipant> participants, required String requestedAt, required String? ringingAt, required List<CallSession> sessions, required CallState state, required CallTerminalReason? terminalReason, required List<CallTransfer> transfers, required String updatedAt, required int version}) =>
+  factory Call.create({required String? answeredAt, required String? authorizedAt, required Uuid callId, required bool canViewRecordings, required String? connectedAt, required int? connectedDurationMs, required String createdAt, required String durationsAsOf, required String? endedAt, required String? endingAt, required CallFailureCategory? failureCategory, required Uuid initiatorPrincipalId, required List<CallInvitation> invitations, required CallKind kind, required List<CallParticipant> participants, required String requestedAt, required String? ringingAt, required List<CallSession> sessions, required CallState state, required CallTerminalReason? terminalReason, required List<CallTransfer> transfers, required String updatedAt, required int version}) =>
       Call.fromJson(<String, Object?>{
         'answeredAt': answeredAt,
         'authorizedAt': authorizedAt,
         'callId': callId,
+        'canViewRecordings': canViewRecordings,
         'connectedAt': connectedAt,
         'connectedDurationMs': connectedDurationMs,
         'createdAt': createdAt,
@@ -405,6 +406,9 @@ class Call {
   String? get authorizedAt => json['authorizedAt'] as String?;
 
   Uuid get callId => json['callId']! as String;
+
+  /// Whether this caller may read the call's recordings and recording authorizations (GET /v1/calls/{call_id}/recordings, /recording-authorizations): the credential holds enterprise.recording.read. Request recordings only when true; otherwise those routes answer 403. 1.17.0.
+  bool get canViewRecordings => json['canViewRecordings']! as bool;
 
   String? get connectedAt => json['connectedAt'] as String?;
 
@@ -3895,13 +3899,14 @@ class RecoveredInvitation {
   const RecoveredInvitation.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory RecoveredInvitation.create({required bool actionable, required Uuid callId, required CallKind callKind, required CallState callState, required int callVersion, required String expiresAt, required Uuid invitationId, required String issuedAt, required CallInvitationPurpose purpose, required Uuid? sessionId, required CallInvitationStatus status, required CallInvitationTerminalReason? terminalReason}) =>
+  factory RecoveredInvitation.create({required bool actionable, required Uuid callId, required CallKind callKind, required CallState callState, required int callVersion, required String? callerDisplayName, required String expiresAt, required Uuid invitationId, required String issuedAt, required CallInvitationPurpose purpose, required Uuid? sessionId, required CallInvitationStatus status, required CallInvitationTerminalReason? terminalReason}) =>
       RecoveredInvitation.fromJson(<String, Object?>{
         'actionable': actionable,
         'callId': callId,
         'callKind': callKind,
         'callState': callState,
         'callVersion': callVersion,
+        'callerDisplayName': callerDisplayName,
         'expiresAt': expiresAt,
         'invitationId': invitationId,
         'issuedAt': issuedAt,
@@ -3923,6 +3928,9 @@ class RecoveredInvitation {
   CallState get callState => json['callState']! as String;
 
   int get callVersion => (json['callVersion']! as num).toInt();
+
+  /// The Call initiator's display name (shown on the incoming call), or null when the Call was created without one. 1.6.0.
+  String? get callerDisplayName => json['callerDisplayName'] as String?;
 
   String get expiresAt => json['expiresAt']! as String;
 

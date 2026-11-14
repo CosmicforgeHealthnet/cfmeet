@@ -32,7 +32,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 
 pub use bus::{InMemorySignalBus, PgNotifySignalBus, RealtimeSignalBus, SignalEnvelope};
-pub use credentials::{SignalingClaims, SignalingKeys};
+pub use credentials::{SignalingClaims, SignalingCredentialError, SignalingKeys};
 pub use push::{NoPushTransport, PushDispatcher};
 
 use crate::{
@@ -142,9 +142,15 @@ impl SignalingAuthority {
         request: RequestContext,
     ) -> Result<SignalingIdentity, CallingError> {
         let now = self.clock.now();
-        let claims = self.keys.verify(token, now).map_err(|_| {
-            tracing::info!("signaling authentication rejected (credential)");
-            CallingError::AuthenticationFailed
+        let claims = self.keys.verify(token, now).map_err(|error| match error {
+            SignalingCredentialError::Expired => {
+                tracing::info!("signaling authentication rejected (credential expired)");
+                CallingError::SignalingCredentialExpired
+            }
+            SignalingCredentialError::Invalid => {
+                tracing::info!("signaling authentication rejected (credential)");
+                CallingError::AuthenticationFailed
+            }
         })?;
         self.authority_holds(&claims, now).await?;
         Ok(SignalingIdentity { claims, request })

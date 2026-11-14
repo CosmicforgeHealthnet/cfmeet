@@ -916,6 +916,68 @@ async fn conversations_are_isolated_by_tenant_application_environment_and_member
     );
 }
 
+/// The policy states what THIS deployment can run, and a write cannot configure a context no
+/// conversation could ever be created in (production: E2EE devices disabled, PRIVATE_E2EE by
+/// platform default, so every personal context had no usable profile and creation failed).
+#[tokio::test]
+async fn policy_reports_and_enforces_the_profiles_this_deployment_can_run() {
+    let Some(h) = Harness::build(|s| s.devices.enabled = false).await else {
+        return;
+    };
+    let c = h.customer(ALL);
+    let v = h.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(v.status, StatusCode::OK, "{}", v.text);
+    conforms("messaging/common/v1.schema.json#/$defs/PolicyView", &v.json);
+    let d = &v.json["deployment"];
+    assert_eq!(
+        d["profiles"]["PRIVATE_E2EE"],
+        json!({"available": false, "reason": "E2EE_DEVICES_DISABLED"})
+    );
+    assert_eq!(
+        d["profiles"]["MANAGED"],
+        json!({"available": true, "reason": null})
+    );
+    assert_eq!(d["usableProfiles"]["DIRECT"], json!([]));
+    assert!(
+        d["contextsWithoutUsableProfile"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("DIRECT")),
+        "{d}"
+    );
+    // Configuring a context with only an unavailable profile is refused, naming why.
+    let r = h
+        .put_policy(&c, 0, json!({ "contexts": { "GROUP": { "allowedProfiles": ["PRIVATE_E2EE"], "defaultProfile": "PRIVATE_E2EE" } } }))
+        .await;
+    assert_eq!(r.code(), "VALIDATION_ERROR", "{}", r.text);
+    assert!(r.text.contains("E2EE_DEVICES_DISABLED"), "{}", r.text);
+    // A context with a runnable profile is accepted and becomes usable.
+    let ok = h
+        .put_policy(&c, 0, json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" } } }))
+        .await;
+    assert_eq!(ok.status, StatusCode::OK, "{}", ok.text);
+    assert_eq!(
+        ok.json["deployment"]["usableProfiles"]["GROUP"],
+        json!(["MANAGED"])
+    );
+    assert!(!ok.json["deployment"]["contextsWithoutUsableProfile"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("GROUP")));
+    // A fully provisioned deployment has a usable profile for every enabled context.
+    let Some(full) = Harness::new().await else {
+        return;
+    };
+    let c = full.customer(ALL);
+    let v = full.get(&c, None, "/v1/messaging/policy").await;
+    assert_eq!(
+        v.json["deployment"]["contextsWithoutUsableProfile"],
+        json!([]),
+        "{}",
+        v.text
+    );
+}
+
 #[tokio::test]
 async fn policy_changes_are_versioned_validated_and_audited() {
     let Some(h) = Harness::new().await else {

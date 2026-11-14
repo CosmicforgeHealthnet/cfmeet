@@ -1271,7 +1271,8 @@
         "issuedAt",
         "expiresAt",
         "terminalReason",
-        "sessionId"
+        "sessionId",
+        "callerDisplayName"
       ],
       "properties": {
         "invitationId": {
@@ -1321,6 +1322,19 @@
           "oneOf": [
             {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "callerDisplayName": {
+          "description": "The Call initiator's display name (shown on the incoming call), or null when the Call was created without one. 1.6.0.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
             },
             {
               "type": "null"

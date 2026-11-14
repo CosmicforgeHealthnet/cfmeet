@@ -120,6 +120,8 @@ export namespace Calling {
     sessions: Array<CallSession>;
     invitations: Array<CallInvitation>;
     transfers: Array<CallTransfer>;
+    /** Whether this caller may read the call's recordings and recording authorizations (GET /v1/calls/{call_id}/recordings, /recording-authorizations): the credential holds enterprise.recording.read. Request recordings only when true; otherwise those routes answer 403. 1.17.0. */
+    canViewRecordings: boolean;
   }) & (CallCore);
   /** Fields of every Call representation (HTTP API, call-control results). Provider-independent: no provider or carrier identifiers, execution bindings, media identities, telephone numbers or protected contact data. */
   export type CallCore = {
@@ -630,7 +632,7 @@ export namespace Calling {
     enteredAt: string;
   };
   /** Stable public error codes of the Calling service. */
-  export type ErrorCode = "AUTHENTICATION_FAILED" | "INSUFFICIENT_SCOPE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR" | "STALE_CALL_VERSION" | "CALL_STATE_CONFLICT" | "CALL_EVIDENCE_REQUIRED" | "CALL_NOT_AUTHORIZED" | "CONCURRENT_CALL_LIMIT_EXCEEDED" | "CALL_RESOURCE_STATE_CONFLICT" | "CONFLICT" | "IDEMPOTENCY_CONFLICT" | "INVITATION_EXPIRED" | "INVITATION_NOT_ACTIONABLE" | "ANSWERED_ELSEWHERE" | "CAPABILITY_UNAVAILABLE" | "MEDIA_UNAVAILABLE" | "PARTICIPANT_LIMIT_EXCEEDED" | "TARGET_UNAVAILABLE" | "PRIVACY_AUTHORIZATION_UNAVAILABLE" | "PUBLIC_ROUTE_DENIED" | "PUBLIC_ROUTE_UNAVAILABLE" | "TELECOM_SPEND_LIMIT_EXCEEDED" | "VERSION_CONFLICT" | "ENTERPRISE_POLICY_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "RECORDING_NOT_AUTHORIZED" | "PRINCIPAL_NOT_ELIGIBLE" | "COMMUNICATIONS_POLICY_UNAVAILABLE";
+  export type ErrorCode = "AUTHENTICATION_FAILED" | "INSUFFICIENT_SCOPE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR" | "STALE_CALL_VERSION" | "CALL_STATE_CONFLICT" | "CALL_EVIDENCE_REQUIRED" | "CALL_NOT_AUTHORIZED" | "CONCURRENT_CALL_LIMIT_EXCEEDED" | "CALL_RESOURCE_STATE_CONFLICT" | "CONFLICT" | "IDEMPOTENCY_CONFLICT" | "INVITATION_EXPIRED" | "INVITATION_NOT_ACTIONABLE" | "ANSWERED_ELSEWHERE" | "CAPABILITY_UNAVAILABLE" | "MEDIA_UNAVAILABLE" | "PARTICIPANT_LIMIT_EXCEEDED" | "TARGET_UNAVAILABLE" | "PRIVACY_AUTHORIZATION_UNAVAILABLE" | "PUBLIC_ROUTE_DENIED" | "PUBLIC_ROUTE_UNAVAILABLE" | "TELECOM_SPEND_LIMIT_EXCEEDED" | "VERSION_CONFLICT" | "ENTERPRISE_POLICY_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "RECORDING_NOT_AUTHORIZED" | "PRINCIPAL_NOT_ELIGIBLE" | "COMMUNICATIONS_POLICY_UNAVAILABLE" | "SIGNALING_CREDENTIAL_EXPIRED";
   /** Error response body. Messages are fixed, safe strings; authentication failures are uniform. */
   export type ErrorEnvelope = {
     error: {
@@ -1121,6 +1123,8 @@ export namespace Calling {
     expiresAt: string;
     terminalReason: CallInvitationTerminalReason | null;
     sessionId: Uuid | null;
+    /** The Call initiator's display name (shown on the incoming call), or null when the Call was created without one. 1.6.0. */
+    callerDisplayName: string | null;
   };
   /** Response of GET /v1/calling/invitations (signaling credential): the endpoint's live and recently finished offers. */
   export type RecoveredInvitationList = {
@@ -7443,6 +7447,21 @@ export namespace Messaging {
     effective: EffectivePolicy;
     digest: string;
     platformPolicyVersion: number;
+    /** What THIS deployment can run (1.23.0): PRIVATE_E2EE needs E2EE devices, MANAGED the managed key ring. usableProfiles lists, per enabled context, the allowed profiles that are actually available; contextsWithoutUsableProfile names enabled contexts in which no conversation can currently be created. A policy update that would leave a context it configures without a usable profile is refused … */
+    deployment: {
+      profiles: {
+        PRIVATE_E2EE: {
+          available: boolean;
+          reason: ("E2EE_DEVICES_DISABLED" | "MANAGED_ENCRYPTION_NOT_CONFIGURED") | null;
+        };
+        MANAGED: {
+          available: boolean;
+          reason: ("E2EE_DEVICES_DISABLED" | "MANAGED_ENCRYPTION_NOT_CONFIGURED") | null;
+        };
+      };
+      usableProfiles: { [key: string]: Array<SecurityProfile> };
+      contextsWithoutUsableProfile: Array<ContextClass>;
+    };
   };
   export type PresenceSettings = {
     visibility: "CONVERSATION_MEMBERS" | "HIDDEN";

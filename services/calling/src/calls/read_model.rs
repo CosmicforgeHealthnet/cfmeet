@@ -269,6 +269,11 @@ pub struct CallView {
     pub sessions: Vec<SessionView>,
     pub invitations: Vec<InvitationView>,
     pub transfers: Vec<TransferView>,
+    /// Whether THIS caller may read the call's recordings and recording authorizations
+    /// (`GET /v1/calls/{id}/recordings`, `/recording-authorizations`): its credential holds
+    /// `enterprise.recording.read`. Clients request recordings only when true (an ordinary
+    /// app credential holds `calls.write` / `calls.read` only and would get 403).
+    pub can_view_recordings: bool,
 }
 
 impl From<&CallDetail> for CallView {
@@ -281,6 +286,7 @@ impl From<&CallDetail> for CallView {
             sessions: d.sessions.iter().map(Into::into).collect(),
             invitations: d.invitations.iter().map(Into::into).collect(),
             transfers: d.transfers.iter().map(Into::into).collect(),
+            can_view_recordings: false,
         }
     }
 }

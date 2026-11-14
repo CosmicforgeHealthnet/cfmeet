@@ -13510,7 +13510,7 @@
         "operationId": "v2_messaging_me",
         "responses": {
           "200": {
-            "description": "principalId, tenantId, applicationId, environmentId",
+            "description": "principalId, tenantId, applicationId, environmentId, displayName (the caller's own account display name)",
             "content": {
               "application/json": {
                 "schema": {

@@ -2486,8 +2486,9 @@ class PolicyView {
   const PolicyView.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory PolicyView.create({required String digest, required EffectivePolicy effective, required int platformPolicyVersion, required ApplicationPolicy policy, required int version}) =>
+  factory PolicyView.create({required Map<String, Object?> deployment, required String digest, required EffectivePolicy effective, required int platformPolicyVersion, required ApplicationPolicy policy, required int version}) =>
       PolicyView.fromJson(<String, Object?>{
+        'deployment': deployment,
         'digest': digest,
         'effective': effective.toJson(),
         'platformPolicyVersion': platformPolicyVersion,
@@ -2497,6 +2498,9 @@ class PolicyView {
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// What THIS deployment can run (1.23.0): PRIVATE_E2EE needs E2EE devices, MANAGED the managed key ring. usableProfiles lists, per enabled context, the allowed profiles that are actually available; contextsWithoutUsableProfile names enabled contexts in which no conversation can currently be created. A policy update that would leave a context it configures without a usable profile is refused …
+  Map<String, Object?> get deployment => json['deployment']! as Map<String, Object?>;
 
   String get digest => json['digest']! as String;
 

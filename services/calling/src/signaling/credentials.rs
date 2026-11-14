@@ -108,6 +108,9 @@ impl fmt::Debug for MintedSignalingCredential {
 pub enum SignalingCredentialError {
     #[error("signaling credential invalid")]
     Invalid,
+    /// Genuine (signature, issuer, audience, purpose verified) but past its expiry.
+    #[error("signaling credential expired")]
+    Expired,
 }
 
 impl SignalingKeys {
@@ -242,8 +245,11 @@ impl SignalingKeys {
         .map_err(|_| invalid)?
         .claims;
         // Explicit time checks against the service clock (testable, no leeway).
-        if claims.pur != PURPOSE || claims.exp <= now.timestamp() || claims.nbf > now.timestamp() {
+        if claims.pur != PURPOSE || claims.nbf > now.timestamp() {
             return Err(invalid);
+        }
+        if claims.exp <= now.timestamp() {
+            return Err(SignalingCredentialError::Expired);
         }
         let endpoint = Uuid::parse_str(&claims.sub).map_err(|_| invalid)?;
         Ok(SignalingClaims {
@@ -305,11 +311,15 @@ mod tests {
         assert_eq!(claims.endpoint_id.as_uuid(), Uuid::from_u128(5));
         assert_eq!(claims.minted_by_credential_id.as_uuid(), Uuid::from_u128(7));
         // Expired, tampered, foreign-key and unprefixed tokens are refused.
-        assert!(k
-            .verify(&token, now + Duration::seconds(DEFAULT_TTL_SECONDS + 1))
-            .is_err());
-        assert!(
-            k.verify(&token, now - Duration::seconds(1)).is_err(),
+        let expired_at = now + Duration::seconds(DEFAULT_TTL_SECONDS + 1);
+        assert_eq!(
+            k.verify(&token, expired_at).unwrap_err(),
+            SignalingCredentialError::Expired,
+            "a genuine credential past its lifetime is reported as expired (mint a new one)"
+        );
+        assert_eq!(
+            k.verify(&token, now - Duration::seconds(1)).unwrap_err(),
+            SignalingCredentialError::Invalid,
             "not yet valid"
         );
         // The service clock is the only time authority (no system-time check).
@@ -333,6 +343,12 @@ mod tests {
         tampered.pop();
         tampered.push(if token.ends_with('A') { 'B' } else { 'A' });
         assert!(k.verify(&tampered, now).is_err());
+        // Only a genuine credential can be reported as expired: a forged or foreign one
+        // past the same instant is the uniform Invalid.
+        assert_eq!(
+            k.verify(&tampered, expired_at).unwrap_err(),
+            SignalingCredentialError::Invalid
+        );
         assert!(k
             .verify(token.trim_start_matches(TOKEN_PREFIX), now)
             .is_err());
@@ -342,6 +358,10 @@ mod tests {
         })
         .unwrap();
         assert!(other.verify(&token, now).is_err());
+        assert_eq!(
+            other.verify(&token, expired_at).unwrap_err(),
+            SignalingCredentialError::Invalid
+        );
         // A platform API credential is never a signaling credential.
         assert!(k
             .verify("cfmk_live_abcdefghijklmnopqrstuvwxyz", now)

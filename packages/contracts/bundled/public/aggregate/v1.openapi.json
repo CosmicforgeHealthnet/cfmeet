@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.16.0"
+      "description": "cfmeet.calling.http-api 1.17.0"
     },
     {
       "name": "privacy-relay",
@@ -52471,7 +52471,8 @@
           "participants",
           "sessions",
           "invitations",
-          "transfers"
+          "transfers",
+          "canViewRecordings"
         ],
         "properties": {
           "connectedDurationMs": {
@@ -52508,6 +52509,10 @@
             "items": {
               "$ref": "#/components/schemas/calling.calling.control.v1.CallTransfer"
             }
+          },
+          "canViewRecordings": {
+            "type": "boolean",
+            "description": "Whether this caller may read the call's recordings and recording authorizations (GET /v1/calls/{call_id}/recordings, /recording-authorizations): the credential holds enterprise.recording.read. Request recordings only when true; otherwise those routes answer 403. 1.17.0."
           }
         },
         "unevaluatedProperties": false
@@ -52975,7 +52980,8 @@
           "ARTIFACT_STORAGE_UNAVAILABLE",
           "RECORDING_NOT_AUTHORIZED",
           "PRINCIPAL_NOT_ELIGIBLE",
-          "COMMUNICATIONS_POLICY_UNAVAILABLE"
+          "COMMUNICATIONS_POLICY_UNAVAILABLE",
+          "SIGNALING_CREDENTIAL_EXPIRED"
         ]
       },
       "calling.ErrorEnvelope": {
@@ -54399,7 +54405,8 @@
           "issuedAt",
           "expiresAt",
           "terminalReason",
-          "sessionId"
+          "sessionId",
+          "callerDisplayName"
         ],
         "properties": {
           "invitationId": {
@@ -54449,6 +54456,19 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "callerDisplayName": {
+            "description": "The Call initiator's display name (shown on the incoming call), or null when the Call was created without one. 1.6.0.",
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
               },
               {
                 "type": "null"
@@ -79514,7 +79534,8 @@
           "policy",
           "effective",
           "digest",
-          "platformPolicyVersion"
+          "platformPolicyVersion",
+          "deployment"
         ],
         "properties": {
           "version": {
@@ -79534,6 +79555,98 @@
           "platformPolicyVersion": {
             "type": "integer",
             "minimum": 1
+          },
+          "deployment": {
+            "description": "What THIS deployment can run (1.23.0): PRIVATE_E2EE needs E2EE devices, MANAGED the managed key ring. usableProfiles lists, per enabled context, the allowed profiles that are actually available; contextsWithoutUsableProfile names enabled contexts in which no conversation can currently be created. A policy update that would leave a context it configures without a usable profile is refused (VALIDATION_ERROR).",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "profiles",
+              "usableProfiles",
+              "contextsWithoutUsableProfile"
+            ],
+            "properties": {
+              "profiles": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "PRIVATE_E2EE",
+                  "MANAGED"
+                ],
+                "properties": {
+                  "PRIVATE_E2EE": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "available",
+                      "reason"
+                    ],
+                    "properties": {
+                      "available": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "oneOf": [
+                          {
+                            "enum": [
+                              "E2EE_DEVICES_DISABLED",
+                              "MANAGED_ENCRYPTION_NOT_CONFIGURED"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "MANAGED": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "available",
+                      "reason"
+                    ],
+                    "properties": {
+                      "available": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "oneOf": [
+                          {
+                            "enum": [
+                              "E2EE_DEVICES_DISABLED",
+                              "MANAGED_ENCRYPTION_NOT_CONFIGURED"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "usableProfiles": {
+                "type": "object",
+                "propertyNames": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.ContextClass"
+                },
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/messaging.messaging.common.v1.SecurityProfile"
+                  }
+                }
+              },
+              "contextsWithoutUsableProfile": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.ContextClass"
+                }
+              }
+            }
           }
         }
       },
@@ -88904,10 +89017,16 @@
         }
       },
       "calling.SignalingAuthenticationFailed": {
-        "description": "Missing, malformed, expired or no longer valid signaling credential (revoked endpoint, inactive principal, revoked minting credential), or a platform API credential. Uniform for every reason. Code AUTHENTICATION_FAILED.",
+        "description": "Missing, malformed or no longer valid signaling credential (revoked endpoint, inactive principal, revoked minting credential), or a platform API credential: code AUTHENTICATION_FAILED, uniform for every reason. A genuine signaling credential whose lifetime ended answers SIGNALING_CREDENTIAL_EXPIRED (1.17.0) with WWW-Authenticate error=\"invalid_token\": mint a new signaling credential instead of retrying the same one.",
         "headers": {
           "x-request-id": {
             "$ref": "#/components/headers/calling.XRequestId"
+          },
+          "www-authenticate": {
+            "description": "Bearer challenge (error=\"invalid_token\", error_description=\"expired\" for SIGNALING_CREDENTIAL_EXPIRED).",
+            "schema": {
+              "type": "string"
+            }
           }
         },
         "content": {

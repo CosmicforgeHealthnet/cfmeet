@@ -91,7 +91,9 @@ impl State {
             .call(
                 "/internal/v1/communications/calls",
                 &json!({"idempotencyKey":input.client_request_id.to_string(),"initiatorPrincipalId":p.principal_id,
-                    "initiatorEndpointId":input.endpoint_id,"targetPrincipalIds":targets,"kind":input.kind}),
+                    "initiatorEndpointId":input.endpoint_id,"targetPrincipalIds":targets,"kind":input.kind,
+                    // Shown to the callee on the incoming call (Calling keeps it only if valid).
+                    "initiatorDisplayName":p.display_name}),
             )
             .await?;
         let call = uuid_field(&created, "callId")?;

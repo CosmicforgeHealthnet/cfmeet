@@ -16,7 +16,7 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 246 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.3.0 | 73 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.16.0 | 129 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 129 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.16.0 | 98 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
 | **Total** | | | **619** |
@@ -605,7 +605,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.3.
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.17.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 
@@ -672,15 +672,15 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; b
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/calling/history` | signaling credential | The endpoint's principal's call history | 200, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#recoverCallHistory` |
+| GET | `/v1/calling/history` | signaling credential | The endpoint's principal's call history | 200, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, VALIDATION_ERROR | `calling/http/v1.openapi.json#recoverCallHistory` |
 
 ### Call Invitations
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/calling/invitations` | signaling credential | Recover the endpoint's offers | 200, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE | `calling/http/v1.openapi.json#recoverInvitations` |
-| POST | `/v1/calling/invitations/{invitation_id}/accept` | signaling credential | Accept one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acceptInvitation` |
-| POST | `/v1/calling/invitations/{invitation_id}/decline` | signaling credential | Decline one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#declineInvitation` |
+| GET | `/v1/calling/invitations` | signaling credential | Recover the endpoint's offers | 200, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED | `calling/http/v1.openapi.json#recoverInvitations` |
+| POST | `/v1/calling/invitations/{invitation_id}/accept` | signaling credential | Accept one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acceptInvitation` |
+| POST | `/v1/calling/invitations/{invitation_id}/decline` | signaling credential | Decline one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#declineInvitation` |
 
 ### Call Management
 
@@ -745,13 +745,13 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.16.0**; b
 | GET | `/v1/calling/media/rtc/v1` | media credential | Open a media signaling connection | 101, 400, 401, 404, 503 | — | `calling/http/v1.openapi.json#connectMedia` |
 | GET | `/v1/calling/media/rtc/v1/validate` | media credential | Check whether a media credential would be admitted | 200, 400, 401, 404, 503 | — | `calling/http/v1.openapi.json#validateMedia` |
 | GET | `/v1/calling/media/rtc/validate` | media credential | Check whether a media credential would be admitted (SDK legacy path) | 200, 400, 401, 404, 503 | — | `calling/http/v1.openapi.json#validateMediaLegacy` |
-| POST | `/v1/calling/sessions/{session_id}/media-credentials` | signaling credential | Issue a media credential for one's own session | 200, 400, 401, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#issueOwnMediaCredential` |
+| POST | `/v1/calling/sessions/{session_id}/media-credentials` | signaling credential | Issue a media credential for one's own session | 200, 400, 401, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#issueOwnMediaCredential` |
 
 ### Calling Signaling
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| GET | `/v1/calling/signaling` | signaling credential | Open the endpoint's realtime signaling channel (WebSocket) | 101, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#openSignalingChannel` |
+| GET | `/v1/calling/signaling` | signaling credential | Open the endpoint's realtime signaling channel (WebSocket) | 101, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, VALIDATION_ERROR | `calling/http/v1.openapi.json#openSignalingChannel` |
 | POST | `/v1/calling/signaling-credentials` | platform credential (server-side only) | Mint a signaling credential for one endpoint | 201, 400, 401, 403, 404, 429, 503 | AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#mintSignalingCredential` |
 
 ### Departments & Membership

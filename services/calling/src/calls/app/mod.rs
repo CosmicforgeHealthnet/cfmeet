@@ -598,21 +598,24 @@ impl AppCallService {
         correlation_id: &str,
     ) -> CallResult<()> {
         let sequence = self.sequence(db, call.id).await?;
-        if kind == SignalType::Incoming {
-            self.push_offer(db, pending, call, invitation).await?;
-        }
-        pending.push(
-            vec![invitation.endpoint_id],
-            signals::build(
-                kind,
-                call,
-                sequence,
-                correlation_id,
-                Some(invitation),
-                Map::new(),
-                self.calls.now(),
-            ),
+        let mut signal = signals::build(
+            kind,
+            call,
+            sequence,
+            correlation_id,
+            Some(invitation),
+            Map::new(),
+            self.calls.now(),
         );
+        if kind == SignalType::Incoming {
+            let caller = caller_display_name(db, call.id).await?;
+            if let Some(name) = &caller {
+                signal["invitation"]["callerDisplayName"] = Value::String(name.clone());
+            }
+            self.push_offer(db, pending, call, invitation, caller.as_deref())
+                .await?;
+        }
+        pending.push(vec![invitation.endpoint_id], signal);
         Ok(())
     }
 }
@@ -625,6 +628,7 @@ impl AppCallService {
         pending: &mut PendingSignals,
         call: &calls::Model,
         invitation: &call_invitations::Model,
+        caller: Option<&str>,
     ) -> CallResult<()> {
         let Some(target) = call_endpoints::Entity::find_by_id(invitation.endpoint_id)
             .one(db)
@@ -633,18 +637,24 @@ impl AppCallService {
         else {
             return Ok(());
         };
-        let caller = call_participants::Entity::find()
-            .filter(call_participants::Column::CallId.eq(call.id))
-            .filter(call_participants::Column::Role.eq(ParticipantRole::Initiator))
-            .one(db)
-            .await?
-            .and_then(|p| p.display_name);
-        pending.pushes.push((
-            target,
-            signals::push_payload(call, invitation, caller.as_deref()),
-        ));
+        pending
+            .pushes
+            .push((target, signals::push_payload(call, invitation, caller)));
         Ok(())
     }
+}
+
+/// The display name the Call's initiator was created with (shown on incoming calls).
+pub(crate) async fn caller_display_name<C: ConnectionTrait>(
+    db: &C,
+    call_id: Uuid,
+) -> CallResult<Option<String>> {
+    Ok(call_participants::Entity::find()
+        .filter(call_participants::Column::CallId.eq(call_id))
+        .filter(call_participants::Column::Role.eq(ParticipantRole::Initiator))
+        .one(db)
+        .await?
+        .and_then(|p| p.display_name))
 }
 
 /// Signal kind announcing a Call that reached `state` (terminal / ending / connected …).

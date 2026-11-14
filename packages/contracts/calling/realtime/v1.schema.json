@@ -83,6 +83,12 @@
         "expiresAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "callerDisplayName": {
+          "description": "The Call initiator's display name, on call.incoming when the Call was created with one (absent otherwise). 1.3.0.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
         }
       }
     },

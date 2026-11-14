@@ -340,13 +340,19 @@ pub const RELAY_MAX_BODY_BYTES: usize = 1024 * 1024;
 /// encrypted message.
 #[utoipa::path(
     get, path = "/api/v2/messaging/me", tag = "Messaging (v2)", operation_id = "v2_messaging_me",
-    responses((status = 200, description = "principalId, tenantId, applicationId, environmentId", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
+    responses((status = 200, description = "principalId, tenantId, applicationId, environmentId, displayName (the caller's own account display name)", body = Object), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 503, description = "CHAT_UNAVAILABLE", body = ErrorEnvelope)),
     security(("bearer_auth" = []))
 )]
 pub async fn me(State(state): State<AppState>, actor: ActorContext) -> ApiResult<Json<Value>> {
     let um = integration(&state)?;
     let user = verified_user(&state, &actor)?;
-    Ok(Json(um.me(user).await?))
+    let mut me = um.me(user).await?;
+    // The caller's own name, so a calling client can name itself on the calls it starts
+    // (initiatorDisplayName), as the callee's incoming-call screen shows it.
+    if let Some(registered) = actor.registered() {
+        me["displayName"] = Value::String(registered.display_name.clone());
+    }
+    Ok(Json(me))
 }
 
 /// The caller's colleague scope (Blueprint Section 4: read from Organizations once it is

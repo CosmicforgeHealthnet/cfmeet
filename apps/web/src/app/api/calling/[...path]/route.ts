@@ -1,4 +1,4 @@
-import { callingDevMode, callingFailure, callingFetch, callingIdentity, CallingHttpError, ownCall, ownEndpoints, type CallingIdentity } from "@/lib/calling/server";
+import { callerDisplayName, callingDevMode, callingFailure, callingFetch, callingIdentity, CallingHttpError, ownCall, ownEndpoints, type CallingIdentity } from "@/lib/calling/server";
 import { mayControl, ownParticipant, activeParticipant, type ControlOperation } from "@/lib/calling/call-permissions";
 import type { Call } from "@/types/calling";
 
@@ -295,6 +295,11 @@ async function authorize({ identity, route, path, method, url, body }: Authoriza
     if (method === "GET") url.searchParams.set("principalId", principalId);
     if (body) {
       body.initiatorPrincipalId = principalId;
+      // The callee's incoming-call screen names the caller from the verified account only;
+      // a client-supplied name is never trusted.
+      const name = callerDisplayName(identity.displayName);
+      if (name) body.initiatorDisplayName = name;
+      else delete body.initiatorDisplayName;
       // Contact/relay administration needs a separate end-user authorization
       // boundary. The native UI exposes app calls (1:1 and group) and extensions only.
       if (body.callbackRequested || body.targetContactReference || body.initiatorContactReference || body.presentedNumberResourceId || body.privacyRelaySessionId) {
