@@ -752,3 +752,74 @@ async fn session_operations_require_a_signed_in_user() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+/// Notification Service N0-10 (S-9): the password-changed notice is recorded in the same
+/// transaction as the new password. If the notice cannot be recorded (injected database
+/// failure), the change rolls back; once recording works, change and notice commit together.
+#[tokio::test]
+async fn a_password_change_and_its_security_notice_commit_together() {
+    let app = app_with_redis!();
+    let email = format!(
+        "notice-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let id = password_user(&app, &email, "active").await;
+    let notices = || {
+        let app = &app;
+        async move {
+            app.scalar(&format!(
+                "SELECT count(*) FROM email_deliveries WHERE category = 'SECURITY_PASSWORD_CHANGED' \
+                  AND idempotency_key LIKE 'password-changed:{id}:%'"
+            ))
+            .await
+        }
+    };
+    let change = |access: String| {
+        let app = &app;
+        async move {
+            app.post(
+                "/api/v1/auth/change-password",
+                Auth::Bearer(&access),
+                json!({
+                    "current_password": PASSWORD,
+                    "new_password": "N0tice!Passw0rd-long",
+                    "confirm_password": "N0tice!Passw0rd-long",
+                }),
+            )
+            .await
+        }
+    };
+    // Failure injection: the email ledger refuses this category.
+    app.db
+        .conn
+        .execute_unprepared(
+            "CREATE FUNCTION n0_10_refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+               IF NEW.category = 'SECURITY_PASSWORD_CHANGED' THEN RAISE EXCEPTION 'injected'; END IF; \
+               RETURN NEW; END $$; \
+             CREATE TRIGGER n0_10_refuse BEFORE INSERT ON email_deliveries \
+               FOR EACH ROW EXECUTE FUNCTION n0_10_refuse();",
+        )
+        .await
+        .unwrap();
+    let (access, _) = login(&app, &email).await;
+    let (s, _) = change(access).await;
+    assert!(s.is_server_error(), "the change fails with its notice: {s}");
+    assert_eq!(notices().await, 0);
+    // The old password still works: nothing was changed without its notice.
+    let (access, _) = login(&app, &email).await;
+
+    app.db
+        .conn
+        .execute_unprepared(
+            "DROP TRIGGER n0_10_refuse ON email_deliveries; DROP FUNCTION n0_10_refuse();",
+        )
+        .await
+        .unwrap();
+    let (s, v) = change(access).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(
+        notices().await,
+        1,
+        "the notice is committed with the change"
+    );
+}

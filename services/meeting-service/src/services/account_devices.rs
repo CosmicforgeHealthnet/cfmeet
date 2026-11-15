@@ -766,16 +766,6 @@ pub async fn end_session_media(state: &AppState, account_session_id: Uuid) -> Ap
     Ok(rows.len() as u64)
 }
 
-async fn notify_owner(state: &AppState, user: &users::Model, subject: &str, message: &str) {
-    if let Err(e) = state
-        .email_service
-        .send_notification_email(&user.email, &user.username, subject, message)
-        .await
-    {
-        tracing::warn!(user_id = %user.id, "device security notice not queued: {e}");
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Policy and listing
 // ---------------------------------------------------------------------------
@@ -1548,7 +1538,7 @@ pub async fn send_email_code(
     crate::services::email_delivery::enqueue(
         &txn,
         crate::services::email_delivery::NewEmail {
-            category: "SECURITY_DEVICE_STEP_UP",
+            category: crate::services::email_delivery::category::SECURITY_DEVICE_STEP_UP,
             idempotency_key: Some(format!(
                 "device-step-up:{}:{}",
                 l.id,
@@ -1719,28 +1709,37 @@ pub async fn complete_link(
             .detail(json!({"linkId": l.id, "deviceId": d.id, "method": method})),
     )
     .await?;
-    txn.commit().await?;
-    session_effects(state, caller.user.id, &ended).await;
-    if replaced.is_some() || d.device_class == "MOBILE" {
-        notify_owner(
-            state,
-            &caller.user,
+    // N0-10 (S-9): the owner's security notice is recorded in the same transaction as the
+    // link (deterministic key device-linked:<link id>), so it can never be lost.
+    let (subject, message) = if replaced.is_some() || d.device_class == "MOBILE" {
+        (
             "A new phone is now your primary CF Meet mobile",
             "A new phone was confirmed as the primary mobile of your CF Meet account. Any previous \
              phone was signed out; your trusted browsers stay signed in. If this was not you, \
              change your password and revoke the phone under Security & devices.",
         )
-        .await;
     } else {
-        notify_owner(
-            state,
-            &caller.user,
+        (
             "A new browser was linked to your CF Meet account",
             "A new browser was confirmed as a trusted device of your CF Meet account. If this was \
              not you, revoke it under Security & devices and change your password.",
         )
-        .await;
-    }
+    };
+    crate::services::email::tolerate_unsendable(
+        crate::services::email::device_notice_on(
+            &txn,
+            &caller.user.email,
+            &caller.user.username,
+            l.id,
+            subject,
+            message,
+        )
+        .await,
+        caller.user.id,
+        "device-linked",
+    )?;
+    txn.commit().await?;
+    session_effects(state, caller.user.id, &ended).await;
     let d = find_device(&state.db, caller.user.id, d.id, false)
         .await?
         .ok_or_else(link_invalid)?;

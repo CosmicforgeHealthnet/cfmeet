@@ -60,6 +60,8 @@ pub mod category {
     pub const OPERATIONS_ACCEPTANCE: &str = "OPERATIONS_ACCEPTANCE";
     pub const NOTIFICATION: &str = "NOTIFICATION";
     pub const LEGACY_QUEUE: &str = "LEGACY_QUEUE";
+    /// Device step-up codes (account_devices.rs).
+    pub const SECURITY_DEVICE_STEP_UP: &str = "SECURITY_DEVICE_STEP_UP";
 }
 
 /// Categories that are never suppressed after bounces or complaints: account recovery,
@@ -70,6 +72,7 @@ pub const UNSUPPRESSIBLE_CATEGORIES: &[&str] = &[
     category::AUTH_VERIFICATION,
     category::AUTH_PASSWORD_RESET,
     category::SECURITY_PASSWORD_CHANGED,
+    category::SECURITY_DEVICE_STEP_UP,
     category::NOTIFICATION,
     category::OPERATIONS_ACCEPTANCE,
 ];

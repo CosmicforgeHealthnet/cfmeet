@@ -422,6 +422,15 @@ async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touch
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["device"]["primary"], true);
     assert_eq!(v["replacedDeviceId"], Value::Null);
+    // N0-10 (S-9): the owner's notice was committed with the link, under a deterministic key.
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM email_deliveries WHERE category = 'NOTIFICATION' AND idempotency_key = 'device-linked:{}'",
+            link["linkId"].as_str().unwrap()
+        ))
+        .await,
+        1
+    );
     assert_eq!(me(&app, &mobile_a).await, StatusCode::OK);
     assert_eq!(policy(&app, &web_a).await["accountState"], "MOBILE_PRIMARY");
 

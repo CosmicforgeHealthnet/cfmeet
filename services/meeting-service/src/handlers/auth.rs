@@ -894,15 +894,23 @@ pub async fn reset_password(
     user.password_hash = Set(Some(password_hash));
     user.updated_at = Set(now_utc());
 
-    user.update(&state.db).await?;
-    // Security notice (unified email delivery); never blocks the reset.
-    if let Err(e) = state
-        .email_service
-        .send_password_changed_email(&notice_email, &notice_name, user_id, "reset")
-        .await
-    {
-        tracing::warn!(user_id = %user_id, "password reset notice not queued: {e}");
-    }
+    // N0-10 (S-9): the security notice is recorded in the same transaction as the new
+    // password, so a committed reset always has its notice queued.
+    let txn = state.db.begin().await?;
+    user.update(&txn).await?;
+    crate::services::email::tolerate_unsendable(
+        crate::services::email::password_changed_notice_on(
+            &txn,
+            &notice_email,
+            &notice_name,
+            user_id,
+            "reset",
+        )
+        .await,
+        user_id,
+        "password-reset",
+    )?;
+    txn.commit().await?;
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("PASSWORD_RESET", Outcome::Success)
@@ -1039,14 +1047,22 @@ pub async fn change_password(
     let mut user_active: users::ActiveModel = user.into();
     user_active.password_hash = Set(Some(new_password_hash));
     user_active.updated_at = Set(now_utc());
-    user_active.update(&state.db).await?;
-    if let Err(e) = state
-        .email_service
-        .send_password_changed_email(&notice_email, &notice_name, user_id, "changed")
-        .await
-    {
-        tracing::warn!(user_id = %user_id, "password change notice not queued: {e}");
-    }
+    // N0-10 (S-9): notice and change commit together.
+    let txn = state.db.begin().await?;
+    user_active.update(&txn).await?;
+    crate::services::email::tolerate_unsendable(
+        crate::services::email::password_changed_notice_on(
+            &txn,
+            &notice_email,
+            &notice_name,
+            user_id,
+            "changed",
+        )
+        .await,
+        user_id,
+        "password-changed",
+    )?;
+    txn.commit().await?;
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("PASSWORD_CHANGED", Outcome::Success).by_user(user_id),
