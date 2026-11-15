@@ -13,7 +13,7 @@ export const dashboardNavigation: DashboardNavItem[] = [
   { label: "Home", icon: Home, href: "/dashboard" },
   { label: "Meetings", icon: Video, href: "/dashboard/meetings", feature: "meetings" },
   { label: "Calendar", icon: CalendarDays, href: "/dashboard/calendar", feature: "meetings" },
-  { label: "Messages", icon: MessageSquare, href: "/dashboard/messages", feature: "messaging" },
+  { label: "Chats", icon: MessageSquare, href: "/dashboard/messages", feature: "messaging" },
   { label: "Calls", icon: Phone, href: "/calling", feature: "calling" },
   // Personal contacts (Communications Hub); the screen gates itself on Hub capabilities.
   { label: "Contacts", icon: Users, href: "/dashboard/contacts" },

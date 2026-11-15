@@ -60,6 +60,10 @@ export interface AccountDeviceApi {
   rejectLink(linkId: string): Promise<LinkView>;
   /** Emails a step-up code for this browser's own link (no trusted device at hand). */
   emailCode(linkId: string): Promise<LinkView>;
+  /** Signs another device out for good (needs this device's REVOKE proof unless it is this device). */
+  revokeDevice(deviceId: string, body: unknown): Promise<unknown>;
+  /** This browser withdraws its own open link request. */
+  cancelLink(linkId: string): Promise<LinkView>;
 }
 
 export interface AccountDeviceDeps {
@@ -235,6 +239,15 @@ export function createAccountDevice(deps: AccountDeviceDeps) {
 
     /** Web-only recovery: email a step-up code for this browser's pending link. */
     sendEmailCode: (linkId: string) => deps.api.emailCode(linkId),
+
+    /** Remove a device from the account (another device: signed by this trusted device). */
+    async revokeDevice(deviceId: string): Promise<void> {
+      const device = await declared();
+      const own = device.deviceId === deviceId;
+      await deps.api.revokeDevice(deviceId, own ? {} : { proof: await proof(device, "REVOKE", deviceId) });
+    },
+
+    cancelLink: (linkId: string) => deps.api.cancelLink(linkId),
   };
 }
 

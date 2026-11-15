@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUp, Check, CheckCircle2, EyeOff, MessageCircleQuestion, Pin, PinOff, Trash2, VenetianMask } from "lucide-react";
+import { ArrowUp, Check, CheckCircle2, Eye, EyeOff, MessageCircleQuestion, Pin, PinOff, Trash2, VenetianMask } from "lucide-react";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { cn } from "@/lib/utils";
 import {
@@ -11,6 +11,7 @@ import {
   useUnvoteQuestion,
   useAnswerQuestion,
   useDismissQuestion,
+  useRestoreQuestion,
   useArchiveQuestion,
   usePinQuestion,
   useUnpinQuestion,
@@ -108,10 +109,11 @@ function QuestionCard({ question, conferenceId, isHost }: { question: QuestionVi
   const unvote = useUnvoteQuestion(conferenceId);
   const answer = useAnswerQuestion(conferenceId);
   const dismiss = useDismissQuestion(conferenceId);
+  const restore = useRestoreQuestion(conferenceId);
   const archive = useArchiveQuestion(conferenceId);
   const pin = usePinQuestion(conferenceId);
   const unpin = useUnpinQuestion(conferenceId);
-  const failure = [vote, unvote, answer, dismiss, archive, pin, unpin].find((m) => m.isError)?.error;
+  const failure = [vote, unvote, answer, dismiss, restore, archive, pin, unpin].find((m) => m.isError)?.error;
 
   const name = question.anonymous ? "Anonymous" : question.displayName || "Someone";
   const canVote = !question.isMine && (question.status === "OPEN" || question.status === "ANSWERED");
@@ -177,9 +179,9 @@ function QuestionCard({ question, conferenceId, isHost }: { question: QuestionVi
             </button>
           )}
           {active && (
-            <button type="button" onClick={() => dismiss.mutate(question.id)} disabled={dismiss.isPending} className={iconButton} aria-label="Hide from everyone (can't be undone)" title="Hide from everyone (can't be undone)"><EyeOff className="size-4" /></button>
+            <button type="button" onClick={() => dismiss.mutate(question.id)} disabled={dismiss.isPending} className={iconButton} aria-label="Hide from everyone" title="Hide from everyone"><EyeOff className="size-4" /></button>
           )}
-          {question.status === "DISMISSED" && <span className="mr-1 inline-flex items-center gap-1 text-xs text-white/50"><EyeOff className="size-3.5" />Hidden from the room for good</span>}
+          {question.status === "DISMISSED" && <button type="button" onClick={() => restore.mutate(question.id)} disabled={restore.isPending} className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-sm font-medium text-primary hover:bg-primary/10"><Eye className="size-4" />Show again</button>}
           <button type="button" onClick={() => archive.mutate(question.id)} disabled={archive.isPending} className={iconButton} aria-label="Remove question" title="Remove question"><Trash2 className="size-4" /></button>
         </div>
       )}

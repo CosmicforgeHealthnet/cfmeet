@@ -59,5 +59,7 @@ export const accountDevice = createAccountDevice({
     approveLink: async (id, body) => (await (await v2()).post(`/me/device-links/${id}/approve`, body)).data,
     rejectLink: async (id) => (await (await v2()).post(`/me/device-links/${id}/reject`, {})).data,
     emailCode: async (id) => (await (await v2()).post(`/me/device-links/${id}/email-code`, {})).data,
+    revokeDevice: async (id, body) => (await (await v2()).post(`/me/devices/${id}/revoke`, body)).data,
+    cancelLink: async (id) => (await (await v2()).post(`/me/device-links/${id}/cancel`, {})).data,
   },
 });

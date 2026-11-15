@@ -12,9 +12,9 @@
  * and one floating control pill. Minimise shrinks it to a strip so the app stays usable; the
  * media connection stays mounted either way so audio never drops.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, Maximize2, Pause, PhoneOff, Play, RefreshCw, Users } from "lucide-react";
+import { Circle, Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, PhoneOff, Play, RefreshCw, Users } from "lucide-react";
 import { useCalling } from "@/context/CallingContext";
 import { useCall, useCallActions, useCallingMutation } from "@/hooks/calling/useCalls";
 import { usePrincipalNames } from "@/hooks/calling/usePrincipalNames";
@@ -25,7 +25,11 @@ import { ownSession, visibleControls } from "@/lib/calling/call-permissions";
 import { mediaStatusLabel } from "@/lib/calling/media-reconnect";
 import { cn } from "@/lib/utils";
 import { rememberedCallName } from "@/lib/calling/call-names";
-import CallMedia, { CallCameraButton, CallMicButton, CallVideoStage, MutedTag, useAnyVideo } from "./CallMedia";
+import { Popover } from "radix-ui";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import CallRecordingControls from "./CallRecordingControls";
+import AbuseReportDialog from "./AbuseReportDialog";
+import CallMedia, { CallButton, CallCameraButton, CallFlipButton, CallMicButton, CallMicToggle, CallSpeakerButton, CallVideoStage, MutedTag, useAnyVideo } from "./CallMedia";
 
 const COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#4f46e5", "#ea580c"];
 const colorFor = (key: string) => COLORS[([...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % COLORS.length];
@@ -35,7 +39,27 @@ const clock = (ms: number) => {
   const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
   return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
 };
+const moreItem = "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm hover:bg-white/10";
 const RINGING = ["REQUESTED", "AUTHORIZED", "RESOLVING", "ROUTING", "DIALING", "RINGING"];
+
+/**
+ * Your own camera, full screen, from the moment a video call starts (WhatsApp / FaceTime),
+ * until the call's real video takes over. Local only: nothing is sent from here.
+ */
+function CameraPreview() {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let stopped = false;
+    void navigator.mediaDevices?.getUserMedia({ video: { facingMode: "user" } }).then((s) => {
+      if (stopped) { s.getTracks().forEach((t) => t.stop()); return; }
+      stream = s;
+      if (ref.current) ref.current.srcObject = s;
+    }).catch(() => undefined);
+    return () => { stopped = true; stream?.getTracks().forEach((t) => t.stop()); };
+  }, []);
+  return <video ref={ref} autoPlay playsInline muted aria-hidden className="absolute inset-0 h-full w-full -scale-x-100 object-cover opacity-90" />;
+}
 
 type StageProps = {
   inRoom: boolean;
@@ -52,6 +76,7 @@ type StageProps = {
   onRetry: () => void;
   onMinimise: () => void;
   controls: React.ReactNode;
+  hangup: React.ReactNode;
   footerLinks: React.ReactNode;
 };
 
@@ -63,42 +88,50 @@ function StageInRoom(p: StageProps) {
   const anyVideo = useAnyVideo();
   return <StageView {...p} anyVideo={p.video && anyVideo} />;
 }
-export function StageView({ inRoom, video, group, seed, counterpart, status, ringing, connected, held, failed, error, onRetry, onMinimise, controls, footerLinks, anyVideo }: StageProps & { anyVideo: boolean }) {
+export function StageView({ inRoom, video, group, seed, counterpart, status, ringing, connected, held, failed, error, onRetry, onMinimise, controls, hangup, footerLinks, anyVideo }: StageProps & { anyVideo: boolean }) {
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {inRoom && video ? <CallVideoStage /> : null}
-      {/* A soft glow in the caller's colour behind the avatar (only without video). */}
-      {!anyVideo && <div aria-hidden className="pointer-events-none absolute left-1/2 top-[38%] size-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-25 blur-[120px]" style={{ backgroundColor: colorFor(seed) }} />}
+      {video && !anyVideo ? <CameraPreview /> : null}
+      {!anyVideo && !video && <div aria-hidden className="pointer-events-none absolute left-1/2 top-[42%] size-[30rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-20 blur-[110px]" style={{ backgroundColor: colorFor(seed) }} />}
 
-      <header className={cn("relative z-10 flex items-center gap-2 p-4 sm:p-6", anyVideo && "bg-gradient-to-b from-black/60 to-transparent")}>
-        <button type="button" onClick={onMinimise} aria-label="Minimise call" title="Minimise" className="flex size-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur hover:bg-white/20"><ChevronDown className="size-5" /></button>
-        <span className="ml-1 text-sm font-medium text-white/70">{group ? "Group call" : video ? "Video call" : "Voice call"}</span>
-        {anyVideo && <span className="ml-auto rounded-full bg-black/40 px-3 py-1 text-sm font-semibold tabular-nums text-white backdrop-blur">{counterpart} · {status}</span>}
+      <header className={cn("relative z-10 flex h-16 items-center px-3 sm:h-20 sm:px-5", anyVideo && "bg-gradient-to-b from-black/70 to-transparent")}>
+        <button type="button" onClick={onMinimise} aria-label="Minimise call" title="Minimise" className="flex size-11 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"><Minimize2 className="size-5" /></button>
+        {anyVideo ? <p className="ml-3 min-w-0 truncate text-sm font-semibold text-white">{counterpart} <span className="font-normal tabular-nums text-white/70">· {status}</span></p> : null}
       </header>
 
       {!anyVideo ? (
-        <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 pb-16 text-center">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-hidden px-6 pb-4 text-center sm:gap-7 [@media(max-height:700px)]:gap-3">
+          <div className="max-w-md">
+            <h2 className="truncate text-[1.75rem] font-semibold leading-tight tracking-tight text-white sm:text-4xl">{counterpart}</h2>
+            <p role="status" aria-live="polite" className={cn("mt-1.5 text-base tabular-nums sm:text-lg", connected && !held ? "text-white/85" : "text-white/60")}>{status}</p>
+          </div>
           <div className="relative flex items-center justify-center">
             {ringing && [0, 1, 2].map((i) => (
-              <span key={i} aria-hidden className="absolute size-36 animate-ping rounded-full sm:size-40" style={{ backgroundColor: colorFor(seed), opacity: 0.2, animationDuration: "2.4s", animationDelay: `${i * 0.8}s` }} />
+              <span key={i} aria-hidden className="absolute size-28 animate-ping rounded-full sm:size-36 [@media(max-height:700px)]:size-24" style={{ backgroundColor: colorFor(seed), opacity: 0.16, animationDuration: "2.4s", animationDelay: `${i * 0.8}s` }} />
             ))}
-            <span className="relative flex size-36 items-center justify-center rounded-full text-5xl font-semibold text-white shadow-2xl ring-4 ring-white/10 sm:size-40" style={{ backgroundColor: colorFor(seed) }}>
-              {group ? <Users className="size-16" /> : initials(counterpart)}
+            <span className="relative flex size-28 items-center justify-center rounded-full text-4xl font-semibold text-white shadow-2xl sm:size-36 sm:text-5xl [@media(max-height:700px)]:size-24 [@media(max-height:700px)]:text-3xl" style={{ backgroundColor: colorFor(seed) }}>
+              {group ? <Users className="size-12" /> : initials(counterpart)}
             </span>
           </div>
-          <h2 className="mt-8 max-w-xl truncate text-3xl font-semibold tracking-tight text-white sm:text-4xl">{counterpart}</h2>
-          <p role="status" aria-live="polite" className={cn("mt-3 text-lg tabular-nums", connected && !held ? "text-white/90" : "text-white/60")}>{status}</p>
-          <div className="mt-4 h-7">{inRoom && connected ? <MutedTag /> : null}</div>
+          <div className="h-7">{inRoom && connected ? <MutedTag /> : null}</div>
           {failed ? (
-            <button type="button" onClick={onRetry} className="mt-2 flex h-10 items-center gap-2 rounded-full bg-white/10 px-5 text-sm font-semibold text-white hover:bg-white/20"><RefreshCw className="size-4" />Reconnect</button>
+            <button type="button" onClick={onRetry} className="flex h-10 items-center gap-2 rounded-xl bg-white/10 px-5 text-sm font-semibold text-white hover:bg-white/20"><RefreshCw className="size-4" />Reconnect</button>
           ) : null}
         </div>
       ) : <div className="flex-1" />}
 
-      <footer className="relative z-10 flex flex-col items-center gap-3 p-6 pb-8">
-        {error ? <p role="alert" className="rounded-full bg-red-500/20 px-4 py-2 text-sm text-red-100">{error}</p> : null}
-        <div className="flex items-center gap-3 rounded-full bg-[#2D2E31]/90 p-2.5 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl">{controls}</div>
-        <div className="flex items-center gap-4 text-xs">{footerLinks}</div>
+      {/* Bottom panel of labelled round buttons, end call on the right. */}
+      <footer className="relative z-10 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-8">
+        {error ? <p role="alert" className="mx-auto mb-3 max-w-md rounded-xl bg-red-500/20 px-4 py-2 text-center text-sm text-red-100">{error}</p> : null}
+        <div className="mx-auto w-full max-w-md rounded-[32px] bg-[#1B1C1E]/95 px-4 py-6 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl sm:w-fit sm:max-w-none sm:px-6 sm:py-4">
+          <div className="grid grid-cols-3 justify-items-center gap-y-5 sm:flex sm:items-start sm:gap-2">
+            {controls}
+            <div className="hidden sm:block">{hangup}</div>
+          </div>
+          <div className="mt-5 flex justify-center sm:hidden">{hangup}</div>
+        </div>
+        {footerLinks ? <div className="mt-3 flex items-center justify-center gap-5 text-xs">{footerLinks}</div> : null}
       </footer>
     </div>
   );
@@ -114,6 +147,8 @@ export default function ActiveCallDock() {
   const names = usePrincipalNames(others.map((p) => p.principalId));
   const [full, setFull] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const connectedNow = call.data?.state === "CONNECTED";
   useEffect(() => {
@@ -123,7 +158,18 @@ export default function ActiveCallDock() {
   }, [connectedNow]);
   // Every new call opens full screen.
   useEffect(() => { if (media?.callId) setFull(true); }, [media?.callId]);
-  if (!calling || !media) return null;
+  if (!calling) return null;
+  if (!media) {
+    if (!calling.placing) return null;
+    const p = calling.placing;
+    return (
+      <section aria-label="Active call" className="dark fixed inset-0 z-[60] bg-[#202124] text-white">
+        <StageView inRoom={false} video={p.kind === "VIDEO"} group={false} seed={p.label ?? "call"} counterpart={p.label ?? "Calling"} status="Calling…" ringing
+          connected={false} held={false} failed={false} error={null} onRetry={() => undefined} onMinimise={() => undefined} anyVideo={false} footerLinks={null} controls={null}
+          hangup={<CallButton icon={<PhoneOff />} label="Cancel" tone="danger" onClick={calling.cancelPlacing} />} />
+      </section>
+    );
+  }
 
   const { mediaState, mediaEvents } = calling;
   const party = call.data?.participants.filter((p) => p.principalId !== calling.principalId) ?? [];
@@ -145,53 +191,66 @@ export default function ActiveCallDock() {
   };
   const command = (operation: "cancel" | "end" | "hold" | "resume") => run(() =>
     mutation.mutateAsync({ operation, callId: media.callId, body: { expectedVersion: call.data!.version }, key: newIdempotencyKey() }));
-  const leave = () => run(async () => {
-    if (session && call.data) {
-      await mutation.mutateAsync({ operation: "removeSession", callId: media.callId, sessionId: session.sessionId, body: { expectedVersion: call.data.version }, key: newIdempotencyKey() });
-    }
-    calling.leaveMedia();
-  });
 
   const state = call.data?.state;
   const held = state === "HELD";
   const ringing = !!state && (RINGING.includes(state) || state === "ANSWERED");
-  const status = held ? "On hold"
-    : state === "RINGING" ? "Ringing…"
+  const status = !state ? "Calling…"
+    : held ? "On hold"
     : state === "ANSWERED" ? "Connecting…"
     : ringing ? "Calling…"
     : elapsed !== null && mediaState.status === "connected" ? clock(elapsed)
+    : mediaState.status === "idle" || mediaState.status === "connecting" && !mediaState.attempt ? "Connecting…"
     : mediaStatusLabel(mediaState);
   const dot = mediaState.status === "connected" && !held && !ringing ? "bg-emerald-400" : mediaState.status === "failed" ? "bg-red-500" : "animate-pulse bg-amber-400";
   const video = media.kind === "VIDEO";
+  const hangUpNow = (operation: "cancel" | "end" | "leave") => {
+    const data = call.data;
+    calling.leaveMedia();
+    if (!data) return;
+    const callId = media.callId;
+    void (operation === "leave"
+      ? session ? mutation.mutateAsync({ operation: "removeSession", callId, sessionId: session.sessionId, body: { expectedVersion: data.version }, key: newIdempotencyKey() }) : Promise.resolve()
+      : mutation.mutateAsync({ operation, callId, body: { expectedVersion: data.version }, key: newIdempotencyKey() })
+    ).catch(() => undefined);
+  };
   const hangUp = controls.cancel
-    ? { label: "Cancel", run: () => void command("cancel") }
-    : controls.end && !group ? { label: "End call", run: () => void command("end") } : { label: "Leave", run: () => void leave() };
-  const pill = "flex size-14 items-center justify-center rounded-full bg-white/12 text-white transition-colors hover:bg-white/20 disabled:opacity-40 [&_svg]:size-6";
+    ? { label: "Cancel", run: () => hangUpNow("cancel") }
+    : controls.end && !group ? { label: "End call", run: () => hangUpNow("end") } : { label: "Leave", run: () => hangUpNow("leave") };
   const inRoom = !!media.credential;
 
+  const me = call.data?.participants.find((p) => p.principalId === calling.principalId && !p.endedAt);
   const stageControls = (
     <>
-      {inRoom && <CallMicButton allowed={!!media.credential?.capabilities.canPublishAudio} />}
+      {inRoom && <CallSpeakerButton />}
       {inRoom && video && <CallCameraButton allowed={!!media.credential?.capabilities.canPublishVideo} />}
-      {controls.hold && <button type="button" aria-label="Hold" title="Put on hold" disabled={mutation.isPending} onClick={() => void command("hold")} className={pill}><Pause /></button>}
-      {controls.resume && <button type="button" aria-label="Resume" title="Resume" disabled={mutation.isPending} onClick={() => void command("resume")} className={cn(pill, "bg-[#FDD663] text-[#3A2A00] hover:bg-[#FDE293]")}><Play /></button>}
-      <button type="button" disabled={mutation.isPending} onClick={hangUp.run} aria-label={hangUp.label} title={hangUp.label}
-        className="flex h-14 items-center gap-2 rounded-full bg-[#EA4335] px-6 text-sm font-semibold text-white transition-colors hover:bg-[#D93025] disabled:opacity-50 [&_svg]:size-6">
-        <PhoneOff />{hangUp.label}
-      </button>
+      {inRoom && <CallMicButton allowed={!!media.credential?.capabilities.canPublishAudio} />}
+      {inRoom && video && <CallFlipButton />}
+      <Popover.Root>
+        <Popover.Trigger asChild><span><CallButton icon={<MoreHorizontal />} label="More" /></span></Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content side="top" sideOffset={10} collisionPadding={12} className="dark z-[80] w-60 rounded-2xl bg-[#2D2E31] p-1.5 text-white shadow-2xl ring-1 ring-white/10">
+            {me && connectedNow && call.data?.canViewRecordings ? <Popover.Close asChild><button type="button" className={moreItem} onClick={() => setRecording(true)}><Circle className="size-4 text-red-400" />Record call</button></Popover.Close> : null}
+            <Popover.Close asChild><Link href={`/calling?call=${encodeURIComponent(media.callId)}`} onClick={() => setFull(false)} className={moreItem}><Info className="size-4 text-white/60" />Call details</Link></Popover.Close>
+            <Popover.Close asChild><button type="button" className={moreItem} onClick={() => setReporting(true)}><Flag className="size-4 text-white/60" />Report a problem</button></Popover.Close>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+      {controls.hold && <CallButton icon={<Pause />} label="Hold" disabled={mutation.isPending} onClick={() => void command("hold")} />}
+      {controls.resume && <CallButton icon={<Play />} label="Resume" tone="warn" disabled={mutation.isPending} onClick={() => void command("resume")} />}
     </>
   );
+  const hangupButton = <CallButton icon={<PhoneOff />} label={hangUp.label} tone="danger" onClick={hangUp.run} />;
   const footerLinks = (
     <>
       {group && controls.end && !controls.cancel ? <button type="button" disabled={mutation.isPending} onClick={() => void command("end")} className="font-semibold text-red-300 hover:underline">End for everyone</button> : null}
-      <Link href={`/calling?call=${encodeURIComponent(media.callId)}`} onClick={() => setFull(false)} className="font-medium text-white/50 hover:text-white/80">Call details</Link>
     </>
   );
 
   const stage = (
     <Stage inRoom={inRoom} video={video} group={group} seed={seed} counterpart={counterpart} status={status} ringing={ringing}
       connected={!!connectedNow} held={held} failed={mediaState.status === "failed"} error={error} onRetry={calling.retryMedia}
-      onMinimise={() => setFull(false)} controls={stageControls} footerLinks={footerLinks} />
+      onMinimise={() => setFull(false)} controls={stageControls} hangup={hangupButton} footerLinks={footerLinks} />
   );
 
   /* Minimised: a slim strip (tap to bring the call back). */
@@ -207,7 +266,7 @@ export default function ActiveCallDock() {
           <span role="status" aria-live="polite" className="block truncate text-xs tabular-nums text-white/60">{status}</span>
         </span>
       </button>
-      {inRoom && <CallMicButton small allowed={!!media.credential?.capabilities.canPublishAudio} />}
+      {inRoom && media.credential?.capabilities.canPublishAudio && <CallMicToggle />}
       <button type="button" onClick={hangUp.run} aria-label={hangUp.label} title={hangUp.label} disabled={mutation.isPending} className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#EA4335] text-white hover:bg-[#D93025]"><PhoneOff className="size-5" /></button>
       <button type="button" onClick={() => setFull(true)} aria-label="Full screen" title="Full screen" className="flex size-10 shrink-0 items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"><Maximize2 className="size-4" /></button>
     </div>
@@ -227,6 +286,13 @@ export default function ActiveCallDock() {
           {full ? stage : strip}
         </CallMedia>
       ) : full ? stage : strip}
+      <Dialog open={recording} onOpenChange={setRecording}>
+        <DialogContent className="z-[90] sm:max-w-md">
+          <DialogHeader><DialogTitle>Record this call</DialogTitle><DialogDescription>Everyone on the call is asked to agree before recording starts.</DialogDescription></DialogHeader>
+          {me ? <CallRecordingControls callId={media.callId} participantId={me.participantId} endpointId={calling.device.endpoint?.endpointId ?? null} live /> : null}
+        </DialogContent>
+      </Dialog>
+      <AbuseReportDialog callId={media.callId} open={reporting} onOpenChange={setReporting} />
     </section>
   );
 }

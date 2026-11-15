@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { LiveKitRoom, RoomAudioRenderer, useAudioPlayback, useLocalParticipant, useRoomContext, useTracks, VideoTrack } from "@livekit/components-react";
-import { DisconnectReason, RoomEvent, Track } from "livekit-client";
-import { Mic, MicOff, Video, VideoOff, Volume2 } from "lucide-react";
+import { DisconnectReason, RoomEvent, Track, type LocalVideoTrack } from "livekit-client";
+import { Mic, MicOff, SwitchCamera, Video, VideoOff, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MediaCredential } from "@/types/calling";
+import { quietExpectedLiveKitTeardown } from "@/lib/calling/livekit-quiet";
+
+quietExpectedLiveKitTeardown();
 
 /**
  * Video for the full-screen call (Meet / FaceTime pattern): the other person fills the stage,
@@ -95,16 +98,38 @@ function ProviderReconnectEvents({ onReconnecting, onReconnected }: { onReconnec
   return null;
 }
 
-const round = "flex size-14 items-center justify-center rounded-full transition-colors [&_svg]:size-6";
+/**
+ * One labelled round call button (WhatsApp call-screen pattern): icon in a circle, label below.
+ * `off` paints it white with a dark icon, the way WhatsApp shows "mic off" / "camera off".
+ */
+export function CallButton({ icon, label, onClick, off, disabled, tone }: { icon: React.ReactNode; label: string; onClick?: () => void; off?: boolean; disabled?: boolean; tone?: "danger" | "warn" }) {
+  return (
+    <button type="button" aria-label={label} title={label} aria-pressed={off} disabled={disabled} onClick={onClick}
+      className="group flex w-20 flex-col items-center gap-2 disabled:opacity-40">
+      <span className={cn("flex size-16 items-center justify-center rounded-full transition-colors [&_svg]:size-6",
+        tone === "danger" ? "bg-[#EA4335] text-white group-hover:bg-[#D93025]"
+          : tone === "warn" ? "bg-[#FDD663] text-[#3A2A00] group-hover:bg-[#FDE293]"
+            : off ? "bg-white text-[#202124]" : "bg-white/12 text-white group-hover:bg-white/20")}>{icon}</span>
+      <span className="text-sm text-white/85">{label}</span>
+    </button>
+  );
+}
 
-/** Mute / unmute (Meet style: red when off). Must be rendered inside <CallMedia>. */
-export function CallMicButton({ allowed, small }: { allowed: boolean; small?: boolean }) {
+/** Mute / unmute. Must be rendered inside <CallMedia>. */
+export function CallMicButton({ allowed }: { allowed: boolean }) {
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   if (!allowed) return null;
+  return <CallButton icon={isMicrophoneEnabled ? <Mic /> : <MicOff />} label={isMicrophoneEnabled ? "Mute" : "Unmute"} off={!isMicrophoneEnabled}
+    onClick={() => void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)} />;
+}
+
+/** Small mute toggle for the minimised strip. */
+export function CallMicToggle() {
+  const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   return (
     <button type="button" aria-label={isMicrophoneEnabled ? "Mute" : "Unmute"} title={isMicrophoneEnabled ? "Mute" : "Unmute"} aria-pressed={!isMicrophoneEnabled}
       onClick={() => void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)}
-      className={cn(round, small && "size-10 [&_svg]:size-5", isMicrophoneEnabled ? "bg-white/12 text-white hover:bg-white/20" : "bg-[#F28B82] text-[#3C0A06] hover:bg-[#F6AEA9]")}>
+      className={cn("flex size-10 items-center justify-center rounded-full [&_svg]:size-5", isMicrophoneEnabled ? "bg-white/12 text-white hover:bg-white/20" : "bg-white text-[#202124]")}>
       {isMicrophoneEnabled ? <Mic /> : <MicOff />}
     </button>
   );
@@ -113,14 +138,43 @@ export function CallMicButton({ allowed, small }: { allowed: boolean; small?: bo
 /** Camera on / off. Must be rendered inside <CallMedia>. */
 export function CallCameraButton({ allowed }: { allowed: boolean }) {
   const { localParticipant, isCameraEnabled } = useLocalParticipant();
-  if (!allowed) return null;
-  return (
-    <button type="button" aria-label={isCameraEnabled ? "Turn camera off" : "Turn camera on"} title={isCameraEnabled ? "Turn camera off" : "Turn camera on"} aria-pressed={!isCameraEnabled}
-      onClick={() => void localParticipant.setCameraEnabled(!isCameraEnabled)}
-      className={cn(round, isCameraEnabled ? "bg-white/12 text-white hover:bg-white/20" : "bg-[#F28B82] text-[#3C0A06] hover:bg-[#F6AEA9]")}>
-      {isCameraEnabled ? <Video /> : <VideoOff />}
-    </button>
-  );
+  if (!allowed || !localParticipant.permissions?.canPublish) return null;
+  return <CallButton icon={isCameraEnabled ? <Video /> : <VideoOff />} label={isCameraEnabled ? "Camera" : "Camera off"} off={!isCameraEnabled}
+    onClick={() => void localParticipant.setCameraEnabled(!isCameraEnabled)} />;
+}
+
+/** Switch between front and back camera (phones). Hidden while the camera is off. */
+export function CallFlipButton() {
+  const { localParticipant, isCameraEnabled } = useLocalParticipant();
+  const [front, setFront] = useState(true);
+  const [many, setMany] = useState(false);
+  useEffect(() => {
+    void navigator.mediaDevices?.enumerateDevices().then((d) => setMany(d.filter((x) => x.kind === "videoinput").length > 1)).catch(() => undefined);
+  }, [isCameraEnabled]);
+  if (!isCameraEnabled || !many) return null;
+  const flip = async () => {
+    const track = [...localParticipant.videoTrackPublications.values()].find((t) => t.source === Track.Source.Camera)?.track as LocalVideoTrack | undefined;
+    if (!track) return;
+    await track.restartTrack({ facingMode: front ? "environment" : "user" });
+    setFront(!front);
+  };
+  return <CallButton icon={<SwitchCamera />} label="Flip" onClick={() => void flip().catch(() => undefined)} />;
+}
+
+/** Choose where call audio plays (speaker, headset, …). Only where the browser lets a page pick the output. */
+export function CallSpeakerButton() {
+  const room = useRoomContext();
+  const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([]);
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (typeof HTMLMediaElement === "undefined" || !("setSinkId" in HTMLMediaElement.prototype)) return;
+    void navigator.mediaDevices?.enumerateDevices().then((d) => setOutputs(d.filter((x) => x.kind === "audiooutput" && x.deviceId !== "communications"))).catch(() => undefined);
+  }, []);
+  if (outputs.length < 2) return null;
+  const next = (index + 1) % outputs.length;
+  const label = outputs[index]?.label?.split("(")[0]?.trim() || "Speaker";
+  return <CallButton icon={<Volume2 />} label={label.length > 10 ? "Speaker" : label}
+    onClick={() => void room.switchActiveDevice("audiooutput", outputs[next].deviceId).then(() => setIndex(next)).catch(() => undefined)} />;
 }
 
 /** "Muted" tag for the stage. Must be rendered inside <CallMedia>. */

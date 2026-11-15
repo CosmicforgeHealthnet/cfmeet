@@ -52,6 +52,9 @@ import { CaptionsOverlay, RoomNotices } from "./RoomLiveEvents";
 import { createContext, useContext } from "react";
 import { useStartTranscription, useStopTranscription } from "@/hooks/v2/useArtifacts";
 import { Captions, CaptionsOff, Pin } from "lucide-react";
+import { quietExpectedLiveKitTeardown } from "@/lib/calling/livekit-quiet";
+
+quietExpectedLiveKitTeardown();
 
 // Notification type for participant events
 interface ParticipantNotification {
@@ -714,7 +717,10 @@ function AudioSettings() {
  const speakers = useMediaDeviceSelect({ kind: "audiooutput" });
  return <div className="grid gap-4">
    <NiceSelect label="Microphone" value={mics.activeDeviceId} onChange={(id) => void mics.setActiveMediaDevice(id)} options={(mics.devices ?? []).map(device => ({ value: device.deviceId, label: device.label || "Microphone", icon: Mic }))} />
-   <NiceSelect label="Speaker" value={speakers.activeDeviceId} onChange={(id) => void speakers.setActiveMediaDevice(id)} options={(speakers.devices ?? []).map(device => ({ value: device.deviceId, label: device.label || "Default speaker", icon: Volume2 }))} />
+   {/* Phones (and some browsers) don't let a web page pick speaker vs earpiece: the system does. */}
+   {typeof HTMLMediaElement !== "undefined" && "setSinkId" in HTMLMediaElement.prototype && (speakers.devices ?? []).length > 1
+     ? <NiceSelect label="Speaker" value={speakers.activeDeviceId} onChange={(id) => void speakers.setActiveMediaDevice(id)} options={(speakers.devices ?? []).map(device => ({ value: device.deviceId, label: device.label || "Default speaker", icon: Volume2 }))} />
+     : <p className="flex items-start gap-2 rounded-xl bg-white/5 p-3 text-sm text-white/70"><Volume2 className="mt-0.5 size-4 shrink-0" />Your device chooses the speaker, earpiece or headphones. On a phone, switch with its audio or Bluetooth controls.</p>}
  </div>;
 }
 

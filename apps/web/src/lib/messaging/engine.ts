@@ -97,6 +97,8 @@ export type MessageView = {
   replyTo?: { messageId: string; senderPrincipalId: string | null; text: string | null; removed: boolean } | null;
   reactions?: ReactionView[];
   pinned?: boolean;
+  /** WhatsApp ticks for your own messages: sent (one), delivered (two), read (two, coloured). */
+  receipt?: "sent" | "delivered" | "read";
   /** Members whose read receipt reached this message (only computed for your latest message). */
   seenBy?: string[];
   announcement?: boolean;
@@ -116,6 +118,8 @@ export type AccountLink = { linkId: string; comparisonCode: string; expiresAt: s
 export type IncomingLink = { linkId: string; platform: string; label: string | null; expiresAt: string; keyThumbprint: string };
 
 export type EngineSnapshot = {
+  /** Per conversation: who is online and when others were last seen. */
+  presence: Record<string, Record<string, { online: boolean; lastSeenAt: string | null }>>;
   phase: Phase;
   /** This browser waits for a trusted device to approve it (shows the code). */
   accountLink: AccountLink | null;
@@ -233,9 +237,18 @@ export function currentMessagingEngine(): MessagingEngine | null {
   return MessagingEngine.active;
 }
 
+/** Why a send failed, in plain words (files switched off on the server get their own reason). */
+function sendFailureText(e: unknown): string {
+  if (e instanceof MessagingApiError && e.code === "FEATURE_DISABLED" && (e.reason === "ATTACHMENTS_DISABLED" || e.reason === "ATTACHMENT_STORAGE_NOT_CONFIGURED")) {
+    return "sending photos and files isn't switched on for CF Meet yet";
+  }
+  return e instanceof Error ? e.message : "error";
+}
+
 export class MessagingEngine {
   static active: MessagingEngine | null = null;
   private snapshot: EngineSnapshot = {
+    presence: {},
     phase: "loading",
     accountLink: null,
     incomingLinks: [],
@@ -258,6 +271,9 @@ export class MessagingEngine {
   private readonly listeners = new Set<() => void>();
   private crypto: CryptoClient | null = null;
   private transport: MessagingRealtimeTransport | null = null;
+  /** Per conversation, each member's delivered / read sequence (from receipt events and snapshots). */
+  private receipts = new Map<string, Map<string, { read: number; delivered: number }>>();
+  private presenceTimer: ReturnType<typeof setInterval> | null = null;
   private server = new Map<string, ServerConversation>();
   /** MANAGED message stores (current representation per message, MSG-008). */
   private managed = new Map<string, ManagedConversationState>();
@@ -657,6 +673,17 @@ export class MessagingEngine {
         // MSG-018: the server resumed from this device's stored ack cursor.
         const st = this.managed.get(conversationId);
         if (st && st.eventCursor === null) st.eventCursor = after;
+        transport.queryReceipts(conversationId);
+      },
+      onPresence: (conversationId, members) => {
+        const me = this.snapshot.identity?.principalId;
+        const map: Record<string, { online: boolean; lastSeenAt: string | null }> = {};
+        for (const m of members) if (m.principalId !== me) map[m.principalId] = { online: m.state === "AVAILABLE", lastSeenAt: m.lastSeenAt ?? null };
+        this.set({ presence: { ...this.snapshot.presence, [conversationId]: map } });
+      },
+      onReceipts: (conversationId, members) => {
+        for (const m of members) this.noteReceipt(conversationId, m.principalId, m.readSequence, m.deliveredSequence);
+        this.refreshTicks(conversationId);
       },
       onTyping: (conversationId, principalId, state, ttlMs) => this.onTyping(conversationId, principalId, state, ttlMs),
       onReadCursor: (conversationId) => {
@@ -773,9 +800,58 @@ export class MessagingEngine {
   }
 
   /** A realtime event: MANAGED ones are applied directly (current representation), E2EE ones trigger a sync. */
+  /** Keeps "online" / "last seen" fresh for the open chat (null: stop). */
+  watchPresence(conversationId: string | null): void {
+    if (this.presenceTimer) clearInterval(this.presenceTimer);
+    this.presenceTimer = null;
+    if (!conversationId) return;
+    const ask = () => this.transport?.queryPresence(conversationId);
+    ask();
+    this.presenceTimer = setInterval(ask, 20_000);
+  }
+
+  private noteReceipt(conversationId: string, principalId: string, read?: number, delivered?: number): void {
+    let byMember = this.receipts.get(conversationId);
+    if (!byMember) this.receipts.set(conversationId, (byMember = new Map()));
+    const cur = byMember.get(principalId) ?? { read: 0, delivered: 0 };
+    const r = Math.max(cur.read, read ?? 0);
+    // Reading a message implies it was delivered.
+    byMember.set(principalId, { read: r, delivered: Math.max(cur.delivered, delivered ?? 0, r) });
+  }
+
+  /** Ticks for your messages: read when every other member read it, delivered when it reached all of them. */
+  private withTicks(conversationId: string, views: MessageView[]): MessageView[] {
+    const me = this.snapshot.identity?.principalId;
+    const others = (this.server.get(conversationId)?.members ?? []).map((m) => m.principalId).filter((p) => p !== me);
+    const byMember = this.receipts.get(conversationId);
+    return views.map((v) => {
+      if (!v.mine || v.sequence == null || (v.state !== "sent" && v.state !== "delivered")) return v;
+      const seq = v.sequence;
+      const all = (key: "read" | "delivered") => others.length > 0 && others.every((p) => (byMember?.get(p)?.[key] ?? 0) >= seq);
+      const receipt = all("read") ? "read" : all("delivered") ? "delivered" : "sent";
+      return v.receipt === receipt ? v : { ...v, receipt };
+    });
+  }
+
+  private refreshTicks(conversationId: string): void {
+    const views = this.snapshot.messages[conversationId];
+    if (!views) return;
+    const next = this.withTicks(conversationId, views);
+    if (next.some((v, i) => v !== views[i])) this.set({ messages: { ...this.snapshot.messages, [conversationId]: next } });
+  }
+
   private onRealtimeEvent(event: MessagingRealtimeEvent): void {
     const conv = this.server.get(event.conversationId);
     if (!conv) return;
+    if (event.type === "read.cursor.updated" || event.type === "delivery.cursor.updated") {
+      const d = ((event as { data?: Record<string, unknown> }).data ?? {}) as { principalId?: unknown; readSequence?: unknown; deliveredSequence?: unknown };
+      if (typeof d.principalId === "string") {
+        this.noteReceipt(event.conversationId, d.principalId,
+          typeof d.readSequence === "number" ? d.readSequence : undefined,
+          typeof d.deliveredSequence === "number" ? d.deliveredSequence : undefined);
+        this.refreshTicks(event.conversationId);
+      }
+    }
     if (conv.securityProfile !== "MANAGED") {
       this.scheduleSync(event.conversationId);
       return;
@@ -1416,7 +1492,7 @@ export class MessagingEngine {
         if (!waiting && drafts.length) void this.flushDrafts(conversationId);
       }
     }
-    this.set({ messages: { ...this.snapshot.messages, [conversationId]: [...views, ...pending] } });
+    this.set({ messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...pending]) } });
   }
 
   private stateFor(conversationId: string): ManagedConversationState {
@@ -1598,7 +1674,7 @@ export class MessagingEngine {
       }));
     const pending = this.pendingSends.get(conversationId) ?? [];
     this.set({
-      messages: { ...this.snapshot.messages, [conversationId]: [...views, ...queued, ...pending] },
+      messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...queued, ...pending]) },
       hasOlder: { ...this.snapshot.hasOlder, [conversationId]: st.hasOlder },
     });
   }
@@ -1801,7 +1877,7 @@ export class MessagingEngine {
     const list = [...(this.pendingSends.get(conversationId) ?? []), view];
     this.pendingSends.set(conversationId, list);
     const shown = (this.snapshot.messages[conversationId] ?? []).filter((m) => m.key !== view.key);
-    this.set({ messages: { ...this.snapshot.messages, [conversationId]: [...shown, view] } });
+    this.set({ messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...shown, view]) } });
   }
   private settlePending(conversationId: string, key: string, failed: string | null): void {
     const list = (this.pendingSends.get(conversationId) ?? []).flatMap((m) => (m.key !== key ? [m] : failed ? [{ ...m, state: "failed" as const, note: failed }] : []));
@@ -1850,7 +1926,7 @@ export class MessagingEngine {
       else await relay("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId: uuid(), text });
       this.settlePending(conversationId, key, null);
     } catch (e) {
-      this.settlePending(conversationId, key, `Not sent (${e instanceof Error ? e.message : "error"})`);
+      this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
     }
     await this.sync(conversationId);
   }
@@ -1932,7 +2008,7 @@ export class MessagingEngine {
       }
       this.settlePending(conversationId, key, null);
     } catch (e) {
-      this.settlePending(conversationId, key, `Not sent (${e instanceof Error ? e.message : "error"})`);
+      this.settlePending(conversationId, key, `Not sent (${sendFailureText(e)})`);
     }
     await this.sync(conversationId);
   }
@@ -2121,6 +2197,14 @@ export class MessagingEngine {
   }
 
   /** No trusted device at hand (web-only account, lost device): email a step-up code. */
+  /** Withdraw this browser's link request (the code stops working on the other device). */
+  async cancelLink(): Promise<void> {
+    const link = this.snapshot.accountLink;
+    this.stopLinkWatch();
+    if (link) await accountDevice.cancelLink(link.linkId).catch(() => undefined);
+    this.set({ accountLink: null, phase: "needs-device", detail: null });
+  }
+
   async sendLinkEmailCode(): Promise<void> {
     const link = this.snapshot.accountLink;
     if (!link) return;

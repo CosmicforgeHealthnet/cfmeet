@@ -11,16 +11,18 @@
  * Calls and chats are launched elsewhere (Calls / Messages); the old Activity tab repeated
  * those screens and is gone.
  */
+import ContactLists from "./ContactLists";
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Ban, Bell, BellOff, Check, Copy, Link2, MessageSquare, MoreHorizontal, Pencil, Phone, QrCode as QrIcon, RefreshCw, Search, Settings2, Star, UserMinus, UserPlus, Users, Video, X } from "lucide-react";
+import { Ban, Bell, BellOff, Hash, Check, Copy, Link2, MessageSquare, MoreHorizontal, Pencil, Phone, QrCode as QrIcon, RefreshCw, Search, Settings2, Star, UserMinus, UserPlus, Users, Video } from "lucide-react";
 import { Popover } from "radix-ui";
 
 import { Spinner } from "@/components/ui/spinner";
 import { NiceSelect } from "@/components/ui/nice-select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { SidePage, SideRow, SideSection, Toggle } from "@/components/ui/side-page";
 import { cn } from "@/lib/utils";
 import QrCode from "./QrCode";
 import {
@@ -28,7 +30,6 @@ import {
   useHubBlocks,
   useHubCapabilities,
   useHubContacts,
-  useHubInvites,
   useHubPrivacy,
   useHubProfile,
   useHubRequests,
@@ -52,7 +53,7 @@ import {
 } from "@/lib/communications/comms-core";
 import type { Contact, Privacy, PublicProfile } from "@/types/communications";
 
-type Tab = "connections" | "requests" | "blocked" | "colleagues";
+type Tab = "connections" | "lists" | "requests" | "blocked" | "colleagues";
 
 const AVATAR_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#4f46e5", "#ea580c"];
 const colorFor = (key: string) => AVATAR_COLORS[([...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % AVATAR_COLORS.length];
@@ -135,55 +136,7 @@ function MyIdCard({ areas }: { areas: CommunicationsAreas }) {
   );
 }
 
-function InviteLinks({ areas }: { areas: CommunicationsAreas }) {
-  const invites = useHubInvites(areas.contacts);
-  const actions = useHubActions();
-  const [maxUses, setMaxUses] = useState(1);
-  const created = actions.createInvite.data;
-  const { copied, copy } = useCopy();
-  const list = (invites.data?.data ?? []).filter((i) => !i.revoked && new Date(i.expiresAt) > new Date());
-  return (
-    <section className="space-y-3" aria-label="Invite links" data-testid="invite-links">
-      <div>
-        <h3 className="font-semibold">Invite link</h3>
-        <p className="text-sm text-muted-foreground">Send a link anywhere. Whoever opens it can connect with you. Lasts 7 days.</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-muted-foreground">Can be used</span>
-        <div className="flex rounded-full bg-muted p-1">
-          {[1, 5, 10].map((n) => <button key={n} type="button" aria-pressed={maxUses === n} onClick={() => setMaxUses(n)} className={cn("h-7 rounded-full px-3 text-sm font-medium", maxUses === n ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}>{n === 1 ? "Once" : `${n} times`}</button>)}
-        </div>
-        <button type="button" data-testid="create-invite" disabled={actions.createInvite.isPending} onClick={() => actions.createInvite.mutate({ expiresInSeconds: 7 * 24 * 3600, maxUses })} className={cn(pill, "ml-auto bg-primary text-primary-foreground hover:bg-primary/90")}>
-          {actions.createInvite.isPending ? <Spinner /> : <Link2 className="size-4" />}Create link
-        </button>
-      </div>
-      <ErrorText error={actions.createInvite.error} />
-      {created?.payload ? (
-        <div className="rounded-xl bg-primary/5 p-3 ring-1 ring-primary/20" data-testid="invite-created">
-          <p className="text-xs font-semibold text-primary">Copy it now. For your safety it&apos;s only shown once.</p>
-          <div className="mt-2 flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded-lg bg-background px-3 py-2 text-sm">{created.payload}</code>
-            <button type="button" onClick={() => copy(created.payload!, "invite")} className={cn(pill, "bg-primary text-primary-foreground hover:bg-primary/90")}>{copied === "invite" ? <Check className="size-4" /> : <Copy className="size-4" />}{copied === "invite" ? "Copied" : "Copy"}</button>
-          </div>
-        </div>
-      ) : null}
-      {invites.isPending ? null : <ErrorText error={invites.error} retry={() => void invites.refetch()} />}
-      {list.length > 0 && (
-        <ul className="divide-y divide-border rounded-xl border border-border">
-          {list.map((i) => (
-            <li key={i.inviteId} className="flex items-center gap-3 px-3 py-2.5 text-sm" data-testid="invite">
-              <Link2 className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">Active until {new Date(i.expiresAt).toLocaleDateString([], { day: "numeric", month: "short" })} · <span className="text-muted-foreground">{i.uses} of {i.maxUses} used</span></span>
-              <button type="button" data-testid="revoke-invite" disabled={actions.revokeInvite.isPending} onClick={() => actions.revokeInvite.mutate(i.inviteId)} className="h-8 rounded-full px-3 text-sm font-semibold text-destructive hover:bg-destructive/10">Turn off</button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <ErrorText error={actions.revokeInvite.error} />
-    </section>
-  );
-}
-
+const RELATIONSHIP_LABEL: Record<string, string> = { CONNECTED: "On CF Meet", PENDING_OUTGOING: "Request sent", PENDING_INCOMING: "Wants to connect", BLOCKED: "Blocked", NONE: "Not connected" };
 const RELATIONSHIP: Record<string, string> = { NONE: "Not connected", CONNECTED: "Already a contact", PENDING_OUTGOING: "Request sent", PENDING_INCOMING: "Sent you a request", BLOCKED: "Blocked" };
 
 function ProfileCard({ profile }: { profile: PublicProfile }) {
@@ -217,30 +170,27 @@ function AddContactDialog({ open, onOpenChange, areas }: { open: boolean; onOpen
   const resolve = useMutation({ mutationFn: (id: string) => hub.resolvePublicId(id), retry: false });
   const normalized = normalizeCfMeetId(value);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] gap-0 overflow-y-auto p-0 sm:max-w-lg">
-        <DialogHeader className="px-5 pb-2 pt-5 text-left">
-          <DialogTitle>Add contact</DialogTitle>
-          <DialogDescription>Find someone by their CF Meet ID, or share yours.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-6 px-5 pb-6 pt-3">
-          <section className="space-y-2" aria-label="Find someone by CF Meet ID">
-            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (normalized) resolve.mutate(normalized); }}>
-              <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full bg-muted px-4 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
-                <Search className="size-4 shrink-0" />
-                <input autoFocus aria-label="CF Meet ID" placeholder="Their CF Meet ID, e.g. CF-7K2…" value={value} maxLength={40} onChange={(e) => setValue(e.target.value)} data-testid="find-id" className="min-w-0 flex-1 bg-transparent font-mono text-sm text-foreground outline-none placeholder:font-sans placeholder:text-muted-foreground" />
-              </label>
-              <button type="submit" disabled={!normalized || resolve.isPending} data-testid="find-submit" className={cn(pill, "h-11 bg-primary text-primary-foreground hover:bg-primary/90")}>{resolve.isPending ? <Spinner /> : "Find"}</button>
-            </form>
-            {value && !normalized ? <p className="px-2 text-xs text-muted-foreground">A CF Meet ID starts with CF- followed by 26 letters and numbers.</p> : null}
-            <ErrorText error={resolve.error} />
-            {resolve.data ? <ProfileCard profile={resolve.data} /> : null}
-          </section>
-          <MyIdCard areas={areas} />
-          <InviteLinks areas={areas} />
-        </div>
-      </DialogContent>
-    </Dialog>
+    <SidePage open={open} onOpenChange={onOpenChange} title="New contact" description="Find someone by their CF Meet ID, or share yours">
+      <div className="space-y-6 px-4 py-5">
+        <section className="space-y-3" aria-label="Find someone by CF Meet ID">
+          <div>
+            <h3 className="font-semibold">Find by CF Meet ID</h3>
+            <p className="text-sm text-muted-foreground">Ask them for their ID. It starts with CF-.</p>
+          </div>
+          <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (normalized) resolve.mutate(normalized); }}>
+            <input autoFocus aria-label="CF Meet ID" placeholder="CF-…" value={value} maxLength={40} onChange={(e) => setValue(e.target.value)} data-testid="find-id"
+              className="h-12 w-full rounded-xl border border-border bg-background px-4 font-mono text-base outline-none placeholder:font-sans focus:border-primary focus:ring-2 focus:ring-primary/20" />
+            {value && !normalized ? <p className="px-1 text-xs text-muted-foreground">A CF Meet ID is CF- followed by 26 letters and numbers.</p> : null}
+            <button type="submit" disabled={!normalized || resolve.isPending} data-testid="find-submit" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+              {resolve.isPending ? <Spinner /> : <Search className="size-4" />}Find
+            </button>
+          </form>
+          <ErrorText error={resolve.error} />
+          {resolve.data ? <ProfileCard profile={resolve.data} /> : null}
+        </section>
+        <MyIdCard areas={areas} />
+      </div>
+    </SidePage>
   );
 }
 
@@ -252,28 +202,45 @@ const NOTIFY: { value: Contact["notifications"]; label: string }[] = [
   { value: "MUTED", label: "Muted" },
 ];
 
+/** "N groups in common" on Contact info (the server shares group ids only, not names). */
+function CommonGroups({ contactId }: { contactId: string }) {
+  const groups = useQuery({ queryKey: ["contact", contactId, "common-groups"], queryFn: () => hub.commonGroups(contactId), retry: false });
+  const n = groups.data?.groups.length;
+  if (n === undefined) return null;
+  return (
+    <SideSection title="Groups in common">
+      <SideRow icon={<Users />} label={n === 0 ? "No groups in common" : `${n} ${n === 1 ? "group" : "groups"} in common`} hint={n ? "Open Chats to see them" : undefined} />
+    </SideSection>
+  );
+}
+
 function ContactRow({ contact, areas }: { contact: Contact; areas: CommunicationsAreas }) {
   const router = useRouter();
   const actions = useHubActions();
   const [renaming, setRenaming] = useState(false);
   const [removing, setRemoving] = useState(false);
+  // "/dashboard/contacts?contact=<id>" (tapping a person elsewhere) opens their contact info.
+  const [profileOpen, setProfileOpen] = useState(useSearchParams().get("contact") === contact.contactId);
   const [alias, setAlias] = useState(contact.alias ?? "");
   const open = useMutation({ mutationFn: () => openDirectChatWithContact(contact.cfMeetId), retry: false, onSuccess: (id) => router.push(chatHref(id)) });
   const connected = contact.relationship === "CONNECTED";
   const name = contactLabel(contact);
   const update = (patch: Partial<Pick<Contact, "favorite" | "notifications">> & { alias?: string | null }) => actions.updateContact.mutate({ contactId: contact.contactId, expectedVersion: contact.version, ...patch });
   const menu = "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted";
+  const profileAction = "flex w-24 flex-col items-center gap-1.5 rounded-2xl bg-muted/50 py-3 text-xs font-semibold text-primary ring-1 ring-border hover:bg-primary/5 disabled:opacity-50";
   return (
     <li className="group" data-testid="contact" data-relationship={contact.relationship}>
       <div className="flex items-center gap-3 rounded-2xl px-2 py-2 transition-colors hover:bg-muted/60">
-        <Avatar name={name} seed={contact.cfMeetId} size="size-11" />
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 truncate font-semibold">
-            <span className="truncate">{name}</span>
-            {contact.notifications === "MUTED" ? <BellOff className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" /> : null}
-          </p>
-          <p className="truncate text-sm text-muted-foreground">{contact.alias ? contact.displayName : shortId(contact.cfMeetId)}</p>
-        </div>
+        <button type="button" data-testid="contact-open" onClick={() => setProfileOpen(true)} aria-label={`View ${name}'s profile`} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+          <Avatar name={name} seed={contact.cfMeetId} size="size-11" />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5 truncate font-semibold">
+              <span className="truncate">{name}</span>
+              {contact.notifications === "MUTED" ? <BellOff className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" /> : null}
+            </span>
+            <span className="block truncate text-sm text-muted-foreground">{contact.alias ? contact.displayName : shortId(contact.cfMeetId)}</span>
+          </span>
+        </button>
         <div className="flex shrink-0 items-center">
           {areas.managedMessaging && connected ? <button type="button" data-testid="contact-message" disabled={open.isPending} onClick={() => open.mutate()} aria-label={`Message ${name}`} title="Message" className={iconBtn}><MessageSquare className="size-[18px]" /></button> : null}
           {areas.calling && connected ? (
@@ -314,6 +281,37 @@ function ContactRow({ contact, areas }: { contact: Contact; areas: Communication
       </div>
       <div className="px-2"><ErrorText error={open.error ?? actions.updateContact.error ?? actions.block.error ?? actions.removeContact.error} /></div>
 
+      {/* Contact info (WhatsApp): its own screen, full screen on phones, a right panel on computers. */}
+      <SidePage open={profileOpen} onOpenChange={setProfileOpen} title="Contact info" description={`${name}'s profile`}>
+        <div className="flex flex-col items-center px-6 pb-6 pt-8 text-center">
+          <Avatar name={name} seed={contact.cfMeetId} size="size-32" className="text-5xl" />
+          <p className="mt-4 max-w-full truncate text-2xl font-semibold tracking-tight">{name}</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">{contact.alias ? contact.displayName : RELATIONSHIP_LABEL[contact.relationship] ?? ""}</p>
+          {connected && (areas.managedMessaging || areas.calling) ? (
+            <div className="mt-6 flex w-full justify-center gap-3">
+              {areas.managedMessaging ? <button type="button" disabled={open.isPending} onClick={() => open.mutate()} className={profileAction}><MessageSquare className="size-5" />Message</button> : null}
+              {areas.calling ? <Link href={callHref({ contactId: contact.contactId }, "VOICE")} className={profileAction}><Phone className="size-5" />Voice</Link> : null}
+              {areas.calling ? <Link href={callHref({ contactId: contact.contactId }, "VIDEO")} className={profileAction}><Video className="size-5" />Video</Link> : null}
+            </div>
+          ) : null}
+        </div>
+        <SideSection title="CF Meet ID">
+          <SideRow icon={<Hash />} label={<span className="font-mono text-sm">{contact.cfMeetId}</span>} hint="Their ID for connecting on CF Meet"
+            onClick={() => void navigator.clipboard?.writeText(contact.cfMeetId)} trailing={<Copy className="size-4 text-muted-foreground" />} />
+        </SideSection>
+        {connected ? <CommonGroups contactId={contact.contactId} /> : null}
+        <SideSection title="Settings">
+          <SideRow icon={<Star />} label="Favorite" hint="Shows at the top of your contacts and speed dial" disabled={actions.updateContact.isPending} onClick={() => update({ favorite: !contact.favorite })} trailing={<Toggle on={contact.favorite} />} />
+          <SideRow icon={<BellOff />} label="Mute notifications" disabled={actions.updateContact.isPending} onClick={() => update({ notifications: contact.notifications === "MUTED" ? "ALL" : "MUTED" })} trailing={<Toggle on={contact.notifications === "MUTED"} />} />
+          <SideRow icon={<Pencil />} label="Nickname" hint={contact.alias || "Only you see it"} onClick={() => setRenaming(true)} />
+        </SideSection>
+        <div className="pb-8">
+          <SideSection>
+            <SideRow icon={<Ban />} label={`Block ${name}`} danger onClick={() => { setProfileOpen(false); actions.block.mutate(contact.cfMeetId); }} />
+            <SideRow icon={<UserMinus />} label="Remove contact" danger onClick={() => setRemoving(true)} />
+          </SideSection>
+        </div>
+      </SidePage>
       <Dialog open={renaming} onOpenChange={setRenaming}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader className="text-left"><DialogTitle>Nickname</DialogTitle><DialogDescription>Only you see this. Their name stays {contact.displayName}.</DialogDescription></DialogHeader>
@@ -558,10 +556,12 @@ export default function ContactsContent() {
   const contactCount = connectedContacts(contacts.data ?? []).length;
   const organization = workspace.kind === "ORGANIZATION" && workspace.organizationId ? { id: workspace.organizationId, name: workspace.workspace?.displayName ?? "this organization" } : null;
   const [tab, setTab] = useState<Tab>("connections");
-  const [adding, setAdding] = useState(false);
+  // "/dashboard/contacts?add=1" (e.g. "New contact" in Chats) opens Add contact straight away.
+  const [adding, setAdding] = useState(useSearchParams().get("add") === "1");
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const tabs: [Tab, string, number | null][] = [
     ["connections", "Contacts", contacts.isSuccess ? contactCount : null],
+    ["lists", "Lists", null],
     ["requests", "Requests", pendingCount || null],
     ["blocked", "Blocked", null],
     ...(organization ? ([["colleagues", "Colleagues", null]] as [Tab, string, number | null][]) : []),
@@ -618,6 +618,7 @@ export default function ContactsContent() {
             {tab === "connections" ? <ConnectionsTab areas={areas} onAdd={() => setAdding(true)} /> : null}
             {tab === "requests" ? <RequestsTab areas={areas} /> : null}
             {tab === "blocked" ? <BlockedTab areas={areas} /> : null}
+            {tab === "lists" ? <ContactLists /> : null}
             {tab === "colleagues" && organization ? <ColleaguesTab organizationId={organization.id} organizationName={organization.name} /> : null}
           </div>
           <AddContactDialog open={adding} onOpenChange={setAdding} areas={areas} />

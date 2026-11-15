@@ -279,7 +279,8 @@ body {
 .room-space .lk-participant-tile { background: #3C4043; }
 .room-floating-reaction { animation: room-reaction-rise 3.5s ease-out forwards; }
 @keyframes room-reaction-rise { 0% { opacity: 0; transform: translate(0, 0) scale(.6) rotate(-10deg); } 15% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(35px, -55vh) scale(1.3) rotate(10deg); } }
-@media (max-width: 480px) { .room-controls { gap: 6px; } .room-footer { padding-inline: 6px; } .room-control-button { width: 42px; height: 42px; } .room-leave-button { width: 54px; height: 42px; } .room-tile { border-radius: 12px; } .room-bar-side { flex: 0 0 auto; } }
+@media (max-width: 639px) { .room-bar { justify-content: center; } .room-controls { gap: 12px; } }
+@media (max-width: 480px) { .room-controls { gap: 10px; } .room-footer { padding-inline: 6px; } .room-control-button { width: 46px; height: 46px; } .room-leave-button { width: 58px; height: 46px; } .room-tile { border-radius: 12px; } .room-bar-side { flex: 0 0 auto; } }
 @media (prefers-reduced-motion: reduce) { .room-floating-reaction { animation: room-reaction-fade 3.5s ease-out forwards; bottom: 25%; } @keyframes room-reaction-fade { 0%,100% { opacity: 0; } 20%,80% { opacity: 1; } } }
 
 /* Landing page motion: calm, slow loops; switched off for reduced-motion users. */

@@ -5,6 +5,11 @@
  * Tokens and tickets are kept in memory for one handshake only, never in a URL.
  */
 export const MESSAGING_REALTIME_PROTOCOL = "cfmeet.messaging.v1";
+
+/** One member's delivered / read position in a conversation. */
+/** A member's presence: AVAILABLE (online) or OFFLINE with when they were last seen (if they share it). */
+export type PresenceMember = { principalId: string; state: string; lastSeenAt?: string | null };
+export type ReceiptCursor = { principalId: string; readSequence?: number; deliveredSequence?: number };
 const PREFIX = "cfmeet.ticket.";
 const TICKET_ENDPOINT = "/v1/realtime/tickets";
 const SOCKET_ENDPOINT = "/v1/realtime";
@@ -30,6 +35,10 @@ export type MessagingTransportOptions = {
   onConnectionState?: (state: "connected" | "disconnected" | "auth-required") => void;
   /** The server confirmed a subscription: where it resumes (its per-device ack cursor when none was sent) and its head. */
   onSubscribed?: (conversationId: string, afterEventSequence: number, headEventSequence: number) => void;
+  /** Who is online in a conversation (answer to presence.query). */
+  onPresence?: (conversationId: string, members: PresenceMember[]) => void;
+  /** Members' delivered / read positions (answer to receipts.query). */
+  onReceipts?: (conversationId: string, members: ReceiptCursor[]) => void;
   /** Another member started / stopped typing (ephemeral, never acknowledged). */
   onTyping?: (conversationId: string, principalId: string, state: "started" | "stopped", ttlMs: number) => void;
   /** This account's read position moved on another of its sessions. */
@@ -158,6 +167,16 @@ export class MessagingRealtimeTransport {
     if (!this.subscriptions.has(conversationId)) throw new MessagingTransportError("Not subscribed");
     this.send({ type: "typing", conversationId, state: started ? "started" : "stopped" });
   }
+  /** Asks who is online in a conversation (the server allows about one query a second). */
+  queryPresence(conversationId: string): void {
+    if (this.socket?.readyState === 1) this.send({ type: "presence.query", conversationId });
+  }
+
+  /** Asks for every member's delivered / read position (WhatsApp ticks after a reconnect). */
+  queryReceipts(conversationId: string): void {
+    if (this.socket?.readyState === 1) this.send({ type: "receipts.query", conversationId });
+  }
+
   connect(): Promise<void> {
     if (this.disposed) return Promise.reject(new MessagingTransportError("Transport disposed"));
     if (this.socket?.readyState === 1) return Promise.resolve();
@@ -253,6 +272,14 @@ export class MessagingRealtimeTransport {
         (frame.state === "started" || frame.state === "stopped") && this.subscriptions.has(frame.conversationId)) {
       const ttl = Number.isSafeInteger(frame.ttlMs) ? (frame.ttlMs as number) : 6000;
       this.options.onTyping?.(frame.conversationId, frame.principalId, frame.state, ttl);
+      return;
+    }
+    if (frame.type === "presence.snapshot" && typeof frame.conversationId === "string" && Array.isArray(frame.members)) {
+      this.options.onPresence?.(frame.conversationId, frame.members as PresenceMember[]);
+      return;
+    }
+    if (frame.type === "receipts.snapshot" && typeof frame.conversationId === "string" && Array.isArray(frame.members)) {
+      this.options.onReceipts?.(frame.conversationId, frame.members as ReceiptCursor[]);
       return;
     }
     if (frame.type === "read-cursor.synced" && typeof frame.conversationId === "string" && Number.isSafeInteger(frame.readSequence)) {

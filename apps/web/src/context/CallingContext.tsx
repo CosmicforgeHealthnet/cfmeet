@@ -51,10 +51,14 @@ export interface CallingContextValue {
   retryMedia: () => void;
   answer: (invitation: RecoveredInvitation, accept: boolean) => Promise<string>;
   /** Direct (1:1), group (several principals) or extension call through the adapter; returns the callId. */
-  startCall: (kind: CallKind, target: CallTarget) => Promise<string>;
+  startCall: (kind: CallKind, target: CallTarget, label?: string) => Promise<string>;
   /** Communications Hub launch from a contact / a conversation; returns the callId. */
-  callContact: (contactId: string, kind: CallKind) => Promise<string>;
-  callConversation: (conversationId: string, kind: CallKind) => Promise<string>;
+  callContact: (contactId: string, kind: CallKind, label?: string) => Promise<string>;
+  callConversation: (conversationId: string, kind: CallKind, label?: string) => Promise<string>;
+  /** A call being placed (shown at once, before the server answers). */
+  placing: { kind: CallKind; label: string | null } | null;
+  /** Cancel the call being placed: the screen closes now, the call is cancelled as soon as it exists. */
+  cancelPlacing: () => void;
   /** Media callbacks for the dock. */
   mediaEvents: {
     connected: () => void;
@@ -184,43 +188,67 @@ function CallingSession({ principalId, children }: { principalId: string; childr
 
   /** After a Hub launch: find the caller's own session on this endpoint and join its media. */
   const joinLaunched = useCallback(async (callId: string, endpointId: string, kind: CallKind) => {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
       const call = await callsService.get(callId);
       const session = ownSession(call, principalId, endpointId);
       if (session) { await joinMedia(callId, session.sessionId, kind); return; }
       if (isWindingDown(call.state)) return;
-      await sleep(500);
+      await sleep(150);
     }
     throw new Error("The call was started, but this browser could not join it yet. Open it from Calls.");
   }, [principalId, joinMedia]);
 
-  const startCall = useCallback(async (kind: CallKind, target: CallTarget) => {
+  // The call screen opens the moment you tap call (WhatsApp); the server work happens behind it.
+  const [placing, setPlacing] = useState<{ kind: CallKind; label: string | null } | null>(null);
+  const cancelled = useRef(false);
+  const place = useCallback(async (kind: CallKind, label: string | undefined, create: () => Promise<string>) => {
+    cancelled.current = false;
+    setPlacing({ kind, label: label ?? null });
+    try {
+      const callId = await create();
+      if (cancelled.current) {
+        // Hung up while it was being placed: drop the media and cancel the call.
+        dispatch({ type: "LEAVE" });
+        setMedia(null);
+        void (async () => {
+          const call = await callsService.get(callId);
+          await callsService.cancel(callId, { expectedVersion: call.version }, newIdempotencyKey());
+        })().catch(() => undefined);
+      }
+      return callId;
+    } finally {
+      setPlacing(null);
+    }
+  }, []);
+  const cancelPlacing = useCallback(() => { cancelled.current = true; setPlacing(null); }, []);
+
+  const startCall = useCallback((kind: CallKind, target: CallTarget, label?: string) => place(kind, label, async () => {
     const endpointId = requireEndpoint();
     const body: CreateCallRequest = { kind, initiatorPrincipalId: principalId, initiatorEndpointId: endpointId, ...target };
     const result = await callsService.create(body, newIdempotencyKey());
-    if (result.initiatorSessionId) await joinMedia(result.call.callId, result.initiatorSessionId, kind);
+    if (result.initiatorSessionId && !cancelled.current) await joinMedia(result.call.callId, result.initiatorSessionId, kind);
     return result.call.callId;
-  }, [principalId, requireEndpoint, joinMedia]);
+  }), [place, principalId, requireEndpoint, joinMedia]);
 
-  const callContact = useCallback(async (contactId: string, kind: CallKind) => {
+  const callContact = useCallback((contactId: string, kind: CallKind, label?: string) => place(kind, label, async () => {
     const endpointId = requireEndpoint();
     const launched = await hubCallsService.callContact(contactId, kind, endpointId);
-    await joinLaunched(launched.callId, endpointId, kind);
+    if (!cancelled.current) await joinLaunched(launched.callId, endpointId, kind);
     return launched.callId;
-  }, [requireEndpoint, joinLaunched]);
+  }), [place, requireEndpoint, joinLaunched]);
 
-  const callConversation = useCallback(async (conversationId: string, kind: CallKind) => {
+  const callConversation = useCallback((conversationId: string, kind: CallKind, label?: string) => place(kind, label, async () => {
     const endpointId = requireEndpoint();
     const launched = await hubCallsService.callConversation(conversationId, kind, endpointId);
-    await joinLaunched(launched.callId, endpointId, kind);
+    if (!cancelled.current) await joinLaunched(launched.callId, endpointId, kind);
     return launched.callId;
-  }, [requireEndpoint, joinLaunched]);
+  }), [place, requireEndpoint, joinLaunched]);
 
   const value = useMemo<CallingContextValue>(() => ({
     principalId, device, media: activeMedia, mediaState: activeMediaState, joinMedia, leaveMedia,
     retryMedia: () => dispatch({ type: "RETRY_NOW" }),
-    answer, startCall, callContact, callConversation, mediaEvents,
-  }), [principalId, device, activeMedia, activeMediaState, joinMedia, leaveMedia, answer, startCall, callContact, callConversation, mediaEvents]);
+    answer, startCall, callContact, callConversation, mediaEvents, placing, cancelPlacing,
+  }), [principalId, device, activeMedia, activeMediaState, joinMedia, leaveMedia, answer, startCall, callContact, callConversation, mediaEvents, placing, cancelPlacing]);
 
   return (
     <CallingContext.Provider value={value}>

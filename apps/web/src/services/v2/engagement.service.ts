@@ -183,6 +183,16 @@ export const engagementService = {
   },
 
   /**
+   * Restore a hidden (dismissed) question: back to Open, or Answered if it had an answer
+   */
+  restoreQuestion: async (conferenceId: string, questionId: string) => {
+    const response = await apiV2.post<QuestionActionResponse>(
+      `/conferences/${conferenceId}/questions/${questionId}/restore`,
+    );
+    return response.data;
+  },
+
+  /**
    * Archive a question
    */
   archiveQuestion: async (conferenceId: string, questionId: string) => {

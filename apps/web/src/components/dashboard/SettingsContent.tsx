@@ -1,18 +1,21 @@
 "use client";
 
+import ChatSettings from "@/components/account/ChatSettings";
 import { useState } from "react";
 import ApiKeysContent from "./ApiKeysContent";
 import WebhooksContent from "./WebhooksContent";
 import AccountProfileSettings from "@/components/account/AccountProfileSettings";
 import AccountSecuritySettings from "@/components/account/AccountSecuritySettings";
-import { KeyRound, ShieldCheck, UserRound, Webhook } from "lucide-react";
+import LinkedDevices from "@/components/account/LinkedDevices";
+import { KeyRound, BellRing, ShieldCheck, UserRound, Webhook } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Tab = "profile" | "security" | "api-keys" | "webhooks";
+type Tab = "profile" | "security" | "chats" | "api-keys" | "webhooks";
 
 const MAIN: { id: Tab; label: string; hint: string; icon: typeof UserRound }[] = [
   { id: "profile", label: "Profile", hint: "Name, username, time zone", icon: UserRound },
   { id: "security", label: "Security", hint: "Password and devices", icon: ShieldCheck },
+  { id: "chats", label: "Chats & notifications", hint: "Alerts, storage, backup", icon: BellRing },
 ];
 // Retired integrations: kept reachable so people can revoke what they still have.
 const OLD: { id: Tab; label: string; icon: typeof UserRound }[] = [
@@ -53,7 +56,8 @@ export default function SettingsContent() {
 
         <div className="min-w-0 max-w-3xl">
           {activeTab === "profile" && <AccountProfileSettings />}
-          {activeTab === "security" && <AccountSecuritySettings />}
+          {activeTab === "security" && <div className="space-y-4"><AccountSecuritySettings /><LinkedDevices /></div>}
+          {activeTab === "chats" && <ChatSettings />}
           {activeTab === "api-keys" && <ApiKeysContent />}
           {activeTab === "webhooks" && <WebhooksContent />}
         </div>

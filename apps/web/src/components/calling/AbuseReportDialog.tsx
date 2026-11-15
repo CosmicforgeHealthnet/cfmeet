@@ -38,7 +38,7 @@ export default function AbuseReportDialog({ callId, open, onOpenChange }: {
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="z-[90] sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><AlertTriangle className="size-5 text-destructive" /> Report this call</DialogTitle>
           <DialogDescription>

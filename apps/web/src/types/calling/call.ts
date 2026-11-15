@@ -103,6 +103,8 @@ export interface CallTransfer {
 }
 
 export interface Call extends CallCore {
+  /** Whether this caller may read the call's recordings (ask for them only when true). */
+  canViewRecordings?: boolean;
   connectedDurationMs: number | null;
   durationsAsOf: string;
   participants: CallParticipant[];

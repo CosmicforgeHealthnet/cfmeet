@@ -6,25 +6,26 @@
  * with starred contacts, or the selected call. In-call controls live in the floating call bar
  * (ActiveCallDock) only, so they are never shown twice.
  */
+import { communicationsService } from "@/services/v2/communications.service";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, Check, Delete, ExternalLink, Plus, Settings2, Star, UserPlus, Voicemail, Flag, Grid3x3, MoreHorizontal, Pause, Phone, PhoneCall, PhoneIncoming, PhoneMissed, PhoneOff, PhoneOutgoing,
+  ArrowLeft, Check, Delete, ExternalLink, Settings2, Star, UserPlus, Voicemail, Flag, Grid3x3, MoreHorizontal, Pause, Phone, PhoneCall, PhoneIncoming, PhoneMissed, PhoneOff, PhoneOutgoing,
   Play, RefreshCw, Search, Users, Video, X,
 } from "lucide-react";
 import { Popover } from "radix-ui";
 import { useQuery } from "@tanstack/react-query";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { useCalling, type CallTarget } from "@/context/CallingContext";
+import { useCalling } from "@/context/CallingContext";
 import { useCall, useCallActions, useCallHistory, useCallingIdentity, useCallingMutation } from "@/hooks/calling";
 import { usePrincipalNames } from "@/hooks/calling/usePrincipalNames";
 import { identityApi } from "@/lib/messaging/api";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
 import { activeParticipant, isWindingDown, ownParticipant, ownSession, visibleControls } from "@/lib/calling/call-permissions";
-import { hubCallsService } from "@/services/calling/hub-calls.service";
+import { hubCallsService, type HubContact } from "@/services/calling/hub-calls.service";
 import type { CallKind, CallState, IvrInputRequest } from "@/types/calling";
 import type { CallHistoryEntry } from "@/types/calling/history";
 import CallRecordingControls from "./CallRecordingControls";
@@ -42,7 +43,7 @@ const callStatePresentation: Record<CallState, { title: string; description: str
   RESOLVING: { title: "Calling…", description: "Finding the best way to reach them." },
   ROUTING: { title: "Calling…", description: "Finding the best way to reach them." },
   DIALING: { title: "Dialing…", description: "Reaching their devices." },
-  RINGING: { title: "Ringing…", description: "Waiting for them to answer." },
+  RINGING: { title: "Calling…", description: "Waiting for them to answer." },
   ANSWERED: { title: "Connecting…", description: "They answered. Connecting audio." },
   CONNECTED: { title: "Connected", description: "" },
   HELD: { title: "On hold", description: "Nobody can hear each other until someone resumes." },
@@ -99,7 +100,8 @@ type Launch = { contactId: string; kind: CallKind } | { conversationId: string; 
 export default function CallsContent({ initialCallId = "", launch = null }: { initialCallId?: string; launch?: Launch | null }) {
   const identity = useCallingIdentity();
   const calling = useCalling();
-  if (identity.isPending) return <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"><Spinner /> Loading calls…</div>;
+  // Calling starts a moment after the page: show loading, not "not available", until it has.
+  if (identity.isPending || (!identity.error && !calling)) return <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground"><Spinner /> Loading calls…</div>;
   if (identity.error || !calling) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-6 text-center">
@@ -170,10 +172,10 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <h1 className="text-2xl font-bold tracking-tight">Calls</h1>
-                <p role="status" className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={cn("size-2 rounded-full", status.tone)} />{status.text}
+                {device.status !== "online" ? <p role="status" className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={cn("size-2 rounded-full", status.tone)} />{status.text}
                   {device.status === "disabled" ? <button type="button" onClick={() => void device.setReceiving(true)} className="font-semibold text-primary hover:underline">· Turn on</button> : null}
                   {device.status === "offline" ? <button type="button" onClick={() => void device.register()} className="inline-flex items-center gap-1 font-semibold text-primary hover:underline">· <RefreshCw className="size-3" />Reconnect</button> : null}
-                </p>
+                </p> : null}
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <Popover.Root>
@@ -185,12 +187,12 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
                     </Popover.Content>
                   </Popover.Portal>
                 </Popover.Root>
-                <button type="button" onClick={() => { setSelected(""); setDialerOpen(true); }} aria-label="New call" title="New call" className={cn("flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90", !selected && "md:hidden")}><PhoneCall className="size-5" /></button>
+                <button type="button" onClick={() => { setSelected(""); setDialerOpen(true); }} aria-label="New call" title="New call" className={cn("hidden size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90", selected && "md:flex")}><PhoneCall className="size-5" /></button>
               </div>
             </div>
-            <div role="tablist" className="flex rounded-full bg-muted p-1">
+            <div role="tablist" aria-label="Filter calls" className="flex gap-2">
               {([["all", "All"], ["missed", "Missed"], ["voicemail", "Voicemail"]] as const).map(([value, label]) => (
-                <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)} className={cn("h-8 flex-1 rounded-full text-sm font-medium transition-colors", tab === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>{label}</button>
+                <button key={value} role="tab" type="button" aria-selected={tab === value} onClick={() => setTab(value)} className={cn("h-8 rounded-full px-3.5 text-sm font-medium transition-colors", tab === value ? "bg-primary/15 text-primary" : "bg-muted/70 text-muted-foreground hover:text-foreground")}>{label}</button>
               ))}
             </div>
             {tab !== "voicemail" && (
@@ -222,14 +224,17 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
                 const inbound = entry.participation.direction === "INBOUND";
                 const DirIcon = isMissed ? PhoneMissed : inbound ? PhoneIncoming : PhoneOutgoing;
                 const group = entry.counterparts.length > 1;
-                const detail = [outcomeText[entry.participation.outcome] ?? "", entry.durationMs ? formatCallDuration(entry.durationMs) : ""].filter(Boolean).join(" · ");
+                // A finished call can still report RINGING (the server leaves invitations open after a cancel): show what really happened.
+                const finished = ["ENDED", "CANCELLED", "FAILED", "NO_ANSWER", "DECLINED", "REJECTED", "BUSY"].includes(entry.state);
+                const outcome = finished && (entry.participation.outcome === "RINGING" || entry.participation.outcome === "IN_PROGRESS") ? (inbound ? "MISSED" : "NOT_ANSWERED") : entry.participation.outcome;
+                const detail = [outcomeText[outcome] ?? "", entry.durationMs ? formatCallDuration(entry.durationMs) : ""].filter(Boolean).join(" · ");
                 return (
                   <Fragment key={entry.callId}>
                     {newDay && <li className="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{dayLabel(entry.createdAt)}</li>}
                     <li className="group relative">
                       <button type="button" onClick={() => open(entry.callId)} aria-pressed={selected === entry.callId} className={cn("flex w-full items-center gap-3 rounded-2xl px-2.5 py-2.5 text-left transition-colors", selected === entry.callId ? "bg-primary/10" : "hover:bg-muted/70")}>
-                        {group ? <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Users className="size-5" /></span> : <Avatar name={name} seed={entry.counterparts[0]?.principalId ?? name} />}
-                        <span className="min-w-0 flex-1 pr-10">
+                        {group ? <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"><Users className="size-5" /></span> : <Avatar name={name} seed={entry.counterparts[0]?.principalId ?? name} size="size-12" />}
+                        <span className="min-w-0 flex-1 pr-12">
                           <span className={cn("block truncate text-[15px] font-semibold", isMissed && "text-destructive")}>{name}</span>
                           <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
                             <DirIcon className={cn("size-3.5 shrink-0", isMissed && "text-destructive")} />
@@ -240,7 +245,7 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
                         </span>
                       </button>
                       <button type="button" aria-label={`Call ${name} back`} title="Call back" disabled={!canCall} onClick={() => void callBack(entry, entry.kind)}
-                        className="absolute right-3 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-full text-primary hover:bg-primary/10 disabled:opacity-30 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
+                        className="absolute right-2 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center rounded-full text-primary hover:bg-primary/10 disabled:opacity-30">
                         {entry.kind === "VIDEO" ? <Video className="size-5" /> : <Phone className="size-5" />}
                       </button>
                     </li>
@@ -250,6 +255,11 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
               {history.hasNextPage ? <li className="py-2 text-center"><button type="button" disabled={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()} className="h-9 rounded-full px-4 text-sm font-semibold text-primary hover:bg-primary/10 disabled:opacity-50">{history.isFetchingNextPage ? "Loading…" : "Show older calls"}</button></li> : null}
             </ul>
           )}
+          {/* WhatsApp-style floating "new call" button on phones. */}
+          <button type="button" onClick={() => { setSelected(""); setDialerOpen(true); }} aria-label="New call" title="New call"
+            className="fixed bottom-24 right-4 z-30 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl shadow-primary/30 hover:bg-primary/90 md:hidden">
+            <PhoneCall className="size-6" />
+          </button>
         </aside>
 
         <main className={cn("min-w-0 min-h-0 flex-1 overflow-y-auto", !rightVisible && "hidden md:block")}>
@@ -267,164 +277,161 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"];
 
 /**
- * The dialer (Zoom Phone pattern): search people or use the keypad, choose voice / video, call.
- * Starred contacts sit below as speed dial (Communications Hub launch, CAL-014).
- * Direct, group (several people) or extension calls go through the adapter (CAL-014 group calling).
+ * New call (WhatsApp "Select contact"): one list of people, each with a voice and a video button.
+ * Extras on top: add a contact, a group call (pick several), or dial an extension.
  */
 function Dialer({ busy, canCall, run, onStarted, onBack }: { busy: boolean; canCall: boolean; run: Runner; onStarted: (callId: string) => void; onBack: () => void }) {
   const calling = useCalling()!;
-  const [mode, setMode] = useState<"people" | "keypad">("people");
-  const [picked, setPicked] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
+  const [groupMode, setGroupMode] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [keypad, setKeypad] = useState(false);
   const [extension, setExtension] = useState("");
-  const [kind, setKind] = useState<CallKind>("VOICE");
   const directory = useQuery({ queryKey: ["calling", "directory", calling.principalId], queryFn: () => identityApi.directory(), retry: false });
   const contacts = useQuery({ queryKey: ["calling", "hub-contacts"], queryFn: () => hubCallsService.contacts(), retry: false, staleTime: 60_000 });
+  const q = filter.trim().toLowerCase();
+  const myContacts = (contacts.data?.data ?? [])
+    .filter((c) => (c.alias || c.displayName).toLowerCase().includes(q))
+    .sort((x, y) => Number(y.favorite) - Number(x.favorite) || (x.alias || x.displayName).localeCompare(y.alias || y.displayName));
   const people = useMemo(() => (directory.data?.people ?? []).filter((p) => p.principalId !== calling.principalId), [directory.data, calling.principalId]);
-  const shown = people.filter((p) => p.displayName.toLowerCase().includes(filter.trim().toLowerCase())).slice(0, 50);
+  const colleagues = people.filter((p) => p.displayName.toLowerCase().includes(q)).slice(0, 50);
   const toggle = (userId: string) => setPicked((current) => current.includes(userId) ? current.filter((id) => id !== userId) : current.length >= MAX_GROUP_TARGETS ? current : [...current, userId]);
-  const starred = contacts.data?.data ?? [];
-  const canSubmit = canCall && (mode === "keypad" ? !!extension.trim() : picked.length > 0);
 
-  const submit = () => run(async () => {
-    let target: CallTarget;
-    if (mode === "keypad") {
-      target = { targetExtension: extension.trim() };
-    } else {
-      const chosen = people.filter((p) => picked.includes(p.userId));
-      const missing = chosen.filter((p) => !p.principalId).map((p) => p.userId);
-      const resolved = missing.length ? (await identityApi.resolve(missing)).people : [];
-      const principalIds = chosen.map((p) => p.principalId ?? resolved.find((r) => r.userId === p.userId)?.principalId).filter((id): id is string => !!id);
-      if (!principalIds.length || principalIds.length !== chosen.length) throw new Error("Some of the people you chose can't receive calls yet.");
-      target = { targetPrincipalIds: principalIds };
-    }
-    onStarted(await calling.startCall(kind, target));
-    setPicked([]); setExtension(""); setFilter("");
+  const principalsFor = async (userIds: string[]) => {
+    const chosen = people.filter((p) => userIds.includes(p.userId));
+    const missing = chosen.filter((p) => !p.principalId).map((p) => p.userId);
+    const resolved = missing.length ? (await identityApi.resolve(missing)).people : [];
+    const ids = chosen.map((p) => p.principalId ?? resolved.find((r) => r.userId === p.userId)?.principalId).filter((id): id is string => !!id);
+    if (!ids.length || ids.length !== chosen.length) throw new Error("Some of the people you chose can't receive calls yet.");
+    return ids;
+  };
+  const callContact = (contact: HubContact, kind: CallKind) => run(async () => {
+    const id = await calling.callContact(contact.contactId, kind, contact.alias || contact.displayName);
+    rememberCallName(id, contact.alias || contact.displayName);
+    onStarted(id);
   });
+  const callPeople = (userIds: string[], kind: CallKind, name?: string) => run(async () => {
+    const id = await calling.startCall(kind, { targetPrincipalIds: await principalsFor(userIds) }, name);
+    if (name) rememberCallName(id, name);
+    onStarted(id); setPicked([]); setGroupMode(false);
+  });
+  const callExtension = () => run(async () => { onStarted(await calling.startCall("VOICE", { targetExtension: extension.trim() })); setExtension(""); });
+
+  const iconBtn = "flex size-10 shrink-0 items-center justify-center rounded-full text-primary hover:bg-primary/10 disabled:opacity-30";
+  const action = "flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left hover:bg-muted/60";
+  const actionIcon = "flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground";
+  const callButtons = (onVoice: () => void, onVideo: () => void, name: string) => (
+    <>
+      <button type="button" aria-label={`Voice call ${name}`} title="Voice call" disabled={!canCall} onClick={onVoice} className={iconBtn}><Phone className="size-5" /></button>
+      <button type="button" aria-label={`Video call ${name}`} title="Video call" disabled={!canCall} onClick={onVideo} className={iconBtn}><Video className="size-5" /></button>
+    </>
+  );
 
   return (
-    <div className="mx-auto flex min-h-full max-w-2xl flex-col px-4 py-5 sm:px-8 sm:py-8">
-      <div className="mb-6 flex items-center gap-2">
-        <button type="button" onClick={onBack} aria-label="Back to calls" className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted md:hidden"><ArrowLeft className="size-5" /></button>
-        <h2 className="text-2xl font-bold tracking-tight">New call</h2>
+    <div className="mx-auto flex min-h-full max-w-2xl flex-col">
+      <div className="sticky top-0 z-10 space-y-3 bg-background px-4 pb-3 pt-4 sm:px-6">
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={onBack} aria-label="Back to calls" className="-ml-2 flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted md:hidden"><ArrowLeft className="size-5" /></button>
+          <div className="min-w-0">
+            <h2 className="text-xl font-bold tracking-tight">{groupMode ? "New group call" : "New call"}</h2>
+            {groupMode ? <p className="text-xs text-muted-foreground">{picked.length ? `${picked.length} selected` : "Choose who to call"}</p> : null}
+          </div>
+          {groupMode ? <button type="button" onClick={() => { setGroupMode(false); setPicked([]); }} className="ml-auto h-9 rounded-xl px-3 text-sm font-semibold text-primary hover:bg-primary/10">Cancel</button> : null}
+        </div>
+        <label className="flex h-11 items-center gap-2 rounded-xl bg-muted/70 px-3.5 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
+          <Search className="size-4 shrink-0" />
+          <input value={filter} placeholder="Search name" onChange={(e) => setFilter(e.target.value)} aria-label="Search people" className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
+        </label>
+        {calling.media ? <p className="text-xs text-muted-foreground">You&apos;re on a call. Hang up to start another.</p> : !calling.device.endpoint ? <p className="text-xs text-muted-foreground">This browser isn&apos;t connected for calls yet.</p> : null}
       </div>
 
-      {/* Speed dial: starred contacts, one tap (Teams favorites row). */}
-      {starred.length >= 0 && (
-        <section className="mb-6">
-          <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground"><Star className="size-3.5" />Speed dial</p>
-          <ul className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
-            {starred.map((contact) => {
-              const name = contact.alias || contact.displayName;
-              return (
-                <li key={contact.contactId} className="w-20 shrink-0">
-                  <Popover.Root>
-                    <Popover.Trigger asChild>
-                      <button type="button" disabled={!canCall} className="flex w-full flex-col items-center gap-1.5 rounded-2xl p-2 hover:bg-muted disabled:opacity-50">
-                        <Avatar name={name} seed={contact.contactId} size="size-14" className="text-lg" />
-                        <span className="w-full truncate text-center text-xs font-medium">{name.split(" ")[0]}</span>
-                      </button>
-                    </Popover.Trigger>
-                    <Popover.Portal>
-                      <Popover.Content sideOffset={4} className="z-50 flex gap-1 rounded-full border border-border bg-popover p-1 shadow-xl">
-                        <Popover.Close asChild><button type="button" aria-label={`Voice call ${name}`} onClick={() => void run(async () => { const id = await calling.callContact(contact.contactId, "VOICE"); rememberCallName(id, name); onStarted(id); })} className="flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-muted"><Phone className="size-4 text-emerald-600" />Voice</button></Popover.Close>
-                        <Popover.Close asChild><button type="button" aria-label={`Video call ${name}`} onClick={() => void run(async () => { const id = await calling.callContact(contact.contactId, "VIDEO"); rememberCallName(id, name); onStarted(id); })} className="flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-muted"><Video className="size-4 text-primary" />Video</button></Popover.Close>
-                      </Popover.Content>
-                    </Popover.Portal>
-                  </Popover.Root>
-                </li>
-              );
-            })}
-            <li className="w-20 shrink-0">
-              <Link href="/dashboard/contacts" className="flex w-full flex-col items-center gap-1.5 rounded-2xl p-2 hover:bg-muted">
-                <span className="flex size-14 items-center justify-center rounded-full border-2 border-dashed border-muted-foreground/30 text-muted-foreground"><Plus className="size-5" /></span>
-                <span className="text-xs font-medium text-muted-foreground">Add</span>
-              </Link>
-            </li>
-          </ul>
-        </section>
-      )}
-
-      <section className="flex flex-1 flex-col">
-        <div className="flex items-center gap-2">
-          <div role="tablist" className="flex flex-1 rounded-full bg-muted p-1">
-            {([["people", "People", Users], ["keypad", "Keypad", Grid3x3]] as const).map(([value, label, Icon]) => (
-              <button key={value} role="tab" type="button" aria-selected={mode === value} onClick={() => setMode(value)} className={cn("flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full text-sm font-medium", mode === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}><Icon className="size-4" />{label}</button>
-            ))}
-          </div>
-        </div>
-
-        {mode === "people" ? (
-          <>
-            <label className="mt-4 flex h-11 items-center gap-2 rounded-full bg-muted/60 px-4 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
-              <Search className="size-4 shrink-0" />
-              <input value={filter} placeholder="Search colleagues" onChange={(e) => setFilter(e.target.value)} aria-label="Search colleagues" className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
-            </label>
-            {picked.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {people.filter((p) => picked.includes(p.userId)).map((p) => (
-                  <button key={p.userId} type="button" onClick={() => toggle(p.userId)} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-primary/10 pl-1 pr-2.5 text-sm font-medium text-primary hover:bg-primary/15">
-                    <Avatar name={p.displayName} seed={p.userId} size="size-6" className="text-[10px]" />{p.displayName}<X className="size-3.5" />
-                  </button>
-                ))}
+      <div className="flex-1 px-2 pb-28 sm:px-4">
+        {!groupMode && !q ? (
+          <div className="pb-2">
+            <Link href="/dashboard/contacts?add=1" className={action}><span className={actionIcon}><UserPlus className="size-5" /></span><span className="font-medium">New contact</span></Link>
+            {people.length > 1 ? <button type="button" onClick={() => setGroupMode(true)} className={action}><span className={actionIcon}><Users className="size-5" /></span><span className="font-medium">New group call</span></button> : null}
+            <button type="button" onClick={() => setKeypad(!keypad)} aria-expanded={keypad} className={action}><span className={actionIcon}><Grid3x3 className="size-5" /></span><span className="font-medium">Call an extension</span></button>
+            {keypad ? (
+              <div className="mx-2 mb-2 flex flex-col items-center rounded-2xl bg-muted/40 p-4">
+                <div className="flex h-12 w-full max-w-xs items-center gap-2 border-b border-border">
+                  <input autoFocus value={extension} maxLength={32} placeholder="Extension" aria-label="Extension" onChange={(e) => setExtension(e.target.value.replace(/[^0-9*#]/g, ""))}
+                    className="min-w-0 flex-1 bg-transparent text-center text-2xl font-light tracking-[0.15em] tabular-nums outline-none placeholder:text-base placeholder:tracking-normal placeholder:text-muted-foreground" />
+                  {extension ? <button type="button" aria-label="Delete digit" onClick={() => setExtension(extension.slice(0, -1))} className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><Delete className="size-5" /></button> : null}
+                </div>
+                <div className="mt-3 grid w-full max-w-[15rem] grid-cols-3 place-items-center gap-y-2">
+                  {KEYS.map((k) => <button key={k} type="button" onClick={() => setExtension((e) => (e + k).slice(0, 32))} className="flex size-14 items-center justify-center rounded-full bg-background text-xl tabular-nums hover:bg-muted active:bg-primary/15">{k}</button>)}
+                </div>
+                <button type="button" disabled={!canCall || !extension.trim()} onClick={() => void callExtension()} aria-label="Call extension" className="mt-3 flex size-14 items-center justify-center rounded-full bg-[#1E8E3E] text-white hover:bg-[#188038] disabled:opacity-40">{busy ? <Spinner /> : <Phone className="size-6" />}</button>
               </div>
-            )}
-            <ul aria-label="Choose people to call" className="no-scrollbar mt-2 min-h-48 flex-1 overflow-y-auto">
-              {directory.isPending ? [0, 1, 2].map((i) => <li key={i} className="flex animate-pulse items-center gap-3 px-2 py-2"><span className="size-9 rounded-full bg-muted" /><span className="h-3.5 w-32 rounded-full bg-muted" /></li>) : null}
-              {directory.error ? <li className="px-2 py-4 text-sm text-muted-foreground">Colleagues couldn&apos;t load. <button className="font-semibold text-primary hover:underline" onClick={() => void directory.refetch()}>Try again</button></li> : null}
-              {!directory.isPending && !directory.error && !shown.length ? (
-                <li className="flex flex-col items-center px-4 py-10 text-center">
-                  {people.length ? <p className="text-sm text-muted-foreground">No one matches &quot;{filter}&quot;.</p> : (
-                    <>
-                      <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><Users className="size-5" /></span>
-                      <p className="mt-3 text-sm font-semibold">No colleagues to show</p>
-                      <p className="mt-1 max-w-xs text-sm text-muted-foreground">People in your organizations appear here. Call your contacts from speed dial above.</p>
-                      <Link href="/dashboard/contacts" className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold text-primary ring-1 ring-primary/30 hover:bg-primary/10"><UserPlus className="size-4" />Add a contact</Link>
-                    </>
-                  )}
-                </li>
-              ) : null}
-              {shown.map((person) => {
-                const on = picked.includes(person.userId);
+            ) : null}
+          </div>
+        ) : null}
+
+        {!groupMode && myContacts.length > 0 ? (
+          <section>
+            <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contacts</p>
+            <ul>
+              {myContacts.map((c) => {
+                const name = c.alias || c.displayName;
                 return (
-                  <li key={person.userId}>
-                    <label className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/60">
-                      <input type="checkbox" className="sr-only" checked={on} onChange={() => toggle(person.userId)} />
-                      <Avatar name={person.displayName} seed={person.userId} size="size-9" />
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{person.displayName}</span>
-                      <span className={cn("flex size-5 shrink-0 items-center justify-center rounded-full border", on ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40")}>{on && <Check className="size-3.5" strokeWidth={3} />}</span>
-                    </label>
+                  <li key={c.contactId} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/40">
+                    <Link href={`/dashboard/contacts?contact=${encodeURIComponent(c.contactId)}`} aria-label={`View ${name}'s contact info`} className="flex min-w-0 flex-1 items-center gap-3">
+                      <Avatar name={name} seed={c.contactId} size="size-11" />
+                      <span className="flex min-w-0 flex-1 items-center gap-1 truncate font-medium">{name}{c.favorite ? <Star className="size-3.5 shrink-0 fill-amber-400 text-amber-400" aria-label="Favorite" /> : null}</span>
+                    </Link>
+                    {callButtons(() => void callContact(c, "VOICE"), () => void callContact(c, "VIDEO"), name)}
                   </li>
                 );
               })}
             </ul>
-          </>
-        ) : (
-          <div className="flex flex-1 flex-col items-center pt-4">
-            <div className="flex h-14 w-full max-w-xs items-center gap-2 border-b border-border">
-              <input autoFocus value={extension} maxLength={32} placeholder="Extension" aria-label="Extension" onChange={(e) => setExtension(e.target.value.replace(/[^0-9*#]/g, ""))}
-                className="min-w-0 flex-1 bg-transparent text-center text-3xl font-light tracking-[0.15em] tabular-nums outline-none placeholder:text-xl placeholder:tracking-normal placeholder:text-muted-foreground" />
-              {extension ? <button type="button" aria-label="Delete digit" onClick={() => setExtension(extension.slice(0, -1))} className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><Delete className="size-5" /></button> : null}
-            </div>
-            <div className="mt-4 grid w-full max-w-[16rem] grid-cols-3 place-items-center gap-y-2">
-              {KEYS.map((k) => <button key={k} type="button" onClick={() => setExtension((e) => (e + k).slice(0, 32))} className="flex size-16 items-center justify-center rounded-full bg-muted/70 text-2xl font-light tabular-nums transition-colors hover:bg-muted active:bg-primary/15">{k}</button>)}
-            </div>
-          </div>
-        )}
+          </section>
+        ) : null}
 
-        <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
-          <div className="flex rounded-full bg-muted p-1">
-            {([["VOICE", "Voice", Phone], ["VIDEO", "Video", Video]] as const).map(([value, label, Icon]) => (
-              <button key={value} type="button" aria-pressed={kind === value} onClick={() => setKind(value)} className={cn("flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium", kind === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}><Icon className="size-4" />{label}</button>
-            ))}
+        {colleagues.length > 0 ? (
+          <section>
+            <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Colleagues</p>
+            <ul aria-label="Colleagues">
+              {colleagues.map((p) => {
+                const on = picked.includes(p.userId);
+                return (
+                  <li key={p.userId}>
+                    {groupMode ? (
+                      <label className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/40">
+                        <input type="checkbox" className="sr-only" checked={on} onChange={() => toggle(p.userId)} />
+                        <Avatar name={p.displayName} seed={p.userId} size="size-11" />
+                        <span className="min-w-0 flex-1 truncate font-medium">{p.displayName}</span>
+                        <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-full border-2", on ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40")}>{on && <Check className="size-3.5" strokeWidth={3} />}</span>
+                      </label>
+                    ) : (
+                      <div className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/40">
+                        <Avatar name={p.displayName} seed={p.userId} size="size-11" />
+                        <span className="min-w-0 flex-1 truncate font-medium">{p.displayName}</span>
+                        {callButtons(() => void callPeople([p.userId], "VOICE", p.displayName), () => void callPeople([p.userId], "VIDEO", p.displayName), p.displayName)}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
+
+        {contacts.isPending || directory.isPending ? [0, 1, 2].map((i) => <div key={i} className="flex animate-pulse items-center gap-3 px-2 py-2"><span className="size-11 rounded-full bg-muted" /><span className="h-3.5 w-32 rounded-full bg-muted" /></div>) : null}
+        {!contacts.isPending && !directory.isPending && !myContacts.length && !colleagues.length ? (
+          <div className="flex flex-col items-center px-6 py-12 text-center">
+            <span className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground"><Users className="size-5" /></span>
+            <p className="mt-3 font-semibold">{q ? `No one matches "${filter}"` : "No one to call yet"}</p>
+            <p className="mt-1 max-w-xs text-sm text-muted-foreground">{q ? "Try another name." : "Add a contact with their CF Meet ID, then call them from here."}</p>
           </div>
-          <button type="button" disabled={!canSubmit} onClick={() => void submit()} className="ml-auto inline-flex h-11 items-center gap-2 rounded-full bg-emerald-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-40">
-            {busy ? <Spinner /> : picked.length > 1 && mode === "people" ? <Users className="size-4" /> : kind === "VIDEO" ? <Video className="size-4" /> : <Phone className="size-4" />}
-            {mode === "people" && picked.length > 1 ? `Call ${picked.length} people` : "Call"}
-          </button>
+        ) : null}
+      </div>
+
+      {groupMode && picked.length > 0 ? (
+        <div className="sticky bottom-0 flex items-center justify-center gap-4 border-t border-border bg-background/95 px-4 py-4 backdrop-blur">
+          <button type="button" disabled={!canCall} onClick={() => void callPeople(picked, "VOICE")} className="inline-flex h-12 items-center gap-2 rounded-xl bg-[#1E8E3E] px-6 text-sm font-semibold text-white hover:bg-[#188038] disabled:opacity-40">{busy ? <Spinner /> : <Phone className="size-5" />}Voice call</button>
+          <button type="button" disabled={!canCall} onClick={() => void callPeople(picked, "VIDEO")} className="inline-flex h-12 items-center gap-2 rounded-xl bg-primary px-6 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40"><Video className="size-5" />Video call</button>
         </div>
-        {calling.media ? <p className="mt-2 text-xs text-muted-foreground">You&apos;re on a call. Hang up to start another.</p> : !calling.device.endpoint ? <p className="mt-2 text-xs text-muted-foreground">Connect this browser to make calls.</p> : null}
-      </section>
+      ) : null}
     </div>
   );
 }
@@ -436,6 +443,19 @@ function RoundControl({ label, onClick, disabled, children, tone = "default" }: 
         tone === "danger" ? "bg-destructive text-white group-hover:bg-destructive/90" : tone === "go" ? "bg-emerald-600 text-white group-hover:bg-emerald-700" : "bg-muted text-foreground group-hover:bg-muted/70")}>{children}</span>
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
     </button>
+  );
+}
+
+/** "Started from a chat" with a link back to it (Communications call context). Hidden when unknown. */
+function CallOrigin({ callId }: { callId: string }) {
+  const ctx = useQuery({ queryKey: ["call-context", callId], queryFn: () => communicationsService.callContext(callId), retry: false, staleTime: 60_000 });
+  const c = ctx.data;
+  if (!c || c.origin === "CALLING") return null;
+  return (
+    <div className="mt-6 flex w-full max-w-sm items-center gap-3 rounded-2xl border border-border px-4 py-3 text-left text-sm">
+      <span className="min-w-0 flex-1 text-muted-foreground">{c.origin === "CONVERSATION" ? "Started from a chat" : "Started from Contacts"}</span>
+      {c.conversationId && c.actions?.openConversation ? <Link href={`/dashboard/messages?conversation=${encodeURIComponent(c.conversationId)}`} className="shrink-0 font-semibold text-primary hover:underline">Open chat</Link> : null}
+    </div>
   );
 }
 
@@ -553,7 +573,9 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
           </form>
         ) : null}
 
-        {mine && live ? <div className="mt-6 w-full max-w-sm text-left"><CallRecordingControls callId={callId} participantId={mine.participantId} endpointId={session ? endpointId : null} live={live} /></div> : null}
+        {mine && live && data.canViewRecordings ? <div className="mt-6 w-full max-w-sm text-left"><CallRecordingControls callId={callId} participantId={mine.participantId} endpointId={session ? endpointId : null} live={live} /></div> : null}
+
+        <CallOrigin callId={callId} />
 
         {/* People in the call */}
         <section className="mt-8 w-full max-w-sm text-left">

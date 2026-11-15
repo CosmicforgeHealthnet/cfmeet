@@ -9,14 +9,17 @@
  * Layout: one full-height surface (WhatsApp Web / Teams): chat list on the left, the open
  * chat on the right; on phones the list and the chat are separate screens.
  */
+import SavedMessages, { SAVED_KEY } from "./SavedMessages";
+import ChatInfoExtras from "./ChatInfoExtras";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BellOff, Check, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
+  ArrowLeft, BellOff, Check, Star, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
   MoreHorizontal, Paperclip, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X,
+  UserPlus,
 } from "lucide-react";
 import { Popover } from "radix-ui";
 
@@ -245,6 +248,11 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
               No other device with you? Email me a code
             </button>
           ) : null}
+          {s.accountLink ? (
+            <button type="button" className="ml-3 mt-1 text-xs font-semibold text-muted-foreground underline-offset-2 hover:underline" onClick={() => void run(() => engine.cancelLink())}>
+              Cancel
+            </button>
+          ) : null}
           {s.accountLink?.emailCodeSent ? (
             <form className="mt-2 flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); void run(async () => { await engine.completeLinkWithEmailCode(emailCode); setEmailCode(""); }); }}>
               <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" aria-label="Code from the email" data-testid="link-email-code-input"
@@ -405,6 +413,14 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
           )}
         </div>
         <ul className="no-scrollbar mt-2 max-h-64 overflow-y-auto px-3">
+          {!search ? (
+            <li>
+              <Link href="/dashboard/contacts?add=1" onClick={close} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/60">
+                <span className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground"><UserPlus className="size-4" /></span>
+                <span className="text-sm font-semibold">New contact</span>
+              </Link>
+            </li>
+          ) : null}
           {picker.pending ? <li className="flex items-center gap-2 px-2 py-4 text-sm text-muted-foreground"><Spinner /> Loading…</li>
             : picker.error ? <li role="alert" className="px-2 py-4 text-sm text-destructive">{messagingErrorMessage(picker.error)} <button className="underline" onClick={picker.retry}>Retry</button></li>
               : picker.people.length === 0 ? <li className="px-2 py-6 text-center text-sm text-muted-foreground">{search ? "No one matches." : "No one to message yet."}</li> : null}
@@ -447,6 +463,23 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
   );
 }
 
+/** "last seen today at 10:02" / "yesterday at …" / "12 Nov at …" (WhatsApp wording). */
+function lastSeenText(iso: string) {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const day = new Date(); day.setHours(0, 0, 0, 0);
+  const diff = Math.floor((day.getTime() - new Date(d).setHours(0, 0, 0, 0)) / 86_400_000);
+  if (diff <= 0) return `last seen today at ${time}`;
+  if (diff === 1) return `last seen yesterday at ${time}`;
+  return `last seen ${d.toLocaleDateString([], { day: "numeric", month: "short" })} at ${time}`;
+}
+
+/** WhatsApp ticks: one = sent, two = delivered, two coloured = read. */
+function Ticks({ receipt }: { receipt: "sent" | "delivered" | "read" }) {
+  if (receipt === "sent") return <Check className="size-4" aria-label="Sent" />;
+  return <CheckCheck className={cn("size-4", receipt === "read" && "text-[#5EEAD4] dark:text-[#0E7490]")} aria-label={receipt === "read" ? "Read" : "Delivered"} />;
+}
+
 /* ─── Message bubble ──────────────────────────────────────────────────── */
 
 type BubbleActions = {
@@ -455,6 +488,9 @@ type BubbleActions = {
   edit: (text: string) => Promise<void>;
   remove: (scope: "EVERYONE" | "ME") => void;
   pin: (pinned: boolean) => void;
+  /** Star / unstar (saved messages, WhatsApp). */
+  star: () => void;
+  starred: boolean;
   retry: () => void;
   discard: () => void;
 };
@@ -518,7 +554,7 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
             {m.note ? <p className="text-xs italic opacity-80" data-testid="message-note">{m.note}</p> : null}
             <p className={cn("mt-0.5 flex items-center justify-end gap-1 text-[11px] tabular-nums", mine ? "text-primary-foreground/70" : "text-muted-foreground")}>
               {m.editCount ? "edited · " : ""}{m.transferred ? "recovered · " : ""}{status}
-              {mine && (m.state === "sent" || m.state === "delivered") ? (m.seenBy?.length ? <CheckCheck className="size-3.5" aria-label="Seen" /> : <Check className="size-3.5" aria-label="Sent" />) : null}
+              {mine && (m.state === "sent" || m.state === "delivered") ? <Ticks receipt={m.seenBy?.length ? "read" : m.receipt ?? "sent"} /> : null}
             </p>
           </div>
 
@@ -542,6 +578,7 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
                       {QUICK_REACTIONS.map((r) => <button key={r} type="button" aria-label={`React ${r}`} onClick={() => { actions.react(r, !(m.reactions ?? []).some((x) => x.reaction === r && x.reactedByMe)); setMenu(false); }} className="flex size-7 items-center justify-center rounded-full text-base hover:bg-muted">{r}</button>)}
                     </div>
                     <button type="button" className={item} data-testid="reply" onClick={() => { actions.reply(); setMenu(false); }}><CornerUpLeft className="size-4 text-muted-foreground" />Reply</button>
+                    <button type="button" className={item} data-testid="star" onClick={() => { actions.star(); setMenu(false); }}><Star className={cn("size-4", actions.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />{actions.starred ? "Unstar" : "Star"}</button>
                     <button type="button" className={item} data-testid="pin" onClick={() => { actions.pin(!m.pinned); setMenu(false); }}>{m.pinned ? <PinOff className="size-4 text-muted-foreground" /> : <Pin className="size-4 text-muted-foreground" />}{m.pinned ? "Unpin" : "Pin"}</button>
                     {mine && m.text !== null ? <button type="button" className={item} data-testid="edit" onClick={() => { setEditing(m.text ?? ""); setMenu(false); }}><Pencil className="size-4 text-muted-foreground" />Edit</button> : null}
                     <button type="button" className={item} data-testid="hide" onClick={() => { actions.remove("ME"); setMenu(false); }}><EyeOff className="size-4 text-muted-foreground" />Delete for me</button>
@@ -644,6 +681,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
           </form>
         ) : null}
         {shareEnabled ? <ShareMeeting engine={engine} conversation={conversation} /> : null}
+        <ChatInfoExtras conversationId={conversation.id} direct={!isGroup} groupTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? null} />
         <section>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{conversation.members.length} {conversation.members.length === 1 ? "member" : "members"}</p>
           <ul className="space-y-1">
@@ -757,6 +795,12 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   const composer = useRef<HTMLTextAreaElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const messages = useMemo(() => s.messages[conversation.id] ?? [], [s.messages, conversation.id]);
+  // "online" / "last seen" for a one-to-one chat (WhatsApp); groups keep the security badge.
+  useEffect(() => { engine.watchPresence(conversation.id); return () => engine.watchPresence(null); }, [engine, conversation.id]);
+  const others = Object.values(s.presence[conversation.id] ?? {});
+  const presenceText = conversation.contextClass === "GROUP" || others.length !== 1 ? null
+    : others[0].online ? "online"
+    : others[0].lastSeenAt ? lastSeenText(others[0].lastSeenAt) : null;
   const e2ee = conversation.securityProfile === "PRIVATE_E2EE";
   const managed = conversation.securityProfile === "MANAGED";
   const canSend = !!s.identity && (!e2ee || (s.phase === "ready" && conversation.groupReady));
@@ -808,12 +852,21 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     [engine, conversation.id],
   );
   const fail = (cause: unknown) => setError(messagingErrorMessage(cause));
+  const queryClient = useQueryClient();
+  const saved = useQuery({ queryKey: SAVED_KEY, queryFn: () => hub.savedMessages(), retry: false, staleTime: 30_000 });
+  const savedIds = useMemo(() => new Map((saved.data?.data ?? []).map((x) => [x.messageId, x.savedId])), [saved.data]);
   const bubbleActions = (m: MessageView): BubbleActions => ({
     reply: () => { setReplyTo(m); composer.current?.focus(); },
     react: (reaction, add) => { if (m.messageId) void engine.react(conversation.id, m.messageId, reaction, add).catch(fail); },
     edit: async (t) => { if (m.messageId && t.trim()) await engine.editMessage(conversation.id, m.messageId, t).catch(fail); },
     remove: (scope) => { if (m.messageId) void engine.deleteMessage(conversation.id, m.messageId, scope).catch(fail); },
     pin: (pinned) => { if (m.messageId) void engine.pin(conversation.id, m.messageId, pinned).catch(fail); },
+    starred: !!(m.messageId && savedIds.has(m.messageId)),
+    star: () => {
+      if (!m.messageId) return;
+      const savedId = savedIds.get(m.messageId);
+      void (savedId ? hub.unsaveMessage(savedId) : hub.saveMessage(conversation.id, m.messageId)).then(() => queryClient.invalidateQueries({ queryKey: SAVED_KEY })).catch(fail);
+    },
     retry: () => { if (m.outboxKey) engine.retrySend(m.outboxKey); },
     discard: () => { if (m.outboxKey) engine.discardSend(m.outboxKey); },
   });
@@ -860,7 +913,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
             <Avatar name={title} seed={conversation.id} size="size-10" />
             <span className="min-w-0">
               <span className="block truncate font-semibold" data-testid="conversation-title">{title}</span>
-              <span className="block truncate">{typing.length ? <span className="text-xs font-medium text-primary">{typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…</span> : <ProfileBadge profile={conversation.securityProfile} />}</span>
+              <span className="block truncate">{typing.length ? <span className="text-xs font-medium text-primary">{typing.join(", ")} {typing.length === 1 ? "is" : "are"} typing…</span> : presenceText ? <span className={cn("text-xs", presenceText === "online" ? "font-medium text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")} data-testid="presence">{presenceText}</span> : <ProfileBadge profile={conversation.securityProfile} />}</span>
             </span>
           </button>
           <div className="flex shrink-0 items-center">
@@ -1009,6 +1062,7 @@ function PersonalMessages() {
   const [filter, setFilter] = useState<ListFilter>("ALL");
   const [securityOpen, setSecurityOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [starredOpen, setStarredOpen] = useState(false);
   const capabilities = useHubCapabilities();
   const areas = communicationsAreas(capabilities.data);
   const inbox = useHubInbox(areas.contacts || areas.managedMessaging);
@@ -1056,7 +1110,8 @@ function PersonalMessages() {
                 {s.phase === "ready" ? (
                   <button type="button" aria-label="Security and devices" title="Security and devices" onClick={() => setSecurityOpen(true)} aria-expanded={securityOpen} aria-controls="device-security-settings" data-testid="device-settings-toggle" className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><ShieldCheck className="size-5" /></button>
                 ) : null}
-                <button type="button" aria-label="New chat" title="New chat" data-testid="new-conversation" disabled={!s.identity} onClick={() => setComposeOpen(true)} className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-40"><MessageSquarePlus className="size-5" /></button>
+                <button type="button" aria-label="Starred messages" title="Starred messages" onClick={() => setStarredOpen(true)} className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><Star className="size-5" /></button>
+                <button type="button" aria-label="New chat" title="New chat" data-testid="new-conversation" disabled={!s.identity} onClick={() => setComposeOpen(true)} className="hidden size-10 items-center justify-center rounded-full bg-primary/10 text-primary hover:bg-primary/15 disabled:opacity-40 md:flex"><MessageSquarePlus className="size-5" /></button>
               </div>
             </div>
             <label className="flex h-10 items-center gap-2 rounded-full bg-muted px-3.5 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
@@ -1137,6 +1192,11 @@ function PersonalMessages() {
               </li>
             ) : null}
           </ul>
+          {/* WhatsApp-style floating "new chat" button on phones. */}
+          <button type="button" aria-label="New chat" title="New chat" disabled={!s.identity} onClick={() => setComposeOpen(true)}
+            className="fixed bottom-24 right-4 z-30 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl shadow-primary/30 hover:bg-primary/90 disabled:opacity-40 md:hidden">
+            <MessageSquarePlus className="size-6" />
+          </button>
         </aside>
         <main className={cn("min-w-0 min-h-0 flex-1", !current && "hidden md:flex md:items-center md:justify-center")} data-testid="conversation-pane">
           {current ? (
@@ -1158,6 +1218,9 @@ function PersonalMessages() {
       {s.phase === "error" ? <p className="border-t border-border px-4 py-2 text-sm text-destructive" data-testid="messaging-error">Messaging error: {s.detail}</p> : null}
 
       <NewConversation engine={engine} onCreated={setSelected} open={composeOpen} setOpen={setComposeOpen} />
+      <SavedMessages open={starredOpen} onOpenChange={setStarredOpen} onOpenChat={setSelected}
+        chatTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? "Chat"}
+        messageText={(id, messageId) => s.messages[id]?.find((m) => m.messageId === messageId)?.text ?? null} />
 
       {/* Security & devices: a sheet that stays mounted while closed so a history transfer keeps its state. */}
       <div id="device-security-settings" hidden={!securityOpen} className="fixed inset-0 z-50">

@@ -356,7 +356,7 @@ function TimeGrid({ dates, byDate, zone, today, loading, onSelect, onPickDay, hi
         <div className="relative flex" style={{ height: 24 * HOUR }}>
           <div className="relative w-16 shrink-0">
             {Array.from({ length: 23 }, (_, i) => i + 1).map((h) => <span key={h} className={cn("absolute right-3 -translate-y-1/2 text-[11px] tabular-nums text-muted-foreground/80", dates.includes(today) && Math.abs(h * 60 - minute) < 15 && "opacity-0")} style={{ top: h * HOUR }}>{hourLabel(h)}</span>)}
-            {dates.includes(today) && <span className="absolute right-1.5 z-20 -translate-y-1/2 rounded-full bg-red-500 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white" style={{ top: (minute / 60) * HOUR }}>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: zone }).format(new Date())}</span>}
+            {dates.includes(today) && <span className="absolute right-1 z-20 -translate-y-1/2 whitespace-nowrap rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums text-white sm:right-1.5 sm:text-[11px]" style={{ top: (minute / 60) * HOUR }}>{new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: zone }).formatToParts(new Date()).filter((p) => p.type !== "dayPeriod").map((p) => p.value).join("").trim()}</span>}
           </div>
           <div className="relative flex flex-1">
             {/* Hour lines span all days, starting just right of the labels (Google). */}

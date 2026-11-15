@@ -265,6 +265,20 @@ export function useDismissQuestion(conferenceId: string) {
 /**
  * Archive a question
  */
+export function useRestoreQuestion(conferenceId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (questionId: string) =>
+      engagementService.restoreQuestion(conferenceId, questionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: engagementKeys.questions(conferenceId),
+      });
+    },
+  });
+}
+
 export function useArchiveQuestion(conferenceId: string) {
   const queryClient = useQueryClient();
 

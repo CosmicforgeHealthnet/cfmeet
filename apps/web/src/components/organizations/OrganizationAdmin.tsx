@@ -1,5 +1,6 @@
 "use client";
 
+import OrganizationTeams from "./OrganizationTeams";
 import { useState } from "react";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
@@ -23,11 +24,12 @@ import OrganizationSettings from "./OrganizationSettings";
 import OrganizationAudit from "./OrganizationAudit";
 import { ORGANIZATION_CALLING_CAPABILITY, OrganizationCallingPanel } from "@/components/calling/OrganizationCallingAdmin";
 
-type Tab = "overview" | "members" | "invitations" | "settings" | "audit" | "calling";
+type Tab = "overview" | "members" | "teams" | "invitations" | "settings" | "audit" | "calling";
 
 const TABS: Array<{ id: Tab; label: string; visible: (s: OrganizationSections) => boolean }> = [
   { id: "overview", label: "Overview", visible: (s) => s.overview },
   { id: "members", label: "Members", visible: (s) => s.overview },
+  { id: "teams", label: "Teams", visible: (s) => s.overview },
   { id: "invitations", label: "Invitations", visible: (s) => s.invitations },
   { id: "settings", label: "Settings", visible: (s) => s.settings || s.lifecycle || s.ownership },
   { id: "audit", label: "Audit log", visible: (s) => s.audit },
@@ -100,6 +102,7 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
       <div className="mt-6">
       {active === "overview" && <Overview org={data} />}
       {active === "members" && <OrganizationMembers org={data} />}
+      {active === "teams" && <OrganizationTeams org={data} />}
       {active === "invitations" && <OrganizationInvitations org={data} />}
       {active === "settings" && <OrganizationSettings org={data} />}
       {active === "audit" && <OrganizationAudit organizationId={data.id} />}

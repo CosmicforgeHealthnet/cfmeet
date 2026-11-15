@@ -2,15 +2,18 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Search } from "lucide-react";
 import { OPEN_COMMANDS_EVENT } from "./CommandPalette";
 
 /** Signed-in header: the search / command bar, centred (Gmail / Teams pattern). */
 export default function TopBar() {
   const openCommands = () => window.dispatchEvent(new Event(OPEN_COMMANDS_EVENT));
+  // Phones (app-style): the header only on Home; every other screen has its own title row.
+  const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:px-6">
+    <header className={`sticky top-0 z-30 h-16 shrink-0 items-center gap-3 border-b border-border bg-background/85 px-4 backdrop-blur-md sm:px-6 ${pathname === "/dashboard" ? "flex" : "hidden md:flex"}`}>
       <Link href="/dashboard" aria-label="CF Meet home" className="md:hidden">
         <Image src="/CFLogo.png" alt="CF Meet" width={32} height={32} className="size-8 object-contain" />
       </Link>

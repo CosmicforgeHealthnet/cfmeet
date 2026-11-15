@@ -161,7 +161,7 @@ export default function MeetingsContent() {
                 setPage(1);
               }}
               placeholder="Search by name or code"
-              className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary"
+              className="h-10 w-full rounded-xl border-0 bg-muted/70 pl-9 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
             />
           </label>
         </div>
