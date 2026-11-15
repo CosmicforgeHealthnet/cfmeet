@@ -58,6 +58,8 @@ export interface AccountDeviceApi {
   pendingLinks(): Promise<{ links: LinkView[] }>;
   approveLink(linkId: string, body: unknown): Promise<LinkView>;
   rejectLink(linkId: string): Promise<LinkView>;
+  /** Emails a step-up code for this browser's own link (no trusted device at hand). */
+  emailCode(linkId: string): Promise<LinkView>;
 }
 
 export interface AccountDeviceDeps {
@@ -102,6 +104,8 @@ export const accountOf = (token: string) => claim(token, "sub");
 export function createAccountDevice(deps: AccountDeviceDeps) {
   const now = deps.now ?? (() => Date.now());
   const cache = new Map<string, StoredAccountDevice>();
+  /** One declaration per sign-in at a time (sign-in and Messaging may both ask). */
+  const declaring = new Map<string, Promise<DeviceView | null>>();
 
   async function thumbprint(publicKey: Uint8Array): Promise<string> {
     const digest = new Uint8Array(await deps.subtle.digest("SHA-256", publicKey as BufferSource));
@@ -169,7 +173,17 @@ export function createAccountDevice(deps: AccountDeviceDeps) {
      * Binds the sign-in of `accessToken` to this browser's device of that account
      * (idempotent per sign-in). Must run within a few minutes of signing in.
      */
-    async declare(accessToken: string, label = "CF Meet web browser"): Promise<DeviceView | null> {
+    declare(accessToken: string, label = "CF Meet web browser"): Promise<DeviceView | null> {
+      const sid = sessionIdOf(accessToken);
+      if (!sid) return Promise.resolve(null);
+      const inflight = declaring.get(sid);
+      if (inflight) return inflight;
+      const run = this.declareOnce(accessToken, label).finally(() => declaring.delete(sid));
+      declaring.set(sid, run);
+      return run;
+    },
+
+    async declareOnce(accessToken: string, label: string): Promise<DeviceView | null> {
       const account = accountOf(accessToken);
       const sid = sessionIdOf(accessToken);
       if (!account || !sid) return null;
@@ -218,6 +232,9 @@ export function createAccountDevice(deps: AccountDeviceDeps) {
     },
 
     rejectLink: (linkId: string) => deps.api.rejectLink(linkId),
+
+    /** Web-only recovery: email a step-up code for this browser's pending link. */
+    sendEmailCode: (linkId: string) => deps.api.emailCode(linkId),
   };
 }
 

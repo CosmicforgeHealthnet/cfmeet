@@ -22,7 +22,7 @@ outside; their state is stated as such.
 |---|---|---|---|---|
 | `NEXT_PUBLIC_API_URL` | public | `https://api.cfmeet.com/api/v1` | **correct** (in bundle) | none |
 | `NEXT_PUBLIC_CALLING_API_URL` | public | `https://api.cfmeet.com` | **correct** (in bundle and CSP) | none |
-| `NEXT_PUBLIC_MESSAGING_URL` | public | `https://api.cfmeet.com` | **missing** (left as an unresolved `process.env` reference) | set, redeploy |
+| `NEXT_PUBLIC_MESSAGING_URL` | public | `https://api.cfmeet.com` (optional since 2026-11-15) | was **missing**, which left live updates off ("Live updates unavailable") | none required: when unset, the web app now uses the API origin (`NEXT_PUBLIC_API_URL`), where production serves `/v1/realtime`. Setting it explicitly is still supported |
 | `NEXT_PUBLIC_DEVELOPER_PLATFORM_ENABLED` | public | `true` | **missing** (`/developers` shows "switched off") | set, redeploy |
 | `NEXT_PUBLIC_DEVELOPER_API_BASE_URL` | public | `https://api.cfmeet.com` | **missing** | set, redeploy |
 | `NEXT_PUBLIC_MESSAGING_STORAGE_URL`, `NEXT_PUBLIC_MESSAGING_KT_LOG_ID`, `NEXT_PUBLIC_MESSAGING_KT_LOG_KEY`, `NEXT_PUBLIC_MESSAGING_POLL_MS`, `NEXT_PUBLIC_MESSAGING_DEVICE_CHECK_MS` | public, optional | leave unset (defaults) | unset | none |

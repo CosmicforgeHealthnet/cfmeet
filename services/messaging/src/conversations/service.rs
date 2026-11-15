@@ -635,18 +635,23 @@ async fn create_in(
                 "E2EE_DEVICES_DISABLED",
             ));
         }
-        for (principal, reason) in std::iter::once((acting.principal_id, "CREATOR_HAS_NO_DEVICE"))
-            .chain(counterpart.map(|p| (p, "COUNTERPART_HAS_NO_DEVICE")))
-        {
-            let devices = db::scalar_i64(
-                txn,
-                "SELECT count(*) FROM messaging_devices WHERE environment_id = $1 AND principal_id = $2 AND status = 'ACTIVE'",
-                vec![env.into(), principal.into()],
-            )
-            .await?;
-            if devices == 0 {
-                return Err(Error::reason(ErrorCode::E2eeNotAvailable, reason));
-            }
+        // The creator's device builds the MLS group, so it must exist. A counterpart without
+        // a device yet does NOT block the chat: the conversation is PRIVATE_E2EE from the
+        // start and stays pending setup; the counterpart's devices are added to the group by
+        // a member device once they enroll, and no message is encrypted for nobody (clients
+        // hold them sealed until then). Never a MANAGED conversation instead, never a
+        // server-generated key.
+        let devices = db::scalar_i64(
+            txn,
+            "SELECT count(*) FROM messaging_devices WHERE environment_id = $1 AND principal_id = $2 AND status = 'ACTIVE'",
+            vec![env.into(), acting.principal_id.into()],
+        )
+        .await?;
+        if devices == 0 {
+            return Err(Error::reason(
+                ErrorCode::E2eeNotAvailable,
+                "CREATOR_HAS_NO_DEVICE",
+            ));
         }
     }
     let expires_at = match (request.expires_at, context_policy.max_lifetime_seconds) {

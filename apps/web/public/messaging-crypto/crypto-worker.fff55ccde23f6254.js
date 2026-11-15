@@ -113,6 +113,9 @@ async function unseal(key, aad, sealed) {
 const recordAad = (account, conv, seq) => `cfmeet-msg-record:v1:${account}:${conv}:${seq}`;
 const deviceAad = (account) => `cfmeet-msg-device:v1:${account}`;
 const pendingAad = (account, cmid) => `cfmeet-msg-pending:v1:${account}:${cmid}`;
+const draftAad = (account, conv, cmid) => `cfmeet-msg-draft:v1:${account}:${conv}:${cmid}`;
+/** Drafts live in the `pending` store under the account (wipe() erases them with it). */
+const draftKey = (account, conv, cmid) => [account, `draft:${conv}:${cmid}`];
 
 // ----------------------------------------------------------------- state
 
@@ -593,6 +596,56 @@ const ops = {
     }
     await persistDevice(puts);
     return { records: n, conversations: Object.keys(archive.conversations).length };
+  },
+
+  /**
+   * A message written while no other member of an encrypted conversation has a device yet
+   * ("pending setup"). Kept sealed at rest (never in the clear, never sent) until the
+   * conversation can encrypt it for a recipient device; then sent and dropped.
+   */
+  async holdDraft({ conversationId, clientMessageId, text, createdAt }) {
+    requireDevice();
+    uuid(conversationId);
+    uuid(clientMessageId);
+    if (typeof text !== "string" || text.length < 1 || text.length > MAX_TEXT) fail("TEXT_INVALID");
+    const value = { text, createdAt: typeof createdAt === "string" ? createdAt.slice(0, 40) : new Date().toISOString() };
+    const sealed = await seal(ctx.key, draftAad(ctx.account, conversationId, clientMessageId), enc.encode(JSON.stringify(value)));
+    const d = await db();
+    const tx = d.transaction("pending", "readwrite");
+    tx.objectStore("pending").put(sealed, draftKey(ctx.account, conversationId, clientMessageId));
+    await done(tx);
+    return true;
+  },
+
+  /** The held drafts of a conversation, oldest first. */
+  async drafts({ conversationId }) {
+    requireDevice();
+    uuid(conversationId);
+    const prefix = `draft:${conversationId}:`;
+    const d = await db();
+    const store = d.transaction("pending").objectStore("pending");
+    const range = IDBKeyRange.bound([ctx.account, prefix], [ctx.account, prefix + "\uffff"]);
+    const keys = await req(store.getAllKeys(range));
+    const values = await req(store.getAll(range));
+    const out = [];
+    for (let i = 0; i < keys.length; i++) {
+      const cmid = keys[i][1].slice(prefix.length);
+      const plain = await unseal(ctx.key, draftAad(ctx.account, conversationId, cmid), values[i]);
+      const v = JSON.parse(dec.decode(plain));
+      out.push({ clientMessageId: cmid, text: v.text, createdAt: v.createdAt });
+    }
+    return out.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  },
+
+  async dropDraft({ conversationId, clientMessageId }) {
+    requireDevice();
+    uuid(conversationId);
+    uuid(clientMessageId);
+    const d = await db();
+    const tx = d.transaction("pending", "readwrite");
+    tx.objectStore("pending").delete(draftKey(ctx.account, conversationId, clientMessageId));
+    await done(tx);
+    return true;
   },
 
   /** Logout / revocation: everything of the account in this browser is erased. */

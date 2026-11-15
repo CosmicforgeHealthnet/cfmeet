@@ -836,7 +836,9 @@ async fn unclassified_sign_ins_keep_working_and_never_count() {
     assert_eq!(code(&v), "DEVICE_DECLARATION_REFUSED", "{v}");
     // Compatibility mode (no enforcement date): the old sign-in still works.
     assert_eq!(
-        app.get("/api/v1/users/me", Auth::Bearer(&old_access)).await.0,
+        app.get("/api/v1/users/me", Auth::Bearer(&old_access))
+            .await
+            .0,
         StatusCode::OK
     );
 }
@@ -912,7 +914,9 @@ async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_device
     // The old phone also holds a legacy sign-in (an app version without the device flow).
     let (legacy_access, legacy_refresh, legacy_session) = legacy_sign_in(&app, &e).await;
     assert_eq!(
-        app.get("/api/v1/users/me", Auth::Bearer(&legacy_access)).await.0,
+        app.get("/api/v1/users/me", Auth::Bearer(&legacy_access))
+            .await
+            .0,
         StatusCode::OK
     );
 
@@ -926,7 +930,9 @@ async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_device
 
     assert_eq!(me(&app, &phone_a).await, StatusCode::UNAUTHORIZED);
     assert_eq!(
-        app.get("/api/v1/users/me", Auth::Bearer(&legacy_access)).await.0,
+        app.get("/api/v1/users/me", Auth::Bearer(&legacy_access))
+            .await
+            .0,
         StatusCode::UNAUTHORIZED,
         "the legacy sign-in ends with the replacement"
     );
@@ -991,18 +997,27 @@ async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_device
 #[tokio::test]
 async fn declaration_enforcement_ends_legacy_sign_ins_after_the_owner_date() {
     let base = app_with_redis!();
-    let future = base.with_auth_env(&[("ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM", "2999-01-01T00:00:00Z")]);
+    let future = base.with_auth_env(&[(
+        "ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM",
+        "2999-01-01T00:00:00Z",
+    )]);
     let e = email();
     password_user(&future, &e).await;
     let (fresh, _, _) = legacy_sign_in(&future, &e).await;
     let old_access = aged_access_token(&future, &fresh, 3600).await;
     assert_eq!(
-        future.get("/api/v1/users/me", Auth::Bearer(&old_access)).await.0,
+        future
+            .get("/api/v1/users/me", Auth::Bearer(&old_access))
+            .await
+            .0,
         StatusCode::OK,
         "a future enforcement date changes nothing yet"
     );
 
-    let app = future.with_auth_env(&[("ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM", "2020-01-01T00:00:00Z")]);
+    let app = future.with_auth_env(&[(
+        "ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM",
+        "2020-01-01T00:00:00Z",
+    )]);
     let mut web = Device::web();
     assert_eq!(sign_in(&app, &e, &mut web).await.0, StatusCode::OK);
     let mut phone = Device::mobile("ANDROID");
@@ -1015,19 +1030,28 @@ async fn declaration_enforcement_ends_legacy_sign_ins_after_the_owner_date() {
     assert_eq!(code(&v), "DEVICE_DECLARATION_REQUIRED", "{v}");
     let (acc2, refresh2, s2) = legacy_sign_in(&app, &e).await;
     // Within the window an undeclared sign-in still works (it can declare now) ...
-    assert_eq!(app.get("/api/v1/users/me", Auth::Bearer(&acc2)).await.0, StatusCode::OK);
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&acc2)).await.0,
+        StatusCode::OK
+    );
     // ... but once the window passes without a declaration it has no authority.
     let acc2 = aged_access_token(&app, &acc2, 3600).await;
     let _ = s2;
     let (s, v) = app.get("/api/v1/users/me", Auth::Bearer(&acc2)).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
     let (s, v) = app
-        .post("/api/v1/auth/refresh", Auth::None, json!({ "refresh_token": refresh2 }))
+        .post(
+            "/api/v1/auth/refresh",
+            Auth::None,
+            json!({ "refresh_token": refresh2 }),
+        )
         .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
     assert_eq!(code(&v), "DEVICE_DECLARATION_REQUIRED", "{v}");
     // The device endpoints still answer it, so the client can explain what to do.
-    let (s, v) = app.get("/api/v2/me/device-policy", Auth::Bearer(&acc2)).await;
+    let (s, v) = app
+        .get("/api/v2/me/device-policy", Auth::Bearer(&acc2))
+        .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["currentDeviceStatus"], "UNCLASSIFIED", "{v}");
     // Declared devices are unaffected, even when their sign-in is old.

@@ -427,9 +427,7 @@ impl ErrorCode {
             ErrorCode::DeviceProofInvalid => StatusCode::UNAUTHORIZED,
             ErrorCode::DeviceReplacementPending
             | ErrorCode::DeviceNotTrusted
-            | ErrorCode::DeviceDeclarationRequired => {
-                StatusCode::FORBIDDEN
-            }
+            | ErrorCode::DeviceDeclarationRequired => StatusCode::FORBIDDEN,
             ErrorCode::WebDeviceLimitReached
             | ErrorCode::DeviceDeclarationRefused
             | ErrorCode::DeviceKeyInUse => StatusCode::CONFLICT,

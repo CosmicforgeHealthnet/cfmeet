@@ -45,6 +45,7 @@ const routes: [MessagingMethod, string, readonly string[]][] = [
   ["POST", `messaging/client-sessions/${id}/revoke`, []],
   ["GET", "messaging/presence/settings", []], ["PUT", "messaging/presence/settings", []],
   ["PUT", `messaging/devices/${id}/push-registration`, []], ["DELETE", `messaging/devices/${id}/push-registration`, []],
+  ["GET", "messaging/push/configuration", []],
   ["POST", "messaging/backups", []], ["GET", "messaging/backups/latest", []], ["DELETE", `messaging/backups/${id}`, []],
   ["POST", `messaging/backups/${id}/finalize`, []], ["POST", `messaging/backups/${id}/download-grants`, []],
 ];

@@ -24,6 +24,32 @@ import { DEFAULT_WORKSPACE_KEY, TAB_WORKSPACE_KEY } from "@/lib/workspace/worksp
 async function establish(response: LoginResponse, remember: boolean) {
   await accountSession.establish(response.access_token, response.refresh_token, remember);
   storageStore.setUser(response.user);
+  await declareThisBrowser(response.access_token);
+}
+
+/** How long sign-in waits for the device declaration before continuing without it. */
+const DECLARE_WAIT_MS = 5_000;
+
+/**
+ * Multi-device policy (ADR 0060): bind this fresh sign-in to this browser's account device
+ * right away, inside the declaration window, so private messaging can start on its own
+ * (the first browser of an account becomes its trusted device; others are linked). The
+ * device key is generated once per browser profile and reused. Never blocks sign-in: on
+ * any failure or timeout the sign-in simply stays unclassified (Meetings, Calling and
+ * Organizations are unaffected) and Messaging retries.
+ */
+async function declareThisBrowser(accessToken: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const { accountDevice } = await import("@/lib/auth/account-device");
+    const { browserDeviceLabel } = await import("@/lib/auth/device-label");
+    await Promise.race([
+      accountDevice.declare(accessToken, browserDeviceLabel(navigator.userAgent)).catch(() => null),
+      new Promise((resolve) => setTimeout(resolve, DECLARE_WAIT_MS)),
+    ]);
+  } catch {
+    /* best effort */
+  }
 }
 
 export const authService = {
@@ -88,6 +114,20 @@ export const authService = {
     const result = (await apiV2.post<AccountSessionRevokeResponse>("/me/sessions/revoke-all")).data;
     await authService.forgetLocalSession();
     return result;
+  },
+
+  /**
+   * Standard re-authentication: ends this (too old) sign-in at the API and in this browser,
+   * so the login page starts a fresh one. Local encrypted data is not touched.
+   */
+  endSessionForReauthentication: async () => {
+    try {
+      await api.post<MessageResponse>("/auth/logout");
+    } catch {
+      /* the session may already be gone; the browser side is cleared regardless */
+    } finally {
+      await authService.forgetLocalSession();
+    }
   },
 
   /** Browser-side sign-out only (after the API already ended the session). */

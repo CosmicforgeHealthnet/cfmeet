@@ -369,3 +369,83 @@ test("the refresh route forwards only a well-formed device proof", () => {
     assert.equal(deviceProofOf(bad), null, JSON.stringify(bad));
   }
 });
+
+// ------------------------------------------------- automatic Messaging onboarding (closure)
+import { messagingRealtimeOrigin } from "../src/lib/messaging/urls.ts";
+import { browserDeviceLabel } from "../src/lib/auth/device-label.ts";
+
+test("concurrent declarations of one sign-in send ONE request; a new sign-in reuses the browser key", async () => {
+  let resolveDeclare;
+  const { device, calls, store } = memoryDevice({
+    declare: (body) => {
+      calls.push(["declare", body]);
+      return new Promise((r) => { resolveDeclare = () => r({ device: { deviceId: "d1", trust: "TRUSTED", state: "ACTIVE", keyThumbprint: "", deviceClass: "WEB", platform: "WEB", primary: false } }); });
+    },
+  });
+  const token = claimsJwt({ sub: "acct-a", sid: "s-1" });
+  const a = device.declare(token, "Chrome on macOS");
+  const b = device.declare(token, "Chrome on macOS");
+  while (!resolveDeclare) await new Promise((r) => setTimeout(r, 1));
+  resolveDeclare();
+  const [va, vb] = await Promise.all([a, b]);
+  assert.equal(va.deviceId, "d1");
+  assert.equal(vb.deviceId, "d1");
+  assert.equal(calls.length, 1, "sign-in and Messaging share one declaration of the same sign-in");
+  const first = store.get("acct-a");
+  // The next sign-in on this browser: the same installation and key (never a new device).
+  resolveDeclare = null;
+  const c = device.declare(claimsJwt({ sub: "acct-a", sid: "s-2" }), "Chrome on macOS");
+  while (!resolveDeclare) await new Promise((r) => setTimeout(r, 1));
+  resolveDeclare();
+  await c;
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1][1].installationId, first.installationId);
+  assert.equal(calls[1][1].publicKey, calls[0][1].publicKey);
+  assert.equal(store.get("acct-a").sessionId, "s-2", "refresh proofs follow the newest sign-in");
+});
+
+test("a sign-in without a session id is never declared", async () => {
+  const { device, calls } = memoryDevice();
+  assert.equal(await device.declare(claimsJwt({ sub: "acct-a" })), null);
+  assert.equal(calls.length, 0);
+});
+
+test("the email step-up of a pending link calls the account authority for that link", async () => {
+  const seen = [];
+  const { device } = memoryDevice({ emailCode: async (id) => { seen.push(id); return { linkId: id, status: "PENDING" }; } });
+  await device.sendEmailCode("link-1");
+  assert.deepEqual(seen, ["link-1"]);
+});
+
+test("live updates use the API origin when NEXT_PUBLIC_MESSAGING_URL is not configured", () => {
+  // Production root cause of "Live updates unavailable": the build had no Messaging URL,
+  // so the engine never opened a socket. The API origin serves /v1/realtime.
+  assert.equal(messagingRealtimeOrigin(undefined, "https://api.cfmeet.com/api/v1"), "https://api.cfmeet.com");
+  assert.equal(messagingRealtimeOrigin("", "https://api.cfmeet.com/api/v1"), "https://api.cfmeet.com");
+  assert.equal(messagingRealtimeOrigin("https://rt.example.com/", "https://api.cfmeet.com/api/v1"), "https://rt.example.com");
+  // Local development keeps realtime off unless configured (separate service ports).
+  assert.equal(messagingRealtimeOrigin(undefined, "http://localhost:8080/api/v1"), "");
+  assert.equal(messagingRealtimeOrigin(undefined, "https://user:pw@api.example.com/api/v1"), "");
+  assert.equal(messagingRealtimeOrigin(undefined, "not a url"), "");
+  assert.equal(messagingRealtimeOrigin(undefined, undefined), "");
+});
+
+test("device labels are short, readable and never identifiers", () => {
+  assert.equal(browserDeviceLabel("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"), "Chrome on macOS");
+  assert.equal(browserDeviceLabel("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"), "Firefox on Windows");
+  assert.equal(browserDeviceLabel("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/141.0 Safari/537.36 Edg/141.0"), "Edge on Windows");
+  assert.equal(browserDeviceLabel("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1"), "Safari on iOS");
+  assert.equal(browserDeviceLabel(""), "Browser");
+});
+
+test("Messaging has no manual activation control; sign-in declares the browser device", () => {
+  const ui = readFileSync(new URL("../src/components/messaging/MessagesContent.tsx", import.meta.url), "utf8");
+  assert.ok(!/Turn on private messaging/.test(ui), "no 'Turn on private messaging' panel");
+  assert.ok(!/data-testid="register-device"/.test(ui), "no activation button");
+  assert.ok(/reason=secure_messaging/.test(ui), "an old sign-in goes through the standard sign-in flow");
+  const engine = readFileSync(new URL("../src/lib/messaging/engine.ts", import.meta.url), "utf8");
+  assert.ok(/void this\.autoEnroll\(\)/.test(engine), "the engine enrolls on its own");
+  assert.ok(!/NO_DEVICE_TO_ADD/.test(engine), "a chat with someone not yet set up is pending, not an error");
+  const auth = readFileSync(new URL("../src/services/auth.service.ts", import.meta.url), "utf8");
+  assert.ok(/await declareThisBrowser\(response\.access_token\)/.test(auth), "every sign-in path declares the device");
+});

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { buildCsp } from "@/lib/security/csp";
+import { messagingRealtimeOrigin } from "@/lib/messaging/urls";
 
 /**
  * Issues a fresh CSP nonce per document request. Next.js reads the nonce from the
@@ -20,7 +21,7 @@ export function proxy(request: NextRequest) {
     apiUrl: process.env.NEXT_PUBLIC_API_URL,
     callingUrl: process.env.NEXT_PUBLIC_CALLING_API_URL || "http://localhost:8090",
     extraConnectSrc: process.env.CSP_EXTRA_CONNECT_SRC,
-    messagingUrl: process.env.NEXT_PUBLIC_MESSAGING_URL,
+    messagingUrl: messagingRealtimeOrigin(process.env.NEXT_PUBLIC_MESSAGING_URL, process.env.NEXT_PUBLIC_API_URL),
     storageUrl: process.env.NEXT_PUBLIC_MESSAGING_STORAGE_URL,
     developerApiUrl:
       process.env.NEXT_PUBLIC_DEVELOPER_PLATFORM_ENABLED === "true"

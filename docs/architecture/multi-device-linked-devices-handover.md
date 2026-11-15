@@ -138,6 +138,26 @@ Each trusted device has its **own** MLS device. Never copy keys between devices.
 5. A new device sees future messages only. For older history, use the existing device-to-device history transfer from a surviving device. Without one, history stays inaccessible by design.
 6. Use a fresh `clientMessageId` per message per device. A retried send with the same id and bytes returns the original message.
 
+### 3.5 Automatic onboarding (no activation step)
+
+Users never "turn on" private messaging. The web client does all of this on its own; mobile clients should do the same.
+
+1. **At every sign-in** (password, verify-then-sign-in, Google): declare the device right away (§3.1), reusing the key and installation this browser or phone already has. On failure or timeout, sign-in continues and the sign-in simply stays unclassified.
+2. **When Messaging starts** without a local MLS device, enroll automatically:
+   * trusted: run §3.4;
+   * untrusted: start a link request and show only the comparison code, with "Email me a code" as the alternative when no trusted device is at hand;
+   * `DEVICE_DECLARATION_REFUSED` (the sign-in predates the device flow): end the sign-in and send the user through the normal login page (`/login?reason=secure_messaging&next=…`), then enroll.
+
+   Transient failures are retried with backoff. Expired or rejected links restart on their own.
+3. **Chat with a contact who has no device yet:** the conversation is created `PRIVATE_E2EE` anyway (Messaging 2026-11-15: only the creator needs a device). The MLS group starts with the creator's devices. Messages written meanwhile are **held sealed on the sending device** (the worker's at-rest key; never sent, never shown as sent: state `pending-setup`, "Waiting for secure setup"). When the contact enrolls, a member device adds their devices (§3.4.3), and the held messages are encrypted for them and sent, oldest first. Nothing is ever downgraded to MANAGED, and no key is ever generated on the server.
+4. **Message states shown to the sender:**
+   * `pending-setup`: held, not sent;
+   * `sending`;
+   * `sent`: encrypted for the recipients' devices and stored by the Delivery Service, which also covers an offline recipient who fetches it later;
+   * seen: read cursor;
+   * `failed`: not sent, with retry.
+5. **Realtime:** the WebSocket origin is `NEXT_PUBLIC_MESSAGING_URL`, or else the API origin (production serves `/v1/realtime` there). Device and session tokens are renewed on the open socket before expiry (`auth.refresh`). Reconnection uses backoff and catches up from the per-device cursor.
+
 ## 4. Errors
 
 | HTTP | Code | When | Client action |

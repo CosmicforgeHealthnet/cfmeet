@@ -465,10 +465,10 @@ async fn readiness_reports_delivery_state_and_excludes_reconciliation_records() 
         fail: false,
     };
     worker::run_once(&on.db.conn, &ok).await.unwrap();
-    let body = on
+    let ready = on
         .raw(axum::http::Method::GET, "/ready", Default::default(), None)
-        .await
-        .expect(200);
+        .await;
+    let body = ready.expect(200);
     assert_eq!(body["outbox"]["delivery"], "enabled");
     assert_eq!(body["outbox"]["destinations"], serde_json::json!([MEETING]));
     assert_eq!(body["outbox"]["pending"], 0, "{body}");

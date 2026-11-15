@@ -11,7 +11,7 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, BellOff, Check, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
@@ -26,7 +26,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from "@/lib/utils";
 import { MessagingEngine, type ConversationView, type MessageView, type SearchHit, type SecurityProfile } from "@/lib/messaging/engine";
 import { mergeTimeline, type TimelineCard } from "@/lib/messaging/managed-store";
-import { useMessagingDirectory, useMessagingDevices, useRegisterMessagingDevice, useRemoveCurrentMessagingDevice } from "@/hooks/v2/useMessaging";
+import { useMessagingDirectory, useMessagingDevices, useRemoveCurrentMessagingDevice } from "@/hooks/v2/useMessaging";
 import { hubKeys, useConversationContext, useConversationTimeline, useHubCapabilities, useHubContacts, useHubInbox } from "@/hooks/v2/useCommunications";
 import { useWorkspace } from "@/context/WorkspaceContext";
 import OrganizationMessages from "@/components/messaging/OrganizationMessages";
@@ -48,14 +48,30 @@ import {
 } from "@/lib/communications/comms-core";
 import type { TimelineCallCard, TimelineMeetingCard } from "@/types/communications";
 import MessagingDevicesPanel from "./MessagingDevicesPanel";
+import { authService } from "@/services/auth.service";
 
 function useEngine(): MessagingEngine {
   // One engine per mounted page (lazy state initializer, never re-created on render).
   const [engine] = useState(() => new MessagingEngine());
+  const router = useRouter();
   useEffect(() => {
     void engine.start();
     return () => engine.stop();
   }, [engine]);
+  useEffect(() => {
+    // A sign-in too old to register this browser: hand over to the standard sign-in flow
+    // (no Messaging activation step); the login page returns here afterwards.
+    let handed = false;
+    const check = () => {
+      if (handed || engine.getSnapshot().phase !== "needs-signin") return;
+      handed = true;
+      void authService.endSessionForReauthentication().finally(() => {
+        router.replace("/login?reason=secure_messaging&next=%2Fdashboard%2Fmessages");
+      });
+    };
+    check();
+    return engine.subscribe(check);
+  }, [engine, router]);
   return engine;
 }
 
@@ -203,9 +219,9 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
   const [recovering, setRecovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const devices = useMessagingDevices(recovering ? s.identity?.principalId ?? "" : "");
-  const registration = useRegisterMessagingDevice(engine);
   const removal = useRemoveCurrentMessagingDevice(engine);
-  const busy = registration.isPending || removal.isPending;
+  const busy = removal.isPending;
+  const [emailCode, setEmailCode] = useState("");
   const sources = devices.data?.devices.filter((d) => d.status === "ACTIVE" && d.deviceId !== s.deviceId) ?? [];
   const run = async (action: () => Promise<unknown>) => {
     setError(null);
@@ -213,21 +229,31 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
   };
   const [transfer, setTransfer] = useState<{ code: string; state: string } | null>(null);
   if (s.phase === "loading") return null;
-  if (s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering") {
+  if (s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering" || s.phase === "needs-signin") {
+    // Set up automatically (no activation step). Only a new browser's verification is shown.
     return (
-      <div className="flex flex-wrap items-center gap-3" data-testid="device-setup">
+      <div className="flex flex-wrap items-center gap-3" data-testid="device-setup" data-linking={s.accountLink ? "true" : "false"}>
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600"><Shield className="size-5" /></span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold">Turn on private messaging in this browser</p>
+          <p className="text-sm font-semibold">{s.accountLink ? "Verify this browser" : "Setting up private messaging"}</p>
           <p className="text-xs text-muted-foreground">{s.detail ?? "Your encryption keys are made here and never leave this browser."}</p>
           {s.accountLink ? (
             <p className="mt-1 text-sm">Code for your other device: <span className="font-mono font-semibold tracking-widest" data-testid="account-link-code">{s.accountLink.comparisonCode}</span></p>
           ) : null}
+          {s.accountLink && !s.accountLink.emailCodeSent ? (
+            <button type="button" data-testid="link-email-code" className="mt-1 text-xs font-semibold text-primary underline-offset-2 hover:underline" onClick={() => void run(() => engine.sendLinkEmailCode())}>
+              No other device with you? Email me a code
+            </button>
+          ) : null}
+          {s.accountLink?.emailCodeSent ? (
+            <form className="mt-2 flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); void run(async () => { await engine.completeLinkWithEmailCode(emailCode); setEmailCode(""); }); }}>
+              <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" aria-label="Code from the email" data-testid="link-email-code-input"
+                className="h-8 w-28 rounded-lg border border-border bg-background px-2 font-mono text-sm tracking-widest" />
+              <button type="submit" disabled={emailCode.length !== 6} className="inline-flex h-8 items-center rounded-full bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">Verify</button>
+            </form>
+          ) : null}
         </div>
-        <button type="button" data-testid="register-device" disabled={busy || s.phase === "registering"} onClick={() => void run(() => registration.mutateAsync())}
-          className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
-          {s.phase === "registering" ? <Spinner /> : null}{s.phase === "registering" ? "Setting up…" : "Turn on"}
-        </button>
+        {s.phase === "registering" ? <Spinner /> : null}
         {error ? <p role="alert" className="w-full text-sm text-destructive">{error}</p> : null}
       </div>
     );
@@ -397,14 +423,11 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
           })}
         </ul>
         <div className="space-y-3 border-t border-border px-5 py-4">
-          {s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering" ? (
-            <div className="flex items-center gap-3 rounded-xl bg-muted/60 p-3">
+          {s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering" || s.phase === "needs-signin" ? (
+            <div className="flex items-center gap-3 rounded-xl bg-muted/60 p-3" data-testid="new-chat-setup">
               <Shield className="size-4 shrink-0 text-emerald-600" />
-              <p className="min-w-0 flex-1 text-xs text-muted-foreground">Turn on private messaging in this browser to start a chat.</p>
-              <button type="button" disabled={s.phase === "registering"} onClick={() => void engine.registerDevice().catch((e) => setError(messagingErrorMessage(e)))}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
-                {s.phase === "registering" ? <><Spinner />Turning on…</> : "Turn on"}
-              </button>
+              <p className="min-w-0 flex-1 text-xs text-muted-foreground">{s.accountLink ? "Verify this browser (code above) to start a chat." : "Setting up private messaging in this browser…"}</p>
+              {s.phase === "registering" ? <Spinner /> : null}
             </div>
           ) : (
             <p className="flex items-center gap-2 text-xs text-muted-foreground"><Lock className="size-3.5 shrink-0 text-emerald-600" />{s.phase === "ready" ? "Private · only people in the chat can read it"
@@ -444,7 +467,7 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
   const [editing, setEditing] = useState<string | null>(null);
   const live = managed && !!m.messageId && m.state === "delivered";
   const mine = m.mine;
-  const status = m.state === "queued" ? "Waiting…" : m.state === "sending" ? "Sending…" : m.state === "failed" ? "Not sent" : clock(m.createdAt);
+  const status = m.state === "queued" ? "Waiting…" : m.state === "pending-setup" ? "Waiting for secure setup" : m.state === "sending" ? "Sending…" : m.state === "failed" ? "Not sent" : clock(m.createdAt);
   const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted";
 
   return (
@@ -466,7 +489,7 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
               mine ? cn(!first && "rounded-tr-md", !last && "rounded-br-md") : cn(!first && "rounded-tl-md", !last && "rounded-bl-md"),
               m.state === "failed" && "ring-2 ring-destructive",
               m.announcement && "ring-2 ring-amber-400",
-              (m.state === "queued" || m.state === "sending") && "opacity-70",
+              (m.state === "queued" || m.state === "sending" || m.state === "pending-setup") && "opacity-70",
             )}
           >
             {m.pinned ? <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium opacity-75" data-testid="message-pinned"><Pin className="size-3" /> Pinned</p> : null}
@@ -864,7 +887,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
           {e2ee && !conversation.groupReady ? (
             <p className="mx-auto my-4 flex max-w-md items-start gap-3 rounded-2xl bg-muted/60 p-4 text-sm" data-testid="e2ee-unavailable">
               <Lock className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-              {s.phase === "ready" ? "Waiting for this browser to be added to the encrypted chat. It usually takes a moment." : "Turn on private messaging in this browser to read this encrypted chat."}
+              {s.phase === "ready" ? "Waiting for this browser to be added to the encrypted chat. It usually takes a moment." : "Setting up private messaging in this browser…"}
             </p>
           ) : null}
           <ol className="mx-auto max-w-3xl pb-2" data-testid="messages">
@@ -1089,7 +1112,7 @@ function PersonalMessages() {
                       </span>
                       <span className="mt-0.5 flex items-center justify-between gap-2">
                         <span className={cn("flex min-w-0 items-center gap-1 text-sm", unread ? "font-medium text-foreground" : "text-muted-foreground")}>
-                          {mine && latest && latest.state !== "failed" && latest.state !== "queued" ? <CheckCheck className="size-4 shrink-0 text-muted-foreground" aria-label="Sent" /> : null}
+                          {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Check className="size-4 shrink-0 text-muted-foreground" aria-label="Sent" /> : null}
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
                           <span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span>
                         </span>

@@ -104,5 +104,9 @@ def run(operation, sha, run_id):
         receipt = inspect_runtime(sha, run_id)
         assert all(code == 200 for code in receipt['privateProbes'].values()), 'Messaging probes failed'
         p.regression()
+    elif operation == 'messaging-web-verify':
+        # Fixtures for the real-website journey that the runner drives next (web_journey.py).
+        import web_journey
+        web_journey.prepare(run_id)
     else:
         raise AssertionError('Unsupported Messaging operation')

@@ -793,7 +793,9 @@ impl PushProvider for PushAdapters {
     }
 
     fn web_push_application_server_key(&self) -> Option<String> {
-        self.web.as_ref().map(|w| w.application_server_key().to_owned())
+        self.web
+            .as_ref()
+            .map(|w| w.application_server_key().to_owned())
     }
 
     fn validate_handle(&self, platform: &str, handle: &str) -> Result<(), &'static str> {

@@ -130,10 +130,10 @@ async function pick(page, name) {
   assert.ok(await box.isChecked(), `${name} selected`);
 }
 
+/** Private messaging sets itself up after sign-in: no activation control exists. */
 async function register(page) {
-  await phase(page, "needs-device");
-  await page.click("[data-testid=register-device]");
   await phase(page, "ready");
+  assert.equal(await page.locator("[data-testid=register-device]").count(), 0, "no manual activation button");
 }
 
 async function openConversation(page, profile, nth = 0) {
@@ -205,7 +205,8 @@ test("the CF Meet web app runs real end-to-end encrypted messaging", { timeout: 
 async function journey() {
   assert.ok(USERS.alice && USERS.bob, "E2E_USERS must name alice and bob");
 
-  // ---- 1. Device registration in the signed-in app (keys generated in the worker).
+  // ---- 1. Automatic device setup in the signed-in app (keys generated in the worker; the
+  //         first browser of an account is its trusted device, no activation step).
   const alice = await open("alice");
   const bob = await open("bob");
   pages.alice = alice.page;
@@ -315,8 +316,8 @@ async function journey() {
   pages.bob2 = bob2.page;
   // Multi-device policy (ADR 0060): a second browser is untrusted until one of Bob's trusted
   // devices approves it by typing the code the new browser shows; then setup completes.
-  await phase(bob2.page, "needs-device");
-  await bob2.page.click("[data-testid=register-device]");
+  // The link request starts on its own; the new browser only shows the code to compare.
+  await bob2.page.locator("[data-testid=device-setup][data-linking=true]").first().waitFor({ timeout: T });
   const linkCode = (await bob2.page.locator("[data-testid=account-link-code]:visible").first().textContent({ timeout: T })).trim();
   assert.match(linkCode, /^\d{6}$/, "the new browser shows a 6-digit linking code");
   await bob.page.locator("[data-testid=incoming-link]").waitFor({ timeout: 2 * T });

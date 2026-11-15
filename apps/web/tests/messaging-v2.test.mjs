@@ -195,6 +195,10 @@ test("revoke-all pauses reconnects, preserves client keys, and resumes only on r
       return { conversations: [], nextCursor: null };
     } },
     "./crypto-client": { CryptoClient: class {}, CryptoWorkerError: class extends Error {} },
+    "./urls": urls,
+    "@/lib/auth/device-label": load("../src/lib/auth/device-label.ts"),
+    "@/lib/auth/account-device": { accountDevice: {} },
+    "@/lib/auth/session": { accountSession: {} },
   }, { process: { env: { NEXT_PUBLIC_MESSAGING_URL: "https://messaging.example" } },
     setInterval, clearInterval, setTimeout, navigator: { onLine: true },
     window: { addEventListener() {}, removeEventListener() {} }, crypto: globalThis.crypto });

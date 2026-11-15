@@ -209,18 +209,15 @@ async fn encryption_that_cannot_be_established_is_an_error_never_a_managed_fallb
             "CREATOR_HAS_NO_DEVICE"
         )
     );
-    h.active_device(&c, alice).await;
-    let r = h.create(&c, alice, body.clone(), &key()).await;
-    assert_eq!(r.reason(), "COUNTERPART_HAS_NO_DEVICE");
-    // Even with MANAGED allowed, an unavailable E2EE request is not converted.
+    // Even with MANAGED allowed, an E2EE request without a creator device is not converted.
     h.put_policy(
         &c,
         0,
         json!({ "contexts": { "DIRECT": { "allowedProfiles": ["PRIVATE_E2EE", "MANAGED"] } } }),
     )
     .await;
-    let r = h.create(&c, alice, body, &key()).await;
-    assert_eq!(r.reason(), "COUNTERPART_HAS_NO_DEVICE");
+    let r = h.create(&c, alice, body.clone(), &key()).await;
+    assert_eq!(r.reason(), "CREATOR_HAS_NO_DEVICE");
     // Nothing was written by any refused attempt (the transaction rolled back whole).
     assert_eq!(
         h.scalar("SELECT count(*) FROM messaging_conversations")
@@ -238,6 +235,20 @@ async fn encryption_that_cannot_be_established_is_an_error_never_a_managed_fallb
         )
         .await,
         0
+    );
+    // Section "modern messaging": a counterpart who has not set up a device yet does not block
+    // the chat. It is created PRIVATE_E2EE (never MANAGED, even where MANAGED is allowed),
+    // pending setup; the counterpart's devices join the MLS group when they enroll.
+    h.active_device(&c, alice).await;
+    let r = h.create(&c, alice, body.clone(), &key()).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["securityProfile"], "PRIVATE_E2EE", "{}", r.text);
+    assert!(r.json["encryption"]["mlsGroupId"].is_string(), "{}", r.text);
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_conversations WHERE security_profile = 'MANAGED'")
+            .await,
+        0,
+        "never a server-readable conversation instead"
     );
     // Deployments without E2EE devices refuse PRIVATE_E2EE creation explicitly.
     let disabled = Harness::on(h.db.clone(), |s| s.devices.enabled = false);

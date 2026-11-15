@@ -1655,8 +1655,13 @@ pub async fn complete_link(
         if let Some(old) = old {
             ended.extend(end_device_sessions(&txn, old, "DEVICE_REPLACED", None).await?);
             ended.extend(
-                end_unclassified_sessions(&txn, caller.user.id, "DEVICE_REPLACED", Some(caller.session_id))
-                    .await?,
+                end_unclassified_sessions(
+                    &txn,
+                    caller.user.id,
+                    "DEVICE_REPLACED",
+                    Some(caller.session_id),
+                )
+                .await?,
             );
             txn.execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
@@ -1806,8 +1811,13 @@ pub async fn revoke_device(
     if current.state != "REVOKED" {
         ended = end_device_sessions(&txn, device_id, "DEVICE_REVOKED", None).await?;
         ended.extend(
-            end_unclassified_sessions(&txn, caller.user.id, "DEVICE_REVOKED", Some(caller.session_id))
-                .await?,
+            end_unclassified_sessions(
+                &txn,
+                caller.user.id,
+                "DEVICE_REVOKED",
+                Some(caller.session_id),
+            )
+            .await?,
         );
         txn.execute(Statement::from_sql_and_values(
             DbBackend::Postgres,

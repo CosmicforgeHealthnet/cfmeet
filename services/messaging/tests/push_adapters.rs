@@ -683,12 +683,24 @@ async fn push_configuration_publishes_the_vapid_public_key_and_platforms() {
     let key = r.json["webPush"]["applicationServerKey"].as_str().unwrap();
     assert_eq!(key, w.vapid_public);
     let point = B64URL.decode(key).unwrap();
-    assert_eq!((point.len(), point[0]), (65, 0x04), "uncompressed P-256 point");
-    assert!(!r.text.contains("PRIVATE"), "never key material: {}", r.text);
+    assert_eq!(
+        (point.len(), point[0]),
+        (65, 0x04),
+        "uncompressed P-256 point"
+    );
+    assert!(
+        !r.text.contains("PRIVATE"),
+        "never key material: {}",
+        r.text
+    );
     // The scope is enforced.
     let send_only = h.customer(&["messages.send"]);
     let denied = h
-        .get(&send_only, Some(people[0]), "/v1/messaging/push/configuration")
+        .get(
+            &send_only,
+            Some(people[0]),
+            "/v1/messaging/push/configuration",
+        )
         .await;
     assert_eq!(denied.status, S::FORBIDDEN, "{}", denied.text);
 }
@@ -706,18 +718,33 @@ fn an_openssl_generated_vapid_key_configures_web_push_through_the_environment() 
     std::fs::create_dir_all(&dir).unwrap();
     let key = dir.join("web-push-vapid.pem");
     let out = std::process::Command::new("openssl")
-        .args(["genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256"])
+        .args([
+            "genpkey",
+            "-algorithm",
+            "EC",
+            "-pkeyopt",
+            "ec_paramgen_curve:P-256",
+        ])
         .output()
         .expect("openssl is required for this test");
     assert!(out.status.success());
     std::fs::write(&key, &out.stdout).unwrap();
     let key_path = key.to_str().unwrap().to_string();
     let vars = [
-        ("DATABASE_URL", "postgres://messaging:pw-xyz-123@db/m".to_string()),
+        (
+            "DATABASE_URL",
+            "postgres://messaging:pw-xyz-123@db/m".to_string(),
+        ),
         ("MESSAGING_KT_LOG_ID", "cfmeet-messaging:test".to_string()),
-        ("MESSAGING_KT_SIGNING_KEY_FILE", "/run/secrets/kt.pem".to_string()),
+        (
+            "MESSAGING_KT_SIGNING_KEY_FILE",
+            "/run/secrets/kt.pem".to_string(),
+        ),
         ("MESSAGING_PUSH_WEB_VAPID_KEY_FILE", key_path),
-        ("MESSAGING_PUSH_WEB_VAPID_SUBJECT", "https://cfmeet.com".to_string()),
+        (
+            "MESSAGING_PUSH_WEB_VAPID_SUBJECT",
+            "https://cfmeet.com".to_string(),
+        ),
     ];
     let cfg = MessagingConfig::from_lookup(RuntimeEnvironment::Test, |k| {
         vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone())
@@ -726,10 +753,21 @@ fn an_openssl_generated_vapid_key_configures_web_push_through_the_environment() 
     let adapters =
         messaging::realtime::push_adapters::PushAdapters::build(&cfg.push_adapters, false, None)
             .unwrap();
-    assert_eq!(adapters.configured(), vec!["WEB_PUSH"], "APNs / FCM stay off");
+    assert_eq!(
+        adapters.configured(),
+        vec!["WEB_PUSH"],
+        "APNs / FCM stay off"
+    );
     let published = adapters.web_push_application_server_key().unwrap();
     let der = std::process::Command::new("openssl")
-        .args(["pkey", "-in", key.to_str().unwrap(), "-pubout", "-outform", "DER"])
+        .args([
+            "pkey",
+            "-in",
+            key.to_str().unwrap(),
+            "-pubout",
+            "-outform",
+            "DER",
+        ])
         .output()
         .unwrap()
         .stdout;

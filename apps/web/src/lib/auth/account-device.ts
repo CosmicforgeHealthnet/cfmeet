@@ -58,5 +58,6 @@ export const accountDevice = createAccountDevice({
     pendingLinks: async () => (await (await v2()).get("/me/device-links")).data,
     approveLink: async (id, body) => (await (await v2()).post(`/me/device-links/${id}/approve`, body)).data,
     rejectLink: async (id) => (await (await v2()).post(`/me/device-links/${id}/reject`, {})).data,
+    emailCode: async (id) => (await (await v2()).post(`/me/device-links/${id}/email-code`, {})).data,
   },
 });
