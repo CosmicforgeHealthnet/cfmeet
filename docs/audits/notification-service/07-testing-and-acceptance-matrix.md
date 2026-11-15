@@ -1,4 +1,4 @@
-# Document 7 — Testing and Acceptance Matrix
+# Document 7 — Testing and Acceptance Matrix (revision 2: unified service)
 
 **Test levels used below:**
 
@@ -38,7 +38,13 @@ Each test row also states which adapter it needs:
 | F-14 | Inbox pagination stable under concurrent inserts; ETag 304 on unchanged unread | I | T | no item skipped or duplicated across pages |
 | F-15 | Bulk read `upTo` cursor, bulk dismiss by category | I | T | counts correct; idempotent replay |
 | F-16 | Mobile route contract includes U1–U5 | U | — | `apps/mobile/tests/routes.test.ts` passes |
-| F-17 | Token-bearing invitation emails are still sent by the Meeting relay (unchanged), and the NS inbox copy contains no token | I | T | grep of the NS DB and logs for the token returns nothing |
+| F-17 | Token-bearing invitation emails are sent by the service from a sealed token; the inbox copy and logs never contain the token | I | T | the token is present only in the sealed body until the final state; grep of logs, inbox and admin APIs returns nothing |
+| F-18 | Ported email ledger parity: every test in `services/meeting-service/tests/email_delivery.rs` passes against the service ledger (idempotency, temporary vs permanent failure, expiry, lease recovery, Svix authentication, monotonic status) | I | T | all pass unchanged in intent |
+| F-19 | Template parity: for the same input, the service renders the same subject and body (hash) as today's Meeting templates (`templates/email/*`) for every email category | U | T | equal hashes (or reviewed, intended diffs) |
+| F-20 | OTP journey through the service: register → Account outbox row (sealed code) → service ledger → provider receives the 6-digit code → content erased → wrong/right/reused code → sign-in | I, C | T (R in P) | identical outcome to `otp_journey_from_registration_to_session` |
+| F-21 | Preference facades: old clients using Hub `notification-preferences` (7 booleans), conversation and contact mute endpoints read and write through the service with identical responses | I, C | T | contract tests on the Hub 1.3.0 schema pass |
+| F-22 | Reminder scheduling in the service: schedule, reschedule (old reminder cancelled, new created), cancel, recurring occurrences, protected titles via X2 | I | T | matches `s11_reminders_once_per_start_*` behaviour |
+| F-23 | Platform-tenant push via the Messaging `registerPush` facade | I | T | registration lands in `notif_push_endpoints` with the tenant scope; wake-up is metadata-only |
 
 ## 2. Reliability tests
 
@@ -54,12 +60,16 @@ Each test row also states which adapter it needs:
 | R-08 | Queue backlog: 50k PENDING events | S | ingest returns 503 + `Retry-After` above the threshold; producers keep events; drain completes; no loss |
 | R-09 | Concurrent workers: 3 NS instances, slow provider (timeout = 10 s) | I | 0 duplicate sends (the lease-renewal fix) |
 | R-10 | Migration during live traffic: authority switch at fence T with steady event flow | S | jobs before T legacy, at or after T NS; ledger rows = unique (job, recipient) |
-| R-11 | Rollback with in-flight events | S | Document 5 §9 P4.2: legacy resumes; no duplicate (key), no loss (recipient ledger + PENDING jobs) |
+| R-11 | Rollback with in-flight events | S | Document 5 §9 row 4.3: new messages route back to the old path; the service drains its own rows; no message in both ledgers; no loss |
 | R-12 | **NS completely down** | C | sign-in, OTP, call ringing/answer, message send/receive and webhooks all pass (C1–C6 journeys) |
 | R-13 | Hub down | C | NS policy calls fail → deliveries retried (not failed) for ≥ 30 min; a security in-app copy is still created |
 | R-14 | Meeting ledger down (X1 503) | I | EMAIL deliveries retried; in-app unaffected |
 | R-15 | Delayed and reordered events: reminder arrives after cancel | I | reminder dropped (subject version) |
 | R-16 | Calling push fast path with NS down or slow | C | `calling_call_ring_seconds` p95 unchanged versus baseline; call established via WS |
+| R-17 | CRITICAL lane under a STANDARD flood (50k STANDARD pending) | I, S | CRITICAL p95 handoff unchanged; STANDARD backpressure does not refuse CRITICAL ingest |
+| R-18 | Both replicas down for 10 min | C | codes are delayed, not lost (Account outbox); delivered after recovery if not expired; expired codes are not sent |
+| R-19 | Break-glass `ACCOUNT_EMAIL_FALLBACK=local` | C, P | new code emails go through the retained old ledger within one poll interval; no message exists in both ledgers |
+| R-20 | One replica killed mid-batch | I | the other replica completes; no duplicate (lease renewal + key) |
 
 ## 3. Security tests
 
@@ -88,9 +98,11 @@ Each test row also states which adapter it needs:
 |---|---|---|
 | M-01 | Shadow mode makes no transport call (spy transport) | 0 calls |
 | M-02 | Shadow comparator classifies matched, missing, extra and mismatch correctly (synthetic) | exact counts |
-| M-03 | Dual-enqueue exact-once (legacy worker and NS, same job and recipient, interleaved in both orders) | 1 ledger row, `created=false` on the second |
+| M-03 | Routing fence: messages created before the fence exist only in the old ledger, after it only in the service ledger; no message in both (SQL join on idempotency key across both databases) | 0 overlaps |
 | M-04 | Fence boundary at millisecond granularity (job created at T−1 ms vs T) | the correct single owner |
-| M-05 | Authority mismatch detection: NS ACTIVE, legacy flag still legacy (mis-set) | email still single (key); certify reports FAIL "authority disagreement" |
+| M-05 | Routing mismatch detection: service ACTIVE while the producer is still routing to the old path (mis-set) | the producer decision still sends one message to one system; certify reports FAIL "routing disagreement" |
+| M-08 | Drain completion: old ledger non-final rows reach 0; Resend events for old message IDs still applied by the old endpoint during the drain | 0 stuck rows |
+| M-09 | Preference copy + catch-up + freeze: counts and versions equal; writes during the freeze are retried successfully; rollback write-back restores Hub values | equal; no lost write |
 | M-06 | Push registry migration (Q6 > 0 path): copy, dual-read, fence, verify counts and that sealed handles round-trip | equal counts; no plaintext handle in the NS DB |
 | M-07 | Producer flag off mid-stream | no further events; already-queued rows handled |
 
@@ -111,14 +123,19 @@ The targets are formulas over the **Phase 0 baseline** (Document 5 §2). No abso
 | | U2 p95 latency | ≤ `B(Hub /bootstrap p95)` (a comparable relay read) |
 | | Wrong-recipient reports | 0 |
 | | Notification loss: events accepted versus items created (for in-app-enabled categories) | ≥ 99.9 % (remainder explained by policy suppression) |
-| A4.2 meeting email | Ledger rows per (job, recipient) | exactly 1 (SQL check) |
+| A4.3 standard email | Messages per (notice, recipient) across both ledgers | exactly 1 (SQL check) |
 | | Email failure rate (FAILED+EXPIRED / created) | ≤ `B` + 2σ (requires a working transport: N0-2) |
 | | Delivery latency, notice created → ledger ACCEPTED, p95 | ≤ `B` + 30 s |
-| | Duplicates reported by `email_enqueue_duplicates` beyond the dual-enqueue expectation | 0 |
-| A4.3 push | Invalid-handle rate | ≤ `B` once established (first activation: track only) |
+| | Messages with the same idempotency key in both ledgers | 0 |
+| A4.1 push | Invalid-handle rate | ≤ `B` once established (first activation: track only) |
 | | Payload validation failures | 0 |
 | | Push to a revoked device | 0 |
-| A4.5 call push | `calling_call_ring_seconds` p95 / answer rate | unchanged within `B` ± 2σ |
+| A4.1 call push | `calling_call_ring_seconds` p95 / answer rate | unchanged within `B` ± 2σ |
+| A4.2 preferences | Copy parity; facade error rate | 100 % equal; ≤ baseline Hub error rate |
+| A4.6 critical lane | p95 code email handoff (outbox commit → provider ACCEPTED) | ≤ `B(Q17, AUTH_*)` + 5 s |
+| | Code email failure rate | ≤ `B` (and 0 lost: every AUTH_* outbox row reaches a terminal state) |
+| | `email-acceptance confirm=otp` through the service | PASS at every canary step |
+| | Break-glass use | 0 during the 60-day acceptance window |
 | | Ringing works with NS stopped (R-12, run in production during a maintenance window by the owner) | PASS |
 | Rollback drill (each stage) | Time from trigger to legacy authority | ≤ 1 coordinated-release operation; no duplicate; no loss (reconciliation SQL) |
 | User-visible consistency | Read on one device reflected on another | within the poll interval (30 s) |

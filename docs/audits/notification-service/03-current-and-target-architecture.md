@@ -163,207 +163,185 @@ flowchart LR
    - Principal authority is Platform Access.
    - Service tokens are single-audience and receiver-authoritative.
 
-### 2.1 Components that must remain untouched
+### 2.1 Components that stay outside the notification service (revision 2)
 
-| Component | Why |
+| Component | Why it stays |
 |---|---|
-| Calling ringing, arbitration, signaling WS, invitation recovery, recording/compliance notices | latency-critical and transactional (ADR 0008, 0024) |
-| Account OTP generation, verification, storage; password reset; device step-up | security token authority (ADR 0057, 0060) |
-| Messaging ciphertext storage, MLS, realtime gateway, read/delivery cursors | E2EE boundary (ADR 0045-0049, 0060) |
-| Meeting `email_deliveries` schema and worker semantics (apart from the N0 bug fixes) | reused as the email transport |
-| Developer Platform webhook system | a separate product; production-tested |
-| Organizations membership/permission writes | business authority |
-| Hub preference **writes** | single-writer rule |
-| Telephony, SMS Gateway, Numbering, Privacy Relay configuration | disabled by owner decision |
+| Calling ringing, arbitration, signaling WS, invitation recovery, recording/compliance notices | call control, not notification; latency-critical and transactional (ADR 0008, 0024; brief Part 4.3). **Call push moves** |
+| Account code generation, storage, expiry and verification (OTP, reset, device step-up) | token authority (ADR 0057, 0060; brief Part 4.1). **The emails carrying the codes move** (critical lane) |
+| Messaging ciphertext, MLS, realtime gateway, read/delivery cursors, membership and device authority | E2EE boundary (ADR 0045-0049, 0060; brief Part 4.4). **Message push moves**; Messaging authorizes each wake-up |
+| Conference realtime (waiting room, participant updates) | in-meeting state, not notification |
+| Organizations membership/permission writes; Hub blocks and privacy | business authority. The service asks them |
+| Developer Platform customer webhooks | separate product (brief Part 4.7). Joining them is owner decision **D-W** |
+| Telephony, SMS Gateway, Numbering, Privacy Relay configuration | disabled by owner decision; no dependency is introduced |
+
+**Moving into the notification service:**
+- the Meeting email ledger, worker, providers and Resend webhooks;
+- all email categories;
+- meeting notice jobs and reminder scheduling;
+- Messaging push registrations, jobs, adapters and dispatcher;
+- the Calling push hook;
+- Hub notification preferences (category switches, conversation and contact notification mute);
+- every new category, the in-app inbox, delivery history and the operator channel.
 
 ---
 
-## 3. Option A — Notification orchestration service (recommended)
+## 3. Options evaluated
 
-The new service owns:
-- event ingestion;
-- recipient resolution, by calling the authoritative owner;
-- policy (preferences + precedence);
-- channel routing;
-- the in-app inbox;
+### 3.1 Option B — Unified notification service (**owner-selected, recommended in revision 2**)
+
+One service is the single notification authority. Producers submit notification events through their transactional outboxes. The service owns:
+- preferences;
+- recipient routing (asking the authorities for membership and identity);
+- channels (email, push, in-app, operator, optionally webhook);
+- providers and provider callbacks;
 - scheduling;
-- the delivery ledger;
-- shadow comparison;
-- operator diagnostics.
+- delivery history.
 
-It **delegates transport**:
-- email → Meeting ledger (new internal service-auth enqueue API);
-- message push → Messaging (unchanged decision path);
-- call ring → Calling (unchanged).
+Old pipelines become clients of the service, are drained, and are then retired.
 
-Non-message push uses the shared push transport (§4.3, decision D-1).
+### 3.2 Option A — Orchestration only (revision 1 recommendation, superseded)
 
-## 4. Option B — Fully consolidated delivery service
+The service would have owned policy, inbox and history while email stayed in the Meeting ledger and push stayed in Messaging. It is lower risk for the email move, but leaves three delivery systems in place. It does not meet the owner's goal of one system.
 
-NS absorbs:
-- the email ledger, worker and providers (Resend/SMTP, Svix webhooks);
-- push registrations, jobs and adapters;
-- meeting notification jobs;
-- Hub preferences (new writer, or migrating the writer).
+### 3.3 Option C — Extend the Communications Hub (rejected)
 
-Existing services call NS for every send. Compatibility adapters keep the old internal entry points during migration.
+The Hub governs only the personal-communications scope (`packages/communications-policy/src/lib.rs:11-55`). Account, organizations, meetings and developer notifications are outside its authority.
 
-### 4.1 Comparison
+### 3.4 Comparison
 
-| Criterion | Option A (orchestration) | Option B (full consolidation) | Evidence |
+| Criterion | Option B (unified) | Option A (orchestration) | How B handles its weak points |
 |---|---|---|---|
-| Reliability | OTP/security email stays in the process that owns the token; an NS outage does not block sign-in | an NS outage blocks OTP unless Account keeps a fallback path, which is duplication again | Part 11 requirement; `handlers/auth.rs` |
-| Code ownership | transports stay with the teams that built and certified them | NS team owns email, push and preferences, including the E2EE-sensitive dispatch rechecks it cannot evaluate locally (membership and history window live in the Messaging DB) | `push.rs:319-395` |
-| Migration risk | **Email: zero data movement.** The same ledger and same `UNIQUE (idempotency_key)` make dual enqueue during handover exact-once | ledger rows (with OTP bodies) and handles must be copied; dual-run dedupe across two ledgers relies on provider idempotency (Resend window-limited; SMTP none) | `email_delivery.rs:124-185, 394-486` |
-| Operational complexity | +1 container, +1 DB | +1 container, +1 DB, plus re-certifying email (Resend activation, webhooks) and push in the new home | `docs/operations/resend-email-owner-handoff.md` |
-| Performance | one extra internal hop for NS-owned email (async; irrelevant to latency) | the same hop for every send, including OTP (user-visible latency) | — |
-| Maintainability | one policy/inbox/history model; transports unchanged | single codebase for all delivery | — |
-| Cost | €0 infrastructure (fits headroom) | €0 infrastructure; much higher engineering and certification cost | Document 3 §7 |
-| Rollback safety | flip the channel authority back (configuration); old path never removed until Phase 8 | requires the old path to be kept warm anyway, which is effectively Option A plus duplication | — |
-
-**Verdict:** Option A. Option B centralizes code that is already correctly centralized (email), and moves security-critical paths for no functional gain.
-
-### 4.2 Option C — Extend the Communications Hub (evaluated, rejected)
-
-Putting the inbox and routing into the Hub reuses its preferences, device index and relay. But:
-- The Hub governs **only the personal-communications triple** (`packages/communications-policy/src/lib.rs:11-55`). Account security, organizations, meetings and developer notifications are outside its authority.
-- Its policy engine is already the most expensive internal call.
-- The documented decision is that "the Hub only owns preferences" (`CFMEET_FINAL_PRODUCTION_COMPLETION.md` §5).
-
-Option C would have to widen the Hub's authority across four domains. That is more coupling than a narrow new service.
-
-### 4.3 Push transport: the evidence-driven exception (decision D-1)
-
-Push has **no production traffic**: no provider and no client registrations. Consolidating its transport now costs nothing to migrate. Consolidating it after activation means migrating live handles.
-
-**Recommended shape:**
-
-1. **Extract** `services/messaging/src/realtime/push_adapters.rs` into a shared library crate `packages/push-transport`. This is a pure move, with tests and behaviour unchanged. Messaging keeps using it in-process.
-2. **Push-target registry at the account-device level.** It is owned by NS (`notif_push_endpoints`) and keyed by the Account device (ADR 0060). It is registered through the **existing** Hub facade `PUT/DELETE /api/v2/communications/devices/{id}/push`; the public contract is unchanged. This fixes:
-   - organization/MANAGED clients being unable to register (session devices);
-   - Calling's unset `pushTargetRef`. Its contract already says "opaque reference to a push target held by the application" (`packages/contracts/calling/control/v1.schema.json:1098-1105`).
-3. **Message wake-ups.** Messaging keeps deciding *whether* a device gets a wake-up: membership, history window, block and Hub policy, all evaluated in its own DB. It then dispatches through NS by `pushTargetRef` (Phase 4.3), or through its own adapters until then.
-4. **Call push.** A Calling `PushDispatcher` implementation calls the NS fast path post-commit, with a hard timeout of ≤ 1 s, fire-and-forget. **Ringing never waits for it**: the WS signal and the recovery API are unchanged.
-
-   Alternative if the owner prefers zero runtime coupling for calls: Calling embeds `packages/push-transport` directly and resolves `pushTargetRef` from a replicated read model. This is decision D-2.
-
-**If the owner activates Web Push in Messaging before NS exists** (the `activate-web-push` tooling is ready), the plan still works. Phase 5 copies `messaging_push_registrations` into `notif_push_endpoints`, with Messaging remaining a reader until cutover. This is decision D-1b.
+| Owner goal (one system) | **meets it** | does not | — |
+| Reliability of sign-in email | depends on NS availability | stays in Meeting | **critical lane**, 2 replicas, Account transactional outbox (codes are never lost, only delayed), deployed alerting before the move, break-glass fallback to the old Meeting path until Phase 8, moved **last** |
+| Duplicate control during migration | per-message routing fence: each message is created in exactly one ledger | dual-enqueue into one ledger | the fence is decided once at enqueue time inside the producer; the old ledger drains only rows created before the fence |
+| Code ownership | one team owns all delivery; E2EE checks stay in Messaging via `authorizeWakeups` | split | Messaging authority preserved by an API, not copied |
+| Operational complexity | +2 containers, +1 DB; old pipelines retired later (net simpler) | +1 container; three pipelines remain | — |
+| Performance | one async hop for every notification; the call push fast path is ≤ 1 s and best-effort | same, minus email | ringing never waits for push |
+| Maintainability | one retry, preference, metrics and alerting model | partial | — |
+| Cost | €0 infrastructure (fits headroom) | €0 | — |
+| Rollback | route new messages back to the old pipeline (configuration); old code kept until Phase 8 | similar | in-flight messages finish in the system they were created in |
+| Re-certification | email (Resend acceptance, webhook) and push re-run in the new home | none | uses the existing `email-acceptance` / acceptance journeys, retargeted |
 
 ---
 
-## 5. Target architecture (recommended)
+## 4. Push and email specifics in the unified design
+
+| Area | Design |
+|---|---|
+| Push transport | `services/messaging/src/realtime/push_adapters.rs` moves unchanged into the service (or into `packages/push-transport` first, Roadmap N4, so it can be tested before the move). Its tests travel with it |
+| Push registry | **Account-device level**, owned by the service (`notif_push_endpoints`). Registered through the new `/api/v2/notifications/devices/{id}/push`. The existing Hub facade and the Messaging customer `registerPush` stay as compatibility facades. This fixes organization/MANAGED push (session devices) and gives Calling's `pushTargetRef` a real target |
+| Message wake-ups | Messaging publishes `messaging.message.created` (ids only). The service asks Messaging `authorizeWakeups(conversation, sequence)` for the principals entitled to a wake-up (membership, history window, blocks, device state), at fan-out **and again at dispatch**. Payload stays the 5-key metadata object |
+| Call push | Calling `PushDispatcher` → service fast lane (post-commit, ≤ 1 s, no queue). The WebSocket ring path is unchanged |
+| Email | the service owns the ledger: a port of `email_deliveries` with improvements (sealed content, keyed recipient digest, suppression list, lease renewal), providers and the Resend Svix webhook. Producers never send email directly again |
+| Code emails | Account writes `account_notification_outbox` **in the same transaction** that stores the code, with the code sealed to the service's public key (HPKE). The service decrypts only to render, and erases content at the final state, as the ledger does today |
+
+---
+
+## 5. Target architecture
 
 ```mermaid
 flowchart LR
   subgraph Producers["Producers (business logic unchanged)"]
-    ACC[Account / Meeting<br/>account_security_events,<br/>meeting changes]
+    ACC[Account<br/>codes + security events<br/>account_notification_outbox]
+    MTG[Meeting<br/>conferences, invitations<br/>outbox_events NOTIFICATION]
     ORG[Organizations outbox]
-    HUB[Hub outbox<br/>+ preferences owner]
-    CAL[Calling outbox<br/>missed / voicemail / recording facts]
-    DPL[Developer Platform<br/>activity + lifecycle]
+    HUB[Hub outbox<br/>contacts; blocks/privacy owner]
+    MSG[Messaging outbox<br/>message.created ids only]
+    CAL[Calling outbox<br/>missed / voicemail / recording]
+    DPL[Developer Platform]
+    AM[Alertmanager*]
   end
 
-  subgraph NS["cfmeet-notification-service (cfmeet_notifications DB)"]
-    ING[Ingest API<br/>idempotent, versioned]
-    RES[Recipient resolver<br/>calls authorities]
-    POLE[Policy evaluator<br/>Hub prefs + precedence]
-    SCHED[Scheduler]
-    INBOX[(notif_inbox_items)]
-    DLV[(notif_deliveries)<br/>dispatcher]
-    PEP[(notif_push_endpoints)<br/>D-1]
-    SHADOW[Shadow comparator]
+  subgraph NS["cfmeet-notification-service ×2 (cfmeet_notifications)"]
+    ING[Ingest]
+    PREF[(Preferences<br/>single writer)]
+    RES[Recipient resolver]
+    SCHED[Scheduler<br/>reminders, quiet hours]
+    LANES{{Lanes: CRITICAL · CALL · STANDARD}}
+    EMAIL[(Email ledger<br/>Resend / SMTP)]
+    PUSH[(Push endpoints + jobs<br/>APNs / FCM / WebPush)]
+    INBOX[(In-app inbox)]
+    HIST[(Delivery history)]
   end
 
-  subgraph Transports["Transports (existing owners)"]
-    LEDGER[(Meeting email_deliveries)]
-    PT[packages/push-transport<br/>APNs/FCM/WebPush]
-    MSGP[Messaging wake-up decision]
-    RING[Calling ringing + WS<br/>NOT via NS]
-  end
-
-  ACC --> ING
-  ORG --> ING
-  HUB --> ING
-  CAL --> ING
-  DPL --> ING
-  ING --> RES --> POLE
-  POLE -->|resolveNotificationPolicy| HUB
-  POLE --> INBOX
-  POLE --> DLV
-  SCHED --> DLV
-  DLV -->|enqueueEmailDelivery| LEDGER
-  DLV --> PT
-  MSGP -->|dispatch by pushTargetRef| PT
-  CAL -.fast path post-commit.-> PT
-  PEP --- PT
-  WEBC[Web / mobile] -->|/api/v2/notifications via Meeting relay| INBOX
-  WEBC -->|existing Hub facade| PEP
-  RING --> WEBC
+  ACC & MTG & ORG & HUB & MSG & CAL & DPL & AM --> ING
+  ING --> RES --> PREF --> LANES
+  SCHED --> LANES
+  LANES --> EMAIL & PUSH & INBOX
+  EMAIL & PUSH & INBOX --> HIST
+  RES -.resolveAccountContacts.-> ACC
+  RES -.resolveConferenceRecipients.-> MTG
+  RES -.authorizeWakeups.-> MSG
+  RES -.checkCommunicationRestrictions.-> HUB
+  CAL -.post-commit fast lane.-> LANES
+  CLIENT[Web / mobile] -->|/api/v2/notifications/* via Meeting relay| INBOX
+  CLIENT -->|preferences, push registration| PREF
+  CALLWS[Calling ringing WS<br/>stays in Calling] --> CLIENT
 ```
 
 ### 5.1 Ownership boundaries (target)
 
-| Concern | Authority | NS role |
+| Concern | Authority | Notification service role |
 |---|---|---|
-| Who is a member / owner / invitee | Organizations, Meeting spaces, Calling mailboxes, Messaging membership | asks; never stores authority |
-| Account status, sessions, devices | Account (Meeting) | reads the device list, receives revocation events |
-| Principal status | Platform Access | polls the change feed (as Calling and Messaging do) |
-| Preferences | Hub (single writer) | reads in batch; caches with version |
-| OTP / verification tokens | Account | never sees codes; never sends OTP |
-| Email transport | Meeting ledger | enqueues with deterministic keys |
-| Push transport | `packages/push-transport` + `notif_push_endpoints` (D-1) | owns registry and dispatch for non-call, non-message categories; serves fast-path dispatch |
-| Message wake-up decision | Messaging | — |
-| Call ring decision and signal | Calling | — |
-| In-app notification history | **NS** | owner |
-| Delivery history (cross-channel) | **NS** (+ transport-level records stay with transports) | owner |
-| Customer webhooks | Developer Platform | none |
-| Operator alerting | Monitoring stack (Prometheus/Alertmanager when deployed) | exports metrics only |
+| Notification preferences (categories, channels, quiet hours, conversation/contact notification mute) | **Notification service** (moved from the Hub; Hub endpoints become facades) | owner |
+| Blocks, privacy, contact relationships | Hub | asks (`checkCommunicationRestrictions`, batched) |
+| Account identity, email address, locale, time zone, status | Account (Meeting) | asks (`resolveAccountContacts`); keeps addresses only inside email ledger rows (erased per retention) |
+| OTP / reset / step-up code generation and verification | Account | renders and delivers sealed codes; never verifies |
+| Conference recipients | Meeting | asks (`resolveConferenceRecipients`) at send time |
+| Membership / device entitlement for message wake-ups | Messaging | asks (`authorizeWakeups`) |
+| Call ring signaling and arbitration | Calling | none (push only) |
+| Voicemail owners, recording-authorized principals | Calling | supplied in the outbox fact |
+| Org membership | Organizations | consumes events; asks for invitee account (`resolveInvitationInvitee`) |
+| Email, push and in-app delivery; provider credentials and callbacks; delivery history | **Notification service** | owner |
+| Customer webhooks | Developer Platform (unless D-W) | none / future channel |
+| Infrastructure alert evaluation | Prometheus/Alertmanager | optional operator channel for delivery |
 
 ### 5.2 Dependency graph and failure isolation
 
 ```
-Producers ──(async, outbox retry)──▶ NS ──(async, retried)──▶ Meeting ledger / push transport / Hub (read)
-Calling ──(post-commit, ≤1s, best effort)──▶ NS fast path        [never blocks ringing]
-Clients ──(HTTP via Meeting relay)──▶ NS inbox                    [inbox down ≠ app down]
-NS ──✗──▶ never called by: OTP, sign-in, call establishment, message send, webhook delivery
+Producers ──(transactional outbox, retried)──▶ NS          [NS down ⇒ notifications delayed, never lost; business actions unaffected]
+NS ──(read, batched, cached)──▶ Account · Meeting · Messaging · Hub · Organizations · Platform Access feed
+Calling ──(post-commit ≤1s best-effort)──▶ NS CALL lane    [ringing never waits]
+Clients ──(HTTP via Meeting relay)──▶ NS                   [inbox down ≠ app down]
+Sign-in / code verification / call establishment / message send ──✗── never call NS synchronously
 ```
 
-There are no cycles:
-- NS calls the Hub (read), Meeting (enqueue), Platform Access (read) and the push providers.
-- The Hub, Organizations, Calling and the Developer Platform call NS only through their outbox workers, which are already retrying and asynchronous.
-- Messaging calls NS only for dispatch after its own decision (Phase 4.3).
+There are no cycles. Producers call NS only from outbox workers, and NS calls producers only through read APIs.
 
 ### 5.3 Event flow examples
 
-**Rule: token-bearing messages stay with the token minter.** Meeting invitations (`/invite#<token>`) and organization invitations (`/organizations/invitations#<token>`) carry a one-time bearer secret. Only the minting request ever sees it: Meeting never stores it, and Organizations stores only its SHA-256 (`organization_invitations.token_hash`). Accepting requires the token (`services/organizations/src/http/invitations.rs:395-505`). NS must never receive, store or forward such a token. So the token-bearing **email** stays a synchronous side effect in the Meeting relay, as today. NS adds only the *token-free* parts.
+**Verification code (critical lane):**
+1. Account register commits the user, the code state (hashed, N0-8) and an `account_notification_outbox` row (code sealed to the NS key) in one transaction.
+2. The relay posts `account.verification-code.requested` with priority CRITICAL.
+3. The service renders it (template `auth.verification`), writes an email ledger row (`idempotency_key = otp:verify:<recipient>:<digest>`, the existing key format) and sends it through Resend.
+4. Content is erased at the final state.
+5. If NS is down, the row waits in the Account outbox. The break-glass flag `ACCOUNT_EMAIL_FALLBACK=local` lets Account send through the retained legacy ledger until Phase 8.
 
-**Organization invitation (target):**
-1. Organizations creates the invitation and writes `invitation.created` to `organization_outbox`, with destination `cfmeet.notifications` (new subscriber row). The payload carries IDs only, never an email or token (contract rule, `docs/events/organization-event-contracts.md`).
-2. The Meeting relay still sends the token-bearing email when `sendEmail` is set. This is unchanged.
-3. NS ingests the event, deduping by `(producer, eventId)`, and asks Organizations or the Hub whether the invitee is an existing account. **Owner decision D-5:** this needs an Organizations read that maps an invitation to the invitee account reference.
-4. If the invitee is an existing account, NS creates an inbox item: "You were invited to *Org* — open the invitation email to accept".
-5. **Owner decision D-5b:** an Organizations-owned "accept by invitation id for the matching verified email" would allow in-app acceptance. That is an Organizations business-rule change and is out of NS scope.
-6. On `invitation.accepted|declined|revoked|expired`, NS marks the inbox item resolved and can notify the inviter (category `ORG_INVITATION_RESPONSE`).
+**Meeting reminder:**
+1. Meeting commits a conference schedule change together with an outbox row (`meeting-service.conference.rescheduled`, `cancelKey = conference:<id>`).
+2. The service schedules the reminder at `start − lead` in the recipient's time zone context.
+3. At fire time it calls `resolveConferenceRecipients` (Meeting authority, protected titles applied by Meeting).
+4. It applies preferences and sends email, in-app and push.
 
-**Missed call (target):**
-1. Calling commits the terminal transition.
-2. It writes a new derived outbox fact `CALL_PARTICIPANT_MISSED` for each participant whose offers all expired or were cancelled. This applies the ADR 0025 rule inside Calling and does not change it.
-3. The fact goes to the notifications destination.
-4. NS checks the Hub `missed_calls` preference.
-5. NS creates an inbox item, plus a push wake-up if a push endpoint exists, coalesced per caller within 10 min.
+**Message wake-up:**
+1. Messaging commits the message and outbox row, and publishes `messaging.message.created` (conversation id, sequence, sender principal, scope; no content).
+2. The service calls `authorizeWakeups`, which returns the entitled principals.
+3. It maps them to account devices and their push endpoints.
+4. It rechecks with `authorizeWakeups` at dispatch.
+5. It sends the 5-key metadata payload.
 
 ---
 
-## 6. Operational alerts: classification (Part 4.8)
+## 6. Operational alerts (Part 4.8)
 
-| Signal | End-user Notification Service? | Recommended home |
+| Signal | Where it is evaluated | Where it is delivered |
 |---|---|---|
-| Health / readiness failures, container restarts, OOM | No | Prometheus + Alertmanager (deploy the existing rules; fill receivers) |
-| Outbox / webhook / email / push dead letters | No (operator) | Same. NS exports `notif_*` metrics and rules |
-| Security incidents (`calling_incidents`, `CREDENTIAL_GUESSING`, abuse bursts) | No | Monitoring. An optional incident → operator-email bridge can later use the Meeting ledger through monitoring, not NS |
-| TLS certificate | No | Keep the existing GitHub-issue monitor |
-| Deployment results | No | GitHub Actions |
-| Account-security events (new device, password changed) | **Yes** (user-facing) | Account emails them; NS adds inbox copies (Phase 4.4, optional) |
+| Health, restarts, OOM, dead letters, backlog, certificate | Prometheus/Alertmanager (deploy the existing rules, D-9) | **optional:** an Alertmanager webhook receiver posts to the notification service operator channel (email to the operator group), so even operator alerts use the one system (Phase 4.7). The TLS monitor's GitHub-issue notice is kept as an independent second path |
+| Security incidents (`calling_incidents`, abuse) | owning services + monitoring | same optional operator channel |
+| Account-security events | Account | notification service CRITICAL lane (user-facing) |
+
+Monitoring of the notification service itself must **not** depend on the notification service. It keeps the GitHub-issue path and a direct Alertmanager receiver for its own health alerts.
 
 ---
 
@@ -384,15 +362,16 @@ There are no cycles:
 
 | Resource | Recommendation | Rationale |
 |---|---|---|
-| Containers | 1 (`cfmeet-notification-service`, API and workers in one process, as Organizations and the Hub do) | low volume. Split a worker later only if measured |
-| Memory limit | **256 MiB** (expected resident < 64 MiB, comparable to Organizations at 192) | Gate: 5,076 − (256 + 832) = 3,988 ≥ 1,024 ✔ |
-| CPU | no limit needed; < 1 % of one vCPU at current volumes | Postgres polling at 1 s like its peers |
-| Database | new database `cfmeet_notifications` in the existing `cfmeet-core-db` (Postgres 16), with `notifications_migrator` + runtime role via `provision-service-database.sh` | same isolation model as the 11 other service databases |
-| Queue | **Postgres tables with `FOR UPDATE SKIP LOCKED`**; no Redis, no managed queue | identical to every existing worker; measured volume is tiny |
-| Storage | inbox item ≈ 0.5–1 KB; delivery ≈ 0.3 KB. Even 10k users × 20 notifications/month × 90-day retention ≈ 0.6M rows ≈ < 1 GiB | 141 GiB free |
-| Network | internal TLS through `cfmeet-core-tls` (new 84xx port); outbound only to Apple/Google/Web Push endpoints when push is activated | no new public ingress (Meeting relay) |
-| Monitoring | `/metrics` on a private listener; rules file `notifications.rules.yml` (CI-validated like the others) | deploying Alertmanager receivers is a separate owner decision (D-9) |
-| Backups | add to `infra/deployment/backup/catalog.conf` and to the coordinated `backup` operation | consistent |
-| Cost | **€0 additional infrastructure.** Provider costs only if the owner activates them: Resend (already planned for OTP recovery), Apple Developer Program (APNs), FCM and Web Push (no fee from Google / browser vendors) | no purchase authorized or required |
+| Containers | **2 replicas** of `cfmeet-notification-service` (API + workers in each; `SKIP LOCKED` makes them safe to run concurrently) | the critical lane must survive a process crash or a rolling release. Both replicas run on the same VPS, which protects against process failure, not host failure (the whole platform shares that host today) |
+| Memory limit | 256 MiB each (expected resident < 96 MiB) | gate: 5,076 − (512 + 832) = 3,732 ≥ 1,024 ✔ |
+| CPU | no limit needed; < 1 vCPU combined at current volumes | email rendering and push signing are cheap |
+| Database | new `cfmeet_notifications` in the existing `cfmeet-core-db` (Postgres 16), with migrator and runtime roles via `provision-service-database.sh` | same isolation model as the other service databases |
+| Queue | Postgres `FOR UPDATE SKIP LOCKED`, separate partial indexes per lane; no Redis or managed queue | volumes are tiny (email ledger "all counts 0" at 2026-11-12) |
+| Storage | email ledger rows ≈ 4–20 KB until content erasure, then ≈ 0.5 KB; inbox ≈ 1 KB; total < 2 GiB at 10k users with 90-day retention | 141 GiB free |
+| Network | outbound to Resend, the SMTP fallback, Apple, Google and the Web Push endpoints; inbound only through the Meeting relay, the private TLS proxy and the public Resend callback route | — |
+| Secrets | Resend key and webhook secret, VAPID key, APNs `.p8`, FCM service account, HPKE private key for sealed codes: all 0400 files moved from Meeting/Messaging mounts | release tooling refuses provider variables until each activation |
+| Monitoring | `/metrics` private listener; `notifications.rules.yml`; **Alertmanager deployment with a real receiver is a prerequisite for Phase 4.6** (D-9) | sign-in email must be monitored before it moves |
+| Backups | add to `catalog.conf` and the coordinated `backup` operation | consistent |
+| Cost | **€0 additional infrastructure.** Provider fees only for owner-activated providers (Resend, Apple Developer Program) | no purchase authorized |
 
-**A second server, managed queue or paid provider is not justified by any measurement.** Re-measure at Phase 6, and recheck if sustained MemAvailable falls below 2 GiB.
+A second server, managed queue or paid queue is **not justified by measurement**. Re-measure at Phase 6.

@@ -1,5 +1,7 @@
 # Document 2 — Existing Notification Inventory
 
+*In this document "NS" means the proposed unified notification service. Revision 2 (owner decision D-0) updates the migration-action columns.*
+
 This is a service-by-service inventory of notification producers, consumers, APIs, tables, workers, events, feature flags and production states. It reflects `main` at `6f3743f` (2026-11-15).
 
 ## Status vocabulary
@@ -354,22 +356,22 @@ Contact requests, accept/decline, cancellation, expiry, removal, blocks, privacy
 
 | # | Table | Owner (DB) | Key columns / keys / dedupe | Ret. | Sensitive fields | Dependencies | Migration risk |
 |---|---|---|---|---|---|---|---|
-| 1 | `email_deliveries` | Meeting (`rtc_db` in `cosmicforge-db`) | PK `id`; **`UNIQUE idempotency_key`**; partial UNIQUE `(provider, provider_message_id)`; status ∈ 9 states; lease cols; `expires_at` | recipient nulled +30 d after final, row deleted +60 d; **non-final rows never purged** | plaintext `recipient`, `recipient_name`, `subject` (meeting titles), bodies with OTP/tokens until final | worker, webhooks | **Do not move** (OTP bodies, exact-once enqueue). Reuse as transport |
+| 1 | `email_deliveries` | Meeting (`rtc_db` in `cosmicforge-db`) | PK `id`; **`UNIQUE idempotency_key`**; partial UNIQUE `(provider, provider_message_id)`; status ∈ 9 states; lease cols; `expires_at` | recipient nulled +30 d after final, row deleted +60 d; **non-final rows never purged** | plaintext `recipient`, `recipient_name`, `subject` (meeting titles), bodies with OTP/tokens until final | worker, webhooks | **Migrate (revision 2):** superseded by `notif_email_messages`. Not copied; the table drains behind the fence and expires by retention (Document 5 §7) |
 | 2 | `email_delivery_events` | Meeting | PK `(provider, event_id)` | +60 d | none | Resend webhook | none |
-| 3 | `meeting_notifications` | Meeting | PK `id`; **`UNIQUE dedupe_key`**; kind ∈ {RESCHEDULED, CANCELLED, REMINDER}; status ∈ {PENDING, SENT, SKIPPED, FAILED}; lease | completed rows purged after 30 d (only while the flag is on) | none (ids, times) | notification worker | Orchestration moves to NS in Phase 4. The table stays until retirement |
+| 3 | `meeting_notifications` | Meeting | PK `id`; **`UNIQUE dedupe_key`**; kind ∈ {RESCHEDULED, CANCELLED, REMINDER}; status ∈ {PENDING, SENT, SKIPPED, FAILED}; lease | completed rows purged after 30 d (only while the flag is on) | none (ids, times) | notification worker | **Migrate:** reminder scheduling and notices move to the service scheduler; the table drains and is retired (Document 5 §10) |
 | 4 | `meeting_notification_recipients` | Meeting | PK `(notification_id, recipient_digest)`, FK cascade | with parent | unsalted SHA-256 email digest | — | as above |
 | 5 | `account_communication_outbox` | Meeting | lease, backoff; **no max attempts** | not documented | principal ids | Hub | untouched |
 | 6 | `account_security_events` | Meeting | security event log | per Account policy | user/session ids | `/me/security-events` | **source** for security notices (read, never moved) |
 | 7 | `outbox_events` (conference) | Meeting | channel REALTIME/PUBLIC_EVENT; FAILED dead letter | — | — | realtime relay, platform events | untouched |
 | 8 | `webhooks` (legacy) | Meeting | — | — | — | — | deprecated; drop later per its own sunset plan |
-| 9 | `messaging_push_registrations` | Messaging | PK `id`; **`UNIQUE device_id`** (FK `messaging_devices`); platform; `push_handle` VARCHAR(4096); `enabled`, `disabled_reason` | **none** (disabled handles kept) | **plaintext push handles** (Web Push `auth` secret) | dispatcher, Hub facade | Low today (no client registers). Decision D-1 |
+| 9 | `messaging_push_registrations` | Messaging | PK `id`; **`UNIQUE device_id`** (FK `messaging_devices`); platform; `push_handle` VARCHAR(4096); `enabled`, `disabled_reason` | **none** (disabled handles kept) | **plaintext push handles** (Web Push `auth` secret) | dispatcher, Hub facade | **Migrate:** superseded by `notif_push_endpoints` (sealed); copied only if Q6 > 0 |
 | 10 | `messaging_push_jobs` | Messaging | **`UNIQUE (event_id, device_id)`**; status ∈ 6; lease; payload CHECK metadata-only | **none** (unbounded) | none | dispatcher | add retention (N0) |
 | 11 | `messaging_outbox_events` | Messaging | `evt_` id; per-aggregate order; DEAD_LETTER after 12 | not swept | content-key CHECK | publisher | untouched |
 | 12 | `messaging_read_cursors`, `messaging_received_cursors` | Messaging | — | — | — | receipts | untouched (read state ≠ notification read) |
 | 13 | `messaging_communication_inbox` | Messaging | PK `event_id` + digest | — | — | Hub events | untouched |
-| 14 | `communication_notification_preferences` | Hub | PK `profile_id`; 7 booleans; `version` | life of profile | preference data | Messaging policy, Meeting resolve | **single writer stays the Hub**; additive columns (Document 4 §7) |
-| 15 | `communication_conversation_preferences` | Hub | PK `(owner_profile_id, conversation_id)`; `notifications`, `muted_until` | — | — | policy | untouched |
-| 16 | `communication_contact_aliases.notifications` | Hub | — | — | — | policy | untouched; precedence defined (Document 4 §7) |
+| 14 | `communication_notification_preferences` | Hub | PK `profile_id`; 7 booleans; `version` | life of profile | preference data | Messaging policy, Meeting resolve | **Migrate:** copied to `notif_preferences` (Phase 4.2); the Hub endpoints become facades; columns kept read-only until Phase 8 |
+| 15 | `communication_conversation_preferences` | Hub | PK `(owner_profile_id, conversation_id)`; `notifications`, `muted_until` | — | — | policy | **Migrate** `notifications`/`muted_until` to `notif_conversation_preferences` (Phase 4.2); other columns stay in the Hub |
+| 16 | `communication_contact_aliases.notifications` | Hub | — | — | — | policy | **Migrate** to `notif_contact_preferences` (Phase 4.2); alias, favourite and rank stay in the Hub |
 | 17 | `communication_devices` | Hub | `chat_device_ref`, `call_endpoint_ref`, `push_platform`, `push_registered_at`, `account_session_ref` | REVOKED terminal | — | device index | used as the device mapping source |
 | 18 | `communication_outbox` | Hub | `UNIQUE (event_id, destination)`; **destination CHECK IN ('CALLING','MESSAGING')** | delivered +30 d; DEAD kept | ids | Calling, Messaging | additive CHECK change to add `NOTIFICATIONS` (Phase 2) |
 | 19 | `communication_timeline_entries` | Hub | activity cards | — | — | `/activity` | untouched |
@@ -393,6 +395,8 @@ No two of these tables duplicate each other's function. Similar names, such as t
 
 These are **EXISTING APIs only**. The migration action uses: Preserve / Delegate (keep path, change backend) / Replace (new path, old kept compatible) / Deprecate.
 
+**Revision 2 (unified service, D-0):** every public contract below is kept. Where a notification side effect sits behind an endpoint (account emails, invitations, notices, push registration, preferences), that side effect is **delegated to the unified service** behind a fence (Document 5 §6). The endpoint itself stays as it is, or becomes a facade.
+
 | Service | Method & path | operationId | Auth | Consumer | Prod state | Action |
 |---|---|---|---|---|---|---|
 | Meeting | POST `/api/v1/auth/register` | register | none | web, mobile | activated | **Preserve** (Account) |
@@ -405,23 +409,23 @@ These are **EXISTING APIs only**. The migration action uses: Preserve / Delegate
 | Meeting | POST `/api/v2/me/device-links/{linkId}/email-code` | v2_send_device_link_email_code | bearer | web | activated | Preserve |
 | Meeting | POST `/api/v2/me/device-links/{linkId}/complete` | v2_complete_device_link | bearer | web | activated | Preserve. Its notice is emitted as an event in Phase 4 (optional) |
 | Meeting | GET `/api/v2/me/security-events` | v2_list_my_security_events | bearer | web | activated | Preserve (the security feed stays with Account) |
-| Meeting | POST `/api/v2/meeting-spaces/{id}/invitations` | v2_create_invitation | bearer | web | activated | **Preserve, including the email side effect.** The email is token-bearing, so it stays with the token minter. NS may add a token-free inbox item for account-holder invitees |
-| Meeting | POST `/api/v2/organizations/{id}/invitations` | v2_create_organization_invitation | bearer | web | activated | **Preserve, including the email side effect** (token minter). NS adds a token-free inbox item from `invitation.created` |
+| Meeting | POST `/api/v2/meeting-spaces/{id}/invitations` | v2_create_invitation | bearer | web | activated | Preserve the contract (`emailDelivery` kept); **email delegated** to the service with a sealed token (Phase 4.4) |
+| Meeting | POST `/api/v2/organizations/{id}/invitations` | v2_create_organization_invitation | bearer | web | activated | Preserve the contract; **email delegated** with the token and address sealed (Phase 4.4); in-app copy from `invitation.created` |
 | Meeting | POST `/api/v2/conferences/{id}/reschedule`, `/cancel` | v2_reschedule_conference, v2_cancel_conference | bearer | web | activated | Preserve; notice **delegated** |
 | Meeting | GET/WS `/api/v2/conferences/{id}/realtime`, `/events`, POST `…/realtime/ticket` | v2_realtime_* | bearer/participant | web | activated | Preserve (in-meeting) |
 | Meeting | POST `/api/v1/email/provider-events/resend` | — (not in OpenAPI) | Svix HMAC | Resend | configured-off | Preserve |
-| Meeting | POST `/internal/operations/email/acceptance`, GET `/deliveries/{id}`, POST `/developer-access-decision` | — | `X-Internal-Token` | ops scripts | implemented | Preserve. **Verify not publicly reachable** (N0). Replace with service-auth equivalents for NS (Document 4 §3.3) |
+| Meeting | POST `/internal/operations/email/acceptance`, GET `/deliveries/{id}`, POST `/developer-access-decision` | — | `X-Internal-Token` | ops scripts | implemented | **Verify not publicly reachable** (N0-6). Replaced by the service's own acceptance and diagnostics; retired in Phase 8 |
 | Meeting | ANY `/api/v2/communications/*` | (Hub contract ids) | bearer | web | activated | Preserve (relay) |
 | Meeting | `/api/v1/webhooks*` | — | bearer | none | deprecated | Deprecate (existing sunset plan) |
-| Hub | GET/PUT `/api/v2/communications/me/notification-preferences` | getNotificationPreferences / updateNotificationPreferences | bearer | SDK only | prod-tested | **Preserve + additive extension** |
+| Hub | GET/PUT `/api/v2/communications/me/notification-preferences` | getNotificationPreferences / updateNotificationPreferences | bearer | SDK only | prod-tested | **Delegate:** facade over the service's U6/U7 (Phase 4.2), same schema |
 | Hub | GET/PUT `/api/v2/communications/conversations/{id}/preferences` | get/updateConversationPreferences | bearer | SDK only | activated | Preserve |
 | Hub | PATCH `/api/v2/communications/contacts/{contactId}` | updateCommunicationsContact | bearer | web | activated | Preserve |
-| Hub | GET `/api/v2/communications/me/notification-delivery-status` | getNotificationDeliveryStatus | bearer | SDK only | prod-tested | Preserve; NS later contributes channel status |
-| Hub | PUT/DELETE `/api/v2/communications/devices/{id}/push` | register/removeCommunicationsDevicePush | bearer | none | implemented | **Preserve as THE first-party push registration API** (D-1) |
+| Hub | GET `/api/v2/communications/me/notification-delivery-status` | getNotificationDeliveryStatus | bearer | SDK only | prod-tested | **Delegate:** answered from the service's delivery data (Phase 4.1) |
+| Hub | PUT/DELETE `/api/v2/communications/devices/{id}/push` | register/removeCommunicationsDevicePush | bearer | none | implemented | **Delegate:** facade over U8/U9 (Phase 4.1) |
 | Hub | GET `/api/v2/communications/activity`, `/inbox`, `/sync`, `/events`, `/bootstrap` | … | bearer | web (partly) | activated | Preserve. **Not replaced** by the NS inbox (different semantics) |
-| Hub (internal) | POST `/internal/v1/communications/notification-preferences/resolve` | resolveNotificationPreferences | service (`communications-preferences.read`) | Meeting | implemented, grant missing | Preserve; grant fix (N0); extend `grantable_to` to NS |
+| Hub (internal) | POST `/internal/v1/communications/notification-preferences/resolve` | resolveNotificationPreferences | service (`communications-preferences.read`) | Meeting | implemented, grant missing | Grant fix (N0-1). **Deprecated** after Phase 4.2 (preferences live in the service); retired in Phase 8 |
 | Hub (internal) | POST `/internal/v1/communications/policy/check` | checkCommunicationsPolicy | service | Messaging | dormant | Preserve |
-| Messaging | PUT/DELETE `/v1/messaging/devices/{deviceId}/push-registration` | registerPush / unregisterPush | customer credential / client token | none (SDK) | implemented | Preserve (customer contract) |
+| Messaging | PUT/DELETE `/v1/messaging/devices/{deviceId}/push-registration` | registerPush / unregisterPush | customer credential / client token | none (SDK) | implemented | **Delegate:** facade over the service with the tenant scope (Phase 4.1); contract unchanged |
 | Messaging | GET `/v1/messaging/push/configuration` | getPushConfiguration | customer credential | none | implemented | Preserve |
 | Messaging (internal) | POST `/internal/v1/communications/devices/push`, `/push-status`, `/devices/verify`, `/devices/revoke` | apply…DevicePush, read…PushStatus, … | service | Hub | implemented | Preserve |
 | Calling | POST/GET/DELETE `/v1/calling/endpoints` | register/list/revokeEndpoint | platform credential | web | activated | Preserve; `pushTargetRef` gets meaning under D-1 |
@@ -429,7 +433,7 @@ These are **EXISTING APIs only**. The migration action uses: Preserve / Delegate
 | Calling | GET `/v1/calls?missed=true` | listCalls | platform credential | web | prod-tested | Preserve (history is authoritative for missed calls) |
 | Calling | GET `/v1/enterprise/voicemail/messages*`, `/recordings*` | listVoicemailMessages, … | platform credential | web | prod-tested | Preserve |
 | Calling | `/v1/webhooks*` | createWebhook, … | platform credential | — | retired (re-pointed to the Developer Platform) | Preserve the re-pointing |
-| Developer Platform | `/v1/webhooks*`, `/v1/environments/{id}/webhooks*`, replay | … | platform credential / developer session | customers, console | prod-tested | **Preserve; out of NS scope** |
+| Developer Platform | `/v1/webhooks*`, `/v1/environments/{id}/webhooks*`, replay | … | platform credential / developer session | customers, console | prod-tested | **Preserve**; joins the unified service only if owner decision D-W |
 | Organizations (internal) | POST `/internal/v1/organizations/{id}/invitations`; GET/POST `/internal/v1/admin/event-delivery[/replay]` | … | service | Meeting relay, ops | activated | Preserve |
 
 **Inconsistencies found:**

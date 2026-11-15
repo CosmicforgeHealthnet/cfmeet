@@ -1,284 +1,210 @@
-# Document 5 — Zero-Disruption Migration Plan
+# Document 5 — Zero-Disruption Migration Plan (revision 2: full consolidation)
 
-This plan preserves every working notification path at every step. Rules that apply throughout:
-- **Only one delivery authority is active per (category, channel) at a time** (Document 4 §9).
-- Every authority change is a single, journaled coordinated-release operation on `main`.
-- Every step is gated by the same rules as existing activations:
-  - the release of the exact SHA must be the one running;
-  - health checks must pass;
-  - on failure, the containers the step changed are restored automatically (`docs/operations/coordinated-production-release.md`).
+**Goal:** every notification pipeline moves into `cfmeet-notification-service` with no interruption of any notification that works today.
+
+**Rules that hold throughout:**
+- **Every message is routed to exactly one system at creation** (the routing fence, Document 4 §9).
+- Old pipelines remain installed and switchable back until Phase 8.
+- Every switch is one journaled coordinated-release operation on `main`, gated like every existing activation:
+  - the exact SHA must be running;
+  - health must pass;
+  - changed containers are restored automatically on failure.
 
 ---
 
 ## 1. Functions that must never be interrupted
 
-| # | Function | Owner | Why it is safe in this plan |
-|---|---|---|---|
-| C1 | Sign-in, registration, OTP issue/verify, password reset | Account (Meeting) | never routed through NS; the Account email path is unchanged |
-| C2 | Call ringing, answer arbitration, answered-elsewhere, recovery | Calling | never routed through NS; the push fast path is post-commit and best-effort |
-| C3 | Message send, ciphertext storage, realtime delivery, receipts | Messaging | never routed through NS |
-| C4 | Device linking / step-up / revocation | Account | unchanged |
-| C5 | Organization membership and access changes (offboarding) | Organizations → Meeting | the existing subscriber is untouched; NS is an *additional* subscriber |
-| C6 | Customer webhooks | Developer Platform | untouched |
-| C7 | Meeting notice emails (where currently working) | Meeting | stay with the legacy worker until a fenced, key-deduplicated handover |
+| # | Function | How the plan protects it |
+|---|---|---|
+| C1 | Sign-in, registration, code verification, password reset | code authority stays in Account. Code **emails** move last (4.6), through a transactional outbox, with break-glass fallback |
+| C2 | Ringing, arbitration, recovery | stay in Calling; call push is post-commit and best-effort |
+| C3 | Message send, ciphertext, realtime, receipts | stay in Messaging; only push moves |
+| C4 | Device linking, step-up, revocation | Account authority unchanged; step-up email follows C1's rules |
+| C5 | Organization access changes | the existing Meeting subscriber is untouched; the service is an additional subscriber |
+| C6 | Customer webhooks | untouched unless D-W |
+| C7 | Meeting notice emails | old worker keeps running until its fence; old jobs drain |
 
 ---
 
-## 2. Phase 0: baseline and risk inventory (read-only)
+## 2. Phase 0: baseline (read-only)
 
-### 2.1 Already measured (no further action)
+These facts were already measured and are unchanged from revision 1:
+- certify 43670057279 flags, outbox states and memory;
+- the release journal;
+- running revisions.
 
-| Fact | Value | Evidence |
+Queries Q1–Q16 are as specified in revision 1. Three of them carry extra weight in revision 2:
+
+| Q | Why it matters more now |
+|---|---|
+| Q1/Q2 (email ledger by category and status) | needed to size the drain window and to set the CRITICAL-lane baseline |
+| Q6/Q7 (push registrations and jobs) | expected 0, so the push move needs no data copy |
+| Q8/Q9 (Hub preferences and mutes) | **the row counts to copy** in Phase 4.2 |
+
+Two queries are added:
+
+| Q | Query | Answers |
 |---|---|---|
-| Push provider | `none` | certify 43670057279 |
-| Email provider | `smtp` (implicit); Resend not activated | certify 43670057279; journal has no `activate-resend-email` |
-| `NOTIFICATIONS_EMAIL_ENABLED` | `true` | certify 43670057279 |
-| Organizations event delivery | DELIVERED 35, PENDING 59 (reconciliation rows), DEAD 0 | certify 43670057279 + readiness `outbox.pending 0` |
-| Messaging outbox | pending 0, dead letter 0 | Messaging `/ready` in certify 43670057279 |
-| Numbering / SMS outbox | pending 0, dead 0; SMS provider `none` | certify 43670057279 |
-| Host | MemAvailable 5,076 MiB, disk free 141.1 GiB | certify 43670057279 |
-| Running revisions | platform-access, organizations, numbering, privacy-relay, sms-gateway, telephony, developer-platform(+worker) at `b9dc15be`; messaging, calling, meeting (`cfmeet-production-backend`), api-gateway at `c6de964c`; communications at `8a64b480` | certify 43670057279 image labels |
-| Release in progress at audit time | run 43696469230 (`6f3743f`, started 2026-11-15 08:51 UTC) | GitHub Actions |
+| Q17 | `SELECT category, percentile_disc(0.95) WITHIN GROUP (ORDER BY accepted_at - created_at) FROM email_deliveries WHERE accepted_at IS NOT NULL AND created_at > now() - interval '14 days' GROUP BY 1;` | p95 enqueue-to-provider latency per category (CRITICAL baseline) |
+| Q18 | `SELECT count(*) FROM email_deliveries WHERE status IN ('QUEUED','SENDING');` | drain size at each fence |
 
-### 2.2 Still to collect: authorized read-only queries
-
-These must be run through a **new read-only `diagnose` extension**, or by the owner with the runtime role in a read-only session (`SET TRANSACTION READ ONLY`). They return counts and ages only; no addresses, content or handles.
-
-| Q | Database | Query (counts only) | Answers |
-|---|---|---|---|
-| Q1 | meeting (`rtc_db`) | `SELECT category, status, count(*), min(created_at), max(created_at) FROM email_deliveries GROUP BY 1,2;` | email volume, failure mix, stuck QUEUED (OTP bodies retained) |
-| Q2 | meeting | `SELECT last_error_class, count(*) FROM email_deliveries WHERE status IN ('QUEUED','FAILED','EXPIRED') GROUP BY 1;` | SMTP rejection evidence (S-2) |
-| Q3 | meeting | `SELECT kind, status, last_error, count(*) FROM meeting_notifications GROUP BY 1,2,3;` | **confirms or refutes S-1**: look for `PREFERENCES_UNAVAILABLE` / FAILED |
-| Q4 | meeting | `SELECT outcome, count(*) FROM meeting_notification_recipients GROUP BY 1;` | suppressed vs queued |
-| Q5 | meeting | `SELECT count(*) FILTER (WHERE status='PENDING'), max(attempts) FROM account_communication_outbox;` | infinite-retry backlog |
-| Q6 | messaging | `SELECT platform, enabled, count(*) FROM messaging_push_registrations GROUP BY 1,2;` | **decides D-1 cost** (expected 0) |
-| Q7 | messaging | `SELECT status, count(*), max(created_at) FROM messaging_push_jobs GROUP BY 1;` | job growth (no retention) |
-| Q8 | comm hub | `SELECT count(*), count(*) FILTER (WHERE NOT (direct_messages AND group_messages AND incoming_calls AND missed_calls AND contact_requests AND group_invitations AND meeting_invitations)) FROM communication_notification_preferences;` | how many users changed defaults |
-| Q9 | comm hub | `SELECT notifications, count(*) FROM communication_conversation_preferences GROUP BY 1;` and the same on `communication_contact_aliases` | mute usage |
-| Q10 | comm hub | `SELECT destination, state, count(*) FROM communication_outbox GROUP BY 1,2;` | Hub delivery health |
-| Q11 | organizations | `SELECT destination, state, count(*) FROM organization_outbox GROUP BY 1,2;` | baseline |
-| Q12 | calling | `SELECT status, count(*) FROM calling_outbox_events GROUP BY 1;` and `SELECT count(*) FROM calling_incidents WHERE status='OPEN';` | publication health |
-| Q13 | developer platform | `SELECT status, count(*) FROM devplat_webhook_deliveries GROUP BY 1;` | webhook health |
-| Q14 | trust bundle (file) | Is `communications-preferences.read` granted to `cfmeet.meeting-service` in the live Hub bundle? Read permissions only, never keys | **S-1 root cause** |
-| Q15 | nginx (file) | Does any `location` block `^/internal/operations/`? `curl -s -o /dev/null -w '%{http_code}' https://api.cfmeet.com/internal/operations/email/deliveries/00000000-0000-0000-0000-000000000000` **without** a token, run by the owner (expected 404 from nginx; 404 from the app is also "no token"; distinguish by the `server`/body signature) | **S-3** |
-| Q16 | host | `docker stats --no-stream` for the 13 containers; 7-day MemAvailable minimum | Phase 6 capacity gate |
-
-**Phase 0 exit criteria:**
-- Q1–Q16 are recorded in a dated ops report.
+**Exit criteria:**
+- Q1–Q18 are recorded.
 - S-1, S-2 and S-3 are confirmed or refuted.
-- Volumes are known, so that Phase 2/6 thresholds can be derived from them (Document 7 §5).
-
-### 2.3 Pre-requisite remediation (Roadmap N0)
-
-These run in the owning services. Each is a normal coordinated release with its own rollback.
-- Fix the Hub grant (S-1).
-- Owner runs `activate-resend-email` + `email-acceptance confirm=otp` (S-2; already-built tooling).
-- Poison recipient (S-11).
-- Lease/batch bounds (S-8).
-- `notify` restriction (S-4).
-- Erasure of push handles (S-7).
-- OTP hashing (S-5).
-- Enumeration (S-6).
-- nginx internal block (S-3).
-- Push-job and outbox retention.
-
-**NS work does not depend on N0 code, but Phase 4 does depend on S-1 and S-2 being fixed.** Do not migrate a channel whose current behaviour is broken: the baseline comparison would be meaningless.
+- N0 is complete for the channels about to move.
 
 ---
 
-## 3. Phase 1: service foundations (dark)
+## 3. Phase 1: foundations (dark)
 
-| Item | Detail |
-|---|---|
-| Deliverable | `services/notifications` (Roadmap N1–N3), DB `cfmeet_notifications`, migrations, I1–I7, U1–U5 behind the relay (relay route off), workers W1–W4, metrics, rules file |
-| Production action | `provision` (DB + roles) → `release` (container starts; `/ready` passes) → **no grants to producers, no relay route, every authority OFF** |
-| Switched producers | **none** |
-| Acceptance | certify reports the container healthy; `notif_channel_authority` all OFF; no inbound traffic (`notif_events_ingested_total = 0`) |
-| Rollback | stop/remove the container (no other service references it); the DB may remain (empty) |
+The full schema (16 tables), I1–I9, U1–U9 (relay route off), workers and metrics. **2 replicas.** All routing is OFF; producers have no grants.
+
+- **Acceptance:** certify shows both replicas healthy and zero traffic.
+- **Rollback:** remove the containers.
 
 ---
 
-## 4. Phase 2: shadow ingestion (no user-visible effect)
+## 4. Phase 2: shadow (all producers, no sends)
 
-**Mechanism:** NS is added as an **additional destination** on each producer's existing outbox. The existing destinations are untouched:
+Each producer gets an **additional** publication to the service. Existing paths are untouched. The service computes recipients, preferences and channels and renders templates, then writes `SHADOW` rows. **It never calls a provider and never writes an inbox item.**
 
-| Producer | Change (additive) | Revert |
+| Producer | Shadow publication | Compared against |
 |---|---|---|
-| Organizations | `subscribers()` adds `cfmeet.notifications` for `invitation.*`, `membership.*`, `ownership.transferred`, `organization.suspended`; `ORGANIZATIONS_EVENT_DESTINATIONS=cfmeet.meeting-service,cfmeet.notifications` | remove the destination from the env; rows for NS already queued are left to DEAD-letter harmlessly or are purged by the operator |
-| Hub | outbox CHECK allows `NOTIFICATIONS`; `scoped_event` writes a third row for `connection.requested/connected` | config flag `COMMUNICATIONS_NOTIFICATIONS_DESTINATION=off` |
-| Calling | publication destination `notifications` for `VOICEMAIL_READY`, `RECORDING_READY`, the new `CALL_PARTICIPANT_MISSED` | `CALLING_NOTIFICATIONS_DESTINATION=off` |
-| Messaging | publish `messaging.member.invited` to NS | flag off |
-| Meeting | notification worker **also** posts each claimed job as a `meeting-service.notice.*` event **in addition** to its normal email path (shadow copy; mode SHADOW) | flag off |
-| Developer Platform | lifecycle sweep / production decision **also** publishes to NS | flag off |
+| Account | `account_notification_outbox` rows written alongside the current direct enqueue, with `shadow=true` (sealed code included; the service decrypts only to verify rendering, then discards) | old ledger row with the same idempotency key |
+| Meeting | `outbox_events` channel `NOTIFICATION` for `conference.*` and invitation email requests | old `meeting_notifications` + ledger rows |
+| Messaging | `message.created`, `member.invited` | old `messaging_push_jobs` (would-be wake-ups; today `NOT_CONFIGURED`) |
+| Calling | missed, voicemail, recording facts | none (new) |
+| Hub | `connection.*`; preference change feed (`NOTIFICATION_PREFERENCE`) mirrored to the service | Hub preference rows (copy verification) |
+| Organizations | subscriber `cfmeet.notifications` | none (new) |
+| Developer Platform | lifecycle and decision publications | ops-script email (key `devplat-access:<req>:<decision>`) |
 
-NS behaviour in SHADOW:
-- It ingests, resolves recipients, evaluates policy, and writes `notif_notifications.state='SHADOW'`, `notif_deliveries.status='SHADOW'`.
-- It writes `notif_shadow_observations(side='NS')` for categories that have a legacy counterpart (meeting notices).
-- The Meeting worker writes `side='LEGACY'` for the same `dedupe_key`, with a keyed HMAC digest of the recipient ref, never the address.
-- It **makes no transport call and creates no inbox items.**
+**Shadow exit, per category:**
+- ≥ 14 days or ≥ 1,000 events;
+- capture ≥ 99.9 %;
+- recipient, policy and rendering mismatch ≤ 0.1 %, all explained;
+- for email categories, the rendered subject and body hash match the old template output;
+- producer DEAD rows for the service destination = 0.
 
-**Shadow measurements** (I6, alert rules):
-
-| Measure | Definition |
-|---|---|
-| Event capture | `ingested / emitted` per producer. Emitted is counted by the producer's outbox for destination NS |
-| Missed | legacy observation without an NS observation after 10 min |
-| Extra | NS observation without a legacy one (for categories with legacy) |
-| Recipient mismatch | same key, differing recipient digest sets |
-| Policy mismatch | same recipient, different allow/suppress |
-| Lag | `occurredAt` → NS processed (p50/p95) |
-| Duplicates | `DUPLICATE` outcomes are expected (producer retries). Duplicated notifications must be 0 (enforced by `UNIQUE`) |
-
-**Phase 2 exit (per category):**
-- ≥ 14 days of shadow, or ≥ 1,000 legacy events, whichever is longer.
-- Capture ≥ 99.9 %.
-- Mismatches ≤ 0.1 %, each explained.
-- p95 lag below the baseline-derived bound (Document 7 §5).
-- Producer outbox DEAD rows for the NS destination = 0.
+**Rollback:** set each producer's publication flag off.
 
 ---
 
-## 5. Phase 3: in-app notifications first
+## 5. Phase 3: in-app first
 
-**Why first:** the in-app inbox has **no legacy equivalent** (evidence/06 §3), so turning it on cannot duplicate or remove anything users receive today.
+The in-app inbox goes live for categories with **no current channel**:
+- contacts;
+- org changes and the invitation copy;
+- missed calls, voicemail, recordings;
+- message requests;
+- developer notices.
 
-| Step | Action |
-|---|---|
-| 3.1 | Grant Meeting `notifications-user.forward`; enable the relay route `/api/v2/notifications/*`; add U1–U5 to `meeting-service.json` (mobile contract) |
-| 3.2 | Set `notif_channel_authority(category, IN_APP)=ACTIVE` per category, in this order: CONTACT_REQUEST, CONTACT_ACCEPTED, ORG_INVITATION (token-free copy), ORG_MEMBERSHIP, CALL_MISSED, VOICEMAIL, RECORDING_READY, MESSAGE_REQUEST, DEVELOPER_*. These categories have **no current channel at all** |
-| 3.3 | Web: bell + list behind a frontend flag (layout unchanged elsewhere; a new component in the existing header slot requires design approval, Part 2 rule 9). Mobile: list screen behind a flag |
-| 3.4 | Meeting categories in-app: MEETING_CHANGE and MEETING_REMINDER get in-app ACTIVE while **email stays legacy** (in-app is an additional channel, not a replacement) |
+Meeting categories get an in-app copy while their email stays on the old path. There is nothing to duplicate (Document 2 §A.12: no inbox exists today).
 
-**Existing realtime paths are preserved:**
-- Calling signaling, Messaging realtime and conference realtime are untouched.
-- The Hub `/activity` and `/sync` keep their semantics.
-
-**Exit criteria:** see Document 7 §5 (A3).
+**Rollback:** relay route off, IN_APP routing OFF.
 
 ---
 
-## 6. Phase 4: channel-by-channel ownership transfer
+## 6. Phase 4: channel moves, in order of increasing risk
 
-Each sub-phase lists:
-- the moment ownership changes;
-- the mechanism that prevents double sending;
-- what stays.
-
-### 4.1 Organizations
-
-| | |
-|---|---|
-| Moves | in-app only (Phase 3). Optional inviter notice on `invitation.accepted/declined` (new) |
-| Stays | **the token-bearing invitation email** (Meeting relay, P4); membership/access processing in Meeting (C5) |
-| Ownership change | none for email; IN_APP ACTIVE in Phase 3 |
-| Duplicates | none possible (no legacy in-app; email not migrated) |
-
-### 4.2 Meeting notifications (reschedule, cancel, reminder): the only true email handover
+### 4.1 Push (lowest risk: no production traffic)
 
 **Pre-conditions:**
-- S-1 fixed and Q3 shows SENT jobs for account holders.
-- S-11 fixed.
-- Resend active (S-2).
-- Phase 2 shadow exit met for MEETING_*.
+- Q6 = 0, or the D-1b copy path is ready.
+- The owner activates providers **in the service**: VAPID / FCM / APNs (D-3). Do not activate them in Messaging, which would create data to migrate.
 
-The steps are ordered:
+**Switch** (`activate-notifications-push`):
+1. Fence push routing.
+2. Messaging stops creating `messaging_push_jobs` for events after the fence; earlier jobs finish or expire within 24 h.
+3. The Hub and Messaging push-registration endpoints become facades to U8/U9.
+4. Calling: `CALLING_PUSH_TRANSPORT=notifications`.
+5. Delivery status is answered by the service.
 
-1. **4.2a Dual-enqueue window (ACTIVE-ACTIVE, safe by construction).**
-   - Set `notif_channel_authority(MEETING_*, EMAIL)=ACTIVE` with `fence_at = T`.
-   - The Meeting worker keeps sending.
-   - NS enqueues through X1 with `legacyNoticeRef=<job id>`. Meeting computes the legacy idempotency key `meeting-notification:{job}:{sha256(lower(addr))}` for that recipient.
-   - Whichever side enqueues first creates the single ledger row. The other gets `created=false`.
-   - Metric: `email_enqueue_duplicates` rises by about one per recipient. This **proves** both sides agree.
-   - Duration: ≥ 7 days.
-2. **4.2b Legacy stops rendering.**
-   - For jobs with `created_at >= T2`, the Meeting worker forwards the event only (`MEETING_NOTIFICATIONS_DELIVERY=notifications`).
-   - Jobs created before `T2` are finished by the legacy worker.
-   - Because both paths use the same key, overlap at the boundary is harmless.
-3. **4.2c Preference source switch.** NS uses X3 (channels and quiet hours). The Meeting `HubPreferences` call becomes unused for these categories but stays in code.
+**If Q6 > 0:** copy registrations into `notif_push_endpoints`, sealing handles and mapping Messaging device → account device through the Hub index. Dual-read until the 24 h job TTL passes.
 
-**What stays in Meeting:**
-- the job row written in the business transaction (`record_rescheduled` / `record_cancelled`);
-- the reminder scan (`enqueue_due_reminders`);
-- recipient resolution (`RECIPIENTS_SQL`);
-- protected titles (`presented_title`).
+**Duplicate control:** the fence (one creator per job) plus collapse IDs.
 
-NS takes over channel selection, preferences/quiet hours, templates for push/in-app, and delivery tracking. **Invitation emails (token-bearing) stay** in the Meeting synchronous path.
+### 4.2 Preferences (single-writer switch)
 
-### 4.3 Messaging push
+1. **Copy:** Hub `communication_notification_preferences`, the `notifications`/`muted_until` columns of `communication_conversation_preferences`, and `communication_contact_aliases.notifications`. Each row records the Hub `version` in `source_version`.
+2. **Catch-up:** apply Hub change-feed `NOTIFICATION_PREFERENCE` / `CONVERSATION_PREFERENCE` / `CONTACT` entries after the copy. The change feed already exists (`sync.rs:16-29`).
+3. **Switch** (`activate-notifications-preferences`): the Hub endpoints become facades, so preference writes now go to the service. There is a **write freeze of under 60 s**: Hub PUTs answer 503 + `Retry-After: 5`. Web clients already retry `communicationsRequest` (`communications.service.ts:62-70`), and preference writes are rare (Q8).
+4. **Verify:** row counts and per-row versions are equal. The Hub `policy/check` message-notification steps become unused (Messaging push has moved). Blocks and privacy stay in the Hub (X4).
 
-Pre-conditions:
-- **D-1** decided.
-- `packages/push-transport` extracted (no behaviour change, N4).
-- Owner activates a push provider: `activate-web-push` or the APNs/FCM credentials. This is owner decision D-3, outside this plan's authority.
+**Rollback:** switch the facade back. Changes made in the service are written back to the Hub using the version columns. This is possible because the service keeps a change log for 7 days.
 
-**If Q6 = 0** (no registrations, expected):
-- Switch the Hub facade target to NS I8 in one release: `COMMUNICATIONS_PUSH_REGISTRY=notifications`.
-- Messaging's dispatcher calls NS I9 with `pushTargetRef`s resolved through the Hub device index (`chat_device_ref` ↔ account device).
-- Messaging keeps all rechecks: membership, history window, block and Hub policy.
-- **There is no data to migrate.**
+### 4.3 Standard email: developer notices, meeting reminders, changes and cancellations
 
-**If Q6 > 0** (Web Push activated in Messaging earlier, D-1b):
-1. Copy registrations, handle by handle, into `notif_push_endpoints` (sealed).
-2. Dual-read: Messaging resolves NS endpoints first, falling back to its own table.
-3. Fence: push jobs created at or after `fence_at` are dispatched via NS; earlier ones finish in Messaging.
-4. After 24 h (the job TTL) Messaging's own adapters go idle.
+**Pre-conditions:**
+- N0-1 (Hub grant) and N0-3 fixed.
+- **Resend activated** (N0-2) and **re-accepted from the service**: `email-acceptance` retargeted to the service ledger, with the Resend webhook endpoint added to the account.
+
+**Switch per category:**
+1. Fence the category's email routing.
+2. Meeting stops creating old ledger rows and old notification jobs for new events in that category.
+3. The service schedules reminders from `conference.*` events and resolves recipients through X2 at fire time.
+4. Old PENDING jobs and QUEUED ledger rows drain through the old worker.
+
+**Drain:** Q18 shows the backlog. Resend webhooks go to both endpoints until the old ledger has no non-final rows.
+
+### 4.4 Invitation emails (token-bearing)
+
+Meeting and the Meeting relay seal the token (and, for organization invitations, the address) to the service key, and emit `*.email-requested`.
+- The `emailDelivery` field in the `v2_create_invitation` / `v2_create_organization_invitation` responses keeps its meaning: ACCEPTED when the event is committed, DISABLED as before.
+- The fence is per category.
+
+### 4.5 Security notices (password changed, device linked)
+
+These move to the CRITICAL lane through the **transactional** Account outbox, which also fixes S-9 (notices are no longer lost after commit).
+
+**Pre-conditions:**
+- D-9: alerting deployed with a real receiver.
+- CRITICAL-lane metrics live.
+- 30 days of 4.3 stable.
+
+### 4.6 Sign-in, verification, reset and device step-up codes (last)
+
+**Pre-conditions:**
+- 30 days of 4.5 stable.
+- CRITICAL p95 handoff ≤ baseline (Q17) + 5 s in shadow.
+- Both replicas healthy through at least one rolling release.
+- Break-glass `ACCOUNT_EMAIL_FALLBACK=local` tested in production (the switch takes effect within one poll interval).
+
+**Canary:** acceptance accounts → 10 % → 50 % → 100 %, chosen by account hash.
 
 **Duplicate control:**
-- `UNIQUE (event_id, device_id)` in Messaging.
-- `(collapseId=eventId, pushTargetRef)` in NS.
-- The fence decides the single dispatcher per job.
+- The routing decision is made inside Account's transaction (old enqueue **or** outbox row, never both).
+- The idempotency key format `otp:verify:<recipient>:<digest>` is kept, so a resend request collapses as today.
 
-**Stays:** the wake-up *decision*, the payload whitelist, and E2EE rechecks in Messaging. Organization/MANAGED scope gains push only after D-1, because session devices map to account devices.
+**What remains in Account forever:**
+- code generation, hashing, expiry, attempt limits and verification;
+- `/api/v2/me/security-events`.
 
-### 4.4 Account-security notifications
+### 4.7 Operator alerts (optional)
 
-| | |
-|---|---|
-| Moves | **nothing for email.** Optional: `account.security.*` events create **in-app copies** (non-suppressible) |
-| Stays | OTP, reset codes, step-up codes, password-changed and new-device emails (Account → ledger), and `/api/v2/me/security-events` |
-| Reason | Part 4.1 and Part 11. A security notice must not depend on a non-essential service. N0 makes the existing notices transactional (S-9) |
+Deploy Alertmanager (D-9) with receiver 1 = the service's I10 (operator email) and receiver 2 = a direct path (the GitHub issue, as the TLS monitor uses). The service's **own** health alerts must use the direct path only.
 
-### 4.5 Calling-related alerts
+### 4.8 Customer webhooks (only if D-W)
 
-| Alert | Plan |
-|---|---|
-| Ring alert (push) | Calling `PushDispatcher` implementation calling I9 (D-2) **or** an in-Calling dispatcher using `packages/push-transport`. Enabled by Calling configuration `CALLING_PUSH_TRANSPORT=notifications\|local\|none` (default `none` = today). **The WS ring path is unchanged; ringing never waits** |
-| Missed call, voicemail, recording ready | new in-app (Phase 3), plus push/email channels when the authority is ACTIVE. No legacy channel exists, so there are no duplicates |
-| Recording consent notice, answered-elsewhere | stay realtime in Calling (compliance and latency) |
+This is not recommended before every user channel has been stable for 90 days. If approved:
+- move `devplat_webhook_*` tables and the worker into the service as a WEBHOOK channel;
+- the Developer Platform keeps the subscription API as a facade;
+- use the same fence pattern (deliveries created after the fence go to the service; earlier ones finish in the Developer Platform);
+- keep signing secrets sealed under a re-keyed `secret_box`.
 
-### 4.6 Developer Platform
-
-| | |
-|---|---|
-| Moves | human notices: credential expiring/expired, production-access decision. These go through NS email + in-app to organization admins / the applicant |
-| Duplicate control (production-access decision email) | today it is only sent by the ops script (`developer_access.py::notify_applicant` → Meeting `/internal/operations/email/developer-access-decision`, key `devplat-access:<req>:<decision>`). NS uses X1 with the **same key** (`devplat-access:<req>:<decision>`), so a double run is exact-once at the ledger. The script call is removed only in Phase 8 |
-| Stays | customer webhooks (`credential.*` webhooks keep firing) |
-
-### 4.7 Transactional email orchestration (general)
-
-| | |
-|---|---|
-| Moves | only NS-owned categories reach the ledger via X1 |
-| Stays | the ledger, worker, providers, Svix callbacks and retention: **the Meeting Service remains the single email authority** |
-
-The Option B migration of the ledger is explicitly **not** planned.
+This requires its own audit addendum before approval.
 
 ---
 
-## 7. Phase 5: compatibility and historical data
+## 7. Phase 5: historical data
 
-| Data | Treatment | Rationale |
-|---|---|---|
-| `email_deliveries` / events | **left with the owner**; NS stores `transport_ref` = delivery id | contains OTP bodies until final; must not move |
-| `meeting_notifications` / recipients | **left**; read by the shadow comparator only; legacy rows purge naturally (30 d) | no user-visible history today |
-| Push registrations | **reference** (Q6 = 0) or **copy sealed** (Q6 > 0); Messaging rows disabled, not deleted, until Phase 8 | handles are sensitive, so a single store is the goal |
-| Hub preferences | **left** (single writer); NS reads | no conflicting writer |
-| Account security events | **left**; optional in-app copies only for new events (no backfill) | — |
-| Calling history / voicemail / recordings | **left**; NS items reference IDs; no backfill of past missed calls | avoids surprising "new" notifications |
-| Organizations invitations | **left**; no backfill | — |
-| E2EE state (MLS, devices, ciphertext) | **never touched** | — |
-
-There is **no historical backfill** into the inbox. The inbox starts empty at activation. This avoids a burst of stale notifications and moves no sensitive data.
+| Data | Treatment |
+|---|---|
+| Old email ledger (`email_deliveries`, events) | **not copied** (it holds code bodies until final). It drains, then expires by its own retention (60 d). Delivery-status lookups during the overlap query both (I4 reads the service ledger; the old `/internal/operations/email/deliveries/{id}` stays until Phase 8) |
+| `meeting_notifications` / recipients | not copied; drain + 30 d retention |
+| Push registrations | none expected (Q6); otherwise a sealed copy |
+| **Preferences** | **copied** (authoritative data move, §4.2); Hub columns kept read-only until Phase 8 |
+| Security events, call history, voicemail, recordings, org invitations | stay with their owners; inbox items reference IDs; no backfill |
+| E2EE state | never touched |
 
 ---
 
@@ -286,47 +212,40 @@ There is **no historical backfill** into the inbox. The inbox starts empty at ac
 
 | Control | Specification |
 |---|---|
-| Feature flags | `notif_channel_authority` per (category, channel) + producer flags. Each changes only through an `activate-notifications-*` operation that refuses if the exact release SHA is not running |
-| Canary | 1. Internal accounts allowlist (`NOTIFICATIONS_CANARY_ACCOUNT_REFS`; the acceptance accounts used by `communications-verify` / `organization-acceptance`) for ≥ 48 h. 2. 10 % by `hash(accountRef) mod 100 < 10` for ≥ 72 h. 3. 50 %. 4. 100 %. For email categories, accounts outside the canary keep the legacy-only path (NS SHADOW for them) |
-| Health checks | NS `/ready`; dead letters 0; oldest pending < 2 min; breaker closed; shadow/legacy mismatch ≤ 0.1 % |
-| Acceptance gates | Document 7 §5, per stage |
-| Single authority | the authority table + legacy flags are set by the **same** operation; certify reports both sides and fails on disagreement (new certify check) |
-| Provider idempotency limits | Resend `Idempotency-Key` = ledger id (`email_delivery.rs:364`), honoured only within Resend's idempotency window; SMTP has none. **Hence dedupe happens before the provider, at the ledger.** APNs/FCM/Web Push collapse IDs only replace *visible* notifications; they are not idempotency. Hence fencing per job |
+| Flags | `notif_routing` (category, channel) + producer routing configuration, set by one operation; certify fails on disagreement |
+| Canary | acceptance accounts → 10 % → 50 % → 100 % by `hash(accountRef)` for per-account categories; per-category fences otherwise |
+| Gates | Document 7 §5 |
+| Provider idempotency limits | Resend `Idempotency-Key` honoured only within Resend's window; SMTP has none; push collapse IDs replace visible notifications but are not idempotency. **Hence the fence decides before any provider is involved** |
 
 ---
 
 ## 9. Phase 7: rollback (per stage)
 
-| Stage | Trigger (any one) | Restoration path | In-flight treatment | Reconciliation | Duplicate prevention | Preferences | DB compatibility | Monitoring before resuming |
-|---|---|---|---|---|---|---|---|---|
-| P1 dark | NS crash loop, resource gate breach | `rollback` restores the previous container set (NS removed) | none (no traffic) | none | n/a | untouched | NS DB unused; other DBs unchanged | 24 h stable `/ready` |
-| P2 shadow | producer DEAD rows for the NS destination > 0; producer lag up; NS ingest 5xx > 1 % for 10 min | set each producer's NS destination off (one operation) | queued NS-destination rows: left to DEAD (harmless) or purged by the operator via existing replay/admin tools | shadow data discarded | n/a (no sends) | untouched | additive CHECK/subscriber changes remain (inert) | producer outbox lag back to baseline |
-| P3 in-app | inbox API error > 1 %; wrong-recipient report; mismatch spike | relay route off; IN_APP authority OFF (items stay, invisible) | pending IN_APP deliveries → CANCELLED | none needed | none (no legacy) | untouched | items retained or purged by retention | root cause fixed; authorization-matrix tests pass |
-| P4.2 meeting email | email failure rate > baseline + 2σ; missed recipients in shadow > 0.1 %; complaint/bounce spike | set `MEETING_NOTIFICATIONS_DELIVERY=legacy` and authority SHADOW (one operation). The Meeting worker resumes rendering for all jobs | NS deliveries in `DISPATCHING` finish (same key → no duplicate); `PENDING` → CANCELLED | the legacy worker processes all PENDING `meeting_notifications`; the recipient ledger (`meeting_notification_recipients`) prevents re-sends; ledger `UNIQUE` prevents duplicates with NS-enqueued rows | **deterministic key**: the legacy and NS enqueues of the same (job, recipient) collapse | Hub unchanged (single writer) | no schema reversal needed | shadow mismatch ≤ 0.1 % for 7 days |
-| P4.3 push | invalid-handle surge, payload validation failure, provider auth errors, wrong-device delivery | Hub facade target back to Messaging; Messaging dispatcher back to local adapters | jobs at or after the fence and not yet sent are re-created by Messaging fan-out (`UNIQUE (event, device)`) or expire (24 h) | copy endpoints back if needed (sealed → plaintext only inside Messaging) | fence + collapse ID; residual duplicate wake-up accepted (metadata only) | untouched | NS endpoint table retained | provider error rate at baseline |
-| P4.5 call push | any ringing regression (none expected: decoupled); push failure rate > 5 % | `CALLING_PUSH_TRANSPORT=none` | none (no queue) | none | n/a | untouched | none | 72 h canary clean |
-| P4.6 developer | wrong recipient; email failures | authority OFF; the script path still exists until Phase 8 | PENDING → CANCELLED | same key with the script path | ledger key | untouched | none | 7 days clean |
+The universal mechanism is to **route new messages back to the old system**. In-flight messages finish in the system that created them. Nothing is ever in both.
 
-**Universal rule:** a rollback never deletes NS data and never reverses a migration in an existing service. Every additive change stays inert when switched off.
+| Stage | Trigger | Restoration | In-flight | Reconciliation | Duplicates | Preferences | DB compatibility | Resume after |
+|---|---|---|---|---|---|---|---|---|
+| P1 | crash loop, resource gate | remove containers | none | none | n/a | n/a | additive only | 24 h stable |
+| P2 | producer DEAD > 0, lag | publication flags off | queued rows DEAD (harmless) | discard shadow | n/a | n/a | additive only | lag at baseline |
+| P3 | inbox errors, wrong recipient | relay off | items hidden | — | none | — | — | matrix tests pass |
+| 4.1 push | invalid-handle surge, wrong device, auth errors | Messaging resumes job creation; facades point back; `CALLING_PUSH_TRANSPORT=none` | the service finishes or expires its jobs (24 h) | copy endpoints back if any existed | fence | — | — | provider errors at baseline |
+| 4.2 prefs | version mismatch, write errors | facade back to the Hub | — | write back changes by version from the 7-day change log | — | **preserved** (write-back) | Hub columns intact | counts and versions equal |
+| 4.3 / 4.4 email | failure rate > baseline + 2σ, mismatches, complaints | per-category fence back to the old Meeting path | the service ledger drains its own rows | none (rows live in one ledger) | fence | — | — | 7 days clean shadow |
+| 4.5 / 4.6 critical | CRITICAL oldest pending > 60 s, failure above baseline, **any** user report of a missing code | `ACCOUNT_EMAIL_FALLBACK=local` (immediate) then fence back | service CRITICAL rows drain; codes in them stay valid until their TTL | none | routing decided in Account's transaction | — | — | root cause + 14 days shadow |
+| 4.7 operator | — | remove receiver 1 | — | — | — | — | — | — |
 
 ---
 
-## 10. Phase 8: legacy retirement (evidence required)
+## 10. Phase 8: retirement (evidence required)
 
-| Candidate | Retire only when (evidence) | Never retire |
+| Retire | Evidence required | Keep forever |
 |---|---|---|
-| Meeting notification worker's *rendering* path (`deliver` composing emails) | 30 consecutive days at 100 % NS authority; 0 rollbacks; `email_enqueue_duplicates` attributable to legacy = 0 for 14 days; Q3 shows no PENDING legacy-rendered jobs; consumers inventory confirms no other caller | the job *writer* (`record_*`) and the reminder scan (business-transaction guarantee) |
-| Meeting `HubPreferences` call for MEETINGS | no caller (code search + metric) for 30 days | — |
-| `/internal/operations/email/developer-access-decision` + script email call | NS developer notices ACTIVE for 30 days; the script updated to stop calling | the email ledger itself |
-| Messaging local push adapters (`push_adapters.rs` usage in Messaging) | all dispatch via NS for 30 days; Messaging registrations disabled and empty | Messaging's wake-up decision, payload whitelist, `messaging_push_jobs` (or replace with an NS reference later, separate decision) |
-| `messaging_push_registrations` rows | copied and verified; 30 days unused; then delete handles (privacy win) | — |
-| Hub `push_platform` mirror | NS registry authoritative for 30 days | Hub device index |
-| `notif_shadow_observations` and the comparator | all categories ACTIVE ≥ 30 days | — |
-| Calling `NoPushTransport` | a real transport configured and certified | Calling ringing/signaling |
+| Meeting email worker, providers, `email_deliveries` writes, Resend webhook route, `/internal/operations/email/*` | 60 days at 100 % with no fallback use (`ACCOUNT_EMAIL_FALLBACK` never set); old ledger has 0 non-final rows; code search shows no `email_delivery::enqueue` caller; then 60 more days for retention to expire | Account code authority |
+| Meeting notification worker (`meeting_notifications`, recipients) | 30 days with no new rows; drain complete | conference business logic |
+| Messaging push dispatcher, adapters, `messaging_push_jobs`, `messaging_push_registrations` | 30 days with no new jobs; registrations empty or copied | Messaging authority (exposed through X3) |
+| Hub notification preference columns and `policy/check` notification actions | 60 days as a facade with no direct reads | Hub blocks, privacy, contacts |
+| Calling `NoPushTransport` | transport certified | ringing/signaling |
+| Shadow tables and comparator | all categories at 100 % for 30 days | — |
+| Break-glass fallback in Account | 90 days of CRITICAL lane with zero fallback use, and owner sign-off | — |
 
-**Explicitly not proposed for removal:**
-- Meeting Service email delivery (ledger, worker, providers);
-- Messaging push adapters (moved into a shared crate, not deleted);
-- Calling signaling.
-
-Each retirement is its own reviewed change with a consumer inventory: callers, queues, APIs, callbacks.
+**Immediate removal of the Meeting email delivery or the Messaging push adapters is not proposed.** Each retirement is its own reviewed change with a consumer inventory.
