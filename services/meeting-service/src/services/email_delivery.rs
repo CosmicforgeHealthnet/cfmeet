@@ -62,6 +62,40 @@ pub mod category {
     pub const LEGACY_QUEUE: &str = "LEGACY_QUEUE";
 }
 
+/// Categories that are never suppressed after bounces or complaints: account recovery,
+/// sign-in codes and security notices must still be attempted (Notification Service N0-12;
+/// an operator investigates repeated bounces instead), and operator acceptance mail is the
+/// evidence that the transport works.
+pub const UNSUPPRESSIBLE_CATEGORIES: &[&str] = &[
+    category::AUTH_VERIFICATION,
+    category::AUTH_PASSWORD_RESET,
+    category::SECURITY_PASSWORD_CHANGED,
+    category::NOTIFICATION,
+    category::OPERATIONS_ACCEPTANCE,
+];
+
+/// The `ApiError::Conflict` message of an enqueue refused because the recipient is
+/// suppressed (S-12): one complaint, or two bounces, recorded for the same address.
+pub const RECIPIENT_SUPPRESSED: &str = "EMAIL_RECIPIENT_SUPPRESSED";
+
+/// Whether new non-security mail to this recipient is refused (N0-12): the provider
+/// reported a complaint, or at least two bounces, for the address (by its hash).
+pub async fn recipient_suppressed<C: ConnectionTrait>(conn: &C, hash: &str) -> ApiResult<bool> {
+    let row = conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT (count(*) FILTER (WHERE status = 'COMPLAINED') > 0
+                     OR count(*) FILTER (WHERE status = 'BOUNCED') >= 2) AS suppressed
+               FROM email_deliveries
+              WHERE recipient_hash = $1 AND status IN ('BOUNCED', 'COMPLAINED')",
+            [hash.into()],
+        ))
+        .await?;
+    Ok(row
+        .and_then(|r| r.try_get::<bool>("", "suppressed").ok())
+        .unwrap_or(false))
+}
+
 /// Statuses that are final (content erased, never re-sent).
 pub const FINAL_STATUSES: &[&str] = &[
     "ACCEPTED",
@@ -131,6 +165,12 @@ pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult
     let subject = clean_header(&email.subject, 200);
     if subject.is_empty() {
         return Err(ApiError::InternalError("Email subject is empty".into()));
+    }
+    if !UNSUPPRESSIBLE_CATEGORIES.contains(&email.category)
+        && recipient_suppressed(conn, &recipient_hash(&to)).await?
+    {
+        inc(&OM.email_suppressed);
+        return Err(ApiError::Conflict(RECIPIENT_SUPPRESSED.into()));
     }
     let to_name = email
         .to_name

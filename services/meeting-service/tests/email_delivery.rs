@@ -585,3 +585,133 @@ async fn two_workers_never_send_a_message_twice_when_a_batch_outlives_the_lease(
         assert_eq!(status_of(&app, id).await.0, "ACCEPTED");
     }
 }
+
+/// Notification Service N0-12 (S-12): after a complaint, or a second bounce, reported by
+/// the provider's signed webhook, new non-security mail to that address is refused with
+/// SUPPRESSED; sign-in, recovery and security mail is still queued.
+#[tokio::test]
+async fn complained_or_twice_bounced_recipients_are_suppressed_except_for_security_mail() {
+    let app = app!();
+    let raw = b"resend-webhook-signing-secret-32b";
+    let mut state = app.state.clone();
+    state.email_webhook_secret = Some(format!(
+        "whsec_{}",
+        base64::engine::general_purpose::STANDARD.encode(raw)
+    ));
+    let router = backend::routes::create_routes(state);
+    let db = app.state.db.clone();
+    let worker = EmailWorker::new(
+        db.clone(),
+        Arc::new(RecordingProvider::default()),
+        settings(),
+    );
+    let to = |address: &str, key: &str, category: &'static str| NewEmail {
+        category,
+        idempotency_key: Some(key.into()),
+        to: address.into(),
+        ..email(key)
+    };
+    let mut n = 0;
+    let mut event = |id: Uuid, kind: &str| {
+        n += 1;
+        let evt = format!("evt_s12_{n}");
+        let body =
+            json!({"type": kind, "data": {"email_id": format!("rec_{}", id.simple())}}).to_string();
+        let (ts, sig) = signed(raw, &evt, &body);
+        Request::post("/api/v1/email/provider-events/resend")
+            .header("content-type", "application/json")
+            .header("svix-id", evt)
+            .header("svix-timestamp", ts)
+            .header("svix-signature", sig)
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let send_and_report = |id: Uuid, req: Request<Body>| {
+        let (db, router, worker) = (db.clone(), router.clone(), &worker);
+        async move {
+            worker.tick(Utc::now()).await.unwrap();
+            db.execute_unprepared(&format!(
+                "UPDATE email_deliveries SET provider='resend' WHERE id='{id}'"
+            ))
+            .await
+            .unwrap();
+            assert_eq!(router.oneshot(req).await.unwrap().status(), StatusCode::OK);
+        }
+    };
+
+    // Complained once.
+    let c = email_delivery::enqueue(
+        &db,
+        to(
+            "carol@example.com",
+            "s12-c1",
+            category::MEETING_NOTIFICATION,
+        ),
+    )
+    .await
+    .unwrap();
+    let req = event(c.id, "email.complained");
+    send_and_report(c.id, req).await;
+    // Bounced once, then twice.
+    let b1 = email_delivery::enqueue(
+        &db,
+        to("bob@example.com", "s12-b1", category::MEETING_INVITATION),
+    )
+    .await
+    .unwrap();
+    let req = event(b1.id, "email.bounced");
+    send_and_report(b1.id, req).await;
+    // One bounce is not enough.
+    assert!(email_delivery::enqueue(
+        &db,
+        to("bob@example.com", "s12-b2", category::MEETING_NOTIFICATION)
+    )
+    .await
+    .is_ok());
+    let b2 = email_delivery::enqueue(
+        &db,
+        to("bob@example.com", "s12-b2", category::MEETING_NOTIFICATION),
+    )
+    .await
+    .unwrap();
+    let req = event(b2.id, "email.bounced");
+    send_and_report(b2.id, req).await;
+
+    for (address, key) in [
+        ("Carol@Example.com", "s12-c2"),
+        ("bob@example.com", "s12-b3"),
+    ] {
+        for category in [
+            category::MEETING_NOTIFICATION,
+            category::MEETING_INVITATION,
+            category::ORGANIZATION_INVITATION,
+            category::DEVELOPER_PLATFORM,
+        ] {
+            match email_delivery::enqueue(&db, to(address, &format!("{key}-{category}"), category))
+                .await
+            {
+                Err(backend::error::ApiError::Conflict(m)) => {
+                    assert_eq!(
+                        m,
+                        email_delivery::RECIPIENT_SUPPRESSED,
+                        "{address} {category}"
+                    )
+                }
+                other => panic!("{address} {category}: expected SUPPRESSED, got {other:?}"),
+            }
+        }
+        // Account recovery, sign-in and security notices are never suppressed.
+        for category in email_delivery::UNSUPPRESSIBLE_CATEGORIES {
+            email_delivery::enqueue(&db, to(address, &format!("{key}-{category}"), category))
+                .await
+                .unwrap_or_else(|e| panic!("{address} {category} must still be queued: {e:?}"));
+        }
+    }
+    // Other recipients are unaffected.
+    assert!(email_delivery::enqueue(
+        &db,
+        to("dave@example.com", "s12-d", category::MEETING_NOTIFICATION)
+    )
+    .await
+    .is_ok());
+}

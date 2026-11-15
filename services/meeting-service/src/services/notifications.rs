@@ -60,9 +60,10 @@ use uuid::Uuid;
 use crate::{
     config::notifications::NotificationConfig,
     domain::{AccessPolicy, ConferenceStatus, MeetingType, SecurityProfile, SpaceStatus},
-    error::ApiResult,
+    error::{ApiError, ApiResult},
     models::{conference_sessions, meeting_invitations, meeting_spaces},
     services::email::EmailService,
+    services::ops_metrics::{inc, OPS_METRICS as OM},
     templates::email::meeting::{render, NotificationBody},
 };
 
@@ -93,15 +94,36 @@ pub struct OutgoingEmail {
     pub text: String,
 }
 
+/// Why an email was not handed to the delivery queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailError {
+    /// The address can never be sent to (refused by the ledger's address check).
+    InvalidAddress,
+    /// The recipient is suppressed after a complaint or repeated bounces (N0-12).
+    Suppressed,
+    /// The queue is unavailable: retry later.
+    Unavailable,
+}
+
+impl MailError {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MailError::InvalidAddress => "INVALID_ADDRESS",
+            MailError::Suppressed => "SUPPRESSED",
+            MailError::Unavailable => "MAIL_QUEUE_UNAVAILABLE",
+        }
+    }
+}
+
 #[async_trait]
 pub trait NotificationMail: Send + Sync {
     /// Hand one email to the delivery queue.
-    async fn send(&self, email: OutgoingEmail) -> Result<(), String>;
+    async fn send(&self, email: OutgoingEmail) -> Result<(), MailError>;
 }
 
 #[async_trait]
 impl NotificationMail for EmailService {
-    async fn send(&self, email: OutgoingEmail) -> Result<(), String> {
+    async fn send(&self, email: OutgoingEmail) -> Result<(), MailError> {
         crate::services::email_delivery::enqueue(
             self.db(),
             crate::services::email_delivery::NewEmail {
@@ -117,15 +139,23 @@ impl NotificationMail for EmailService {
         )
         .await
         .map(|_| ())
-        .map_err(|_| "MAIL_QUEUE_UNAVAILABLE".to_string())
+        .map_err(|e| match e {
+            ApiError::BadRequest(_) => MailError::InvalidAddress,
+            ApiError::Conflict(m) if m == crate::services::email_delivery::RECIPIENT_SUPPRESSED => {
+                MailError::Suppressed
+            }
+            _ => MailError::Unavailable,
+        })
     }
 }
 
-/// In-process transport for tests: records every email, can simulate a queue outage.
+/// In-process transport for tests: records every email, can simulate a queue outage, and
+/// applies the ledger's address check and a test suppression list.
 #[derive(Default)]
 pub struct RecordingMail {
     sent: Mutex<Vec<OutgoingEmail>>,
     failing: AtomicBool,
+    suppressed: Mutex<HashSet<String>>,
 }
 
 impl RecordingMail {
@@ -135,13 +165,31 @@ impl RecordingMail {
     pub fn set_failing(&self, failing: bool) {
         self.failing.store(failing, Ordering::SeqCst);
     }
+    /// Refuse mail to `address` as the ledger refuses a suppressed recipient.
+    pub fn suppress(&self, address: &str) {
+        self.suppressed
+            .lock()
+            .expect("recording mail")
+            .insert(address.trim().to_ascii_lowercase());
+    }
 }
 
 #[async_trait]
 impl NotificationMail for RecordingMail {
-    async fn send(&self, email: OutgoingEmail) -> Result<(), String> {
+    async fn send(&self, email: OutgoingEmail) -> Result<(), MailError> {
         if self.failing.load(Ordering::SeqCst) {
-            return Err("MAIL_QUEUE_UNAVAILABLE".into());
+            return Err(MailError::Unavailable);
+        }
+        if !crate::config::email::valid_address(email.to.trim()) {
+            return Err(MailError::InvalidAddress);
+        }
+        if self
+            .suppressed
+            .lock()
+            .expect("recording mail")
+            .contains(&email.to.trim().to_ascii_lowercase())
+        {
+            return Err(MailError::Suppressed);
         }
         self.sent.lock().expect("recording mail").push(email);
         Ok(())
@@ -1030,7 +1078,7 @@ async fn deliver(
             .filter(|n| !n.trim().is_empty())
             .or_else(|| r.username.clone());
         let email = compose(job, &conference, &space, &title, &link, &r, name.as_deref());
-        if ctx
+        let sent = ctx
             .notifier
             .mail
             .send(OutgoingEmail {
@@ -1042,9 +1090,28 @@ async fn deliver(
                 html: email.1,
                 text: email.2,
             })
-            .await
-            .is_err()
-        {
+            .await;
+        if let Err(refused @ (MailError::InvalidAddress | MailError::Suppressed)) = sent {
+            // N0-3 (S-11) / N0-12: this recipient can never be sent to (malformed address,
+            // or suppressed after a complaint / repeated bounces). Record it as not sent and
+            // continue with the others; it must not hold the whole notice in retry.
+            ctx.db
+                .execute(Statement::from_sql_and_values(
+                    DbBackend::Postgres,
+                    "UPDATE meeting_notification_recipients SET outcome = 'SUPPRESSED' \
+                     WHERE notification_id = $1 AND recipient_digest = $2",
+                    [job.id.into(), key.into()],
+                ))
+                .await?;
+            if refused == MailError::InvalidAddress {
+                inc(&OM.meeting_notification_invalid_recipients);
+            }
+            tracing::warn!(notification_id = %job.id, reason = refused.as_str(),
+                "meeting notice recipient skipped");
+            suppressed += 1;
+            continue;
+        }
+        if sent.is_err() {
             // Not queued: release the ledger entry so the retry sends it.
             ctx.db
                 .execute(Statement::from_sql_and_values(
