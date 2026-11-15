@@ -625,6 +625,19 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         self.assertEqual(tuple(options), cr.OPERATIONS)
 
 
+class PublicInternalDenial(unittest.TestCase):
+    def test_only_a_marked_nginx_404_proves_the_denial(self):
+        # Notification Service N0-6: a Meeting Service 404 (route token unset) is not proof.
+        self.assertTrue(cr.public_denial_confirmed('HTTP/2 404\r\nserver: nginx\r\nx-cfmeet-ingress: denied\r\n\r\n'))
+        self.assertTrue(cr.public_denial_confirmed('HTTP/1.1 404 Not Found\nX-CFMeet-Ingress: Denied\n'))
+        for bad in ('HTTP/2 404\r\nserver: nginx\r\n', 'HTTP/2 401\r\nx-cfmeet-ingress: denied\r\n',
+                    'HTTP/2 200\r\n', '', 'HTTP/2 404\r\nx-cfmeet-ingress: allowed\r\n'):
+            self.assertFalse(cr.public_denial_confirmed(bad), bad)
+
+    def test_the_operation_is_offered_without_prerequisites(self):
+        self.assertEqual(cr.ACTIVATIONS['activate-public-internal-denial'][0], ())
+
+
 class RestoreTest(unittest.TestCase):
     def test_readiness_and_every_step_use_tcp_never_the_init_socket(self):
         # Releases 43589841572 / 43609024085: socket readiness can report the entrypoint's

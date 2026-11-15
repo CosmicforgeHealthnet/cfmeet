@@ -194,6 +194,31 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
         self.assertEqual(release.public_ingress_config(candidate),candidate)
         with self.assertRaises(AssertionError):release.public_ingress_config(candidate.replace('return 404','return 200'))
 
+    def test_public_ingress_denies_meeting_operator_routes_but_not_provider_callbacks(self):
+        # Notification Service N0-6 (S-3).
+        original='server {\n include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n location / { proxy_pass http://127.0.0.1:18081; }\n}'
+        candidate=release.public_ingress_config(original)
+        for rule in release.PUBLIC_DENIALS:self.assertIn(rule,candidate)
+        for denied in ('/internal/operations/','/internal/metrics','/internal/rtc/metrics'):
+            self.assertIn(denied,candidate)
+        for open_path in ('/internal/rtc/livekit/webhook','/internal/transcription/events','location ^~ /internal/ '):
+            self.assertNotIn(open_path,candidate)
+        self.assertEqual(release.public_ingress_config(candidate),candidate)
+        # Probes cover every new denial.
+        self.assertEqual(len(release.PUBLIC_DENIAL_PROBES),4)
+
+    def test_public_ingress_upgrades_an_installed_communications_denial_in_place(self):
+        # Production already has the marker with only the Communications rule.
+        installed=('server {\n include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n'+release.PUBLIC_INGRESS_MARKER+'\n'
+                   +release.PUBLIC_DENIALS[0]+'\n location / { proxy_pass http://127.0.0.1:18081; }\n}')
+        upgraded=release.public_ingress_config(installed)
+        for rule in release.PUBLIC_DENIALS:self.assertEqual(upgraded.count(rule),1,rule)
+        self.assertIn('location / { proxy_pass http://127.0.0.1:18081; }',upgraded)
+        self.assertEqual(release.public_ingress_config(upgraded),upgraded)
+        # A hand-edited denial (same location, other body) is refused, never duplicated.
+        edited=installed.replace(release.PUBLIC_DENIALS[0],release.PUBLIC_DENIALS[0]+'\n    location ^~ /internal/operations/ { return 200; }')
+        with self.assertRaises(AssertionError):release.public_ingress_config(edited)
+
     def test_public_ingress_refuses_unknown_or_duplicate_site_includes(self):
         for value in ('server {}','include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n'*2):
             with self.assertRaises(AssertionError):release.public_ingress_config(value)
