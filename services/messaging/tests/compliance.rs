@@ -924,6 +924,83 @@ async fn data_deletion_requests_respect_holds() {
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 }
 
+/// S-7 (roadmap N0-7): `PRINCIPAL_ERASURE` removes the principal's push registrations
+/// (provider handles) and every push job for their devices; other principals' push rows
+/// are untouched.
+#[tokio::test]
+async fn principal_erasure_removes_push_registrations_and_jobs() {
+    let Some((h, _)) = harness().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    policy(&h, &c, json!({}), json!({})).await;
+    let (_conv, people) = managed_group(&h, &c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    for (who, label) in [(alice, "a1"), (alice, "a2"), (bob, "b1")] {
+        let device = h.active_device(&c, who).await.device_id();
+        let r = h
+            .put(
+                &c,
+                Some(who),
+                &format!("/v1/messaging/devices/{device}/push-registration"),
+                json!({ "platform": "LOCAL_TEST", "handle": format!("erasure-handle-{label}") }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    }
+    // One pending and one finished job per registration.
+    for status in ["PENDING", "SENT"] {
+        h.sql(&format!(
+            "INSERT INTO messaging_push_jobs (id, event_id, conversation_id, environment_id, device_id, registration_id, payload, \
+               status, next_attempt_at, expires_at, created_at, completed_at) \
+             SELECT gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), environment_id, device_id, id, '{{\"v\":1,\"type\":\"message\"}}', \
+               '{status}', now(), now() + interval '1 day', now(), CASE WHEN '{status}' = 'PENDING' THEN NULL ELSE now() END \
+               FROM messaging_push_registrations"
+        ))
+        .await
+        .unwrap();
+    }
+    let registrations = |p: Uuid| {
+        format!("SELECT count(*) FROM messaging_push_registrations WHERE principal_id = '{p}'")
+    };
+    let jobs = |p: Uuid| {
+        format!(
+            "SELECT count(*) FROM messaging_push_jobs j JOIN messaging_devices d ON d.id = j.device_id WHERE d.principal_id = '{p}'"
+        )
+    };
+    assert_eq!(h.scalar(&registrations(alice)).await, 2);
+    assert_eq!(h.scalar(&jobs(alice)).await, 4);
+
+    let r = h
+        .post(
+            &c,
+            None,
+            "/v1/messaging/deletion-requests",
+            json!({ "kind": "PRINCIPAL_ERASURE", "principalId": alice }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::ACCEPTED, "{}", r.text);
+    let rid = r.json["requestId"].as_str().unwrap().to_string();
+    messaging::compliance::run_once(&h.state).await.unwrap();
+    let s = h
+        .get(&c, None, &format!("/v1/messaging/deletion-requests/{rid}"))
+        .await;
+    assert_eq!(s.json["status"], "COMPLETED", "{}", s.text);
+    assert_eq!(h.scalar(&registrations(alice)).await, 0);
+    assert_eq!(h.scalar(&jobs(alice)).await, 0);
+    assert_eq!(
+        h.scalar(
+            "SELECT count(*) FROM messaging_push_registrations WHERE push_handle LIKE 'erasure-handle-a%'"
+        )
+        .await,
+        0,
+        "no handle of the erased principal is left"
+    );
+    // Bob is untouched.
+    assert_eq!(h.scalar(&registrations(bob)).await, 1);
+    assert_eq!(h.scalar(&jobs(bob)).await, 2);
+}
+
 #[tokio::test]
 async fn regulated_contexts_require_disclosure_and_audit_is_queryable() {
     let Some((h, _)) = harness().await else {
