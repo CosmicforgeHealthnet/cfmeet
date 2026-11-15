@@ -17,7 +17,7 @@
   * key-transparency witnesses: `UNWITNESSED`;
   * delivery through any external push provider.
 
-_Production evidence for the final operations (§7) is appended as each ran._
+* **Final `certify`:** [43711424389](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43711424389), **`CERTIFIED_READ_ONLY`**. All 13 services pass, provider safe defaults pass with no violations, core identity passes, and public API and gateway certification pass.
 
 ## 1. Implemented, deployed and production-verified
 
@@ -106,7 +106,15 @@ The only remaining step is the owner naming reviewers (§4).
 * an openssl-generated key driven through the real environment parser;
 * the configuration endpoint, including its scope.
 
-The production activation is reported in §7. **External delivery to a real browser was not verified**: no client subscribes yet (§4).
+**Production activation:** `activate-web-push` [43706099426](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43706099426).
+* Key generated, `publicKeyPresent: true`.
+* Messaging restarted and reports the `WEB_PUSH` adapter.
+* The regression check passed.
+* `certify` lists "Web Push (VAPID, no provider account): enabled".
+
+A first attempt ([43702218850](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43702218850)) failed before any change: DER output was decoded as text. That was fixed in `de7b863f`.
+
+**External delivery to a real browser was not verified**: no client subscribes yet (§4).
 
 ### 1.5 Device security and recovery (Section 5)
 
@@ -191,9 +199,9 @@ The production multi-device suite also passed: replacement, fan-out and rekey (�
 
 | Item | What is needed | State |
 |---|---|---|
-| Developer production-access review | The owner sets `CFMEET_PRODUCTION_ACCESS_REVIEWERS` (`github-<login>=<CF Meet user id>`), then runs `activate-production-access-review` | backend complete; see §7 for the activation attempt |
+| Developer production-access review | The owner sets `CFMEET_PRODUCTION_ACCESS_REVIEWERS` (`github-<login>=<CF Meet user id>`), then runs `activate-production-access-review` | backend complete. Activation attempt [43708560267](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43708560267) stopped at "Set the CFMEET_PRODUCTION_ACCESS_REVIEWERS variable" before reaching the VPS: no reviewer is named, nothing changed. **Owner configuration requirement** |
 | Enforce device declaration | The mobile app adopts the device flow (handover §3.1/§3.5); then the owner sets `ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM` | backend implemented and tested; unset in production (compatibility) |
-| Web Push in browsers | A client service worker subscribes with the published key. This is web client work; no layout change was in scope | server activated (§7); **external delivery not verified** |
+| Web Push in browsers | A client service worker subscribes with the published key. This is web client work; no layout change was in scope | server **activated** (§1.4); **external delivery not verified** |
 | APNs / FCM | Apple and Google provider credentials | not configured |
 | Email provider | Resend owner setup; SMTP in use | excluded from this assignment |
 
@@ -238,3 +246,32 @@ The production multi-device suite also passed: replacement, fan-out and rekey (�
 | Personal E2EE, multi-device, one-primary-mobile, web-only | [43702913188](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43702913188) | **16/16** |
 | Real-website Messaging journey | [43705489163](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43705489163) | **11/11** |
 | Enterprise Calling, real media | [43702221217](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43702221217) | **21/21** |
+| Organizations and Messaging | [43708792961](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43708792961) | **18/18** |
+| Developer Platform and API Gateway | [43709293595](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43709293595) | **30/30**, cleanup with 0 problems |
+| Personal Calling and Communications, real voice and video | [43709750585](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43709750585) | **24/24** |
+| Meetings, real LiveKit room | [43710752927](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43710752927) | **22/22** |
+| Web Push activation | [43706099426](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43706099426) | activated; `WEB_PUSH` adapter running |
+| Production-access review activation | [43708560267](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43708560267) | refused before the VPS: no reviewers named (owner) |
+| **Final `certify`** | [43711424389](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43711424389) | **`CERTIFIED_READ_ONLY`** |
+
+**Final certify details:**
+* **13/13 services:** each is running at its revision, ready, connected to its database, has every migration applied, refuses anonymous requests, and holds its service identity. `N/A` is recorded where a check does not apply (the worker has no listener; the gateway has no database).
+* **Provider safe defaults:** PASS, violations `[]`. E2EE devices and Web Push are accepted only because their activations are journaled with their exact settings. APNs, FCM, SMS and PSTN stay off.
+* **Organizations event delivery:** PASS. 96 reconciliation records, 0 dispatched; 58 consumer rows, all `DELIVERED` (the acceptance runs above added events).
+* **Core identity:** PASS.
+
+**Section 6 journey coverage:**
+
+| Journey | Evidence |
+|---|---|
+| Registration and login | every suite creates fresh, email-verified accounts; the web journey uses the real login page |
+| One-primary-mobile replacement | E2EE 16/16; device tests |
+| Multiple linked web devices | E2EE 16/16; web journey (second browser verified, both synchronized) |
+| Web-only accounts | E2EE 16/16; web journey |
+| Personal E2EE Messaging | E2EE 16/16; web journey 11/11 |
+| Calling and Enterprise Calling | 24/24; 21/21 |
+| Meetings | 22/22 |
+| Recording | covered by Enterprise Calling's recording-permission checks; the dedicated recording suite (12/12 on 2026-11-13) was not re-run because Calling's recording code is unchanged |
+| Organizations and Messaging | 18/18 |
+| Developer Platform and API Gateway | 30/30 |
+| Cross-service authorization and revocation | E2EE (fan-out revocation, sign-out everywhere), Organizations (revocation, suspension), Developer (revoked or forged credentials) |
