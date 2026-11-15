@@ -509,3 +509,79 @@ async fn developer_access_decision_notice_is_queued_once() {
         1
     );
 }
+
+/// A provider that takes `delay` per message and records every ledger id it was asked to
+/// send (duplicates included).
+struct SlowProvider {
+    delay: std::time::Duration,
+    sent: std::sync::Mutex<Vec<Uuid>>,
+}
+
+#[async_trait::async_trait]
+impl email_delivery::EmailProvider for SlowProvider {
+    fn name(&self) -> &'static str {
+        "slow"
+    }
+
+    async fn send(
+        &self,
+        m: &email_delivery::ProviderMessage<'_>,
+    ) -> Result<Option<String>, ProviderError> {
+        tokio::time::sleep(self.delay).await;
+        self.sent.lock().unwrap().push(m.id);
+        Ok(Some(format!("slow-{}", m.id)))
+    }
+}
+
+/// Notification Service N0-4 (S-8): a batch that takes longer than the lease used to be
+/// re-claimed by a second worker while the first was still sending it, so messages went
+/// out twice. The lease is now renewed before every send and a lost row is skipped.
+#[tokio::test]
+async fn two_workers_never_send_a_message_twice_when_a_batch_outlives_the_lease() {
+    let app = app!();
+    let db = app.state.db.clone();
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        ids.push(
+            email_delivery::enqueue(&db, email(&format!("slow-{i}")))
+                .await
+                .unwrap()
+                .id,
+        );
+    }
+    make_due(&app).await;
+    let provider = Arc::new(SlowProvider {
+        delay: std::time::Duration::from_millis(800),
+        sent: Default::default(),
+    });
+    // 5 messages × 0.8 s = 4 s per batch, lease 2 s: without renewal the lease lapses
+    // mid-batch and the second worker re-claims the unsent rest.
+    let first = EmailWorker::new(db.clone(), provider.clone(), settings()).with_lease_secs(2);
+    let second = EmailWorker::new(db.clone(), provider.clone(), settings()).with_lease_secs(2);
+    let a = tokio::spawn(async move { first.tick(Utc::now()).await.unwrap() });
+    let mut second_reports = Vec::new();
+    while !a.is_finished() {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        second_reports.push(second.tick(Utc::now()).await.unwrap());
+    }
+    let a = a.await.unwrap();
+    second_reports.push(second.tick(Utc::now()).await.unwrap());
+
+    let sent = provider.sent.lock().unwrap().clone();
+    let mut unique = sent.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(
+        sent.len(),
+        unique.len(),
+        "a message was sent twice: {sent:?}"
+    );
+    assert_eq!(sent.len(), 5, "every message is sent exactly once");
+    assert_eq!(
+        a.accepted + second_reports.iter().map(|r| r.accepted).sum::<u64>(),
+        5
+    );
+    for id in ids {
+        assert_eq!(status_of(&app, id).await.0, "ACCEPTED");
+    }
+}
