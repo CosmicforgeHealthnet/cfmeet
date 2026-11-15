@@ -317,7 +317,7 @@ async function journey() {
   // devices approves it by typing the code the new browser shows; then setup completes.
   await phase(bob2.page, "needs-device");
   await bob2.page.click("[data-testid=register-device]");
-  const linkCode = (await bob2.page.locator("[data-testid=account-link-code]").textContent({ timeout: T })).trim();
+  const linkCode = (await bob2.page.locator("[data-testid=account-link-code]:visible").first().textContent({ timeout: T })).trim();
   assert.match(linkCode, /^\d{6}$/, "the new browser shows a 6-digit linking code");
   await bob.page.locator("[data-testid=incoming-link]").waitFor({ timeout: 2 * T });
   await bob.page.fill("[data-testid=incoming-link-code]", linkCode);
