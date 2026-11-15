@@ -225,7 +225,7 @@ fn legacy_key_formats_agree_with_the_contract_patterns() {
     let samples = |f: LegacyKey| {
         vec![
             sample_idempotency_key(f),
-            format!("{}", f.prefix()),
+            f.prefix().to_string(),
             format!("{}{U}:x", f.prefix()),
             format!("{}a b", f.prefix()),
             format!("{}{}", f.prefix(), "x".repeat(141)),
