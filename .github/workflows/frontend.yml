@@ -97,6 +97,11 @@ jobs:
           node --test tests/calling-adapter.test.mjs tests/calling-origin.test.mjs tests/calling-contract.test.mjs
           node --experimental-strip-types --test tests/calling-logic.test.mjs
 
+      # S-10 (Notification Service N0-11): logout revokes this browser's Calling endpoint
+      # (bounded, best effort, before the session is cleared) and forgets its stored id.
+      - name: Calling endpoint sign-out tests
+        run: node --experimental-strip-types --test tests/calling-signout.test.mjs
+
       # Section 17 meetings + calendar: meeting-zone time conversion (America/New_York,
       # Europe/Rome, Africa/Lagos, DST gap/overlap), agenda ranges and opaque-cursor
       # pagination, occurrence controls, artefact fields (FE-007), the pre-join contract

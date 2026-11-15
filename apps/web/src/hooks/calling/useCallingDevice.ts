@@ -12,6 +12,8 @@
  * - The signaling WebSocket reconnects with bounded backoff; offers are recovered over HTTP
  *   (GET /v1/calling/invitations) on open, on every signal and every 10 s, so a missed push
  *   never hides a ringing call. A 4401 close (endpoint revoked) re-registers once.
+ * - Logout revokes this browser's endpoint while still signed in (S-10,
+ *   `lib/calling/signout.ts`); no tab registers it again until the next sign-in.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -19,6 +21,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createSignalingService, endpointsService } from "@/services/calling";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import { renewalDelay } from "@/lib/calling/runtime-guard";
+import { forgetEndpointId, isSigningOut, rememberEndpointId, type KeyValueStorage } from "@/lib/calling/endpoint-signout";
 import { callingKeys } from "./useCalls";
 import type { Endpoint, RecoveredInvitation } from "@/types/calling";
 
@@ -26,6 +29,10 @@ export type DeviceStatus = "disabled" | "offline" | "connecting" | "online" | "r
 
 const preferenceKey = (principalId: string) => `cfmeet.calling.receive.${principalId}`;
 const endpointKeyStorage = (principalId: string) => `cfmeet.calling.endpoint.${principalId}`;
+
+function browserStorage(): KeyValueStorage | null {
+  try { return localStorage; } catch { return null; }
+}
 
 function readPreference(principalId: string): boolean {
   try { return localStorage.getItem(preferenceKey(principalId)) !== "off"; } catch { return true; }
@@ -54,8 +61,19 @@ export function useCallingDevice(principalId?: string) {
         key = crypto.randomUUID();
         try { localStorage.setItem(endpointKeyStorage(principalId), key); } catch { /* one-page endpoint */ }
       }
+      // A logout in progress (this or another tab) revokes this browser's endpoint: never
+      // register it again before the next sign-in (S-10).
+      if (isSigningOut(browserStorage())) { setStatus("offline"); return; }
       const registered = await endpointsService.register({ principalId, endpointKey: key,
         endpointKind: "WEB", capabilities: { audio: true, video: true } });
+      if (isSigningOut(browserStorage())) {
+        // Logout started while registering: undo it (best effort) instead of keeping it.
+        void endpointsService.revoke(registered.endpointId).catch(() => {});
+        setStatus("offline");
+        return;
+      }
+      // Remembered so logout can revoke this browser's endpoint while still signed in.
+      rememberEndpointId(browserStorage(), principalId, registered.endpointId);
       setEndpoint(registered);
       setGeneration((value) => value + 1);
       await queryClient.invalidateQueries({ queryKey: callingKeys.endpoints });
@@ -73,6 +91,7 @@ export function useCallingDevice(principalId?: string) {
     try { localStorage.setItem(preferenceKey(principalId), on ? "on" : "off"); } catch { /* page-only choice */ }
     setReceiveCalls(on);
     if (on) { await register(); return; }
+    forgetEndpointId(browserStorage(), principalId);
     const current = endpoint;
     setEndpoint(null);
     setInvitations([]);
