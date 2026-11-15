@@ -6,6 +6,8 @@
 
 mod common;
 
+use std::collections::BTreeSet;
+
 use std::time::Duration;
 
 use axum::http::StatusCode;
@@ -1603,10 +1605,20 @@ async fn inbox_signals_cover_unsubscribed_and_new_conversations_without_content(
     loop {
         let f = ws.next_of("inbox.event").await;
         if f["conversationId"] == json!(second) {
-            assert!(
-                f["eventType"].as_str().unwrap().starts_with("member."),
+            // Signals are content-free hints. Under load the outbox may publish the
+            // conversation's creation only after Alice was added, so she can see that
+            // signal first; the membership signal must still follow.
+            let keys: BTreeSet<&str> = f.as_object().unwrap().keys().map(String::as_str).collect();
+            assert_eq!(
+                keys,
+                BTreeSet::from(["conversationId", "eventSequence", "eventType", "type"]),
                 "{f}"
             );
+            let kind = f["eventType"].as_str().unwrap();
+            if kind == "conversation.created" {
+                continue;
+            }
+            assert!(kind.starts_with("member."), "{f}");
             break;
         }
     }

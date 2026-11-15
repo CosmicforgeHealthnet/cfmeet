@@ -1084,6 +1084,9 @@ fn ops() -> Vec<Op> {
         Op { method: M::DELETE, template: "/v1/messaging/devices/{deviceId}/push-registration", scopes: SEND, acting: AM, res: Res::Device,
              req: |f| r(format!("/v1/messaging/devices/{}/push-registration", f.owner.device_id()), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/messaging/push/configuration", scopes: READ, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/push/configuration".into(), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         // ------------------------------------------------------------ attachments
         Op { method: M::POST, template: "/v1/conversations/{conversationId}/attachments", scopes: AW, acting: AM, res: CONV,
              req: |f| { let b = png(64);

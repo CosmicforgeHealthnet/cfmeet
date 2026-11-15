@@ -71,6 +71,7 @@ const MIRROR: &[(&str, &str)] = &[
     ("PUT", "/internal/v1/delegated/v1/messaging/presence/settings"),
     ("PUT", "/internal/v1/delegated/v1/messaging/devices/{deviceId}/push-registration"),
     ("DELETE", "/internal/v1/delegated/v1/messaging/devices/{deviceId}/push-registration"),
+    ("GET", "/internal/v1/delegated/v1/messaging/push/configuration"),
     ("POST", "/internal/v1/delegated/v1/conversations/{conversationId}/attachments"),
     ("GET", "/internal/v1/delegated/v1/conversations/{conversationId}/attachments/{attachmentId}"),
     ("POST", "/internal/v1/delegated/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize"),

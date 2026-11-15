@@ -1,8 +1,8 @@
 # Messaging — native authenticated API map
 
-Generated from the Account relay and Messaging 1.16.0 contract.
-Canonical SDK contract: **96 operations**; audience-filtered public Swagger:
-**80 operations**; native Account transports: **71 operations**.
+Generated from the Account relay and Messaging 1.17.0 contract.
+Canonical SDK contract: **97 operations**; audience-filtered public Swagger:
+**81 operations**; native Account transports: **72 operations**.
 There are no new canonical message/conversation/device endpoints.
 
 CF Meet consumer REST calls use the native path below with the existing Account bearer
@@ -157,6 +157,7 @@ required. Meetings and established permitted service contexts retain independent
 | PUT | `/v1/messaging/presence/settings` | putPresenceSettings | `/api/v2/messaging/relay/v1/messaging/presence/settings` | Account session |
 | PUT | `/v1/messaging/devices/{deviceId}/push-registration` | registerPush | `/api/v2/messaging/relay/v1/messaging/devices/{deviceId}/push-registration` | Account session |
 | DELETE | `/v1/messaging/devices/{deviceId}/push-registration` | unregisterPush | `/api/v2/messaging/relay/v1/messaging/devices/{deviceId}/push-registration` | Account session |
+| GET | `/v1/messaging/push/configuration` | getPushConfiguration | `/api/v2/messaging/relay/v1/messaging/push/configuration` | Account session |
 | POST | `/v1/conversations/{conversationId}/attachments` | createAttachmentIntent | `/api/v2/messaging/relay/v1/conversations/{conversationId}/attachments` | Account session |
 | GET | `/v1/conversations/{conversationId}/attachments/{attachmentId}` | getAttachment | `/api/v2/messaging/relay/v1/conversations/{conversationId}/attachments/{attachmentId}` | Account session |
 | POST | `/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize` | finalizeAttachment | `/api/v2/messaging/relay/v1/conversations/{conversationId}/attachments/{attachmentId}/finalize` | Account session |
