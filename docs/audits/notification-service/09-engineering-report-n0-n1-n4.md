@@ -8,7 +8,8 @@
 | Branch | `ccr-a48695ce-yy5erg`, synchronized with `main` @ `7f70ec7` before any change |
 | Production at start | release 43706099426 on `7f70ec7`, success; no workflow run in progress; no open pull request |
 | Production changes made | **none.** Nothing was merged, released, activated or routed. No provider was activated and no notification route was switched |
-| Scope rule followed | each roadmap item is its own commit, so it can be reviewed, released and reverted on its own; no UI redesign; no data migration; no schema change in production services (see §4) |
+| Scope rule followed | each roadmap item is its own commit (N0-3 / N0-12 share one), so it can be reviewed, released and reverted on its own; no UI redesign; **no database migration in any service**, so every service can still be rolled back to its current image (see §4.1, §5) |
+| Test evidence (full suites) | Meeting Service `cargo test --workspace`: **932 passed, 0 failed** (84 test binaries); Messaging suites listed in §5; release tooling 353 + controlled-OTP tests; contracts validator and all generator gates |
 
 ---
 
@@ -66,16 +67,16 @@ M1 (ENGINEERING_COMPLETE) is **not** claimed: it requires N1–N13. Per Document
 | N0-1 | S-1 | `ffff88d` | `communications-preferences.read` added to the Hub's incoming grants (`HUB_INCOMING`, rebuilt on every Hub release) and as `GRANTS` row + operation `activate-meeting-notice-preferences` (merged bundle, Hub only recreated, restored on failure) | release test: grant present in both, valid against `permissions.rs`; the test registry parser now also reads single-line entries (it skipped them before). 353 release-tooling tests pass | next Hub release, or dispatch the operation |
 | N0-2 | S-2 | — | **E-track (owner):** E1 `activate-resend-email` / working SMTP, proven by `email-acceptance confirm=otp` | — | owner |
 | N0-3 | S-11 | `4246235` | typed `MailError`; an address the ledger refuses (or a suppressed one) is recorded as not sent and the notice continues; only a queue outage retries | poison + suppressed recipient → the third recipient is emailed in the same pass, notice finished, nothing more later | release |
-| N0-4 | S-8 | `05bfff0` (email); Messaging see §5 | email worker renews its lease on every held row before each send and skips rows re-claimed elsewhere | 2 workers, 0.8 s provider, 2 s lease, 5 messages → each sent once; **with renewal disabled the same test sees 3 duplicates** | release |
-| N0-5 | S-4 | §5 | Messaging: `notify:false` honoured only for delegated / import callers | §5 | release |
+| N0-4 | S-8 | `05bfff0` (email), `869b9d0` (push) | email worker renews its lease on every held row before each send and skips rows re-claimed elsewhere | 2 workers, 0.8 s provider, 2 s lease, 5 messages → each sent once; **with renewal disabled the same test sees 3 duplicates** | release |
+| N0-5 | S-4 | `3850f98` | Messaging: `notify:false` honoured only for delegated / import callers | §5 | release |
 | N0-6 | S-3 | `1bbfefd` | public `api.cfmeet.com` refuses `/internal/operations/*`, `/internal/metrics`, `/internal/rtc/metrics` with a marked 404; operation `activate-public-internal-denial` proves each denial through the public host and restores on failure | verified with a real nginx: operator routes denied and marked; `/internal/rtc/livekit/webhook`, `/internal/transcription/events` and API traffic pass | dispatch the operation (or next Hub release) |
-| N0-7 | S-7 | §5 | Messaging: principal erasure deletes push registrations and jobs | §5 | release |
+| N0-7 | S-7 | `df6493b` | Messaging: principal erasure deletes push registrations and jobs | §5 | release |
 | N0-8 | S-5 | `ba0af77`, tooling in `94d759f` | codes stored as `salt:SHA-256(salt‖code)`, keys from SHA-256 of the address, constant-time compare; previous-image codes honoured once until expiry | real-Redis key inspection; unit tests; shared format vector Rust / Python / certification | release |
 | N0-9 | S-6 + D-12 | `94d759f` | `verify-reset-token`: 200 only for the correct code, one 400 otherwise, shared attempt limit. `register`: same 201 for an existing address, nothing created, owner notified (≤ 1/h); 409 only for a taken username | updated tests (they encoded the defects); new assertions on answer shape, no second account, notice queued, 429 after 5 probes | release |
 | N0-10 | S-9 | `c684d8c` | password-changed and device notices enqueued in the same transaction as the change; device key `device-linked:<link id>` | failure injection: notice refused → change rolled back, old password works; otherwise both commit | release |
 | N0-11 | S-10 | `567e7f2`, `9696dd6` | web logout revokes this browser's Calling endpoint (existing `DELETE /v1/calling/endpoints/{id}`, bounded 3 s, never blocks logout); mobile drops `voip` from `UIBackgroundModes` | web 10/10, mobile 3/3 (2 fail when `voip` is put back) | web deploy / next app build |
 | N0-12 | S-12 | `4246235` | enqueue refuses non-security mail to a recipient with a complaint or two bounces (`SUPPRESSED`); verification, reset, password-changed, device notices, step-up codes and acceptance mail are never suppressed | through the signed Resend webhook: complaint / second bounce → refused; security categories still queued | release |
-| Retention | FN-32 | §5 | Messaging: purge of finished push jobs | §5 | release |
+| Retention | FN-32 | `79c3bbe` | Messaging: purge of finished push jobs | §5 | release |
 
 ### 4.1 Deliberate deviations from the blueprint wording (with reasons)
 
@@ -99,7 +100,21 @@ M1 (ENGINEERING_COMPLETE) is **not** claimed: it requires N1–N13. Per Document
 
 ## 5. Messaging items (N0-4 push part, N0-5, N0-7, push-job retention)
 
-_Filled in from the Messaging work; see below._
+| Item | Commit | What changed | Regression evidence |
+|---|---|---|---|
+| N0-5 (S-4) | `3850f98` | `notify:false` is honoured only for delegated callers: requests on `/internal/v1/delegated/**` (peer service holding `messaging-application.delegate`, first-party scope confirmed by Platform Access) and the legacy Meeting import. Every `/v1` caller is ignored: end-user client tokens, gateway-forwarded credentials **and external customers' own backend credentials**. The field stays accepted (contract unchanged); ignored attempts counted in `messaging_notify_suppression_ignored_total` | `realtime::notify_false_is_honoured_only_for_delegated_callers`: client token and customer credential with `notify:false` → 1 job each; delegated → 0; fails with the fix disabled |
+| N0-4 (S-8), push part | `869b9d0` | the dispatcher renews each job's lease (fenced by `lease_token`) before authorization and again before the provider call, and skips a job re-claimed elsewhere; authorization and provider calls capped at 20 s (a third of the 60 s lease); `lease_lost` count + `messaging_push_lease_lost_total` | `realtime::a_slow_provider_never_causes_duplicate_pushes_across_dispatchers`: 3 jobs → 3 sends; 4 sends with the fence disabled |
+| N0-7 (S-7) | `df6493b` | principal erasure deletes the principal's push jobs and registrations (environment-scoped, one transaction, registrations locked first); device rows kept as before | `compliance::principal_erasure_removes_push_registrations_and_jobs`: 2 / 4 → 0 / 0, other principal untouched; fails without the fix |
+| Retention (FN-32) | `79c3bbe` | hourly bounded purge (≤ 5,000) of final-state jobs older than 30 days; pending jobs and registrations never touched | `compliance::push_job_retention_purges_only_old_finished_jobs` |
+
+Tests on this branch (all four items applied): realtime 26, compliance 12, delegated_mirror 2, integrations 12, architecture 7, migrations 3, push_adapters 4, messaging 15, notification_authorization 5, query_plans 1, **authorization_matrix 4/4 in one run** (an earlier combined run in the delegated worktree showed one unexplained failure that passed alone; treat as a possible flake); fmt and clippy `-D warnings` clean; migration-order guard unchanged.
+
+**Deviation:** the retention change was first written with an additive migration (partial index on `completed_at`). It was removed: Messaging's readiness fails closed on applied migrations it does not know, so the previous image would no longer become ready after an image rollback. The purge runs hourly without an index; the table is small until push moves to the service (N9).
+
+**Behaviour changes to note:**
+- N0-5: an external customer's backend can no longer suppress pushes with `notify:false` (strict reading of "never for client tokens"). If a customer relied on it for migration writes, the owner may want delegated-style treatment for that case later.
+- N0-4: a push call hanging beyond 20 s is retried instead of waited on (adapters time out at 10 s anyway).
+- Retention: after 30 days, the `messaging_push_jobs{status}` gauge, `push_statuses` in `messaging_release.py` and the owner status view's dead count reflect only recent jobs.
 
 ---
 

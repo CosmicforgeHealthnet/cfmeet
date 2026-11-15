@@ -74,11 +74,11 @@
 | S-1 | Missing Hub preference grant (meeting notices fail closed) | High | N0-1; disappears once preferences move (N10) | **fixed in code, pending release** (ffff88d; Document 9) |
 | S-2 | OTP transport not recovered | High | E-track E1 (owner makes the existing Meeting adapters deliver, D-4); later the CRITICAL lane | open |
 | S-3 | `/internal/operations/email/*` public reachability unverified | Medium | N0-6; routes retired in N15 | **fixed in code, pending release** (1bbfefd; Document 9) |
-| S-4 | Caller-controlled `notify:false` | Medium | N0-5 | **fixed in code, pending release** (Messaging (Doc 9 §5); Document 9) |
+| S-4 | Caller-controlled `notify:false` | Medium | N0-5 | **fixed in code, pending release** (Document 9 §5) |
 | S-5 | Plaintext OTP in Redis | Medium | N0-8 | **fixed in code, pending release** (ba0af77; Document 9) |
 | S-6 | Enumeration | Medium | N0-9 (+ D-12) | **fixed in code, pending release** (94d759f; Document 9) |
-| S-7 | Erasure leaves push handles | Medium | N0-7; service erasure W5 | **fixed in code, pending release** (Messaging (Doc 9 §5); Document 9) |
-| S-8 | Lease < batch, so duplicate sends are possible | Medium | N0-4; lease renewal in the service | **fixed in code, pending release** (05bfff0 + Messaging; Document 9) |
+| S-7 | Erasure leaves push handles | Medium | N0-7; service erasure W5 | **fixed in code, pending release** (Document 9 §5) |
+| S-8 | Lease < batch, so duplicate sends are possible | Medium | N0-4; lease renewal in the service | **fixed in code, pending release** (05bfff0, 869b9d0; Document 9) |
 | S-9 | Security notices best-effort | Medium | N0-10; transactional Account outbox in N7 | **fixed in code, pending release** (c684d8c; Document 9) |
 | S-10 | Calling endpoint survives logout; `voip` without implementation | Medium | N0-11 | **fixed in code, pending release** (567e7f2, 9696dd6; Document 9) |
 | S-11 | Poison recipient | Medium | N0-3 | **fixed in code, pending release** (4246235; Document 9) |
