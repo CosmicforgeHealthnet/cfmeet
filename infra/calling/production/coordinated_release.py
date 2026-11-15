@@ -1240,6 +1240,16 @@ def safe_defaults():
     return rules
 
 
+def allowed_push_adapter_settings():
+    """Push adapter variables a completed activation owns, with their only accepted value.
+    Web Push (activate-web-push) uses a VAPID key generated on the VPS; APNs and FCM need
+    provider credentials that do not exist, so their variables stay refused."""
+    if done('activate-web-push'):
+        return {'MESSAGING_PUSH_WEB_VAPID_KEY_FILE': WEB_PUSH_KEY_TARGET,
+                'MESSAGING_PUSH_WEB_VAPID_SUBJECT': WEB_PUSH_SUBJECT}
+    return {}
+
+
 def safe_default_violations(envs):
     """envs: {service: env}. Provider-dependent features must stay off in production."""
     violations = []
@@ -1253,8 +1263,10 @@ def safe_default_violations(envs):
     # The push adapters switch on from their credential variables whatever
     # MESSAGING_PUSH_PROVIDER says (services/messaging/src/config/mod.rs): none may be present.
     messaging = envs.get('messaging') or {}
+    allowed_push = allowed_push_adapter_settings()
     for var in sorted(v for v in messaging if v.startswith(PUSH_ADAPTER_PREFIXES) and messaging[v]):
-        violations.append('messaging ' + var)
+        if allowed_push.get(var) != messaging[var]:
+            violations.append('messaging ' + var)
     if messaging.get('MESSAGING_E2EE_DEVICES_ENABLED') == 'true' \
             and messaging.get('MESSAGING_E2EE_PRODUCTION_RELEASE_FILE') != E2EE_RELEASE_TARGET:
         violations.append('messaging MESSAGING_E2EE_PRODUCTION_RELEASE_FILE')
@@ -1347,10 +1359,83 @@ def public_smoke():
     return checks
 
 
+# The Organizations outbox holds two kinds of rows (services/organizations/src/store.rs emit):
+# one `cfmeet.reconciliation` RECORD per event (event history; never dispatched, so it stays
+# PENDING with 0 attempts by design) and one row per subscribed CONSUMER (delivered by the
+# worker). Only consumer rows are delivery; a reconciliation record is never a delivery failure.
+RECONCILIATION_DESTINATION = 'cfmeet.reconciliation'
+EVENT_STALL_MINUTES = 15
+EVENT_DELIVERY_SQL = """
+WITH o AS (SELECT seq, event_id, destination, event_type, aggregate_id, state, attempts, created_at
+           FROM organization_outbox),
+     c AS (SELECT * FROM o WHERE destination <> 'cfmeet.reconciliation')
+SELECT json_build_object(
+  'rows', (SELECT count(*) FROM o),
+  'states', (SELECT coalesce(json_object_agg(state, n), '{}') FROM (SELECT state, count(*) n FROM o GROUP BY state) a),
+  'byDestination', (SELECT coalesce(json_object_agg(destination, s), '{}') FROM
+      (SELECT destination, json_object_agg(state, n) s FROM
+          (SELECT destination, state, count(*) n FROM o GROUP BY destination, state) a GROUP BY destination) b),
+  'byDestinationEventState', (SELECT coalesce(json_agg(json_build_object('destination', destination,
+          'eventType', event_type, 'state', state, 'count', n) ORDER BY destination, event_type, state), '[]') FROM
+      (SELECT destination, event_type, state, count(*) n FROM o GROUP BY destination, event_type, state) a),
+  'reconciliationOutOfRecordShape', (SELECT count(*) FROM o WHERE destination = 'cfmeet.reconciliation'
+      AND (state <> 'PENDING' OR attempts <> 0)),
+  'consumerRowsWithoutRecord', (SELECT count(*) FROM c WHERE NOT EXISTS (SELECT 1 FROM o r
+      WHERE r.event_id = c.event_id AND r.destination = 'cfmeet.reconciliation')),
+  'consumerUndeliveredStalled', (SELECT coalesce(json_object_agg(destination, n), '{}') FROM
+      (SELECT destination, count(*) n FROM c WHERE state IN ('PENDING', 'INFLIGHT')
+          AND created_at < now() - make_interval(mins => %(stall)d) GROUP BY destination) a),
+  'consumerBlockedByDead', (SELECT count(*) FROM c WHERE c.state IN ('PENDING', 'INFLIGHT') AND EXISTS
+      (SELECT 1 FROM c d WHERE d.destination = c.destination AND d.aggregate_id = c.aggregate_id
+          AND d.seq < c.seq AND d.state = 'DEAD')),
+  'oldestConsumerUndeliveredSeconds', (SELECT coalesce(EXTRACT(EPOCH FROM now() - min(created_at)), 0)::bigint
+      FROM c WHERE state IN ('PENDING', 'INFLIGHT')));
+""" % {'stall': EVENT_STALL_MINUTES}
+
+
 def event_delivery():
-    rows = release.db_sql('cfmeet_organizations', "SELECT coalesce(json_object_agg(state, n), '{}') FROM "
-                          "(SELECT state, count(*) n FROM organization_outbox GROUP BY state) s;")
+    """Destination- and event-type-aware outbox report (counts only; no payloads)."""
+    rows = release.db_sql('cfmeet_organizations', EVENT_DELIVERY_SQL)
     return json.loads(rows or '{}')
+
+
+def configured_event_destinations(env):
+    return sorted({d.strip() for d in (env or {}).get('ORGANIZATIONS_EVENT_DESTINATIONS', '').split(',') if d.strip()})
+
+
+def classify_event_delivery(report, destinations):
+    """Separates the reconciliation record from consumer delivery and returns
+    {result, failures, reconciliationRecords, consumerDelivery, undeliverableUnconfigured}.
+    Failures are genuine delivery defects only: a DEAD consumer row, a consumer row of a
+    configured destination still undelivered after EVENT_STALL_MINUTES, a row blocked behind
+    a DEAD predecessor, a consumer row without its record, or a reconciliation record that
+    was touched by the dispatcher. Rows of a destination that is not configured cannot be
+    delivered by design; they are reported, not failed."""
+    by_destination = report.get('byDestination') or {}
+    record = by_destination.get(RECONCILIATION_DESTINATION) or {}
+    consumers = {d: s for d, s in by_destination.items() if d != RECONCILIATION_DESTINATION}
+    failures = []
+    for d, states in sorted(consumers.items()):
+        if states.get('DEAD'):
+            failures.append('%s: %d DEAD' % (d, states['DEAD']))
+    for d, n in sorted((report.get('consumerUndeliveredStalled') or {}).items()):
+        if n and d in destinations:
+            failures.append('%s: %d undelivered after %d minutes' % (d, n, EVENT_STALL_MINUTES))
+    if report.get('consumerBlockedByDead'):
+        failures.append('%d consumer rows blocked behind a DEAD event' % report['consumerBlockedByDead'])
+    if report.get('consumerRowsWithoutRecord'):
+        failures.append('%d consumer rows without a reconciliation record' % report['consumerRowsWithoutRecord'])
+    if report.get('reconciliationOutOfRecordShape'):
+        failures.append('%d reconciliation records were dispatched or modified' % report['reconciliationOutOfRecordShape'])
+    unconfigured = {d: sum(n for st, n in s.items() if st in ('PENDING', 'INFLIGHT'))
+                    for d, s in consumers.items() if d not in destinations}
+    return dict(result='FAIL' if failures else 'PASS', failures=failures,
+                reconciliationRecords=dict(count=sum(record.values()), dispatched=report.get('reconciliationOutOfRecordShape', 0),
+                                           note='never dispatched by design (event history)'),
+                consumerDelivery=consumers, configuredDestinations=destinations,
+                undeliverableUnconfigured={d: n for d, n in unconfigured.items() if n},
+                oldestConsumerUndeliveredSeconds=report.get('oldestConsumerUndeliveredSeconds', 0),
+                byDestinationEventState=report.get('byDestinationEventState', []))
 
 
 def verify(sha, run_id):
@@ -1381,9 +1466,10 @@ def verify(sha, run_id):
     checks['provider_features_off'] = 'PASS' if not violations else 'FAIL'
     checks.update(public_smoke())
     if SERVICES['organizations']['container'] in container_names():
-        delivery = event_delivery()
+        delivery = classify_event_delivery(event_delivery(), configured_event_destinations(
+            running_envs().get('organizations')))
         emit('organizationsEventDelivery', delivery)
-        checks['organizations_no_dead_events'] = 'PASS' if not delivery.get('DEAD') else 'FAIL'
+        checks['organizations_event_delivery'] = delivery['result']
     p.regression()
     emit('verification', {'sha': sha, 'runId': run_id, 'checks': checks, 'violations': violations})
     failed = [k for k, v in checks.items() if v != 'PASS']
@@ -1566,9 +1652,10 @@ def activate_org_events(sha, run_id, confirm):
 
     def post():
         time.sleep(30)
-        delivery = event_delivery()
+        delivery = classify_event_delivery(event_delivery(), configured_event_destinations(
+            running_envs().get('organizations')))
         emit('organizationsEventDelivery', delivery)
-        if delivery.get('DEAD'):
+        if any(states.get('DEAD') for states in delivery['consumerDelivery'].values()):
             raise RuntimeError('Dead organization events after activation')
 
     apply_activation('activate-org-events', sha, run_id, [
@@ -1786,6 +1873,57 @@ def activate_personal_e2ee(sha, run_id, confirm):
         ('messaging', {'MESSAGING_E2EE_DEVICES_ENABLED': 'true',
                        'MESSAGING_E2EE_PRODUCTION_RELEASE_FILE': E2EE_RELEASE_TARGET},
          {'mounts': [(str(E2EE_RELEASE_SOURCE), E2EE_RELEASE_TARGET)]})], post=started)
+
+
+# Web Push (Section 4 of the backend closure): browser push through the standard Web Push
+# protocol (RFC 8030/8291/8292) needs no provider account, only a VAPID key pair, generated
+# here on the VPS. APNs and FCM stay off (no provider credentials).
+WEB_PUSH_KEY_NAME = 'web-push-vapid.pem'
+WEB_PUSH_KEY_TARGET = '/run/messaging/web-push-vapid.pem'
+# The VAPID contact (RFC 8292 `sub`): the public site, never a personal address.
+WEB_PUSH_SUBJECT = 'https://cfmeet.com'
+
+
+def vapid_private_key_pem():
+    """A fresh PKCS#8 PEM P-256 key (what Messaging's Web Push adapter requires)."""
+    pem = p.run('openssl', 'genpkey', '-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:P-256')
+    assert pem.startswith('-----BEGIN PRIVATE KEY-----'), 'openssl did not produce a PKCS#8 key'
+    return pem + '\n'
+
+
+def activate_web_push(sha, run_id, confirm):
+    """Web Push for Messaging: a VAPID key generated once on the VPS (owned by Messaging,
+    mode 0400, with a recovery copy: rotating it would invalidate every browser
+    subscription), mounted read-only, and the two adapter variables. Payloads stay metadata
+    only (enforced by Messaging and its database). Delivery reaches a browser only once a
+    client subscribes; no external delivery is claimed by this activation."""
+    import messaging_runtime
+    messaging = env_of('messaging')
+    if messaging.get('CF_RUNTIME_ENVIRONMENT') != 'production':
+        raise RuntimeError('Messaging is not the production runtime')
+    if messaging.get('MESSAGING_E2EE_DEVICES_ENABLED') != 'true':
+        raise RuntimeError('Push registrations belong to E2EE devices; enable personal encryption first')
+    foreign = sorted(k for k in messaging if k.startswith(('MESSAGING_PUSH_APNS_', 'MESSAGING_PUSH_FCM_')) and messaging[k])
+    if foreign:
+        raise RuntimeError('Unexpected APNs/FCM settings present: ' + ', '.join(foreign))
+    key = messaging_runtime.protected_file(WEB_PUSH_KEY_NAME, vapid_private_key_pem)
+    public = p.run('openssl', 'pkey', '-in', str(key), '-pubout', '-outform', 'DER')
+    emit('webPushKey', {'generated': True, 'path': WEB_PUSH_KEY_TARGET, 'subject': WEB_PUSH_SUBJECT,
+                        'publicKeyPresent': bool(public)})
+
+    def started():
+        out = subprocess.run(['docker', 'logs', '--since', '10m', SERVICES['messaging']['container']],
+                             capture_output=True, text=True, timeout=60)
+        logs = out.stdout + out.stderr
+        lines = [line for line in logs.splitlines() if 'push adapters' in line]
+        if not lines or 'WEB_PUSH' not in lines[-1]:
+            raise RuntimeError('Messaging did not start its Web Push adapter')
+        emit('webPushStartup', 'Messaging reports the WEB_PUSH adapter')
+
+    apply_activation('activate-web-push', sha, run_id, [
+        ('messaging', {'MESSAGING_PUSH_WEB_VAPID_KEY_FILE': WEB_PUSH_KEY_TARGET,
+                       'MESSAGING_PUSH_WEB_VAPID_SUBJECT': WEB_PUSH_SUBJECT},
+         {'mounts': [(str(key), WEB_PUSH_KEY_TARGET)]})], post=started)
 
 
 def activate_first_party_features(sha, run_id, confirm):
@@ -2269,6 +2407,8 @@ ACTIVATIONS = {
     'activate-first-party-features': ((), activate_first_party_features),
     # Owner decision 2026-11-15: personal E2EE without an independent assessment (recorded).
     'activate-personal-encryption': (('activate-first-party-features',), activate_personal_e2ee),
+    # Section 4 of the backend closure: Web Push with a VAPID key generated on the VPS.
+    'activate-web-push': (('activate-personal-encryption',), activate_web_push),
     'activate-web-origins': (('activate-gateway-routing',), activate_web_origins),
     'activate-gateway-docs': (('activate-gateway-routing',), activate_gateway_docs),
     'activate-developer-console': (('activate-developer-platform',), activate_developer_console),

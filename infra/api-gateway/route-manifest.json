@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 38,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 577,
+    "PUBLIC_CUSTOMER": 578,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -6699,6 +6699,22 @@
       "auth": [
         "PLATFORM_CREDENTIAL",
         "CLIENT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.getPushConfiguration",
+      "domain": "messaging",
+      "method": "GET",
+      "pattern": "/v1/messaging/push/configuration",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/messaging/push/configuration",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
       ],
       "forwardHeaders": [
         "cf-acting-principal"
@@ -14002,6 +14018,14 @@
       "operationId": "listPrincipalDevices",
       "method": "GET",
       "path": "/v1/messaging/principals/{principalId}/devices",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "getPushConfiguration",
+      "method": "GET",
+      "path": "/v1/messaging/push/configuration",
       "class": "PUBLIC_CUSTOMER"
     },
     {

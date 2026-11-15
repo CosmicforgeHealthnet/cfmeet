@@ -226,7 +226,8 @@ impl AuthPolicy {
                 .and_then(|v| chrono::DateTime::parse_from_rfc3339(v.trim()).ok())
                 .map(|t| t.with_timezone(&chrono::Utc))
         };
-        let devices = crate::services::account_devices::DevicePolicy::from_lookup(&get);
+        let mut devices = crate::services::account_devices::DevicePolicy::from_lookup(&get);
+        devices.declaration_window_secs = reauth_max_age_secs;
         Self {
             devices,
             email_verification_enforce_from: instant("EMAIL_VERIFICATION_ENFORCE_FROM"),
@@ -489,7 +490,8 @@ async fn authorize_inner(
                 .query_one(Statement::from_sql_and_values(
                     DbBackend::Postgres,
                     "SELECT s.user_id, s.revoked_at IS NULL AND s.absolute_expires_at > now() AS open, \
-                            d.state AS device_state \
+                            d.state AS device_state, s.device_id IS NULL AS unclassified, \
+                            s.authenticated_at \
                      FROM account_sessions s LEFT JOIN account_devices d ON d.id = s.device_id \
                      WHERE s.id = $1",
                     [session_id.into()],
@@ -509,6 +511,21 @@ async fn authorize_inner(
                     crate::error::ErrorCode::DeviceReplacementPending,
                     "Confirm this phone as your primary mobile first (approve it from a trusted device or with the emailed code)",
                 ));
+            }
+            // Device declaration enforcement (compatibility mode while unset): an
+            // unclassified sign-in past its declaration window has no authority. The device
+            // endpoints (allow_pending_device) still answer it, so the client can explain.
+            let unclassified: bool = row.try_get("", "unclassified")?;
+            if unclassified && !allow_pending_device {
+                let authenticated_at: chrono::DateTime<chrono::Utc> =
+                    row.try_get("", "authenticated_at")?;
+                if state
+                    .auth_policy
+                    .devices
+                    .unclassified_refused(authenticated_at, chrono::Utc::now())
+                {
+                    return Err(crate::services::account_devices::declaration_required());
+                }
             }
             Ok(TokenAuthorization {
                 session_verified: true,

@@ -473,6 +473,13 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // Push platforms of the deployment and the Web Push application-server key (public).
+    r(
+        Method::GET,
+        &[Lit("messaging"), Lit("push"), Lit("configuration")],
+        &[],
+        false,
+    ),
     r(
         Method::GET,
         &[Lit("conversations"), Id, Lit("search")],
@@ -969,6 +976,7 @@ mod tests {
             (Method::GET, "v1/messaging/invitations".into()),
             (Method::PUT, "v1/messaging/presence/settings".into()),
             (Method::GET, format!("v1/messaging/devices/{C}/welcomes")),
+            (Method::GET, "v1/messaging/push/configuration".into()),
             (
                 Method::PUT,
                 format!("v1/messaging/history-transfers/{C}/sealed-history"),

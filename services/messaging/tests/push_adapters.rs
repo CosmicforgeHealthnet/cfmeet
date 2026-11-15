@@ -342,6 +342,8 @@ struct World {
     web_base: String,
     web_ua: Arc<SecretKey>,
     web_auth: [u8; 16],
+    /// The deployment's VAPID public key (base64url uncompressed point).
+    vapid_public: String,
 }
 
 async fn world() -> Option<World> {
@@ -429,6 +431,7 @@ async fn world() -> Option<World> {
         local: None,
     };
     let _ = std::fs::remove_dir_all(&dir);
+    let vapid_public = B64URL.encode(vapid.public_key().to_sec1_point(false).as_bytes());
     let rt = Rt::with_push(test_settings(), Arc::new(adapters)).await?;
     Some(World {
         rt,
@@ -438,6 +441,7 @@ async fn world() -> Option<World> {
         web_base,
         web_ua: ua,
         web_auth,
+        vapid_public,
     })
 }
 
@@ -655,4 +659,81 @@ async fn e2ee_pushes_carry_no_plaintext_and_handles_are_validated() {
             r.text
         );
     }
+}
+
+/// Section 4: a browser needs the deployment's application-server (VAPID) public key
+/// before `pushManager.subscribe`. GET /v1/messaging/push/configuration publishes it (and
+/// which platforms deliver), never the private key; scope messages.read and a verified
+/// acting principal are required.
+#[tokio::test]
+async fn push_configuration_publishes_the_vapid_public_key_and_platforms() {
+    let Some(w) = world().await else { return };
+    let h = &w.rt.h;
+    let c = h.customer(ALL_SCOPES);
+    let (_conv, people) = h.managed_group(&c, 2).await;
+    let r = h
+        .get(&c, Some(people[0]), "/v1/messaging/push/configuration")
+        .await;
+    assert_eq!(r.status, S::OK, "{}", r.text);
+    assert_eq!(
+        r.json["platforms"],
+        json!({ "APNS": true, "FCM": true, "WEB_PUSH": true })
+    );
+    assert_eq!(r.json["payload"], "METADATA_ONLY");
+    let key = r.json["webPush"]["applicationServerKey"].as_str().unwrap();
+    assert_eq!(key, w.vapid_public);
+    let point = B64URL.decode(key).unwrap();
+    assert_eq!((point.len(), point[0]), (65, 0x04), "uncompressed P-256 point");
+    assert!(!r.text.contains("PRIVATE"), "never key material: {}", r.text);
+    // The scope is enforced.
+    let send_only = h.customer(&["messages.send"]);
+    let denied = h
+        .get(&send_only, Some(people[0]), "/v1/messaging/push/configuration")
+        .await;
+    assert_eq!(denied.status, S::FORBIDDEN, "{}", denied.text);
+}
+
+/// Section 4: the production key path. `activate-web-push` generates the VAPID key on the
+/// VPS with `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256` (PKCS#8 PEM)
+/// and sets MESSAGING_PUSH_WEB_VAPID_KEY_FILE / _SUBJECT. This drives that exact key through
+/// the environment parser and the adapter builder (what Messaging does at startup) and
+/// checks the published key is the key file's public point. No database needed.
+#[test]
+fn an_openssl_generated_vapid_key_configures_web_push_through_the_environment() {
+    use cf_service_auth::RuntimeEnvironment;
+    use messaging::{config::MessagingConfig, realtime::push::PushProvider};
+    let dir = std::env::temp_dir().join(format!("cf-vapid-{}", Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let key = dir.join("web-push-vapid.pem");
+    let out = std::process::Command::new("openssl")
+        .args(["genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256"])
+        .output()
+        .expect("openssl is required for this test");
+    assert!(out.status.success());
+    std::fs::write(&key, &out.stdout).unwrap();
+    let key_path = key.to_str().unwrap().to_string();
+    let vars = [
+        ("DATABASE_URL", "postgres://messaging:pw-xyz-123@db/m".to_string()),
+        ("MESSAGING_KT_LOG_ID", "cfmeet-messaging:test".to_string()),
+        ("MESSAGING_KT_SIGNING_KEY_FILE", "/run/secrets/kt.pem".to_string()),
+        ("MESSAGING_PUSH_WEB_VAPID_KEY_FILE", key_path),
+        ("MESSAGING_PUSH_WEB_VAPID_SUBJECT", "https://cfmeet.com".to_string()),
+    ];
+    let cfg = MessagingConfig::from_lookup(RuntimeEnvironment::Test, |k| {
+        vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone())
+    })
+    .unwrap();
+    let adapters =
+        messaging::realtime::push_adapters::PushAdapters::build(&cfg.push_adapters, false, None)
+            .unwrap();
+    assert_eq!(adapters.configured(), vec!["WEB_PUSH"], "APNs / FCM stay off");
+    let published = adapters.web_push_application_server_key().unwrap();
+    let der = std::process::Command::new("openssl")
+        .args(["pkey", "-in", key.to_str().unwrap(), "-pubout", "-outform", "DER"])
+        .output()
+        .unwrap()
+        .stdout;
+    // The SubjectPublicKeyInfo of a P-256 key ends with the 65-byte uncompressed point.
+    assert_eq!(B64URL.decode(&published).unwrap(), der[der.len() - 65..]);
+    let _ = std::fs::remove_dir_all(&dir);
 }

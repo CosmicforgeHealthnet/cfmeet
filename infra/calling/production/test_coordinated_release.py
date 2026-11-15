@@ -3,6 +3,7 @@ import io
 import json
 import re
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -433,6 +434,71 @@ class SafeDefaultsAndRouting(unittest.TestCase):
             self.assertEqual(cr.safe_default_violations(envs), [])
             envs['messaging']['MESSAGING_E2EE_DEVICES_ENABLED'] = 'yes'
             self.assertIn('messaging MESSAGING_E2EE_DEVICES_ENABLED', cr.safe_default_violations(envs))
+
+    def test_web_push_settings_are_allowed_only_after_activate_web_push_with_exact_values(self):
+        envs = {'messaging': {'MESSAGING_PUSH_WEB_VAPID_KEY_FILE': cr.WEB_PUSH_KEY_TARGET,
+                              'MESSAGING_PUSH_WEB_VAPID_SUBJECT': cr.WEB_PUSH_SUBJECT}}
+        with patch.object(cr, 'done', lambda op: False):
+            self.assertEqual(cr.safe_default_violations(envs), [
+                'messaging MESSAGING_PUSH_WEB_VAPID_KEY_FILE', 'messaging MESSAGING_PUSH_WEB_VAPID_SUBJECT'])
+        with patch.object(cr, 'done', lambda op: op == 'activate-web-push'):
+            self.assertEqual(cr.safe_default_violations(envs), [])
+            # Another key path, a widened host list or any APNs / FCM credential stays refused.
+            other = {'messaging': dict(envs['messaging'], MESSAGING_PUSH_WEB_VAPID_KEY_FILE='/tmp/k',
+                                       MESSAGING_PUSH_WEB_ALLOWED_HOSTS='evil.example',
+                                       MESSAGING_PUSH_APNS_KEY_FILE='/a', MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE='/f')}
+            self.assertEqual(cr.safe_default_violations(other), [
+                'messaging MESSAGING_PUSH_APNS_KEY_FILE', 'messaging MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE',
+                'messaging MESSAGING_PUSH_WEB_ALLOWED_HOSTS', 'messaging MESSAGING_PUSH_WEB_VAPID_KEY_FILE'])
+        self.assertEqual(cr.ACTIVATIONS['activate-web-push'][0], ('activate-personal-encryption',))
+        self.assertTrue(cr.WEB_PUSH_SUBJECT.startswith('https://'), 'VAPID contact is the public site, no address')
+
+    def test_activate_web_push_refuses_without_e2ee_devices_or_with_provider_credentials(self):
+        base = {'CF_RUNTIME_ENVIRONMENT': 'production', 'MESSAGING_E2EE_DEVICES_ENABLED': 'true'}
+        for env, text in ((dict(base, MESSAGING_E2EE_DEVICES_ENABLED='false'), 'personal encryption'),
+                          (dict(base, MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE='/f'), 'APNs/FCM'),
+                          (dict(base, CF_RUNTIME_ENVIRONMENT='staging'), 'production runtime')):
+            with patch.object(cr, 'env_of', lambda name, e=env: e), \
+                    patch.object(cr, 'apply_activation', side_effect=AssertionError('must not apply')):
+                with self.assertRaisesRegex(RuntimeError, text):
+                    cr.activate_web_push('a' * 40, '1', '')
+
+    def test_activate_web_push_mounts_the_generated_key_and_checks_the_adapter_started(self):
+        import messaging_runtime
+        calls = {}
+        env = {'CF_RUNTIME_ENVIRONMENT': 'production', 'MESSAGING_E2EE_DEVICES_ENABLED': 'true'}
+        key = Path('/opt/cfmeet-core/messaging/web-push-vapid.pem')
+
+        def apply(op, sha, run_id, changes, post=None):
+            calls.update(op=op, changes=changes, post=post)
+
+        with patch.object(cr, 'env_of', lambda name: env), \
+                patch.object(messaging_runtime, 'protected_file', return_value=key) as protected, \
+                patch.object(cr.p, 'run', return_value='DER'), \
+                patch.object(cr, 'apply_activation', apply):
+            cr.activate_web_push('a' * 40, '1', '')
+        self.assertEqual(protected.call_args[0][0], 'web-push-vapid.pem')
+        self.assertIs(protected.call_args[0][1], cr.vapid_private_key_pem)
+        self.assertEqual(calls['op'], 'activate-web-push')
+        service, overrides, extra = calls['changes'][0]
+        self.assertEqual(service, 'messaging')
+        self.assertEqual(overrides, {'MESSAGING_PUSH_WEB_VAPID_KEY_FILE': cr.WEB_PUSH_KEY_TARGET,
+                                     'MESSAGING_PUSH_WEB_VAPID_SUBJECT': cr.WEB_PUSH_SUBJECT})
+        self.assertNotIn('MESSAGING_PUSH_PROVIDER', overrides)
+        self.assertEqual(extra['mounts'], [(str(key), cr.WEB_PUSH_KEY_TARGET)])
+        log = '{"message":"push adapters","platforms":"[\\"WEB_PUSH\\"]"}'
+        with patch.object(cr.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, log, '')):
+            calls['post']()
+        with patch.object(cr.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '{"message":"push adapters","platforms":"[]"}', '')):
+            with self.assertRaisesRegex(RuntimeError, 'Web Push adapter'):
+                calls['post']()
+
+    def test_the_vapid_key_is_a_pkcs8_p256_pem(self):
+        pem = cr.vapid_private_key_pem()
+        self.assertTrue(pem.startswith('-----BEGIN PRIVATE KEY-----'))
+        out = subprocess.run(['openssl', 'pkey', '-noout', '-text'], input=pem, capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0)
+        self.assertIn('P-256', out.stdout + out.stderr)
 
     def test_the_e2ee_release_record_states_the_actual_assessment_status(self):
         record = cr.e2ee_release_record('123', witnessed=False, now='2026-11-15T00:00:00Z')

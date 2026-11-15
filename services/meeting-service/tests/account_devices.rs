@@ -814,8 +814,231 @@ async fn unclassified_sign_ins_keep_working_and_never_count() {
     assert_eq!(sign_in(&app, &e, &mut web).await.0, StatusCode::OK);
     assert_eq!(policy(&app, &web).await["activeWebDevices"], 1);
     // An unclassified sign-in older than the re-auth window cannot declare a device.
-    let app_old = app.state.jwt_service.verify_token(&legacy[0]).unwrap();
-    assert!(app_old.session_id().is_some());
+    // (Its tokens carry the sign-in's auth_time, which refresh never advances.)
+    let (fresh_access, _, old_session) = legacy_sign_in(&app, &e).await;
+    let old_access = aged_access_token(&app, &fresh_access, 3600).await;
+    let late = Device::web();
+    let (s, v) = app
+        .post(
+            "/api/v2/me/devices/current",
+            Auth::Bearer(&old_access),
+            json!({
+                "installationId": late.installation,
+                "deviceClass": late.class,
+                "platform": late.platform,
+                "label": "late",
+                "publicKey": b64(&late.public_key()),
+                "proof": late.proof(P::Declare, &old_session.to_string()),
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{v}");
+    assert_eq!(code(&v), "DEVICE_DECLARATION_REFUSED", "{v}");
+    // Compatibility mode (no enforcement date): the old sign-in still works.
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&old_access)).await.0,
+        StatusCode::OK
+    );
+}
+
+/// Move a sign-in's authentication back by `secs` (the database clock decides windows).
+async fn backdate_sign_in(app: &TestApp, session: Uuid, secs: i64) {
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET authenticated_at = authenticated_at - make_interval(secs => $2) \
+             WHERE id = $1",
+            [session.into(), (secs as f64).into()],
+        ))
+        .await
+        .unwrap();
+}
+
+/// The sign-in behind `access`, aged by `secs`: its database authentication time and a
+/// token carrying that auth_time (what an hour-old sign-in holds after refreshes).
+async fn aged_access_token(app: &TestApp, access: &str, secs: i64) -> String {
+    let claims = app.state.jwt_service.verify_token(access).unwrap();
+    let session = claims.session_id().unwrap();
+    backdate_sign_in(app, session, secs).await;
+    let user: Uuid = claims.sub.parse().unwrap();
+    let auth_time = claims.auth_time.unwrap() - secs;
+    app.state
+        .jwt_service
+        .session_tokens(user, &claims.role, auth_time, session, Uuid::new_v4())
+        .unwrap()
+        .0
+}
+
+/// A password sign-in that never declares a device (legacy client). Returns (access,
+/// refresh, session id).
+async fn legacy_sign_in(app: &TestApp, email: &str) -> (String, String, Uuid) {
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/login",
+            Auth::None,
+            json!({ "email": email, "password": PASSWORD }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let access = v["access_token"].as_str().unwrap().to_string();
+    let refresh = v["refresh_token"].as_str().unwrap().to_string();
+    let session = app
+        .state
+        .jwt_service
+        .verify_token(&access)
+        .unwrap()
+        .session_id()
+        .unwrap();
+    (access, refresh, session)
+}
+
+/// Section 5 migration: a legacy (unclassified) sign-in, e.g. on the old phone, cannot
+/// outlive a primary-mobile replacement or a device revocation. Classified web devices
+/// stay connected; the ended sign-ins are audited with the replacement.
+#[tokio::test]
+async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_devices() {
+    let app = app_with_redis!();
+    let e = email();
+    password_user(&app, &e).await;
+    let mut web = Device::web();
+    sign_in(&app, &e, &mut web).await;
+    let mut web2 = Device::web();
+    sign_in(&app, &e, &mut web2).await;
+    link_by_approval(&app, &web, &web2).await;
+    let mut phone_a = Device::mobile("ANDROID");
+    sign_in(&app, &e, &mut phone_a).await;
+    link_by_approval(&app, &web, &phone_a).await;
+    // The old phone also holds a legacy sign-in (an app version without the device flow).
+    let (legacy_access, legacy_refresh, legacy_session) = legacy_sign_in(&app, &e).await;
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&legacy_access)).await.0,
+        StatusCode::OK
+    );
+
+    // A new phone replaces phone A.
+    let mut phone_b = Device::mobile("IOS");
+    let (s, v) = sign_in(&app, &e, &mut phone_b).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["device"]["state"], "REPLACEMENT_PENDING");
+    let done = link_by_approval(&app, &web, &phone_b).await;
+    assert!(done["replacedDeviceId"].is_string(), "{done}");
+
+    assert_eq!(me(&app, &phone_a).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&legacy_access)).await.0,
+        StatusCode::UNAUTHORIZED,
+        "the legacy sign-in ends with the replacement"
+    );
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/refresh",
+            Auth::None,
+            json!({ "refresh_token": legacy_refresh }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "and cannot be refreshed");
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE id = '{legacy_session}' \
+             AND revoke_reason = 'DEVICE_REPLACED'"
+        ))
+        .await,
+        1
+    );
+    // Both web devices and the new primary keep working.
+    assert_eq!(me(&app, &web).await, StatusCode::OK);
+    assert_eq!(me(&app, &web2).await, StatusCode::OK);
+    assert_eq!(me(&app, &phone_b).await, StatusCode::OK);
+    assert_eq!(
+        app.scalar(
+            "SELECT count(*) FROM account_devices WHERE device_class = 'MOBILE' AND state = 'ACTIVE'"
+        )
+        .await,
+        1
+    );
+
+    // Revoking a web device ends the legacy sign-ins too, never the other devices.
+    let (legacy2, _, _) = legacy_sign_in(&app, &e).await;
+    let web2_id = web2.id.unwrap();
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/devices/{web2_id}/revoke"),
+            Auth::Bearer(&web.access),
+            json!({ "proof": web.proof(P::Revoke, &web2_id.to_string()) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(me(&app, &web2).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&legacy2)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(me(&app, &web).await, StatusCode::OK);
+    assert_eq!(me(&app, &phone_b).await, StatusCode::OK);
+    // Signing in again works (Meetings and Calling stay independently available).
+    let (fresh, _, _) = legacy_sign_in(&app, &e).await;
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&fresh)).await.0,
+        StatusCode::OK
+    );
+}
+
+/// Section 5 migration: with `ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM` reached, a sign-in
+/// that did not declare its device within the declaration window is refused (requests and
+/// refresh) with 403 DEVICE_DECLARATION_REQUIRED; a fresh sign-in can still declare, and
+/// declared web and mobile devices are unaffected. Before the date nothing changes.
+#[tokio::test]
+async fn declaration_enforcement_ends_legacy_sign_ins_after_the_owner_date() {
+    let base = app_with_redis!();
+    let future = base.with_auth_env(&[("ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM", "2999-01-01T00:00:00Z")]);
+    let e = email();
+    password_user(&future, &e).await;
+    let (fresh, _, _) = legacy_sign_in(&future, &e).await;
+    let old_access = aged_access_token(&future, &fresh, 3600).await;
+    assert_eq!(
+        future.get("/api/v1/users/me", Auth::Bearer(&old_access)).await.0,
+        StatusCode::OK,
+        "a future enforcement date changes nothing yet"
+    );
+
+    let app = future.with_auth_env(&[("ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM", "2020-01-01T00:00:00Z")]);
+    let mut web = Device::web();
+    assert_eq!(sign_in(&app, &e, &mut web).await.0, StatusCode::OK);
+    let mut phone = Device::mobile("ANDROID");
+    sign_in(&app, &e, &mut phone).await;
+    link_by_approval(&app, &web, &phone).await;
+
+    // The legacy sign-in past its window: refused, also on refresh.
+    let (s, v) = app.get("/api/v1/users/me", Auth::Bearer(&old_access)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(code(&v), "DEVICE_DECLARATION_REQUIRED", "{v}");
+    let (acc2, refresh2, s2) = legacy_sign_in(&app, &e).await;
+    // Within the window an undeclared sign-in still works (it can declare now) ...
+    assert_eq!(app.get("/api/v1/users/me", Auth::Bearer(&acc2)).await.0, StatusCode::OK);
+    // ... but once the window passes without a declaration it has no authority.
+    let acc2 = aged_access_token(&app, &acc2, 3600).await;
+    let _ = s2;
+    let (s, v) = app.get("/api/v1/users/me", Auth::Bearer(&acc2)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    let (s, v) = app
+        .post("/api/v1/auth/refresh", Auth::None, json!({ "refresh_token": refresh2 }))
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(code(&v), "DEVICE_DECLARATION_REQUIRED", "{v}");
+    // The device endpoints still answer it, so the client can explain what to do.
+    let (s, v) = app.get("/api/v2/me/device-policy", Auth::Bearer(&acc2)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["currentDeviceStatus"], "UNCLASSIFIED", "{v}");
+    // Declared devices are unaffected, even when their sign-in is old.
+    web.access = aged_access_token(&app, &web.access, 3600).await;
+    assert_eq!(me(&app, &web).await, StatusCode::OK);
+    assert_eq!(me(&app, &phone).await, StatusCode::OK);
+    // A fresh sign-in that declares right away keeps working.
+    let mut web2 = Device::web();
+    assert_eq!(sign_in(&app, &e, &mut web2).await.0, StatusCode::OK);
+    web2.access = aged_access_token(&app, &web2.access, 3600).await;
+    assert_eq!(me(&app, &web2).await, StatusCode::OK);
 }
 
 #[tokio::test]

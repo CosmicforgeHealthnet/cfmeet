@@ -87,6 +87,8 @@ Send it as `{"issuedAt": <int>, "nonce": "<b64url>", "signature": "<b64url 64 by
    Signing in again on the same installation returns the same `deviceId` and ends that device's older sign-in (`SUPERSEDED`).
 3. From then on, refresh with `POST /api/v1/auth/refresh {"refresh_token", "deviceProof": {REFRESH proof}}`.
 
+**Legacy (undeclared) sign-ins: compatibility and migration.** A client that never declares keeps working for Meetings, Calling and MANAGED messaging, but it has no device authority (no linking, approval, device revocation or E2EE enrollment). It also ends whenever the account's primary mobile is replaced or any device is revoked, because an undeclared sign-in cannot be attributed to a device. Declared web devices stay connected. When every client declares at sign-in, the owner sets `ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM`. From that date, an undeclared sign-in past its 10-minute declaration window is refused with `403 DEVICE_DECLARATION_REQUIRED`, on requests and on refresh. The client must sign in again and declare immediately. Clients should therefore declare at every sign-in, not only before Messaging.
+
 ### 3.2 Linking a device (new browser, new phone)
 
 On the **new device**:
@@ -144,6 +146,7 @@ Each trusted device has its **own** MLS device. Never copy keys between devices.
 | 403 | `DEVICE_REPLACEMENT_PENDING` | A pending mobile called a normal endpoint | Go to the linking screen (§3.2) |
 | 403 | `DEVICE_NOT_TRUSTED` | Approve, revoke another device or enroll E2EE from an untrusted device; or complete before approval | Link this device first |
 | 409 | `WEB_DEVICE_LIMIT_REACHED` | Declaring a new browser beyond `maxWebDevices` | Ask the user to revoke a browser from a trusted device |
+| 403 | `DEVICE_DECLARATION_REQUIRED` | Device declaration is enforced (`ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM`) and this sign-in never declared its device within 10 minutes of signing in | Sign in again and declare immediately (§3.1) |
 | 409 | `DEVICE_DECLARATION_REFUSED` | The sign-in already has another device, is older than 10 minutes, or the device is already trusted (link request) | Sign in again, then declare |
 | 409 | `DEVICE_KEY_IN_USE` | The key or installation is already bound to another live device | Generate a new key and installation id |
 | 404 | `DEVICE_NOT_FOUND` | Unknown or foreign device, or an undeclared sign-in using device endpoints | Declare first |

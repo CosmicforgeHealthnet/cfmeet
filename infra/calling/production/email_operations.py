@@ -185,6 +185,8 @@ SELECT json_build_object(
   'invitations', (SELECT count(*) FROM organization_invitations),
   'outboxByState', (SELECT coalesce(json_object_agg(state, n), '{}') FROM
       (SELECT state, count(*) n FROM organization_outbox GROUP BY state) o),
+  'outboxByDestinationAndState', (SELECT coalesce(json_object_agg(k, n), '{}') FROM
+      (SELECT destination || ' ' || state AS k, count(*) n FROM organization_outbox GROUP BY 1) d),
   'importRuns', (SELECT count(*) FROM organization_import_runs));
 """
 

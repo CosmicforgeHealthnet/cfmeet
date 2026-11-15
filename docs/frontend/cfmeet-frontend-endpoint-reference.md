@@ -17,9 +17,9 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 259 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.3.0 | 73 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 129 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.16.0 | 98 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **632** |
+| **Total** | | | **633** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -901,7 +901,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.17.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.17.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -995,6 +995,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.16.0**;
 | POST | `/v1/messaging/devices/{deviceId}/welcomes/{welcomeId}/consume` | customer credential (server-side only); Messaging client token | consume Welcome | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#consumeWelcome` |
 | GET | `/v1/messaging/key-transparency/proofs` | customer credential (server-side only); Messaging client token | get Key Transparency Proofs | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#getKeyTransparencyProofs` |
 | GET | `/v1/messaging/principals/{principalId}/devices` | customer credential (server-side only); Messaging client token | list Principal Devices | 200, 400, 401, 403, 404, 429, 503 | — | `messaging/http/v1.openapi.json#listPrincipalDevices` |
+| GET | `/v1/messaging/push/configuration` | customer credential (server-side only) | get Push Configuration | 200, 401, 403, 429, 503 | — | `messaging/http/v1.openapi.json#getPushConfiguration` |
 
 ### Encrypted Backups
 

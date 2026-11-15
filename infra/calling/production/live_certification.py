@@ -88,6 +88,7 @@ INTEGRATIONS = (
     ('privacy-relay', 'RELAY_NUMBER_POOL_ENABLED', 'Relay number pool', (None, 'false')),
     ('messaging', 'MESSAGING_PUSH_PROVIDER', 'Mobile push provider', (None, '', 'none')),
     ('messaging', 'MESSAGING_E2EE_DEVICES_ENABLED', 'End-to-end encrypted devices', (None, 'false')),
+    ('messaging', 'MESSAGING_PUSH_WEB_VAPID_KEY_FILE', 'Web Push (VAPID, no provider account)', (None, '')),
     ('calling', 'CALLING_PUBLIC_OUTBOUND_ENABLED', 'Calling public outbound', (None, 'false')),
     ('calling', 'CALLING_PUBLIC_INBOUND_ENABLED', 'Calling public inbound', (None, 'false')),
     ('calling', 'CALL_RECORDING_ENABLED', 'Call recording', (None, 'false')),
@@ -430,8 +431,8 @@ def platform(envs, latest, journal):
     out['integrations'] = integrations(envs)
     out['featureFlags'] = {name: cr.safe_flags(env) for name, env in envs.items()}
     try:
-        delivery = cr.event_delivery()
-        out['organizationsEventDelivery'] = dict(states=delivery, result='PASS' if not delivery.get('DEAD') else 'FAIL')
+        out['organizationsEventDelivery'] = cr.classify_event_delivery(
+            cr.event_delivery(), cr.configured_event_destinations(envs.get('organizations')))
     except Exception as error:
         out['organizationsEventDelivery'] = dict(result='FAIL', error=type(error).__name__)
     try:

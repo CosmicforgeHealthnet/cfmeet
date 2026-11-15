@@ -720,6 +720,13 @@ async fn push_payloads_are_metadata_only_and_revoked_devices_get_none() {
         )
         .await;
     assert_eq!(r.json["pushDeliveryConfigured"], true, "{}", r.text);
+    // No Web Push adapter here: the configuration says so and publishes no key.
+    let cfg = h
+        .get(&c, Some(bob.principal), "/v1/messaging/push/configuration")
+        .await;
+    assert_eq!(cfg.status, StatusCode::OK, "{}", cfg.text);
+    assert_eq!(cfg.json["platforms"]["WEB_PUSH"], false, "{}", cfg.text);
+    assert_eq!(cfg.json["webPush"], Value::Null, "{}", cfg.text);
     let r2 = h
         .put(
             &c,

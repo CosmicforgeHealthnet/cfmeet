@@ -3313,6 +3313,12 @@
     },
     {
       "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/messaging/push/configuration",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
       "method": "POST",
       "path": "/v1/messaging/devices/{deviceId}/revoke",
       "class": "PUBLIC_CUSTOMER"

@@ -70,6 +70,37 @@ pub struct DevicePolicy {
     /// `ACCOUNT_E2EE_REQUIRES_TRUSTED_DEVICE` (default on): personal E2EE device enrollment
     /// through the Messaging relay needs a trusted account device.
     pub e2ee_requires_trusted_device: bool,
+    /// `ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM` (RFC 3339; unset = compatibility mode):
+    /// from this instant a sign-in must declare its device (`POST /api/v2/me/devices/current`)
+    /// within its declaration window, or every authenticated request and refresh of it is
+    /// refused with 403 `DEVICE_DECLARATION_REQUIRED`. Legacy (unclassified) sign-ins then
+    /// end; nothing is deleted. Set it once every client declares at sign-in.
+    pub declaration_required_from: Option<chrono::DateTime<chrono::Utc>>,
+    /// How long after sign-in a device can still be declared (the re-authentication window,
+    /// `ACCOUNT_REAUTH_MAX_AGE_SECS`); set by the account policy.
+    pub declaration_window_secs: i64,
+}
+
+impl DevicePolicy {
+    /// Whether an unclassified sign-in authenticated at `authenticated_at` is refused at `now`.
+    pub fn unclassified_refused(
+        &self,
+        authenticated_at: chrono::DateTime<chrono::Utc>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        self.declaration_required_from.is_some_and(|from| {
+            now >= from
+                && now - authenticated_at > chrono::Duration::seconds(self.declaration_window_secs)
+        })
+    }
+}
+
+/// 403 `DEVICE_DECLARATION_REQUIRED`.
+pub fn declaration_required() -> ApiError {
+    ApiError::domain(
+        ErrorCode::DeviceDeclarationRequired,
+        "Sign in again and register this device (POST /api/v2/me/devices/current right after signing in)",
+    )
 }
 
 impl DevicePolicy {
@@ -96,6 +127,18 @@ impl DevicePolicy {
             proof_window_secs: num("ACCOUNT_DEVICE_PROOF_WINDOW_SECS", 300, 30, 900),
             email_step_up: flag("ACCOUNT_DEVICE_EMAIL_STEP_UP"),
             e2ee_requires_trusted_device: flag("ACCOUNT_E2EE_REQUIRES_TRUSTED_DEVICE"),
+            declaration_required_from: get("ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM")
+                .filter(|v| !v.trim().is_empty())
+                .and_then(|v| match chrono::DateTime::parse_from_rfc3339(v.trim()) {
+                    Ok(t) => Some(t.with_timezone(&chrono::Utc)),
+                    Err(_) => {
+                        tracing::error!(
+                            "ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM is not RFC 3339; device declaration is not enforced"
+                        );
+                        None
+                    }
+                }),
+            declaration_window_secs: 600,
         }
     }
 }
@@ -611,6 +654,31 @@ async fn end_device_sessions(
              WHERE device_id = $1 AND revoked_at IS NULL AND ($3::uuid IS NULL OR id <> $3) \
              RETURNING id",
             [device_id.into(), reason.into(), except.into()],
+        ))
+        .await?;
+    rows.iter()
+        .map(|r| r.try_get::<Uuid>("", "id").map_err(ApiError::from))
+        .collect()
+}
+
+/// Revoke the account's open UNCLASSIFIED sign-ins (no declared device). They cannot be
+/// attributed to a device, so when a device is replaced or revoked they may belong to it:
+/// they end too (the classified sign-ins of every other device are untouched), so a
+/// legacy sign-in on a replaced or lost phone never outlives the replacement.
+async fn end_unclassified_sessions(
+    txn: &DatabaseTransaction,
+    user_id: Uuid,
+    reason: &str,
+    except: Option<Uuid>,
+) -> ApiResult<Vec<Uuid>> {
+    let rows = txn
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = $2 \
+             WHERE user_id = $1 AND device_id IS NULL AND revoked_at IS NULL \
+               AND ($3::uuid IS NULL OR id <> $3) \
+             RETURNING id",
+            [user_id.into(), reason.into(), except.into()],
         ))
         .await?;
     rows.iter()
@@ -1586,6 +1654,10 @@ pub async fn complete_link(
             .transpose()?;
         if let Some(old) = old {
             ended.extend(end_device_sessions(&txn, old, "DEVICE_REPLACED", None).await?);
+            ended.extend(
+                end_unclassified_sessions(&txn, caller.user.id, "DEVICE_REPLACED", Some(caller.session_id))
+                    .await?,
+            );
             txn.execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
                 "UPDATE account_devices SET state = 'REVOKED', revoked_at = now(), \
@@ -1733,6 +1805,10 @@ pub async fn revoke_device(
     let mut ended = vec![];
     if current.state != "REVOKED" {
         ended = end_device_sessions(&txn, device_id, "DEVICE_REVOKED", None).await?;
+        ended.extend(
+            end_unclassified_sessions(&txn, caller.user.id, "DEVICE_REVOKED", Some(caller.session_id))
+                .await?,
+        );
         txn.execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
             "UPDATE account_devices SET state = 'REVOKED', revoked_at = now(), \
@@ -1822,13 +1898,23 @@ pub async fn check_refresh_binding<C: ConnectionTrait>(
     let row = db
         .query_one(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            "SELECT d.public_key, d.state FROM account_sessions s \
-             JOIN account_devices d ON d.id = s.device_id WHERE s.id = $1",
+            "SELECT d.public_key, d.state, s.authenticated_at FROM account_sessions s \
+             LEFT JOIN account_devices d ON d.id = s.device_id WHERE s.id = $1",
             [session_id.into()],
         ))
         .await?;
     let Some(row) = row else { return Ok(()) };
-    let key: Vec<u8> = row.try_get("", "public_key")?;
+    let key: Option<Vec<u8>> = row.try_get("", "public_key")?;
+    let Some(key) = key else {
+        // Unclassified sign-in: refreshes as before (compatibility), unless device
+        // declaration is enforced and its declaration window has passed.
+        let authenticated_at: chrono::DateTime<chrono::Utc> =
+            row.try_get("", "authenticated_at")?;
+        if policy.unclassified_refused(authenticated_at, chrono::Utc::now()) {
+            return Err(declaration_required());
+        }
+        return Ok(());
+    };
     let device_state: String = row.try_get("", "state")?;
     if device_state == "REVOKED" {
         return Err(security_revoked());

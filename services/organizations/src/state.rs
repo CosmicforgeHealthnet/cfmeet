@@ -17,6 +17,9 @@ pub struct AppState {
     /// The Platform Access port (operator binding rotation); `None` while provisioning
     /// is off.
     pub platform: Option<Arc<dyn PlatformScopes>>,
+    /// Consumer destinations the outbox worker delivers to (empty: delivery disabled).
+    /// Reported by `/ready`; the reconciliation record is never among them.
+    pub event_destinations: Vec<String>,
 }
 
 impl AppState {
@@ -26,11 +29,17 @@ impl AppState {
             verifier,
             provisioning_enabled: false,
             platform: None,
+            event_destinations: Vec::new(),
         }
     }
 
     pub fn with_provisioning(mut self, enabled: bool) -> Self {
         self.provisioning_enabled = enabled;
+        self
+    }
+
+    pub fn with_event_destinations(mut self, destinations: Vec<String>) -> Self {
+        self.event_destinations = destinations;
         self
     }
 

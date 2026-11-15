@@ -2606,6 +2606,32 @@ class PublishKeyPackagesResponse {
   Map<String, Object?> toJson() => json;
 }
 
+/// 1.25.0: the push platforms THIS deployment delivers to, and the Web Push application-server (VAPID) public key a browser passes to pushManager.subscribe. Nothing secret and nothing per user; payloads are always metadata only (conversation id and sequences; never content, ciphertext, keys or sender).
+class PushConfiguration {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PushConfiguration.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PushConfiguration.create({required String payload, required Map<String, Object?> platforms, required Map<String, Object?>? webPush}) =>
+      PushConfiguration.fromJson(<String, Object?>{
+        'payload': payload,
+        'platforms': platforms,
+        'webPush': webPush,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get payload => json['payload']! as String;
+
+  Map<String, Object?> get platforms => json['platforms']! as Map<String, Object?>;
+
+  /// null while Web Push is not configured.
+  Map<String, Object?>? get webPush => json['webPush'] == null ? null : json['webPush']! as Map<String, Object?>;
+
+  Map<String, Object?> toJson() => json;
+}
+
 class PushRegistration {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const PushRegistration.fromJson(this.json);

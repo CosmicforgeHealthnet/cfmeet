@@ -55,6 +55,29 @@ pub trait PushProvider: Send + Sync {
         Ok(())
     }
     async fn send(&self, platform: &str, handle: &str, payload: &Value) -> PushOutcome;
+    /// The Web Push application-server (VAPID) public key clients pass to
+    /// `pushManager.subscribe` (base64url, uncompressed P-256 point); `None` when Web Push is
+    /// not configured. Public by nature; the private key never leaves the adapter.
+    fn web_push_application_server_key(&self) -> Option<String> {
+        None
+    }
+}
+
+/// `GET /v1/messaging/push/configuration`: which push platforms this deployment delivers
+/// to, and the Web Push application-server key. Nothing secret, nothing per user.
+pub fn configuration(state: &crate::state::AppState) -> Value {
+    let push = &state.realtime.push;
+    serde_json::json!({
+        "platforms": {
+            "APNS": push.supports("APNS"),
+            "FCM": push.supports("FCM"),
+            "WEB_PUSH": push.supports("WEB_PUSH"),
+        },
+        "webPush": push
+            .web_push_application_server_key()
+            .map(|key| serde_json::json!({ "applicationServerKey": key })),
+        "payload": "METADATA_ONLY",
+    })
 }
 
 /// No provider configured: nothing is ever reported as sent.

@@ -178,6 +178,9 @@ pub enum ErrorCode {
     /// Multi-device policy: this session already belongs to a device, or the session is
     /// not eligible to declare one (unclassified sign-ins older than the re-auth window).
     DeviceDeclarationRefused,
+    /// Device declaration enforcement (`ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM`): this
+    /// sign-in never declared its device and its declaration window has passed.
+    DeviceDeclarationRequired,
     /// Multi-device policy: the device does not exist or is not the caller's.
     DeviceNotFound,
     /// Multi-device policy: the device key is already bound to another live device.
@@ -305,6 +308,7 @@ impl ErrorCode {
             ErrorCode::DeviceReplacementPending => "DEVICE_REPLACEMENT_PENDING",
             ErrorCode::DeviceNotTrusted => "DEVICE_NOT_TRUSTED",
             ErrorCode::DeviceDeclarationRefused => "DEVICE_DECLARATION_REFUSED",
+            ErrorCode::DeviceDeclarationRequired => "DEVICE_DECLARATION_REQUIRED",
             ErrorCode::DeviceNotFound => "DEVICE_NOT_FOUND",
             ErrorCode::DeviceKeyInUse => "DEVICE_KEY_IN_USE",
             ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
@@ -421,7 +425,9 @@ impl ErrorCode {
             | ErrorCode::ReauthenticationRequired
             | ErrorCode::EmailVerificationRequired => StatusCode::FORBIDDEN,
             ErrorCode::DeviceProofInvalid => StatusCode::UNAUTHORIZED,
-            ErrorCode::DeviceReplacementPending | ErrorCode::DeviceNotTrusted => {
+            ErrorCode::DeviceReplacementPending
+            | ErrorCode::DeviceNotTrusted
+            | ErrorCode::DeviceDeclarationRequired => {
                 StatusCode::FORBIDDEN
             }
             ErrorCode::WebDeviceLimitReached
@@ -718,6 +724,7 @@ mod tests {
             ErrorCode::DeviceReplacementPending,
             ErrorCode::DeviceNotTrusted,
             ErrorCode::DeviceDeclarationRefused,
+            ErrorCode::DeviceDeclarationRequired,
             ErrorCode::DeviceNotFound,
             ErrorCode::DeviceKeyInUse,
             ErrorCode::DeviceLinkInvalid,

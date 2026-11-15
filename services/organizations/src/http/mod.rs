@@ -239,7 +239,9 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
             "outbox": backlog.map(|b| json!({
                 "pending": b.pending,
                 "oldestPendingAt": b.oldest.map(store::rfc3339),
-                "delivery": "disabled",
+                // Consumer rows only: the never-dispatched reconciliation record is excluded.
+                "delivery": if state.event_destinations.is_empty() { "disabled" } else { "enabled" },
+                "destinations": state.event_destinations,
             })),
             "provisioning": { "enabled": state.provisioning_enabled },
         })),

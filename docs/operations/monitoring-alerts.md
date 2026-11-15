@@ -95,6 +95,24 @@ value. In that case the expression holds a starting point, not an approved SLA.
 | MessagingWebhookRelayLagHigh | warning | `max(messaging_webhook_relay_oldest_pending_seconds) > 600` | 10 min | **required** | [§9](../architecture/messaging-operations-runbook.md#9-incidents-and-signals-141) |
 | MessagingMetricsUnavailable | warning | `up{job="messaging"} == 0` | 5 min | **required** | [§9](../architecture/messaging-operations-runbook.md#9-incidents-and-signals-141) |
 
+### organizations (no Prometheus exposition; checked by `verify` and `certify`)
+
+The Organizations outbox holds two kinds of rows (`services/organizations/src/store.rs` `emit`):
+
+* one `cfmeet.reconciliation` **record** per event: event history, never dispatched by design, so it stays `PENDING` with 0 attempts forever. It is **not** a backlog and never a delivery failure;
+* one **consumer** row per subscribed destination (today `cfmeet.meeting-service`, 13 event types), delivered by the worker.
+
+`coordinated_release.event_delivery()` / `classify_event_delivery()` (used by `verify`, `certify` and `activate-org-events`) report counts only, per destination, event type and state, and fail on genuine delivery defects only:
+
+| Check | Fails when |
+|---|---|
+| consumer DEAD | any consumer row is `DEAD` |
+| consumer stalled | a consumer row of a **configured** destination (`ORGANIZATIONS_EVENT_DESTINATIONS`) is `PENDING`/`INFLIGHT` more than 15 minutes after it was written |
+| blocked behind DEAD | a consumer row waits behind a `DEAD` row of the same aggregate (ordered delivery) |
+| record integrity | a consumer row has no reconciliation twin, or a reconciliation record was dispatched or modified |
+
+Rows of a destination that is not configured are reported (`undeliverableUnconfigured`), not failed. The service's own `/ready` reports `outbox.pending` for consumer rows only, `outbox.delivery` (`enabled` / `disabled`) and the configured `outbox.destinations`; the admin API `GET /internal/v1/admin/event-delivery` reports per consumer destination and excludes the record.
+
 ### Runbook conditions that cannot be expressed today
 
 | Condition | Why | What covers it now |

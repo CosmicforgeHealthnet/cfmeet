@@ -1123,7 +1123,7 @@ fn public_doc(service: &str, raw: &str) -> String {
                 }
             }
         }
-        doc["info"]["description"] = serde_json::json!(format!("{}\nCF Meet account clients use each operation's x-cfmeet-native-path with their existing Account bearer session. Canonical /v1 routes use the separately authenticated application gateway and are not a substitute for native routing. Device realtime uses a short-lived client token and a single-use WebSocket subprotocol ticket. PRIVATE_E2EE requires approved enrollment, valid client cryptographic state and contact policy; it never falls back to MANAGED. Production enrollment remains blocked pending independent assessment. Operator and internal service operations are excluded from this document.",doc["info"]["description"].as_str().unwrap_or("")));
+        doc["info"]["description"] = serde_json::json!(format!("{}\nCF Meet account clients use each operation's x-cfmeet-native-path with their existing Account bearer session. Canonical /v1 routes use the separately authenticated application gateway and are not a substitute for native routing. Device realtime uses a short-lived client token and a single-use WebSocket subprotocol ticket. PRIVATE_E2EE requires approved enrollment, valid client cryptographic state and contact policy; it never falls back to MANAGED. In production, personal E2EE runs under the owner's recorded release decision: no independent cryptographic assessment has been performed (NOT_PERFORMED) and the key-transparency log is UNWITNESSED; no certification is claimed. Operator and internal service operations are excluded from this document.",doc["info"]["description"].as_str().unwrap_or("")));
     }
     // The generated public bundles carry each operation's source tag (and summary) but no
     // top-level `tags` array, so every used tag is declared here; no operation is added or
@@ -1253,8 +1253,8 @@ mod tests {
     use super::*;
 
     /// Served `/api-docs/messaging.json` (the public Messaging bundle, PLT-006).
-    const SERVED_MESSAGING_OPERATIONS: usize = 96;
-    const SERVED_MESSAGING_NATIVE: usize = 71;
+    const SERVED_MESSAGING_OPERATIONS: usize = 97;
+    const SERVED_MESSAGING_NATIVE: usize = 72;
 
     fn peer(name: &str) -> &'static str {
         PEER_DOCS

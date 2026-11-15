@@ -68,6 +68,7 @@ pub fn customer_routes() -> Router<AppState> {
             "/devices/:device_id/push-registration",
             put(register_push).delete(unregister_push),
         )
+        .route("/push/configuration", get(push_configuration))
 }
 
 fn client_token(headers: &HeaderMap) -> Option<String> {
@@ -402,6 +403,17 @@ async fn register_push(
     Ok(Json(
         push::register(&state, caller.context(), &acting, device, body).await?,
     ))
+}
+
+/// Push platforms this deployment delivers to and the Web Push application-server key
+/// (what a browser needs before `pushManager.subscribe`). Scope messages.read.
+async fn push_configuration(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    acting_with(&state, &caller, &headers, MESSAGES_READ).await?;
+    Ok(Json(push::configuration(&state)))
 }
 
 async fn unregister_push(

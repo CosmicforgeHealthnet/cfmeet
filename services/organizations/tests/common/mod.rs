@@ -368,6 +368,18 @@ impl Harness {
         })
     }
 
+    /// A harness whose HTTP state reports these outbox consumer destinations.
+    pub async fn with_event_destinations(destinations: Vec<String>) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier).with_event_destinations(destinations);
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
     /// A harness whose HTTP state carries a Platform Access port (operator binding
     /// rotation, ADR 0058 A2).
     pub async fn with_platform(

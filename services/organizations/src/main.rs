@@ -57,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let interval = config.worker_interval;
     let provisioning_enabled = platform_scopes.is_some();
     let platform_port = platform_scopes.clone();
+    let event_destinations = dispatcher.destinations();
     let worker = tokio::spawn(worker::run_with(
         worker_db,
         dispatcher,
@@ -67,7 +68,8 @@ async fn main() -> anyhow::Result<()> {
     let app = http::app(
         AppState::new(db, verifier)
             .with_provisioning(provisioning_enabled)
-            .with_platform(platform_port),
+            .with_platform(platform_port)
+            .with_event_destinations(event_destinations),
     );
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "organizations listening");

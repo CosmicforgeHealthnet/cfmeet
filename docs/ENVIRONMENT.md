@@ -180,6 +180,7 @@ SWAGGER_PUBLIC_SERVER_URL=https://api.cfmeet.com
 | `ACCOUNT_DEVICE_PROOF_WINDOW_SECS` | `300` (30-900) | Accepted clock skew of a device proof of possession (nonces are single-use). |
 | `ACCOUNT_DEVICE_EMAIL_STEP_UP` | `true` | A new device can be approved with an emailed code when no trusted device is at hand (web-only recovery, lost phone). Never SMS. |
 | `ACCOUNT_E2EE_REQUIRES_TRUSTED_DEVICE` | `true` | Personal E2EE (Messaging) device enrollment needs a trusted account device. |
+| `ACCOUNT_DEVICE_DECLARATION_REQUIRED_FROM` | unset (compatibility) | RFC 3339 instant. From then on, a sign-in must declare its device (`POST /api/v2/me/devices/current`) within the re-authentication window (`ACCOUNT_REAUTH_MAX_AGE_SECS`), or its requests and refreshes are refused with 403 `DEVICE_DECLARATION_REQUIRED`; the device endpoints still answer it. Set it once every client (web and mobile) declares at sign-in. Independently of it, replacing a primary mobile or revoking any device always ends the account's unclassified sign-ins. |
 
 See [the handover](architecture/multi-device-linked-devices-handover.md).
 
