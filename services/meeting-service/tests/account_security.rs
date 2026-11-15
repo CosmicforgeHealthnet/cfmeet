@@ -439,13 +439,30 @@ async fn password_reset_with_a_valid_code_ends_every_earlier_session() {
         )
         .await;
     assert!(s.is_success(), "{v}");
-    let code = app
-        .state
-        .redis
-        .get(&format!("otp:reset:{}", email.to_lowercase()))
-        .await
-        .unwrap()
-        .expect("a reset code was issued for mailing");
+    // The code as the user receives it: from the queued reset email (N0-8: Redis holds only
+    // a salted hash of it).
+    let text: String = {
+        use sea_orm::ConnectionTrait;
+        app.db
+            .conn
+            .query_one(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "SELECT text_body FROM email_deliveries WHERE category = 'AUTH_PASSWORD_RESET' \
+                  AND recipient_hash = encode(sha256(convert_to(lower($1), 'UTF8')), 'hex') \
+                  ORDER BY created_at DESC LIMIT 1",
+                [email.clone().into()],
+            ))
+            .await
+            .unwrap()
+            .expect("a reset code was issued for mailing")
+            .try_get("", "text_body")
+            .unwrap()
+    };
+    let code = text
+        .split(|c: char| !c.is_ascii_digit())
+        .find(|w| w.len() == 6)
+        .expect("the reset email carries the code")
+        .to_string();
     let new_password = "Reset!Passw0rd-long";
     let body = |token: &str| {
         json!({ "email": email, "token": token,
@@ -529,11 +546,57 @@ async fn registration_normalizes_email_and_refuses_case_variants() {
         .await;
     assert_eq!(s, StatusCode::CREATED, "{v}");
     assert_eq!(v["email"], "mixed.case@example.com");
-    let (s, _) = app
+    // N0-9 / D-12: a case variant of a registered address gets the same answer as a new
+    // registration (never 409); no second account is created and the owner is notified.
+    let first = v.clone();
+    let (s, again) = app
         .post(
             "/api/v1/auth/register",
             Auth::None,
             body("mixed.case@example.com", "mixedcase2"),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{again}");
+    let keys = |v: &serde_json::Value| {
+        let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    };
+    assert_eq!(keys(&again), keys(&first), "same answer shape");
+    assert_eq!(again["email"], first["email"]);
+    assert_eq!(again["status"], first["status"]);
+    assert_eq!(again["role"], first["role"]);
+    assert_ne!(
+        again["user_id"], first["user_id"],
+        "the existing account id is never revealed"
+    );
+    assert!(again["user_id"].is_string());
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM users WHERE lower(email) = 'mixed.case@example.com'")
+            .await,
+        1
+    );
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM users WHERE username = 'mixedcase2'")
+            .await,
+        0,
+        "nothing is created for the second registration"
+    );
+    assert_eq!(
+        app.scalar(
+            "SELECT count(*) FROM email_deliveries WHERE category = 'NOTIFICATION' \
+              AND idempotency_key LIKE 'register-existing:%'"
+        )
+        .await,
+        1,
+        "the account owner is told by email"
+    );
+    // A taken username is still refused (usernames are public).
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/register",
+            Auth::None,
+            body("someone.else@example.com", "mixedcase"),
         )
         .await;
     assert_eq!(s, StatusCode::CONFLICT);

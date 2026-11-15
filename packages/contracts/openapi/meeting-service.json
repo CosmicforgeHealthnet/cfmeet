@@ -887,7 +887,7 @@
           "Authentication"
         ],
         "summary": "Register a new user",
-        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.\nEmail addresses are case-insensitive and stored lowercased. Returns 409 if the email or\nusername is already in use.",
+        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.\nEmail addresses are case-insensitive and stored lowercased. The answer never reveals whether\nthe email already has an account (owner decision D-12): an address already registered gets\nthe same 201 answer, no account is created or changed, and its owner receives an email notice\ninstead of a code. Returns 409 only if the username is taken (usernames are public).",
         "operationId": "register",
         "requestBody": {
           "content": {
@@ -914,7 +914,7 @@
             "description": "Validation error"
           },
           "409": {
-            "description": "User already exists"
+            "description": "Username already taken"
           },
           "429": {
             "description": "Too many requests"
@@ -1042,7 +1042,7 @@
           "Authentication"
         ],
         "summary": "Verify password reset token",
-        "description": "Checks whether a password reset is pending for the given email, for example before showing the\nreset form. Public endpoint. It only confirms that an unexpired reset code exists: the submitted\ncode must be 6 digits but is not compared or consumed (`POST /api/v1/auth/reset-password` does\nthat). Returns 400 if no reset is pending, including when the email is unknown.",
+        "description": "Checks whether a password reset is pending for the given email, for example before showing the\nreset form. Public endpoint. Returns 200 only when the submitted 6-digit code matches the\npending reset code; the code is not consumed (`POST /api/v1/auth/reset-password` does that).\nEvery other case (unknown email, no pending reset, wrong or expired code) returns the same\n400 answer with comparable timing, so the endpoint never reveals whether an account exists.\nChecks share the reset code's attempt limit (429).",
         "operationId": "verify_reset_token",
         "requestBody": {
           "content": {
@@ -1066,7 +1066,10 @@
             }
           },
           "400": {
-            "description": "No pending reset"
+            "description": "Invalid or expired reset code (same answer whether or not the account exists)"
+          },
+          "429": {
+            "description": "Too many attempts"
           }
         }
       }

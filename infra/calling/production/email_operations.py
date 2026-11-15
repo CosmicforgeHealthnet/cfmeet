@@ -27,6 +27,7 @@ import urllib.error
 import urllib.request
 import uuid
 
+import controlled_otp
 import production as p
 
 MEETING_LOOPBACK = 'http://127.0.0.1:18081'
@@ -340,10 +341,21 @@ def public(method, path, body=None, token=None):
             return error.code, None
 
 
+def last_line(out):
+    return out.strip().splitlines()[-1] if out and out.strip() else ''
+
+
 def otp_from_redis(cr, env, address):
-    """The current verification code of the acceptance account (read on the VPS only)."""
-    out = redis_command(cr, env, 'GET "$KEY"', {'KEY': 'otp:verify:' + address.lower()})
-    code = out.strip().splitlines()[-1] if out and out.strip() else ''
+    """A verification code for the controlled acceptance account (VPS only). Since N0-8 the
+    issued code is stored only as a salted hash: replace it with a fresh controlled code in
+    the same format (only if one was issued). The previous image stored it in clear: read it."""
+    hashed = controlled_otp.hashed_key(address)
+    if last_line(redis_command(cr, env, 'EXISTS "$KEY"', {'KEY': hashed})) == '1':
+        code = controlled_otp.new_code()
+        out = redis_command(cr, env, 'SET "$KEY" "$VALUE" EX 86400 XX',
+                            {'KEY': hashed, 'VALUE': controlled_otp.sealed(code)})
+        return code if last_line(out) == 'OK' else None
+    code = last_line(redis_command(cr, env, 'GET "$KEY"', {'KEY': controlled_otp.legacy_key(address)}))
     return code if re.fullmatch(r'\d{6}', code) else None
 
 

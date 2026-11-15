@@ -96,7 +96,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | POST | `/api/v1/auth/resend-verification` | none (public) | Resend verification email | 200, 400, 429 | — | `openapi/meeting-service.json#resend_verification_email` |
 | POST | `/api/v1/auth/reset-password` | none (public) | Reset password with token | 200, 400, 429 | — | `openapi/meeting-service.json#reset_password` |
 | POST | `/api/v1/auth/verify-email` | none (public) | Verify email with token | 200, 400, 429 | — | `openapi/meeting-service.json#verify_email` |
-| POST | `/api/v1/auth/verify-reset-token` | none (public) | Verify password reset token | 200, 400 | — | `openapi/meeting-service.json#verify_reset_token` |
+| POST | `/api/v1/auth/verify-reset-token` | none (public) | Verify password reset token | 200, 400, 429 | — | `openapi/meeting-service.json#verify_reset_token` |
 
 ### Backstage (v2)
 

@@ -139,6 +139,36 @@ impl OtpService {
         }
     }
 
+    /// N0-9: checks a code WITHOUT consuming it, under the same attempt counter as
+    /// [`Self::verify_code`] (so probing shares the brute-force budget). Performs the same
+    /// Redis work whether or not an account or a code exists.
+    pub async fn check_code(&self, email: &str, code: &str, otp_type: OtpType) -> ApiResult<bool> {
+        let attempts_key = self.attempts_key(email, otp_type);
+        let attempts = self
+            .redis
+            .incr_with_ttl(&attempts_key, RATE_LIMIT_TTL_SECS)
+            .await?;
+        if attempts > MAX_OTP_ATTEMPTS {
+            return Err(ApiError::TooManyRequests(
+                "Too many verification attempts. Please try again later.".to_string(),
+            ));
+        }
+        let hashed = self.redis.get(&self.otp_key(email, otp_type)).await?;
+        let legacy = self
+            .redis
+            .get(&self.legacy_otp_key(email, otp_type))
+            .await?;
+        Ok(match (hashed, legacy) {
+            (Some(stored), _) => code_matches(&stored, code),
+            (None, Some(stored)) => constant_time_eq(stored.as_bytes(), code.as_bytes()),
+            (None, None) => {
+                // Same hashing work as a stored code (timing).
+                let _ = code_matches(&seal_code(code), code);
+                false
+            }
+        })
+    }
+
     /// Check if an OTP exists
     pub async fn has_code(&self, email: &str, otp_type: OtpType) -> ApiResult<bool> {
         Ok(self.redis.exists(&self.otp_key(email, otp_type)).await?
@@ -219,6 +249,25 @@ mod tests {
         for bad in ["482913", "zz:zz", "00:00", ""] {
             assert!(!code_matches(bad, "482913"), "{bad}");
         }
+    }
+
+    /// Shared with infra/calling/production/test_controlled_otp.py: acceptance tooling
+    /// writes controlled codes in exactly this format.
+    #[test]
+    fn the_stored_format_matches_the_acceptance_tooling_vector() {
+        let salt: Vec<u8> = (0u8..16).collect();
+        assert_eq!(
+            format!("{}:{}", hex::encode(&salt), hex::encode(salted_digest(&salt, "123456"))),
+            "000102030405060708090a0b0c0d0e0f:99c90773ea9ce66a355bd6a2a6e55122c3caf5a164785c90b1d58c2d63bb8680"
+        );
+        assert!(code_matches(
+            "000102030405060708090a0b0c0d0e0f:99c90773ea9ce66a355bd6a2a6e55122c3caf5a164785c90b1d58c2d63bb8680",
+            "123456"
+        ));
+        assert_eq!(
+            email_key(" Ada@Example.com "),
+            "b5fc85e55755f9e0d030a10ab4429b6b2944855f9a0d60077fe832becbc41d72"
+        );
     }
 
     #[test]

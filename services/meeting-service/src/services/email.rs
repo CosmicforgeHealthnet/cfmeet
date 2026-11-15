@@ -168,6 +168,38 @@ impl EmailService {
         .map(|e| e.id)
     }
 
+    /// D-12: someone tried to register with an address that already has an account. The
+    /// owner is told (at most once per hour per account); nothing about the account changes.
+    pub async fn send_registration_attempt_notice(
+        &self,
+        to_email: &str,
+        username: &str,
+        user_id: Uuid,
+    ) -> ApiResult<Uuid> {
+        let now = Utc::now();
+        let template = notification_email(
+            username,
+            "Someone tried to create a CF Meet account with your email",
+            "Someone tried to create a new CF Meet account with this email address. You already \
+             have an account: sign in, or use \"Forgot password\" if you no longer know your \
+             password. If this was not you, you can ignore this email; your account was not changed.",
+        );
+        self.enqueue_template(
+            category::NOTIFICATION,
+            Some(format!(
+                "register-existing:{user_id}:{}",
+                now.format("%Y%m%d%H")
+            )),
+            to_email,
+            Some(username),
+            "Someone tried to create a CF Meet account with your email",
+            template,
+            Some(now + Duration::days(1)),
+        )
+        .await
+        .map(|e| e.id)
+    }
+
     /// Generic notification email.
     pub async fn send_notification_email(
         &self,

@@ -1421,13 +1421,10 @@ async fn organizations_cutover_shadow_and_rollback_rehearsal() {
     )
     .await;
     assert!((200..300).contains(&r.status), "{}", r.text);
-    let code = cfmeet_certification::redis::get(
-        &redis,
-        &format!("otp:reset:{}", admin_email.to_lowercase()),
-    )
-    .await
-    .unwrap()
-    .expect("reset code");
+    let code = cfmeet_certification::redis::controlled_otp(&redis, "otp:reset", &admin_email)
+        .await
+        .unwrap()
+        .expect("reset code");
     let r = send(&stack, Method::POST, format!("{meeting_url}/api/v1/auth/reset-password"), None, vec![],
         Some(json!({ "email": admin_email, "token": code, "new_password": password, "confirm_password": password }))).await;
     status(&r, 200, "set the administrator's password");
