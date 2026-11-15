@@ -28,18 +28,51 @@
 
 ## 2. Phase 0: baseline (read-only)
 
-These facts were already measured and are unchanged from revision 1:
-- certify 43670057279 flags, outbox states and memory;
-- the release journal;
-- running revisions.
+### 2.1 Already measured (no further action)
 
-Queries Q1–Q16 are as specified in revision 1. Three of them carry extra weight in revision 2:
+| Fact | Value | Evidence |
+|---|---|---|
+| Push provider | `none` | certify 43670057279 |
+| Email provider | `smtp` (implicit); Resend not activated | certify 43670057279; journal has no `activate-resend-email` |
+| `NOTIFICATIONS_EMAIL_ENABLED` | `true` | certify 43670057279 |
+| Organizations event delivery | DELIVERED 35, PENDING 59 (reconciliation rows), DEAD 0 | certify 43670057279 + readiness `outbox.pending 0` |
+| Messaging outbox | pending 0, dead letter 0 | Messaging `/ready` in certify 43670057279 |
+| Numbering / SMS outbox | pending 0, dead 0; SMS provider `none` | certify 43670057279 |
+| Host | MemAvailable 5,076 MiB, disk free 141.1 GiB | certify 43670057279 |
+| Running revisions | platform-access, organizations, numbering, privacy-relay, sms-gateway, telephony, developer-platform(+worker) at `b9dc15be`; messaging, calling, meeting (`cfmeet-production-backend`), api-gateway at `c6de964c`; communications at `8a64b480` | certify 43670057279 image labels |
+| Release in progress at audit time | run 43696469230 (`6f3743f`, started 2026-11-15 08:51 UTC) | GitHub Actions |
+
+### 2.2 Still to collect: authorized read-only queries
+
+These must be run through a **new read-only `diagnose` extension**, or by the owner with the runtime role in a read-only session (`SET TRANSACTION READ ONLY`). They return counts and ages only; no addresses, content or handles.
+
+| Q | Database | Query (counts only) | Answers |
+|---|---|---|---|
+| Q1 | meeting (`rtc_db`) | `SELECT category, status, count(*), min(created_at), max(created_at) FROM email_deliveries GROUP BY 1,2;` | email volume, failure mix, stuck QUEUED (OTP bodies retained) |
+| Q2 | meeting | `SELECT last_error_class, count(*) FROM email_deliveries WHERE status IN ('QUEUED','FAILED','EXPIRED') GROUP BY 1;` | SMTP rejection evidence (S-2) |
+| Q3 | meeting | `SELECT kind, status, last_error, count(*) FROM meeting_notifications GROUP BY 1,2,3;` | **confirms or refutes S-1**: look for `PREFERENCES_UNAVAILABLE` / FAILED |
+| Q4 | meeting | `SELECT outcome, count(*) FROM meeting_notification_recipients GROUP BY 1;` | suppressed vs queued |
+| Q5 | meeting | `SELECT count(*) FILTER (WHERE status='PENDING'), max(attempts) FROM account_communication_outbox;` | infinite-retry backlog |
+| Q6 | messaging | `SELECT platform, enabled, count(*) FROM messaging_push_registrations GROUP BY 1,2;` | sizes the push move (expected 0: no data to copy) |
+| Q7 | messaging | `SELECT status, count(*), max(created_at) FROM messaging_push_jobs GROUP BY 1;` | job growth (no retention) |
+| Q8 | comm hub | `SELECT count(*), count(*) FILTER (WHERE NOT (direct_messages AND group_messages AND incoming_calls AND missed_calls AND contact_requests AND group_invitations AND meeting_invitations)) FROM communication_notification_preferences;` | how many users changed defaults |
+| Q9 | comm hub | `SELECT notifications, count(*) FROM communication_conversation_preferences GROUP BY 1;` and the same on `communication_contact_aliases` | mute usage |
+| Q10 | comm hub | `SELECT destination, state, count(*) FROM communication_outbox GROUP BY 1,2;` | Hub delivery health |
+| Q11 | organizations | `SELECT destination, state, count(*) FROM organization_outbox GROUP BY 1,2;` | baseline |
+| Q12 | calling | `SELECT status, count(*) FROM calling_outbox_events GROUP BY 1;` and `SELECT count(*) FROM calling_incidents WHERE status='OPEN';` | publication health |
+| Q13 | developer platform | `SELECT status, count(*) FROM devplat_webhook_deliveries GROUP BY 1;` | webhook health |
+| Q14 | trust bundle (file) | Is `communications-preferences.read` granted to `cfmeet.meeting-service` in the live Hub bundle? Read permissions only, never keys | **S-1 root cause** |
+| Q15 | nginx (file) | Does any `location` block `^/internal/operations/`? `curl -s -o /dev/null -w '%{http_code}' https://api.cfmeet.com/internal/operations/email/deliveries/00000000-0000-0000-0000-000000000000` **without** a token, run by the owner (expected 404 from nginx; 404 from the app is also "no token"; distinguish by the `server`/body signature) | **S-3** |
+| Q16 | host | `docker stats --no-stream` for the 13 containers; 7-day MemAvailable minimum | Phase 6 capacity gate |
+
+
+Three of these queries carry extra weight in revision 2:
 
 | Q | Why it matters more now |
 |---|---|
-| Q1/Q2 (email ledger by category and status) | needed to size the drain window and to set the CRITICAL-lane baseline |
-| Q6/Q7 (push registrations and jobs) | expected 0, so the push move needs no data copy |
-| Q8/Q9 (Hub preferences and mutes) | **the row counts to copy** in Phase 4.2 |
+| Q1/Q2 | size the drain window of the old email ledger and set the CRITICAL-lane baseline |
+| Q6/Q7 | expected 0, so the push move needs no data copy |
+| Q8/Q9 | **the row counts to copy** in Phase 4.2 (preferences) |
 
 Two queries are added:
 

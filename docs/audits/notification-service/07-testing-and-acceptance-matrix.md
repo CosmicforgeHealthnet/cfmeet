@@ -1,5 +1,7 @@
 # Document 7 — Testing and Acceptance Matrix (revision 2: unified service)
 
+*"NS" means the unified notification service. Old pipelines are called "legacy".*
+
 **Test levels used below:**
 
 | Level | Meaning |
@@ -37,7 +39,7 @@ Each test row also states which adapter it needs:
 | F-13 | Old client PUTs the 7 legacy preference booleans without the new fields | I | T | new fields unchanged (no reset) |
 | F-14 | Inbox pagination stable under concurrent inserts; ETag 304 on unchanged unread | I | T | no item skipped or duplicated across pages |
 | F-15 | Bulk read `upTo` cursor, bulk dismiss by category | I | T | counts correct; idempotent replay |
-| F-16 | Mobile route contract includes U1–U5 | U | — | `apps/mobile/tests/routes.test.ts` passes |
+| F-16 | Mobile route contract includes U1–U9 | U | — | `apps/mobile/tests/routes.test.ts` passes |
 | F-17 | Token-bearing invitation emails are sent by the service from a sealed token; the inbox copy and logs never contain the token | I | T | the token is present only in the sealed body until the final state; grep of logs, inbox and admin APIs returns nothing |
 | F-18 | Ported email ledger parity: every test in `services/meeting-service/tests/email_delivery.rs` passes against the service ledger (idempotency, temporary vs permanent failure, expiry, lease recovery, Svix authentication, monotonic status) | I | T | all pass unchanged in intent |
 | F-19 | Template parity: for the same input, the service renders the same subject and body (hash) as today's Meeting templates (`templates/email/*`) for every email category | U | T | equal hashes (or reviewed, intended diffs) |
@@ -62,8 +64,8 @@ Each test row also states which adapter it needs:
 | R-10 | Migration during live traffic: authority switch at fence T with steady event flow | S | jobs before T legacy, at or after T NS; ledger rows = unique (job, recipient) |
 | R-11 | Rollback with in-flight events | S | Document 5 §9 row 4.3: new messages route back to the old path; the service drains its own rows; no message in both ledgers; no loss |
 | R-12 | **NS completely down** | C | sign-in, OTP, call ringing/answer, message send/receive and webhooks all pass (C1–C6 journeys) |
-| R-13 | Hub down | C | NS policy calls fail → deliveries retried (not failed) for ≥ 30 min; a security in-app copy is still created |
-| R-14 | Meeting ledger down (X1 503) | I | EMAIL deliveries retried; in-app unaffected |
+| R-13 | Hub down | C | X4 restriction checks fail → social-category deliveries retried (not failed) for ≥ 30 min; preference evaluation continues (preferences are local after Phase 4.2); security notices unaffected |
+| R-14 | Owner read API down (X1 Account contacts or X2 conference recipients returns 503) | I | affected deliveries retried with backoff until `expiresAt`; other categories and in-app unaffected; CRITICAL events carrying their own recipient are unaffected |
 | R-15 | Delayed and reordered events: reminder arrives after cancel | I | reminder dropped (subject version) |
 | R-16 | Calling push fast path with NS down or slow | C | `calling_call_ring_seconds` p95 unchanged versus baseline; call established via WS |
 | R-17 | CRITICAL lane under a STANDARD flood (50k STANDARD pending) | I, S | CRITICAL p95 handoff unchanged; STANDARD backpressure does not refuse CRITICAL ingest |
@@ -78,7 +80,7 @@ Each test row also states which adapter it needs:
 | S-01 | Forged event: wrong key, wrong audience, expired token, replayed `jti` | I | 401 `INTERNAL_AUTHENTICATION_FAILED`, no rows |
 | S-02 | Producer identity spoof: Calling token claiming `producer: cfmeet.organizations` | I | REJECTED |
 | S-03 | Event type outside the producer allowlist | I | REJECTED `UNKNOWN_EVENT_TYPE` |
-| S-04 | Cross-tenant / cross-account: authorization-matrix suite for U1–U5 (foreign IDs, other account's items, revoked session) | I | 404 / 401; table fingerprints unchanged (Messaging matrix pattern) |
+| S-04 | Cross-tenant / cross-account: authorization-matrix suite for U1–U9 and I1–I10 (foreign IDs, other account's items, preferences or devices, revoked session, platform-tenant scope) | I | 404 / 401; table fingerprints unchanged (Messaging matrix pattern) |
 | S-05 | Revoked device delivery: revoke → a queued push is not sent | I, C | DISABLED |
 | S-06 | E2EE payload confidentiality: inspect every PUSH payload for PRIVATE_E2EE | I | only `{v,type,conversationId,eventSequence,sequence}` (messages) or the call schema; Web Push ciphertext decrypts to metadata only (RFC 8291 vector) |
 | S-07 | Token disclosure: APIs, admin endpoints and logs never return or print push handles, invitation tokens or OTPs | U, I | grep-based log test; response schema has no handle field |
@@ -88,7 +90,9 @@ Each test row also states which adapter it needs:
 | S-11 | Dangerous links: no URL is returned by U1; `action.kind` is a closed enum | U | schema validation |
 | S-12 | Shared handle: the same Web Push subscription registered by two accounts | I | second registration refused (`UNIQUE handle_digest`) |
 | S-13 | Erasure: account erased → all NS rows for `recipient_ref` gone within 24 h | I | 0 rows |
-| S-14 | X1 refuses `AUTH_*`/`SECURITY_*` categories from NS | I | 403 |
+| S-14 | CRITICAL priority and `sealed` payloads accepted only from the producers and event types allowed for them (Account for `account.*`; Meeting for invitation types) | I | REJECTED otherwise |
+| S-17 | Sealed-content handling: codes, tokens and addresses are decryptable only by the renderer; absent from logs, inbox, push payloads and admin APIs; email bodies erased at the final state; expired CRITICAL items cannot be replayed (I6) | U, I | grep and schema checks pass; replay refused |
+| S-18 | Owner read APIs X1–X5 refuse every caller except `cfmeet.notifications`, and X5 never returns an email address | I | 403; schema check |
 | S-15 | Forbidden data keys (`email`, `token`, `content`, …) in an event | U | REJECTED |
 | S-16 | Public exposure: no `/internal/*` NS or Meeting route reachable from the internet | P (certify probe) | nginx 404 |
 

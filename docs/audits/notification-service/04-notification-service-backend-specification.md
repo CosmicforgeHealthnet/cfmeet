@@ -167,18 +167,49 @@ All use `cf-service-auth`: an Ed25519 single-audience token, a receiver trust bu
 
 ## 5. Event contracts
 
-### 5.1 Envelope `cfmeet.notifications.event` v1
+### 5.1 Envelope `cfmeet.notifications.event` v1 (NEW)
 
-This is the same envelope as in revision 1, with two additions:
-- `sealed`: an HPKE ciphertext object `{kid, enc, ct}` for codes, tokens and invitee addresses;
-- `priority`: `CRITICAL|HIGH|NORMAL`.
+This envelope aligns with `cfmeet.platform.event-envelope`. Producers build it with `packages/notification-client`.
 
-Rules:
-- `data` keys matching `secret|private|token|ciphertext|plaintext|content|body|password|email|phone|key|code` are refused **outside `sealed`**.
-- Maximum size 4 KiB (8 KiB with `sealed`).
-- `producer` must equal the issuer.
-- Each producer has an `eventType` allowlist.
-- Each type has its own `eventVersion`. The current and previous versions are accepted.
+```json
+{
+  "schemaVersion": 1,
+  "eventId": "evt_<32hex> | uuid",
+  "eventType": "account.verification-code.requested",
+  "eventVersion": 1,
+  "producer": "cfmeet.meeting-service",
+  "occurredAt": "RFC3339",
+  "correlationId": "corr_<32hex>",
+  "scope": { "tenantId": "uuid", "applicationId": "uuid", "environmentId": "uuid" },
+  "subject": { "kind": "ACCOUNT", "id": "uuid", "version": 3 },
+  "recipients": [{ "ref": "cfmeet-user:<uuid>" }],
+  "delivery": {
+    "priority": "CRITICAL|HIGH|NORMAL",
+    "dedupeKey": "string<=200",
+    "idempotencyKey": "string<=160|null",
+    "coalesceKey": "string<=200|null",
+    "deliverAfter": "RFC3339|null",
+    "expiresAt": "RFC3339|null",
+    "cancelKey": "string<=200|null"
+  },
+  "data": { "codeTtlMinutes": 1440 },
+  "sealed": { "kid": "notif-hpke-2026-11", "enc": "base64url", "ct": "base64url" }
+}
+```
+
+| Field | Rule |
+|---|---|
+| Size | ≤ 4 KiB, or ≤ 8 KiB when `sealed` is present |
+| `data` keys | must match `^[a-z][a-zA-Z0-9]{0,47}$`. Keys matching `secret\|private\|token\|ciphertext\|plaintext\|content\|body\|password\|email\|phone\|key\|code` are **refused outside `sealed`** (mirrors Messaging's CHECK, `m20261106_000004_realtime.rs:139-140`) |
+| `sealed` | HPKE (RFC 9180, X25519/HKDF-SHA256/AES-256-GCM) to the service's public key `kid`. Plaintext is a JSON object: `code`, `token`, `address` (invitation invitee only). Allowed **only** for event types flagged `sealedAllowed` in the catalogue (#21-25) |
+| Strings | ≤ 200 chars; control characters stripped |
+| `recipients` | ≤ 200 refs: `cfmeet-user:<uuid>`, `meeting-email-principal:<uuid>`, `platform-principal:<uuid>`, `operator-group:<name>` |
+| `delivery.idempotencyKey` | required for email categories that exist today; must use **today's key formats** (`otp:verify:…`, `otp:reset:…`, `device-step-up:…`, `password-changed:…`, `meeting-notification:…`, `devplat-access:…`) so the new ledger keeps the same dedupe behaviour |
+| `producer` | must equal the authenticated service identity |
+| `eventType` | must be in that producer's closed allowlist (as Developer Platform `catalog.rs:29-52` does) |
+| CRITICAL priority | allowed only for `account.*` types from `cfmeet.meeting-service` (the Account authority) |
+
+**Versioning.** `schemaVersion` versions the envelope; `eventVersion` versions each type. The service accepts the current and previous `eventVersion` per type. A breaking change is a new contract entry in `packages/contracts/manifest.json`.
 
 ### 5.2 Inbound catalogue (31 types)
 
@@ -210,7 +241,7 @@ Control event: `notifications.cancel` (`cancelKey`).
 
 ## 6. Data design (16 tables)
 
-The column details for 1–9 are as in revision 1. The DDL below highlights what is new. All tables follow `migration-conventions.md` and the server refuses to start with pending migrations.
+All tables follow `docs/architecture/migration-conventions.md` (raw SQL `UP`/`DOWN`, history table `notifications_seaql_migrations`, prefix `notif_`). The server refuses to start with pending migrations. The full DDL for all 16 tables follows the summary.
 
 | # | Table | Purpose | Key constraints | Retention |
 |---|---|---|---|---|
@@ -230,6 +261,127 @@ The column details for 1–9 are as in revision 1. The DDL below highlights what
 | 14 | `notif_preferences` | account-level categories, channels, quiet hours | PK `account_ref`; `version` | life of account |
 | 15 | `notif_conversation_preferences` | conversation notification mute | PK `(account_ref, conversation_id)`; `muted_until` only with MUTED | life |
 | 16 | `notif_contact_preferences` | contact notification mute | PK `(account_ref, contact_ref)` | life |
+
+```sql
+-- m20270101_000001_notifications_foundation (illustrative date)
+
+CREATE TABLE notif_event_inbox (               -- 1. ingest dedupe
+  producer        VARCHAR(64)  NOT NULL CHECK (producer ~ '^cfmeet\.[a-z][a-z0-9-]*$|^alertmanager$'),
+  event_id        VARCHAR(64)  NOT NULL,
+  request_digest  CHAR(64)     NOT NULL,
+  event_type      VARCHAR(96)  NOT NULL,
+  event_version   SMALLINT     NOT NULL,
+  lane            VARCHAR(10)  NOT NULL CHECK (lane IN ('CRITICAL','HIGH','STANDARD')),
+  state           VARCHAR(16)  NOT NULL CHECK (state IN ('PENDING','PROCESSED','REJECTED','SHADOWED')),
+  reject_reason   VARCHAR(64),
+  envelope        JSONB        NOT NULL CHECK (pg_column_size(envelope) <= 8192),  -- sealed part stays sealed
+  received_at     TIMESTAMPTZ  NOT NULL DEFAULT now(), processed_at TIMESTAMPTZ,
+  lease_id UUID, lease_until TIMESTAMPTZ, attempts INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (producer, event_id)
+);
+CREATE INDEX ix_notif_event_inbox_due ON notif_event_inbox (lane, received_at) WHERE state = 'PENDING';
+
+CREATE TABLE notif_notifications (             -- 2. one logical notification per recipient
+  id              UUID PRIMARY KEY,
+  recipient_ref   VARCHAR(80)  NOT NULL CHECK (recipient_ref ~ '^(cfmeet-user|meeting-email-principal|platform-principal):[0-9a-f-]{36}$|^operator-group:[a-z-]{1,40}$'),
+  category        VARCHAR(40)  NOT NULL,
+  lane            VARCHAR(10)  NOT NULL,
+  dedupe_key      VARCHAR(200) NOT NULL,
+  coalesce_key    VARCHAR(200), cancel_key VARCHAR(200),
+  source_producer VARCHAR(64)  NOT NULL, source_event_id VARCHAR(64) NOT NULL,
+  subject_kind    VARCHAR(32), subject_id UUID,
+  template_key    VARCHAR(64)  NOT NULL,
+  params          JSONB        NOT NULL CHECK (pg_column_size(params) <= 2048),  -- never codes/tokens
+  policy_snapshot JSONB        NOT NULL,       -- decision, reasons, preference version (audit)
+  state           VARCHAR(16)  NOT NULL CHECK (state IN ('ROUTED','SUPPRESSED','CANCELLED','EXPIRED','SHADOW')),
+  deliver_after   TIMESTAMPTZ, expires_at TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  UNIQUE (recipient_ref, dedupe_key)
+);
+CREATE INDEX ix_notif_notifications_cancel ON notif_notifications (cancel_key) WHERE cancel_key IS NOT NULL;
+
+CREATE TABLE notif_deliveries (                -- 3. one per (notification, channel, target)
+  id              UUID PRIMARY KEY,
+  notification_id UUID NOT NULL REFERENCES notif_notifications(id) ON DELETE CASCADE,
+  channel         VARCHAR(16) NOT NULL CHECK (channel IN ('EMAIL','PUSH','IN_APP','OPERATOR','WEBHOOK')),
+  lane            VARCHAR(10) NOT NULL,
+  target_ref      VARCHAR(80) NOT NULL,        -- 'address' | push endpoint id | 'inbox'
+  status          VARCHAR(20) NOT NULL CHECK (status IN
+                  ('PENDING','DEFERRED','DISPATCHING','SENT','DELIVERED','FAILED','EXPIRED','CANCELLED','SUPPRESSED','SHADOW')),
+  attempts        INT NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 64),
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  lease_id UUID, lease_until TIMESTAMPTZ,
+  CHECK ((status = 'DISPATCHING') = (lease_id IS NOT NULL)),
+  last_error_class VARCHAR(64),
+  routing_version INT NOT NULL,                -- notif_routing.version at creation (fence evidence)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), completed_at TIMESTAMPTZ,
+  UNIQUE (notification_id, channel, target_ref)
+);
+CREATE INDEX ix_notif_deliveries_due ON notif_deliveries (lane, next_attempt_at) WHERE status IN ('PENDING','DEFERRED');
+
+CREATE TABLE notif_delivery_attempts (         -- 4. append-only
+  delivery_id UUID NOT NULL REFERENCES notif_deliveries(id) ON DELETE CASCADE,
+  attempt     INT  NOT NULL,
+  started_at  TIMESTAMPTZ NOT NULL, finished_at TIMESTAMPTZ,
+  outcome     VARCHAR(16) NOT NULL CHECK (outcome IN ('OK','RETRY','PERMANENT','BREAKER_OPEN')),
+  error_class VARCHAR(64), http_status INT,
+  PRIMARY KEY (delivery_id, attempt)
+);
+
+CREATE TABLE notif_inbox_items (               -- 5. user-visible history
+  id              UUID PRIMARY KEY,            -- = notification id
+  recipient_ref   VARCHAR(80) NOT NULL,
+  category        VARCHAR(40) NOT NULL,
+  template_key    VARCHAR(64) NOT NULL,
+  params          JSONB NOT NULL CHECK (pg_column_size(params) <= 2048),
+  action_kind     VARCHAR(32) NOT NULL, action_ref UUID,
+  group_key       VARCHAR(200), group_count INT NOT NULL DEFAULT 1,
+  silent          BOOLEAN NOT NULL DEFAULT false,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  read_at TIMESTAMPTZ, dismissed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL,
+  version         BIGINT NOT NULL DEFAULT 1
+);
+CREATE INDEX ix_notif_inbox_recipient ON notif_inbox_items (recipient_ref, created_at DESC, id DESC) WHERE dismissed_at IS NULL;
+CREATE INDEX ix_notif_inbox_unread    ON notif_inbox_items (recipient_ref) WHERE read_at IS NULL AND dismissed_at IS NULL AND silent = false;
+CREATE UNIQUE INDEX uq_notif_inbox_group ON notif_inbox_items (recipient_ref, group_key) WHERE group_key IS NOT NULL AND read_at IS NULL AND dismissed_at IS NULL;
+
+CREATE TABLE notif_schedules (                 -- 6. reminders, quiet-hour deferrals, coalesce windows
+  schedule_key VARCHAR(200) PRIMARY KEY,       -- e.g. reminder:<conference>:<start_epoch> (today's reminder_key)
+  kind         VARCHAR(16) NOT NULL CHECK (kind IN ('REMINDER','QUIET_HOURS','DELIVER_AFTER','COALESCE')),
+  release_at   TIMESTAMPTZ NOT NULL,
+  cancel_key   VARCHAR(200),
+  payload      JSONB NOT NULL CHECK (pg_column_size(payload) <= 2048),  -- ids only
+  delivery_id  UUID REFERENCES notif_deliveries(id) ON DELETE CASCADE,
+  state        VARCHAR(12) NOT NULL CHECK (state IN ('PENDING','FIRED','CANCELLED')),
+  lease_id UUID, lease_until TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_notif_schedules_due ON notif_schedules (release_at) WHERE state = 'PENDING';
+CREATE INDEX ix_notif_schedules_cancel ON notif_schedules (cancel_key) WHERE cancel_key IS NOT NULL;
+
+CREATE TABLE notif_routing (                   -- 7. routing fence per (category, channel)
+  category VARCHAR(40) NOT NULL, channel VARCHAR(16) NOT NULL,
+  mode     VARCHAR(8)  NOT NULL CHECK (mode IN ('OFF','SHADOW','ACTIVE')),
+  fence_at TIMESTAMPTZ NOT NULL, version INT NOT NULL,
+  canary_percent SMALLINT NOT NULL DEFAULT 0 CHECK (canary_percent BETWEEN 0 AND 100),
+  changed_by_run VARCHAR(64) NOT NULL, changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (category, channel)
+);
+
+CREATE TABLE notif_service_nonces (            -- 8. jti replay guard
+  jti VARCHAR(64) PRIMARY KEY, issuer VARCHAR(64) NOT NULL, expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE notif_shadow_observations (       -- 9. temporary; dropped in Phase 8
+  id BIGSERIAL PRIMARY KEY,
+  category VARCHAR(40) NOT NULL, dedupe_key VARCHAR(200) NOT NULL,
+  side VARCHAR(8) NOT NULL CHECK (side IN ('LEGACY','NS')),
+  recipient_digest CHAR(64) NOT NULL,          -- keyed HMAC of the recipient ref
+  decision VARCHAR(16) NOT NULL, render_digest CHAR(64),   -- subject+body hash for template parity
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (category, dedupe_key, side, recipient_digest)
+);
+```
 
 ```sql
 CREATE TABLE notif_email_messages (            -- port of email_deliveries
@@ -279,6 +431,35 @@ CREATE TABLE notif_preferences (               -- port of communication_notifica
   quiet_hours JSONB, source_version BIGINT,     -- Hub version at copy time (Phase 4.2)
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE notif_email_provider_events (     -- 11. port of email_delivery_events
+  provider VARCHAR(16) NOT NULL, event_id VARCHAR(128) NOT NULL,
+  event_type VARCHAR(48) NOT NULL, provider_message_id VARCHAR(128),
+  message_id UUID,                             -- re-linked by a sweep if the event arrived before ACCEPTED
+  occurred_at TIMESTAMPTZ, received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (provider, event_id)
+);
+
+CREATE TABLE notif_email_suppressions (        -- 12. bounce / complaint suppression
+  recipient_digest CHAR(64) PRIMARY KEY,
+  reason VARCHAR(16) NOT NULL CHECK (reason IN ('COMPLAINED','HARD_BOUNCE','MANUAL')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);  -- CRITICAL-lane messages are NOT suppressed (account recovery must still work); an operator alert is raised instead
+
+CREATE TABLE notif_conversation_preferences (  -- 15. port of the Hub conversation notification fields
+  account_ref VARCHAR(64) NOT NULL, conversation_id UUID NOT NULL,
+  notifications VARCHAR(8) NOT NULL DEFAULT 'ALL' CHECK (notifications IN ('ALL','MENTIONS','MUTED')),
+  muted_until TIMESTAMPTZ CHECK (muted_until IS NULL OR notifications = 'MUTED'),
+  version BIGINT NOT NULL DEFAULT 1, source_version BIGINT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (account_ref, conversation_id)
+);
+
+CREATE TABLE notif_contact_preferences (       -- 16. port of communication_contact_aliases.notifications
+  account_ref VARCHAR(64) NOT NULL, contact_ref VARCHAR(64) NOT NULL,
+  notifications VARCHAR(8) NOT NULL DEFAULT 'ALL' CHECK (notifications IN ('ALL','MENTIONS','MUTED')),
+  version BIGINT NOT NULL DEFAULT 1, source_version BIGINT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (account_ref, contact_ref)
+);
 ```
 
 All default values equal today's Hub behaviour: an absent row means everything is enabled.
@@ -301,7 +482,7 @@ Organization policy slot: D-7.
 
 ### 7.2 Precedence
 
-These are the same twelve rules as revision 1, evaluated top to bottom, first terminal rule wins. The only difference: rules 7–9 now read local tables instead of calling the Hub.
+Rules are evaluated top to bottom, and the first terminal rule wins. Rules 7–9 read the service's own preference tables. Rules 2, 4 and 6 ask the Hub through X4.
 
 | # | Rule | Effect |
 |---|---|---|

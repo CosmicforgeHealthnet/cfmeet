@@ -63,26 +63,41 @@ All UI work needs design approval (D-11).
 
 ## N0 — Repair the existing paths (owning services)
 
-This section is unchanged from revision 1. Its items are N0-1 … N0-12:
-- Hub grant;
-- **Resend activation in today's pipeline**;
-- poison recipient;
-- leases;
-- `notify`;
-- nginx `/internal`;
-- erasure;
-- OTP hashing;
-- enumeration;
-- transactional security notices;
-- web logout / `voip`;
-- suppression.
+| # | Field | Content |
+|---|---|---|
+| 1 | Objective | Make today's notifications work and remove the security defects before anything moves. Users need working codes and notices now; the shadow comparison needs a correct baseline; several fixes (OTP hashing, lease renewal, suppression) are ported into the unified service |
+| 2 | Reuse | All existing code and tooling (`activate-resend-email`, `email-acceptance`, release tests) |
+| 3 | Services affected | Meeting, Messaging, Hub release tooling, nginx config, apps/web, apps/mobile |
+| 4 | New components | none |
+| 5 | API changes | none publicly. `verify-reset-token` returns a uniform answer (status semantics kept for the valid case) |
+| 6 | Database changes | additive. Retention indexes / purge for `messaging_push_jobs`. No destructive change |
+| 7 | Events and workers | email worker and push dispatcher lease renewal; meeting worker poison-recipient handling |
+| 8 | Security | see the items below |
+| 9 | Tests | one regression test per item (listed below) |
+| 10 | Prerequisites | Phase 0 queries Q3, Q14 and Q15 to confirm S-1 and S-3 before changing them |
+| 11 | Production verification | `email-acceptance confirm=otp` PASS; Q3 shows SENT notices for account holders; Q15 shows the internal routes are not reachable publicly |
+| 12 | Rollback | each item is a separate release; standard `rollback` |
+| 13 | Dependencies | none |
+| 14 | Definition of done | every item below has merged, been released and been verified in production; Document 8 status → "repaired" |
 
-**Why N0 still matters when these pipelines will be replaced:**
-- users need working codes and notices **now**;
-- the shadow comparison needs a correct baseline;
-- several fixes are ported into the service (hashing, leases, suppression).
+The items:
 
-**Definition of done:** each item is released and verified in production.
+| Item | Change | Evidence | Regression test |
+|---|---|---|---|
+| N0-1 | Grant `communications-preferences.read` to `cfmeet.meeting-service` in `communications_release.py` (the Hub bundle builder) and in the coordinated `GRANTS` | S-1 | release test asserts the grant is present; production `organization-acceptance`-style check sends a notice to a test account |
+| N0-2 | **Owner** completes the Resend setup → `activate-resend-email` → `email-acceptance confirm=otp` (existing tooling; no code) | S-2 | the existing `test_email_operations.py` |
+| N0-3 | `notifications::deliver`: `BadRequest` from `enqueue` marks that recipient `INVALID_ADDRESS` and continues | S-11 | poison address in `RECIPIENTS_SQL` → others still sent |
+| N0-4 | Email worker and push dispatcher: per-item lease renewal, or batch ≤ lease / (timeout × 3) | S-8 | two workers + slow fake provider → 0 duplicates |
+| N0-5 | Messaging: honour `notify=false` only for delegated/migration callers (`messaging-application.delegate` / import), never for client tokens | S-4 | client token `notify:false` → the push job is still created |
+| N0-6 | nginx: `location ^~ /internal/ { return 404; }` on the public server block (verify first, Q15) | S-3 | public certify probe `/internal/operations/email/deliveries/<uuid>` → nginx 404 |
+| N0-7 | `PRINCIPAL_ERASURE` deletes push registrations and jobs for the principal | S-7 | erasure test asserts 0 rows |
+| N0-8 | OTP: store SHA-256(code + per-key salt), constant-time compare, key by hash of email | S-5 | existing OTP journey test + Redis key inspection |
+| N0-9 | `verify-reset-token`: uniform response and timing | S-6 | enumeration test |
+| N0-10 | Security notices (password changed, new device) enqueued in the same transaction (as step-up already is) | S-9 | failure injection → notice still queued |
+| N0-11 | Web logout revokes the browser's Calling endpoint; mobile removes `voip` from `UIBackgroundModes` until CallKit exists | S-10, mobile risk | web unit test; app config review |
+| N0-12 | Bounce/complaint suppression: refuse new non-security sends to a `recipient_hash` with COMPLAINED, or BOUNCED twice | S-12 | webhook → suppression → enqueue refused with `SUPPRESSED` |
+
+---
 
 ## N1 — Contracts, permissions, `notification-client`
 
@@ -217,9 +232,22 @@ This section is unchanged from revision 1. Its items are N0-1 … N0-12:
 
 ## N8 — Inbox and user APIs U1–U5
 
-The rows are as in revision 1, section N7. The relay route, mobile contract routes, authorization-matrix suite and canary acceptance are unchanged.
-
-**Done:** Phase 3 exit criteria are met.
+| # | Field | Content |
+|---|---|---|
+| 1 | Objective | Users see an inbox for categories that have no channel today (Phase 3) |
+| 2 | Reuse | the Meeting `/api/v2/communications` relay pattern, `VerifiedAccount` |
+| 3 | Services affected | the service, Meeting (relay route + OpenAPI), web, mobile |
+| 4 | New components | U1–U5; I2; inbox writer in W1; `notifications.inbox.changed` (internal) |
+| 5 | API changes | U1–U5 (NEW); `meeting-service.json` gains the routes (mobile contract) |
+| 6 | Database changes | none new (table 5 from N2) |
+| 7 | Events and workers | W1 writes items; W5 retention |
+| 8 | Security | own items only (404 for foreign IDs); closed `action.kind`; rate limits; authorization-matrix suite for U1–U5 |
+| 9 | Tests | read/unread/dismiss sync across two sessions; grouping; silent items excluded from the count; ETag 304; pagination stability |
+| 10 | Prerequisites | N3, N7 |
+| 11 | Production verification | canary accounts receive a contact-request item end-to-end (real Hub action → item visible) |
+| 12 | Rollback | relay route off; IN_APP routing OFF |
+| 13 | Dependencies | N3, N7 |
+| 14 | Definition of done | Phase 3 exit (Document 7 §5 A3); FE2 integrated behind a flag |
 
 ## N9 — Push cutover and call fast lane (Phase 4.1)
 
@@ -299,11 +327,22 @@ The rows are as in revision 1, section N7. The relay route, mobile contract rout
 
 ## N13 — Observability, alerting, operator channel
 
-The base is as in revision 1, section N12, plus:
-- **deploy Prometheus/Alertmanager with real receivers (D-9)**: a prerequisite for N12;
-- I4–I9;
-- certify checks (routing agreement, lane backlog);
-- the optional I10 operator channel (Phase 4.7), with the service's own health alerts on a direct path.
+| # | Field | Content |
+|---|---|---|
+| 1 | Objective | Operators can see, diagnose and replay without database access, and **alerting is live before the critical lane moves** |
+| 2 | Reuse | rule CI (`check_alert_rules.py`, promtool, amtool), certify framework, existing `meeting-service.rules.yml` / `messaging.rules.yml` |
+| 3 | Services affected | the service, `infra/monitoring`, coordinated-release certify |
+| 4 | New components | I4–I9; `notifications.rules.yml` (per-lane backlog, CRITICAL age > 60 s, failure rate, breaker, replica down); **Prometheus + Alertmanager deployed with real receivers (D-9)**; certify checks "routing agreement" and "lane backlog"; runbooks (outage → break-glass, replay, credential and HPKE key rotation); optional I10 operator channel (Phase 4.7, D-15) |
+| 5 | API changes | internal I4–I10 |
+| 6 | Database changes | none |
+| 7 | Events and workers | — |
+| 8 | Security | operator identity audit; PII-free responses; the service's own health alerts use a direct path (not the service) |
+| 9 | Tests | rule unit tests; certify offline tests; a fired test alert reaches a person through the configured receiver |
+| 10 | Prerequisites | N3; D-9 |
+| 11 | Production verification | a synthetic alert is delivered; certify output includes routing and lane backlog |
+| 12 | Rollback | receivers can be removed; rules are inert |
+| 13 | Dependencies | N3 |
+| 14 | Definition of done | runbooks reviewed; alert delivery proven in production; certify green |
 
 ## N14 — Canary governance
 

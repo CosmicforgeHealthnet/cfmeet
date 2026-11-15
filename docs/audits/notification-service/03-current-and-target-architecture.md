@@ -1,4 +1,6 @@
-# Document 3 — Current and Target Architecture
+# Document 3 — Current and Target Architecture (revision 2: unified service)
+
+**Revision 2 (owner decision D-0):** the target is one notification system that every service uses (§3.1, §5). Sections 1–2 describe the current state and are unchanged.
 
 The diagrams use Mermaid, which renders on GitHub. Every box in the current-state diagram exists on `main` at `6f3743f`. Its production state is shown in brackets.
 

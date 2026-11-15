@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Status | **AUDIT ONLY. No implementation is authorized.** |
-| Revision | **2 (2026-11-15).** The owner chose full consolidation: one notification system used by every service, with all current notification pipelines moving into it. Revision 1 recommended a narrower orchestration service and is kept as a rejected alternative (Document 3 §4) |
+| Revision | **2 (2026-11-15).** The owner chose full consolidation: one notification system used by every service, with all current notification pipelines moving into it. Revision 1 recommended a narrower orchestration service and is kept as a superseded alternative (Document 3 §3.2) |
 | Repository | `CosmicforgeHealthnet/cfmeet`, `main` at `6f3743f806434a55bad8297f104d28a55e350e2e` (2026-11-15) |
 | Production | `https://api.cfmeet.com` (single Contabo VPS, coordinated release path) |
 | Production evidence | read-only `certify` run [43670057279](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43670057279) (2026-11-15 02:56 UTC, `CERTIFIED_READ_ONLY`, artifact 14144111736); release run history; unauthenticated `GET https://api.cfmeet.com/health` = 200; dated ops reports under `docs/operations/` |
