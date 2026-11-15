@@ -49,6 +49,14 @@ async function signIn(who, name) {
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e).slice(0, 200)));
+  // Failed API calls (method, path with ids redacted, status, error code): never bodies.
+  page.on("response", async (r) => {
+    if (r.status() < 400 || !/api\.cfmeet\.com/.test(r.url())) return;
+    let code = null;
+    try { code = (await r.json())?.error?.code ?? null; } catch { /* not JSON */ }
+    const path = new URL(r.url()).pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, "{id}");
+    (evidence.apiFailures ??= []).push({ who: name, method: r.request().method(), path, status: r.status(), code });
+  });
   await page.goto(`${WEB}/login?next=%2Fdashboard%2Fmessages`, { waitUntil: "load" });
   await page.fill('input[placeholder="you@example.com"]', who.email);
   await page.fill('input[placeholder="Enter your password"]', who.password);
@@ -81,6 +89,13 @@ async function startChat(page, contactLabel) {
   await box.waitFor({ timeout: T, state: "attached" });
   await page.locator("label", { has: box }).click();
   await page.click("[data-testid=create-conversation]");
+  const dialog = page.locator("[data-testid=new-conversation-form]");
+  try {
+    await dialog.waitFor({ state: "detached", timeout: T });
+  } catch (e) {
+    const text = (await dialog.innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 400);
+    throw new Error(`the new chat was not created; the dialog shows: ${text}; API failures: ${JSON.stringify(evidence.apiFailures ?? [])}`, { cause: e });
+  }
   await page.waitForSelector("[data-testid=conversation][data-profile=PRIVATE_E2EE]", { timeout: T });
 }
 
@@ -198,6 +213,8 @@ test("production: sign in, choose a contact, chat — encryption automatic and i
   pass("new_untrusted_browser_verification_only");
   await openChatWith(a2.page, label(A, B)).catch(() => openChat(a2.page));
   await a2.page.locator("[data-testid=e2ee-unavailable]").waitFor({ state: "detached", timeout: 3 * T });
+  // A's first browser still shows the chat with C (step 5): open the chat with B there too.
+  await openChatWith(a1.page, label(A, B));
   const sync = `journey ${RUN} to both browsers`;
   await send(b1.page, sync);
   await shown(a1.page, sync);

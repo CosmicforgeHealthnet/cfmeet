@@ -1891,6 +1891,13 @@ def vapid_private_key_pem():
     return pem + '\n'
 
 
+def vapid_public_key_present(key):
+    """The key file holds a P-256 private key whose public half derives (text output only:
+    p.run decodes stdout as text)."""
+    public = p.run('openssl', 'pkey', '-in', str(key), '-pubout', '-outform', 'PEM')
+    return public.startswith('-----BEGIN PUBLIC KEY-----')
+
+
 def activate_web_push(sha, run_id, confirm):
     """Web Push for Messaging: a VAPID key generated once on the VPS (owned by Messaging,
     mode 0400, with a recovery copy: rotating it would invalidate every browser
@@ -1907,9 +1914,8 @@ def activate_web_push(sha, run_id, confirm):
     if foreign:
         raise RuntimeError('Unexpected APNs/FCM settings present: ' + ', '.join(foreign))
     key = messaging_runtime.protected_file(WEB_PUSH_KEY_NAME, vapid_private_key_pem)
-    public = p.run('openssl', 'pkey', '-in', str(key), '-pubout', '-outform', 'DER')
     emit('webPushKey', {'generated': True, 'path': WEB_PUSH_KEY_TARGET, 'subject': WEB_PUSH_SUBJECT,
-                        'publicKeyPresent': bool(public)})
+                        'publicKeyPresent': vapid_public_key_present(key)})
 
     def started():
         out = subprocess.run(['docker', 'logs', '--since', '10m', SERVICES['messaging']['container']],
