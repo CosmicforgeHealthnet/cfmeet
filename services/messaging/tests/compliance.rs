@@ -1001,6 +1001,107 @@ async fn principal_erasure_removes_push_registrations_and_jobs() {
     assert_eq!(h.scalar(&jobs(bob)).await, 2);
 }
 
+/// Notification Service roadmap N0 (retention): final-state push jobs completed more than
+/// 30 days ago are purged in bounded passes; recent final jobs and pending jobs (however
+/// old) are kept.
+#[tokio::test]
+async fn push_job_retention_purges_only_old_finished_jobs() {
+    let Some((h, _)) = harness().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let who = h.principal(&c);
+    let device = h.active_device(&c, who).await.device_id();
+    let r = h
+        .put(
+            &c,
+            Some(who),
+            &format!("/v1/messaging/devices/{device}/push-registration"),
+            json!({ "platform": "LOCAL_TEST", "handle": "retention-handle" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let now = h.now().to_rfc3339();
+    // (label, status, completed this long ago; NULL = never completed)
+    let jobs = [
+        ("sent-old", "SENT", Some("31 days")),
+        ("failed-old", "FAILED", Some("45 days")),
+        ("disabled-old", "DISABLED", Some("90 days")),
+        ("expired-recent", "EXPIRED", Some("29 days")),
+        ("not-configured-recent", "NOT_CONFIGURED", Some("1 hour")),
+        ("pending-old", "PENDING", None),
+    ];
+    for (label, status, ago) in jobs {
+        let completed = ago.map_or("NULL".to_string(), |a| {
+            format!("'{now}'::timestamptz - interval '{a}'")
+        });
+        h.sql(&format!(
+            "INSERT INTO messaging_push_jobs (id, event_id, conversation_id, environment_id, device_id, registration_id, payload, \
+               status, next_attempt_at, expires_at, created_at, completed_at, last_error) \
+             SELECT gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), environment_id, device_id, id, '{{\"v\":1,\"type\":\"message\"}}', \
+               '{status}', '{now}'::timestamptz - interval '100 days', '{now}'::timestamptz - interval '99 days', \
+               '{now}'::timestamptz - interval '100 days', {completed}, '{label}' \
+               FROM messaging_push_registrations WHERE device_id = '{device}'"
+        ))
+        .await
+        .unwrap();
+    }
+    // Bounded: one pass removes at most `batch` jobs, oldest first.
+    assert_eq!(
+        messaging::realtime::push::purge_completed(&h.state, 1)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        h.scalar("SELECT count(*) FROM messaging_push_jobs WHERE last_error = 'disabled-old'")
+            .await,
+        0
+    );
+    assert_eq!(
+        messaging::realtime::push::purge_completed(
+            &h.state,
+            messaging::realtime::push::PURGE_BATCH
+        )
+        .await
+        .unwrap(),
+        2
+    );
+    assert_eq!(
+        messaging::realtime::push::purge_completed(
+            &h.state,
+            messaging::realtime::push::PURGE_BATCH
+        )
+        .await
+        .unwrap(),
+        0,
+        "idempotent"
+    );
+    let kept: std::collections::BTreeSet<String> =
+        ["expired-recent", "not-configured-recent", "pending-old"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+    for (label, _, _) in jobs {
+        assert_eq!(
+            h.scalar(&format!(
+                "SELECT count(*) FROM messaging_push_jobs WHERE last_error = '{label}'"
+            ))
+            .await,
+            i64::from(kept.contains(label)),
+            "{label}"
+        );
+    }
+    // The registration itself is never touched by job retention.
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_push_registrations WHERE device_id = '{device}'"
+        ))
+        .await,
+        1
+    );
+}
+
 #[tokio::test]
 async fn regulated_contexts_require_disclosure_and_audit_is_queryable() {
     let Some((h, _)) = harness().await else {

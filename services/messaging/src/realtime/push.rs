@@ -503,6 +503,29 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
     Ok(report)
 }
 
+/// How long a push job in a final state (`SENT`, `FAILED`, `EXPIRED`, `DISABLED`,
+/// `NOT_CONFIGURED`) is kept after `completed_at` (delivery diagnostics, the owner's push
+/// status view) before [`purge_completed`] removes it. Pending jobs are never purged.
+pub const JOB_RETENTION: chrono::Duration = chrono::Duration::days(30);
+
+/// Most jobs one [`purge_completed`] pass removes.
+pub const PURGE_BATCH: i64 = 5_000;
+
+/// One bounded retention pass: deletes at most `batch` final-state jobs completed more
+/// than [`JOB_RETENTION`] ago, oldest first. Idempotent and safe on several instances.
+/// Run hourly by the maintenance worker; deliberately without a new index (no migration,
+/// so the previous image still passes readiness after a rollback; the table is small until
+/// push moves to the Notification Service in N9). Returns the number of jobs deleted.
+pub async fn purge_completed(state: &AppState, batch: i64) -> Result<u64> {
+    let cutoff = state.now() - JOB_RETENTION;
+    Ok(db::exec(
+        &state.db,
+        "DELETE FROM messaging_push_jobs WHERE id IN (SELECT id FROM messaging_push_jobs WHERE status <> 'PENDING' AND completed_at < $1 ORDER BY completed_at LIMIT $2)",
+        vec![cutoff.into(), batch.into()],
+    )
+    .await?)
+}
+
 fn lease_lost(report: &mut PushReport) {
     report.lease_lost += 1;
     crate::metrics::inc("messaging_push_lease_lost_total", &[]);
