@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cfmeet.com/notifications/events/inbox-changed/v1.schema.json",
+  "title": "notifications.inbox.changed v1 (outbound, internal)",
+  "description": "Emitted by the Notification Service when an account's inbox changes, for a future realtime nudge (D-6: polling first). Counts and versions only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventType",
+    "eventId",
+    "occurredAt",
+    "accountRef",
+    "unreadCount",
+    "version"
+  ],
+  "properties": {
+    "eventType": {
+      "const": "notifications.inbox.changed"
+    },
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "accountRef": {
+      "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+    },
+    "unreadCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

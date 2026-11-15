@@ -44,6 +44,12 @@ pub mod services {
     /// relay), Calling, Messaging, Communications and operator tooling; owns no account
     /// credential, meeting, message or call data.
     pub const ORGANIZATIONS: &str = "cfmeet.organizations";
+    /// Unified Notification Service (Notification Service blueprint, owner decision D-0 /
+    /// D-13): the single notification authority (preferences, email, push, in-app,
+    /// operator alerts). Receives events from producer outboxes and the call-push fast
+    /// lane; asks owners (Account, Meeting, Messaging, Hub, Organizations) for recipients
+    /// and entitlement instead of copying them. Never in a synchronous business path.
+    pub const NOTIFICATIONS: &str = "cfmeet.notifications";
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -146,6 +152,10 @@ impl ServiceId {
 
     pub fn organizations() -> Self {
         Self(services::ORGANIZATIONS.to_string())
+    }
+
+    pub fn notifications() -> Self {
+        Self(services::NOTIFICATIONS.to_string())
     }
 }
 

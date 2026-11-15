@@ -17,7 +17,7 @@ This package is the permanent home for shared, externally visible contracts acro
 | `cfmeet.calling.call-control` | 1.3.0 (beta) | JSON Schema 2020-12 | [`calling/control/v1.schema.json`](calling/control/v1.schema.json) | contract-first; request / response bodies of the application-calling API (creation incl. APP_TO_PSTN and CALLBACK_RELAY, answers, control, transfer, media credentials, endpoints, signaling credentials, recovery) |
 | `cfmeet.calling.realtime-signal` | 1.2.0 (beta) | JSON Schema 2020-12 | [`calling/realtime/v1.schema.json`](calling/realtime/v1.schema.json) | contract-first; frames of the endpoint signaling channel (call signals, control frames) |
 | `cfmeet.calling.push-invitation` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`calling/push/invitation/v1.schema.json`](calling/push/invitation/v1.schema.json) | contract-first; transport-neutral push-ready ring offer |
-| `cfmeet.platform.common` | 1.7.0 | JSON Schema 2020-12 | [`platform/common/v1.schema.json`](platform/common/v1.schema.json) | contract-first |
+| `cfmeet.platform.common` | 1.18.0 | JSON Schema 2020-12 | [`platform/common/v1.schema.json`](platform/common/v1.schema.json) | contract-first |
 | `cfmeet.platform.service-token-header` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/token-header/v1.schema.json`](platform/service-auth/token-header/v1.schema.json) | contract-first |
 | `cfmeet.platform.service-token-claims` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/token-claims/v1.schema.json`](platform/service-auth/token-claims/v1.schema.json) | contract-first |
 | `cfmeet.platform.delegated-platform-context` | 1.0.0 | JSON Schema 2020-12 | [`platform/service-auth/delegated-platform-context/v1.schema.json`](platform/service-auth/delegated-platform-context/v1.schema.json) | contract-first |
@@ -51,6 +51,19 @@ This package is the permanent home for shared, externally visible contracts acro
 | `cfmeet.developer-platform.internal-api` | 1.0.0 (experimental) | OpenAPI 3.1 | [`platform-developer/internal/v1.openapi.json`](platform-developer/internal/v1.openapi.json) | contract-first, served at `GET /openapi.json`; probes and `GET /internal/v1/gateway/context` (`developer-request.forward`) |
 | `cfmeet.api-gateway.common` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`platform-developer/gateway/common/v1.schema.json`](platform-developer/gateway/common/v1.schema.json) | contract-first; public error envelope and probes of the gateway |
 | `cfmeet.api-gateway.http-api` | 1.0.0 (experimental) | OpenAPI 3.1 | [`platform-developer/gateway/http/v1.openapi.json`](platform-developer/gateway/http/v1.openapi.json) | contract-first; default-deny customer ingress: probes and the flag-gated foundation route (Section 51 catalogue not included) |
+| `cfmeet.notifications.common` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`notifications/common/v1.schema.json`](notifications/common/v1.schema.json) | contract-first, **frozen by Notification Service roadmap N1 before the service exists** (planned owner); shared vocabulary: categories, lanes, recipient refs, routing-fence `Route`, HPKE `Sealed`, inbox items, preferences, push platforms, errors |
+| `cfmeet.notifications.event` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`notifications/events/v1.schema.json`](notifications/events/v1.schema.json) | contract-first (N1); envelope posted to I1: 31 inbound types + control event, per-type producer / priority / data / sealed allowance / legacy idempotency keys; `x-cfmeet-catalogue` mirrored by `packages/notification-client` |
+| `cfmeet.notifications.inbox-changed-event` | 1.0.0 (experimental) | JSON Schema 2020-12 | [`notifications/events/inbox-changed/v1.schema.json`](notifications/events/inbox-changed/v1.schema.json) | contract-first (N1); outbound `notifications.inbox.changed` |
+| `cfmeet.notifications.http-api` | 1.0.0 (experimental) | OpenAPI 3.1 | [`notifications/http/v1.openapi.json`](notifications/http/v1.openapi.json) | contract-first (N1); U1–U9 (via the Meeting relay) and the Resend callback; not yet served |
+| `cfmeet.notifications.internal-api` | 1.0.0 (experimental) | OpenAPI 3.1 | [`notifications/internal/v1.openapi.json`](notifications/internal/v1.openapi.json) | contract-first (N1); I1–I11 and I12 (D-15); not yet served |
+| `cfmeet.{meeting-service,messaging,communications,organizations}.notification-owner-api` | 1.0.0 (experimental) | OpenAPI 3.1 | `<owner>/notification-owner/v1.openapi.json` | contract-first (N1); owner APIs X1–X7 for `cfmeet.notifications` only; not yet served |
+
+**Planned owners.** `manifest.json` `planned_owners` lists services whose contracts the owner
+froze before the service exists (today: `notifications`, approved by D-13). The validator
+accepts their contracts only while they are `experimental`, and rejects the entry as soon as
+`services/<owner>` exists. `scripts/contracts/operation_test_coverage.py` reports the
+operations of these frozen contracts as `frozen_unimplemented` (named per roadmap step,
+`experimental` only) instead of untested; its `BASELINE` stays empty.
 
 Schemas have `examples/` (must validate) and `counter-examples/` (must be rejected).
 Implementations are checked against these contracts in both directions by

@@ -218,6 +218,35 @@ class RealRepository(unittest.TestCase):
         untested = {k: v["untested"] for k, v in report.items() if v["untested"]}
         self.assertEqual(untested, {})
 
+    def test_frozen_contracts_are_only_unimplemented_experimental_ones(self):
+        # The Notification Service N1 contracts are frozen interfaces, not routes.
+        self.assertEqual(
+            set(cov.FROZEN_UNIMPLEMENTED),
+            {
+                "cfmeet.notifications.http-api",
+                "cfmeet.notifications.internal-api",
+                "cfmeet.meeting-service.notification-owner-api",
+                "cfmeet.messaging.notification-owner-api",
+                "cfmeet.communications.notification-owner-api",
+                "cfmeet.organizations.notification-owner-api",
+            },
+        )
+        self.assertEqual(cov.frozen_errors(cov.ROOT, cov.FROZEN_UNIMPLEMENTED), [])
+        report, _ = cov.analyse(cov.ROOT)
+        for cid in cov.FROZEN_UNIMPLEMENTED:
+            self.assertEqual(report[cid]["untested"], [])
+
+    def test_a_frozen_entry_cannot_cover_an_implemented_contract(self):
+        # Freezing a beta / stable contract (or an unknown id) is refused.
+        errors = cov.frozen_errors(cov.ROOT, {"cfmeet.meeting-service.http-api": "N0", "cfmeet.unknown.http-api": "N0"})
+        self.assertTrue(any("cfmeet.meeting-service.http-api is stable" in e for e in errors), errors)
+        self.assertTrue(any("cfmeet.unknown.http-api matches no OpenAPI contract" in e for e in errors), errors)
+
+    def test_without_the_frozen_entry_new_contracts_fail_the_gate(self):
+        report, _ = cov.analyse(cov.ROOT, frozen={})
+        failures, _ = cov.gate(report, cov.BASELINE)
+        self.assertTrue(any("cfmeet.notifications.internal-api" in f for f in failures), failures)
+
     def test_removing_a_test_reference_raises_a_count_above_the_baseline(self):
         # Single mutation of the real corpus: drop every test reference to one tested
         # meeting-service path and the gate must fail.

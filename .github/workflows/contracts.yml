@@ -21,6 +21,7 @@ on:
       - "services/meeting-service/src/swagger/**"
       - "sdks/**"
       - "apps/web/src/**"
+      - "apps/mobile/lib/api/generated/**"
       - "docs/architecture/first-party-direct-ingress-decision.md"
       - "docs/frontend/cfmeet-frontend-endpoint-reference.md"
       - ".github/workflows/contracts.yml"
@@ -34,6 +35,7 @@ on:
       - "services/meeting-service/src/swagger/**"
       - "sdks/**"
       - "apps/web/src/**"
+      - "apps/mobile/lib/api/generated/**"
       - "docs/architecture/first-party-direct-ingress-decision.md"
       - "docs/frontend/cfmeet-frontend-endpoint-reference.md"
       - ".github/workflows/contracts.yml"
@@ -116,6 +118,12 @@ jobs:
       - name: generated SDK types are current with the public contracts (FE-015)
         working-directory: .
         run: python3 sdks/generate.py --check
+
+      # Notification Service FE1: the web / mobile notification types are generated from the
+      # frozen notification contracts (types only; nothing imports them before N8).
+      - name: notification contract types are current (FE1)
+        working-directory: .
+        run: node scripts/contracts/notification-types.mjs --check
 
       # Final closure: the frontend endpoint reference is generated from the contracts.
       - name: frontend endpoint reference is current with the contracts
