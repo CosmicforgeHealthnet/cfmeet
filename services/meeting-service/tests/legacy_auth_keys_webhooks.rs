@@ -448,45 +448,65 @@ async fn verify_email_activates_a_pending_account_once_without_revealing_account
 }
 
 #[tokio::test]
-async fn verify_reset_token_reports_a_pending_reset_without_consuming_it() {
+async fn verify_reset_token_never_reveals_an_account_and_checks_the_code_without_consuming_it() {
+    // N0-9 (S-6): unknown email, no pending reset and a wrong code get one answer; only the
+    // right code is accepted, and the probe does not consume it.
     let app = app_with_redis!();
     let email = unique_email("resetprobe");
     insert_user(&app, &email, "active").await;
-    let probe = |email: String| {
+    let probe = |email: String, token: &'static str| {
         let app = &app;
         async move {
             app.post(
                 "/api/v1/auth/verify-reset-token",
                 Auth::None,
-                json!({ "email": email, "token": "123456" }),
+                json!({ "email": email, "token": token }),
             )
             .await
         }
     };
 
-    let none = probe(email.clone()).await;
+    let none = probe(email.clone(), "123456").await;
     assert_eq!(none.0, StatusCode::BAD_REQUEST, "{}", none.1);
-    let unknown = probe(unique_email("nobody")).await;
+    let unknown = probe(unique_email("nobody"), "123456").await;
     assert_eq!(unknown.0, StatusCode::BAD_REQUEST);
     assert_eq!(none.1["error"]["message"], unknown.1["error"]["message"]);
+    assert_eq!(none.1["error"]["code"], unknown.1["error"]["code"]);
 
     app.state
         .otp_service
         .store_code(&email, "975310", OtpType::PasswordReset)
         .await
         .unwrap();
+    // A pending reset with a wrong code: the same answer as an unknown account.
+    let wrong = probe(email.clone(), "123456").await;
+    assert_eq!(wrong.0, StatusCode::BAD_REQUEST);
+    assert_eq!(wrong.1["error"]["message"], unknown.1["error"]["message"]);
     for _ in 0..2 {
-        let (s, v) = probe(email.clone()).await;
+        let (s, v) = probe(email.clone(), "975310").await;
         assert_eq!(s, StatusCode::OK, "{v}");
         assert_eq!(v["valid"], true);
     }
-    // The probe never compares or consumes the code.
+    // The probe never consumes the code: the reset itself still accepts it.
     assert!(app
         .state
         .otp_service
-        .has_code(&email, OtpType::PasswordReset)
+        .verify_code(&email, "975310", OtpType::PasswordReset)
         .await
         .unwrap());
+
+    // Probing shares the attempt limit (unknown accounts included): 429 after five checks.
+    let other = unique_email("nobody2");
+    for _ in 0..5 {
+        assert_eq!(
+            probe(other.clone(), "000000").await.0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    assert_eq!(
+        probe(other, "000000").await.0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
 
     let (s, _) = app
         .post(

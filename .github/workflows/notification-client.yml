@@ -1,0 +1,59 @@
+name: Notification client package
+
+# packages/notification-client (cf-notification-client, Notification Service roadmap N1):
+# the cfmeet.notifications.event envelope builder / validator, HPKE sealing of codes,
+# tokens and invitee addresses to the service key, and the routing-fence helper
+# (Document 4 §9). Conformance with the frozen contract in packages/contracts is tested
+# in both directions. The `open` feature (renderer only) is tested separately from the
+# producer build, which can seal but never open. Nothing here deploys.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "packages/notification-client/**"
+      - "packages/contracts/notifications/**"
+      - "packages/contracts/manifest.json"
+      - ".github/workflows/notification-client.yml"
+  pull_request:
+    paths:
+      - "packages/notification-client/**"
+      - "packages/contracts/notifications/**"
+      - "packages/contracts/manifest.json"
+      - ".github/workflows/notification-client.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: notification-client-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    working-directory: packages/notification-client
+
+jobs:
+  test:
+    name: fmt / clippy / test (producer build and service `open` build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/notification-client -> target
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy (producer build, then with open)
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo clippy --all-targets --locked --all-features -- -D warnings
+      - name: producer build (seal only) — contract conformance, routing fence
+        run: cargo test --locked
+      - name: service build (open) — HPKE round trip, AAD binding, tamper / wrong-key refusal
+        run: cargo test --locked --all-features

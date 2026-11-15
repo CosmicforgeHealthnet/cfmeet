@@ -5,7 +5,7 @@
 //! the email worker delivers them through the configured provider (Resend in production).
 
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::DatabaseConnection;
+use sea_orm::{ConnectionTrait, DatabaseConnection};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -152,17 +152,36 @@ impl EmailService {
         user_id: Uuid,
         how: &str,
     ) -> ApiResult<Uuid> {
+        password_changed_notice_on(&self.db, to_email, username, user_id, how).await
+    }
+
+    /// D-12: someone tried to register with an address that already has an account. The
+    /// owner is told (at most once per hour per account); nothing about the account changes.
+    pub async fn send_registration_attempt_notice(
+        &self,
+        to_email: &str,
+        username: &str,
+        user_id: Uuid,
+    ) -> ApiResult<Uuid> {
         let now = Utc::now();
-        let template =
-            password_changed_email(username, how, &now.format("%Y-%m-%d %H:%M").to_string());
+        let template = notification_email(
+            username,
+            "Someone tried to create a CF Meet account with your email",
+            "Someone tried to create a new CF Meet account with this email address. You already \
+             have an account: sign in, or use \"Forgot password\" if you no longer know your \
+             password. If this was not you, you can ignore this email; your account was not changed.",
+        );
         self.enqueue_template(
-            category::SECURITY_PASSWORD_CHANGED,
-            Some(format!("password-changed:{user_id}:{}", now.timestamp())),
+            category::NOTIFICATION,
+            Some(format!(
+                "register-existing:{user_id}:{}",
+                now.format("%Y%m%d%H")
+            )),
             to_email,
             Some(username),
-            "Your CF Meet password was changed",
+            "Someone tried to create a CF Meet account with your email",
             template,
-            Some(now + Duration::days(2)),
+            Some(now + Duration::days(1)),
         )
         .await
         .map(|e| e.id)
@@ -188,5 +207,75 @@ impl EmailService {
         )
         .await
         .map(|e| e.id)
+    }
+}
+
+/// N0-10 (S-9): the password-changed security notice, recorded on the caller's connection
+/// (the transaction that changes the password), so it is committed with the change.
+pub async fn password_changed_notice_on<C: ConnectionTrait>(
+    conn: &C,
+    to_email: &str,
+    username: &str,
+    user_id: Uuid,
+    how: &str,
+) -> ApiResult<Uuid> {
+    let now = Utc::now();
+    let template = password_changed_email(username, how, &now.format("%Y-%m-%d %H:%M").to_string());
+    email_delivery::enqueue(
+        conn,
+        NewEmail {
+            category: category::SECURITY_PASSWORD_CHANGED,
+            idempotency_key: Some(format!("password-changed:{user_id}:{}", now.timestamp())),
+            to: to_email.to_string(),
+            to_name: Some(username.to_string()),
+            subject: "Your CF Meet password was changed".to_string(),
+            html: template.html,
+            text: template.text,
+            expires_at: Some(now + Duration::days(2)),
+        },
+    )
+    .await
+    .map(|e| e.id)
+}
+
+/// N0-10 (S-9): a device security notice recorded on the caller's transaction, with the
+/// deterministic key `device-linked:<link id>` (one notice per completed link).
+pub async fn device_notice_on<C: ConnectionTrait>(
+    conn: &C,
+    to_email: &str,
+    username: &str,
+    link_id: Uuid,
+    subject: &str,
+    message: &str,
+) -> ApiResult<Uuid> {
+    let template = notification_email(username, subject, message);
+    email_delivery::enqueue(
+        conn,
+        NewEmail {
+            category: category::NOTIFICATION,
+            idempotency_key: Some(format!("device-linked:{link_id}")),
+            to: to_email.to_string(),
+            to_name: Some(username.to_string()),
+            subject: subject.to_string(),
+            html: template.html,
+            text: template.text,
+            expires_at: Some(Utc::now() + Duration::days(2)),
+        },
+    )
+    .await
+    .map(|e| e.id)
+}
+
+/// A security notice must never block the security change itself because the stored
+/// address is malformed (nothing could ever be sent to it): that case is logged and
+/// skipped. Every other failure (database) aborts the transaction with the change.
+pub fn tolerate_unsendable(result: ApiResult<Uuid>, user_id: Uuid, what: &str) -> ApiResult<()> {
+    match result {
+        Ok(_) => Ok(()),
+        Err(crate::error::ApiError::BadRequest(_)) => {
+            tracing::warn!(user_id = %user_id, notice = what, "security notice not queued: address unusable");
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
 }

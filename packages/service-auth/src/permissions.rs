@@ -363,6 +363,56 @@ pub enum InternalPermission {
     /// `POST /internal/v1/organization-events`. Organizations only.
     #[serde(rename = "meeting-organization-events.apply")]
     MeetingOrganizationEventsApply,
+    // ---- Unified Notification Service (blueprint Document 4 §3.3 / §3.4, roadmap N1) ----
+    /// Notifications I1: publish `cfmeet.notifications.event` envelopes from a producer's
+    /// outbox (`producer` must equal the issuer; per-producer closed type allowlist).
+    #[serde(rename = "notifications-event.publish")]
+    NotificationsEventPublish,
+    /// Notifications I2: forward an account-authenticated U1–U9 request (Meeting relay,
+    /// server-resolved account).
+    #[serde(rename = "notifications-user.forward")]
+    NotificationsUserForward,
+    /// Notifications I3: the synchronous call-push fast lane (≤ 1 s, post-commit,
+    /// best-effort). Calling only; ringing stays in Calling.
+    #[serde(rename = "notifications-call-push.dispatch")]
+    NotificationsCallPushDispatch,
+    /// Notifications I4, I5, I7, I8: PII-free delivery search, dead letters, shadow report
+    /// and routing / route audit. Operator tooling only.
+    #[serde(rename = "notifications-observability.read")]
+    NotificationsObservabilityRead,
+    /// Notifications I6, I9, I10: replay dead letters (never expired codes) and manage the
+    /// email suppression list (keyed digests only). Operator tooling only.
+    #[serde(rename = "notifications-operations.replay")]
+    NotificationsOperationsReplay,
+    /// Notifications I11: first phase of the two-phase reroute (cancel never-dispatched
+    /// items for a producer reroute). Operator tooling only.
+    #[serde(rename = "notifications-operations.reroute")]
+    NotificationsOperationsReroute,
+    /// Account (Meeting Service) X1: resolve notification contacts (status, address,
+    /// display name, locale, time zone, device states) for the Notification Service only.
+    #[serde(rename = "account-contacts.read")]
+    AccountContactsRead,
+    /// Meeting Service X2: resolve a conference's notification recipients and the
+    /// "still true" state (port of `RECIPIENTS_SQL`). Notification Service only.
+    #[serde(rename = "meeting-notification-recipients.read")]
+    MeetingNotificationRecipientsRead,
+    /// Messaging X3: authorize message wake-ups (entitled principals, never content).
+    /// Notification Service only.
+    #[serde(rename = "messaging-wakeups.authorize")]
+    MessagingWakeupsAuthorize,
+    /// Communications Hub X4: batch block / privacy / operator-hold check for
+    /// notifications. Notification Service only.
+    #[serde(rename = "communications-restrictions.read")]
+    CommunicationsRestrictionsRead,
+    /// Organizations X5: resolve an invitation's invitee account (never the email;
+    /// owner decision D-5). Notification Service only.
+    #[serde(rename = "organization-invitations.read")]
+    OrganizationInvitationsRead,
+    /// Account (Meeting Service) X6 / X7: claim CRITICAL send leases and report completed
+    /// sends on the producer's route decisions (a fencing token, not a read).
+    /// Notification Service only.
+    #[serde(rename = "account-route-lease.claim")]
+    AccountRouteLeaseClaim,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -969,6 +1019,110 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Deliver Organizations outbox events (organization lifecycle, memberships, ownership, policy and scope mappings; ids, roles and statuses, never email or tokens) to the Meeting Service, which applies them idempotently and in aggregate-version order; Organizations only",
     },
+    // ---- Unified Notification Service (blueprint Document 4 §3.3 / §3.4, roadmap N1) ----
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsEventPublish,
+        name: "notifications-event.publish",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[
+            services::MEETING_SERVICE,
+            services::ORGANIZATIONS,
+            services::COMMUNICATIONS,
+            services::CALLING,
+            services::MESSAGING,
+            services::DEVELOPER_PLATFORM,
+        ],
+        sensitive: false,
+        description: "Publish notification events from the caller's own transactional outbox (producer equals issuer; closed per-producer type allowlist; codes and tokens HPKE-sealed)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsUserForward,
+        name: "notifications-user.forward",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Forward an account-authenticated inbox, preference or push-endpoint request with the server-resolved account",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsCallPushDispatch,
+        name: "notifications-call-push.dispatch",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::CALLING],
+        sensitive: false,
+        description: "Dispatch a post-commit, best-effort call-invitation push to registered push targets (no queue, no retry; ringing stays in Calling)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsObservabilityRead,
+        name: "notifications-observability.read",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: false,
+        description: "Read PII-free delivery history, dead letters, the shadow report and the routing state with its route audit",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsOperationsReplay,
+        name: "notifications-operations.replay",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: true,
+        description: "Replay failed notification deliveries (never expired or superseded codes) and manage the email suppression list by keyed digest",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsOperationsReroute,
+        name: "notifications-operations.reroute",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: true,
+        description: "Cancel never-dispatched notifications so their producer can reroute them to the retained old path (first phase of the two-phase reroute)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::AccountContactsRead,
+        name: "account-contacts.read",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: true,
+        description: "Resolve accounts' notification contacts (status, email address, display name, locale, time zone, device states); addresses only for email ledger rows",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MeetingNotificationRecipientsRead,
+        name: "meeting-notification-recipients.read",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: true,
+        description: "Resolve a conference's notification recipients, presented title and still-true state at send time",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingWakeupsAuthorize,
+        name: "messaging-wakeups.authorize",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: false,
+        description: "Authorize message wake-ups: the principals entitled to a metadata-only push for one committed conversation event; never content",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationsRestrictionsRead,
+        name: "communications-restrictions.read",
+        receiver: services::COMMUNICATIONS,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: false,
+        description: "Check blocks, privacy denials and operator holds between an actor and up to 100 notification recipients",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationInvitationsRead,
+        name: "organization-invitations.read",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: false,
+        description: "Resolve an organization invitation's status and invitee account reference; never the invitee email or token",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::AccountRouteLeaseClaim,
+        name: "account-route-lease.claim",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: false,
+        description: "Claim CRITICAL send leases on, and report completed sends for, Account notification route decisions (fencing tokens; no code or address)",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -1063,6 +1217,18 @@ impl InternalPermission {
         InternalPermission::PlatformIdentityBindOrganizationServices,
         InternalPermission::CallingRequestActForOrganization,
         InternalPermission::MeetingOrganizationEventsApply,
+        InternalPermission::NotificationsEventPublish,
+        InternalPermission::NotificationsUserForward,
+        InternalPermission::NotificationsCallPushDispatch,
+        InternalPermission::NotificationsObservabilityRead,
+        InternalPermission::NotificationsOperationsReplay,
+        InternalPermission::NotificationsOperationsReroute,
+        InternalPermission::AccountContactsRead,
+        InternalPermission::MeetingNotificationRecipientsRead,
+        InternalPermission::MessagingWakeupsAuthorize,
+        InternalPermission::CommunicationsRestrictionsRead,
+        InternalPermission::OrganizationInvitationsRead,
+        InternalPermission::AccountRouteLeaseClaim,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1352,6 +1518,11 @@ mod tests {
                 ),
                 ("messaging-sms-bridge.deliver", &[services::SMS_GATEWAY][..]),
                 ("messaging-request.forward", &[services::API_GATEWAY][..]),
+                // Notification Service X3 (metadata-only wake-up authorization).
+                (
+                    "messaging-wakeups.authorize",
+                    &[services::NOTIFICATIONS][..]
+                ),
             ]
         );
         // Native account bootstrap remains owned by Account; Hub backfill reuses its bindings.
@@ -1394,6 +1565,8 @@ mod tests {
         "developer-event.publish",
         "security-scan.submit",
         "organization.read",
+        // Notification Service I1: message wake-up and member-invited publications.
+        "notifications-event.publish",
     ];
 
     #[test]
@@ -1461,6 +1634,8 @@ mod tests {
                 "user-session.verify",
                 "webhook-migration.export",
                 "webhook-migration.import",
+                // Notification Service I1: developer notices from its own outbox.
+                "notifications-event.publish",
             ]
         );
         assert_eq!(
@@ -1533,7 +1708,12 @@ mod tests {
                 "meeting-request.forward",
                 "user-session.verify",
                 // Organization event delivery (Organizations only).
-                "meeting-organization-events.apply"
+                "meeting-organization-events.apply",
+                // Notification Service owner APIs X1, X2 and X6/X7 (granted to
+                // cfmeet.notifications only).
+                "account-contacts.read",
+                "meeting-notification-recipients.read",
+                "account-route-lease.claim"
             ]
         );
         // The only sensitive grants the Meeting Service may hold are the Organizations
@@ -1613,6 +1793,12 @@ mod tests {
                     &[services::OPERATOR_CONSOLE, services::MEETING_SERVICE][..],
                     true
                 ),
+                // Notification Service X5 (D-5): invitee account ref, never the email.
+                (
+                    "organization-invitations.read",
+                    &[services::NOTIFICATIONS][..],
+                    false
+                ),
             ]
         );
         // Section 7 (ADR 0058): Organizations calls Platform Access only to provision /
@@ -1642,6 +1828,20 @@ mod tests {
                     "meeting-organization-events.apply",
                     services::MEETING_SERVICE,
                     &[services::ORGANIZATIONS][..],
+                    false
+                ),
+                // Notification Service I1: invitation / membership notices (ids only).
+                (
+                    "notifications-event.publish",
+                    services::NOTIFICATIONS,
+                    &[
+                        services::MEETING_SERVICE,
+                        services::ORGANIZATIONS,
+                        services::COMMUNICATIONS,
+                        services::CALLING,
+                        services::MESSAGING,
+                        services::DEVELOPER_PLATFORM
+                    ][..],
                     false
                 )
             ]
@@ -1690,6 +1890,117 @@ mod tests {
                 .grantable_to,
             &[services::API_GATEWAY]
         );
+    }
+
+    #[test]
+    fn notification_service_flows_are_least_privilege() {
+        use InternalPermission::*;
+        let granted = |service: &str| -> Vec<&str> {
+            REGISTRY
+                .iter()
+                .filter(|d| d.grantable_to.contains(&service))
+                .map(|d| d.name)
+                .collect()
+        };
+        let received = |service: &str| -> Vec<&str> {
+            REGISTRY
+                .iter()
+                .filter(|d| d.receiver == service)
+                .map(|d| d.name)
+                .collect()
+        };
+        // Received by the Notification Service (Document 4 §3.3).
+        assert_eq!(
+            received(services::NOTIFICATIONS),
+            [
+                "notifications-event.publish",
+                "notifications-user.forward",
+                "notifications-call-push.dispatch",
+                "notifications-observability.read",
+                "notifications-operations.replay",
+                "notifications-operations.reroute",
+            ]
+        );
+        // Granted to the Notification Service: the owner read / fencing APIs X1–X7 only.
+        assert_eq!(
+            granted(services::NOTIFICATIONS),
+            [
+                "account-contacts.read",
+                "meeting-notification-recipients.read",
+                "messaging-wakeups.authorize",
+                "communications-restrictions.read",
+                "organization-invitations.read",
+                "account-route-lease.claim",
+            ]
+        );
+        // Producers that publish events: exactly the six producer services, never the
+        // customer ingress, operator tooling, Telephony or Privacy Relay.
+        assert_eq!(
+            NotificationsEventPublish.definition().grantable_to,
+            &[
+                services::MEETING_SERVICE,
+                services::ORGANIZATIONS,
+                services::COMMUNICATIONS,
+                services::CALLING,
+                services::MESSAGING,
+                services::DEVELOPER_PLATFORM,
+            ]
+        );
+        assert_eq!(
+            NotificationsUserForward.definition().grantable_to,
+            &[services::MEETING_SERVICE]
+        );
+        assert_eq!(
+            NotificationsCallPushDispatch.definition().grantable_to,
+            &[services::CALLING]
+        );
+        // Operator operations: operator tooling only; replay and reroute are sensitive.
+        for (p, sensitive) in [
+            (NotificationsObservabilityRead, false),
+            (NotificationsOperationsReplay, true),
+            (NotificationsOperationsReroute, true),
+        ] {
+            let d = p.definition();
+            assert_eq!(d.grantable_to, &[services::OPERATOR_CONSOLE], "{}", d.name);
+            assert_eq!(d.sensitive, sensitive, "{}", d.name);
+        }
+        // Owner APIs: each received by its authority, grantable to the service ONLY.
+        // Addresses (X1, X2) are sensitive; X5 never returns the email (not sensitive).
+        for (p, receiver, sensitive) in [
+            (AccountContactsRead, services::MEETING_SERVICE, true),
+            (
+                MeetingNotificationRecipientsRead,
+                services::MEETING_SERVICE,
+                true,
+            ),
+            (MessagingWakeupsAuthorize, services::MESSAGING, false),
+            (
+                CommunicationsRestrictionsRead,
+                services::COMMUNICATIONS,
+                false,
+            ),
+            (OrganizationInvitationsRead, services::ORGANIZATIONS, false),
+            (AccountRouteLeaseClaim, services::MEETING_SERVICE, false),
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                (d.receiver, d.grantable_to, d.sensitive),
+                (receiver, &[services::NOTIFICATIONS][..], sensitive),
+                "{}",
+                d.name
+            );
+        }
+        // No other permission is grantable to the Notification Service, and none of its
+        // permissions reaches the customer ingress.
+        for d in REGISTRY {
+            if d.receiver == services::NOTIFICATIONS {
+                assert!(
+                    !d.grantable_to.contains(&services::API_GATEWAY),
+                    "{}",
+                    d.name
+                );
+            }
+        }
     }
 
     #[test]

@@ -24,8 +24,7 @@
         "NSCameraUsageDescription": "CF Meet uses the camera for video in meetings.",
         "NSMicrophoneUsageDescription": "CF Meet uses the microphone for audio in meetings.",
         "UIBackgroundModes": [
-          "audio",
-          "voip"
+          "audio"
         ]
       }
     },

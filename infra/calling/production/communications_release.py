@@ -148,6 +148,15 @@ def grant(bundle,issuer,key,permissions):
     bundle['trusted_issuers'].append(dict(issuer=issuer,audience=bundle['receiver'],
         runtime_environment=bundle['runtime_environment'],keys=[key],permissions=permissions))
 
+# Grants the Communications Hub's trust bundle gives each owner service. The Hub bundle is
+# rebuilt from this table on every release preparation, so a permission missing here is
+# dropped at the next release. Notification Service N0-1 (S-1): the Meeting Service reads
+# notification opt-outs (communications-preferences.read) before it sends a meeting notice;
+# without the grant every meeting notice fails closed.
+HUB_INCOMING={'meeting-service':['communications-user.forward','communications-account.apply','communications-preferences.read'],
+              'calling':['communications-policy.check','communications-block.apply'],
+              'messaging':['communications-policy.check','communications-block.apply']}
+
 def prepare_trust():
     WORK.mkdir(exist_ok=True,mode=0o700)
     keyfile=WORK/'communications.pem'
@@ -175,10 +184,7 @@ def prepare_trust():
     for service,name in OWNERS.items():
         c=p.inspect(name);e=p.env_of(c)
         key=public_key(mount_source(c,e['CF_SERVICE_AUTH_PRIVATE_KEY_FILE']),e['CF_SERVICE_AUTH_KEY_ID'])
-        incoming={'meeting-service':['communications-user.forward','communications-account.apply'],
-                  'calling':['communications-policy.check','communications-block.apply'],
-                  'messaging':['communications-policy.check','communications-block.apply']}
-        if service in incoming:grant(hub,'cfmeet.'+service,key,incoming[service])
+        if service in HUB_INCOMING:grant(hub,'cfmeet.'+service,key,HUB_INCOMING[service])
         old=e.get('CF_SERVICE_TRUST_BUNDLE_FILE')
         bundle=json.loads(Path(mount_source(c,old)).read_text()) if old else dict(bundle_version=1,receiver='cfmeet.'+service,runtime_environment='production',trusted_issuers=[])
         # Repeated release preparation reads the original bundle or our already
@@ -386,15 +392,38 @@ def proxy_routes():
         raise
     assert not p.inspect('cfmeet-core-tls')['HostConfig']['PortBindings']
 
+PUBLIC_INGRESS_MARKER='    # CFMEET PRIVATE ACCOUNT COMMUNICATIONS'
+# Routes the public server block refuses. The first is the original Communications denial.
+# Notification Service N0-6 (S-3): the Meeting Service's token-protected operator routes
+# (/internal/operations/*, incl. the email delivery / acceptance operations, and its metrics)
+# are reached only over the host loopback (email_operations.MEETING_LOOPBACK, Prometheus on
+# the private network); the public host refuses them, marked so a probe can tell an nginx
+# denial from a Meeting answer. Signed provider callbacks (/internal/rtc/livekit/webhook,
+# /internal/transcription/events) are deliberately NOT denied: LiveKit or a transcription
+# provider may post to them through the public host (Q15 outstanding).
+PUBLIC_DENIALS=('    location ^~ /internal/v1/accounts/communications/ { return 404; }',
+                '    location ^~ /internal/operations/ { add_header X-CFMeet-Ingress denied always; return 404; }',
+                '    location = /internal/metrics { add_header X-CFMeet-Ingress denied always; return 404; }',
+                '    location = /internal/rtc/metrics { add_header X-CFMeet-Ingress denied always; return 404; }')
+# Paths a probe uses to prove each N0-6 denial (expects 404 + X-CFMeet-Ingress: denied).
+PUBLIC_DENIAL_PROBES=('/internal/operations/email/deliveries/00000000-0000-0000-0000-000000000000',
+                      '/internal/operations/email/acceptance','/internal/metrics','/internal/rtc/metrics')
+
 def public_ingress_config(previous):
-    marker='    # CFMEET PRIVATE ACCOUNT COMMUNICATIONS'
-    rule='    location ^~ /internal/v1/accounts/communications/ { return 404; }'
+    marker=PUBLIC_INGRESS_MARKER
+    def location(rule):return rule.split('{',1)[0].strip()
     if marker in previous:
-        assert rule in previous,'Private endpoint denial was changed'
-        return previous
+        assert PUBLIC_DENIALS[0] in previous,'Private endpoint denial was changed'
+        out=previous
+        for rule in PUBLIC_DENIALS[1:]:
+            if rule in out:continue
+            # A location with this path but another body was edited by hand: refuse.
+            assert location(rule)+' ' not in out and location(rule)+'{' not in out,'Public ingress denial was changed: '+location(rule)
+            out=out.replace(marker+'\n',marker+'\n'+rule+'\n',1)
+        return out
     include='include /etc/nginx/snippets/cfmeet-calling-routes.conf;'
     assert previous.count(include)==1,'Unexpected existing public ingress topology'
-    return previous.replace(include,include+'\n'+marker+'\n'+rule+'\n')
+    return previous.replace(include,include+'\n'+marker+'\n'+'\n'.join(PUBLIC_DENIALS)+'\n')
 
 def secure_public_ingress():
     site=Path('/etc/nginx/sites-enabled/api.cfmeet.com').resolve()

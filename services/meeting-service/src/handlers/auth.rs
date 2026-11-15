@@ -61,8 +61,10 @@ const RECOVERY_ACCEPTED: &str =
 /// Creates an email-and-password account with the `user` role and `pending_verification` status,
 /// then emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are
 /// returned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.
-/// Email addresses are case-insensitive and stored lowercased. Returns 409 if the email or
-/// username is already in use.
+/// Email addresses are case-insensitive and stored lowercased. The answer never reveals whether
+/// the email already has an account (owner decision D-12): an address already registered gets
+/// the same 201 answer, no account is created or changed, and its owner receives an email notice
+/// instead of a code. Returns 409 only if the username is taken (usernames are public).
 #[utoipa::path(
     post,
     path = "/api/v1/auth/register",
@@ -71,7 +73,7 @@ const RECOVERY_ACCEPTED: &str =
     responses(
         (status = 201, description = "User registered successfully", body = RegisterResponse),
         (status = 400, description = "Validation error"),
-        (status = 409, description = "User already exists"),
+        (status = 409, description = "Username already taken"),
         (status = 429, description = "Too many requests"),
     )
 )]
@@ -87,17 +89,7 @@ pub async fn register(
     limit_by_client(&state, &headers, "register", 10, 60 * 60).await?;
     let email = security::normalize_email(&payload.email);
 
-    // Check if user already exists (case-insensitive, DATA-002)
-    if security::find_user_by_email(&state.db, &email)
-        .await?
-        .is_some()
-    {
-        return Err(ApiError::Conflict(
-            "A user with this email already exists".to_string(),
-        ));
-    }
-
-    // Check if username is already taken
+    // Check if username is already taken (usernames are public identifiers).
     let existing_username = Users::find()
         .filter(users::Column::Username.eq(&payload.username))
         .one(&state.db)
@@ -109,8 +101,39 @@ pub async fn register(
         ));
     }
 
-    // Hash password
+    // Hash password (also for an existing address, so both answers cost the same).
     let password_hash = hash_password(&payload.password)?;
+
+    // N0-9 / D-12: an address that already has an account (case-insensitive, DATA-002) gets
+    // the same answer as a new registration; nothing is created or changed, and the account
+    // owner is told by email (at most one notice per hour).
+    if let Some(existing) = security::find_user_by_email(&state.db, &email).await? {
+        if let Err(e) = state
+            .email_service
+            .send_registration_attempt_notice(&existing.email, &existing.username, existing.id)
+            .await
+        {
+            tracing::warn!(user_id = %existing.id, "failed to queue registration notice: {e}");
+        }
+        security::record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("REGISTRATION_EXISTING_EMAIL", Outcome::Denied).by_user(existing.id),
+        )
+        .await;
+        return Ok((
+            StatusCode::CREATED,
+            Json(RegisterResponse {
+                user_id: Uuid::new_v4(),
+                email,
+                role: format!("{:?}", users::UserRole::User).to_lowercase(),
+                status: state
+                    .auth_policy
+                    .status_format
+                    .render(&users::UserStatus::PendingVerification)
+                    .to_owned(),
+            }),
+        ));
+    }
 
     // Generate verification token
     let verification_code = generate_verification_code();
@@ -871,15 +894,23 @@ pub async fn reset_password(
     user.password_hash = Set(Some(password_hash));
     user.updated_at = Set(now_utc());
 
-    user.update(&state.db).await?;
-    // Security notice (unified email delivery); never blocks the reset.
-    if let Err(e) = state
-        .email_service
-        .send_password_changed_email(&notice_email, &notice_name, user_id, "reset")
-        .await
-    {
-        tracing::warn!(user_id = %user_id, "password reset notice not queued: {e}");
-    }
+    // N0-10 (S-9): the security notice is recorded in the same transaction as the new
+    // password, so a committed reset always has its notice queued.
+    let txn = state.db.begin().await?;
+    user.update(&txn).await?;
+    crate::services::email::tolerate_unsendable(
+        crate::services::email::password_changed_notice_on(
+            &txn,
+            &notice_email,
+            &notice_name,
+            user_id,
+            "reset",
+        )
+        .await,
+        user_id,
+        "password-reset",
+    )?;
+    txn.commit().await?;
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("PASSWORD_RESET", Outcome::Success)
@@ -897,9 +928,11 @@ pub async fn reset_password(
 /// Verify password reset token
 ///
 /// Checks whether a password reset is pending for the given email, for example before showing the
-/// reset form. Public endpoint. It only confirms that an unexpired reset code exists: the submitted
-/// code must be 6 digits but is not compared or consumed (`POST /api/v1/auth/reset-password` does
-/// that). Returns 400 if no reset is pending, including when the email is unknown.
+/// reset form. Public endpoint. Returns 200 only when the submitted 6-digit code matches the
+/// pending reset code; the code is not consumed (`POST /api/v1/auth/reset-password` does that).
+/// Every other case (unknown email, no pending reset, wrong or expired code) returns the same
+/// 400 answer with comparable timing, so the endpoint never reveals whether an account exists.
+/// Checks share the reset code's attempt limit (429).
 #[utoipa::path(
     post,
     path = "/api/v1/auth/verify-reset-token",
@@ -907,7 +940,8 @@ pub async fn reset_password(
     request_body = VerifyResetTokenRequest,
     responses(
         (status = 200, description = "Token is valid", body = VerifyResetTokenResponse),
-        (status = 400, description = "No pending reset"),
+        (status = 400, description = "Invalid or expired reset code (same answer whether or not the account exists)"),
+        (status = 429, description = "Too many attempts"),
     )
 )]
 pub async fn verify_reset_token(
@@ -919,24 +953,23 @@ pub async fn verify_reset_token(
         .validate()
         .map_err(|e| ApiError::ValidationError(e.to_string()))?;
     limit_by_client(&state, &headers, "verify-reset-token", 30, 15 * 60).await?;
-    let none = || ApiError::BadRequest("No password reset request found".to_string());
 
-    let user = security::find_user_by_email(&state.db, &payload.email)
-        .await?
-        .ok_or_else(none)?;
-
-    // Check if reset code exists in Redis (without consuming it)
-    let has_code = state
+    // N0-9 (S-6): one answer for an unknown email, no pending reset and a wrong code. The
+    // same lookups run in every case: the stored address when the account exists, else the
+    // normalized submitted one (no code is ever stored for it).
+    let email = match security::find_user_by_email(&state.db, &payload.email).await? {
+        Some(user) => user.email,
+        None => security::normalize_email(&payload.email),
+    };
+    let valid = state
         .otp_service
-        .has_code(&user.email, OtpType::PasswordReset)
+        .check_code(&email, &payload.token, OtpType::PasswordReset)
         .await?;
-
-    if !has_code {
-        return Err(none());
+    if !valid {
+        return Err(ApiError::BadRequest(
+            "Invalid or expired reset code".to_string(),
+        ));
     }
-
-    // Note: We don't verify the actual code here to avoid consuming verification attempts
-    // The actual verification happens in reset_password endpoint
 
     Ok(Json(VerifyResetTokenResponse {
         message: "Reset code exists. Please enter the code to reset your password.".to_string(),
@@ -1014,14 +1047,22 @@ pub async fn change_password(
     let mut user_active: users::ActiveModel = user.into();
     user_active.password_hash = Set(Some(new_password_hash));
     user_active.updated_at = Set(now_utc());
-    user_active.update(&state.db).await?;
-    if let Err(e) = state
-        .email_service
-        .send_password_changed_email(&notice_email, &notice_name, user_id, "changed")
-        .await
-    {
-        tracing::warn!(user_id = %user_id, "password change notice not queued: {e}");
-    }
+    // N0-10 (S-9): notice and change commit together.
+    let txn = state.db.begin().await?;
+    user_active.update(&txn).await?;
+    crate::services::email::tolerate_unsendable(
+        crate::services::email::password_changed_notice_on(
+            &txn,
+            &notice_email,
+            &notice_name,
+            user_id,
+            "changed",
+        )
+        .await,
+        user_id,
+        "password-changed",
+    )?;
+    txn.commit().await?;
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("PASSWORD_CHANGED", Outcome::Success).by_user(user_id),

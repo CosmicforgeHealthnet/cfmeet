@@ -8,6 +8,7 @@
 !packages/messaging-crypto
 !packages/object-storage
 !packages/scan-gateway-contract
+!packages/push-transport
 !packages/contracts/messaging
 !services/messaging
 

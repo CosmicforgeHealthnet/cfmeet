@@ -1,6 +1,13 @@
 {
   "$schema": "./manifest.schema.json",
   "manifest_version": 1,
+  "planned_owners": [
+    {
+      "owner": "notifications",
+      "approval": "owner decision D-13 (2026-11-15) approving docs/audits/notification-service (fa657c8), roadmap N1; decisions D-5, D-10, D-15, D-16 approved, D-W excluded",
+      "until": "N2 (service skeleton creates services/notifications)"
+    }
+  ],
   "contracts": [
     {
       "id": "cfmeet.meeting-service.http-api",
@@ -93,14 +100,14 @@
     },
     {
       "id": "cfmeet.platform.common",
-      "version": "1.17.0",
+      "version": "1.18.0",
       "kind": "json-schema",
       "path": "platform/common/v1.schema.json",
       "owner": "platform",
       "visibility": "internal",
       "lifecycle": "stable",
       "authority": "contract-first",
-      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward. 1.12.0 (Part VI §51): permission meeting-request.forward (API Gateway -> Meeting Service platform-credential meetings requests). 1.13.0 (Blueprint Sections 3-5): service identity cfmeet.organizations; permissions organization.read, organization.write, organization.act-for-user, organization.administer and organization.migrate (received by Organizations). 1.14.0 (Blueprint Section 7, ADR 0058): permission platform-identity.provision-first-party (received by Platform Access, grantable to cfmeet.organizations only, sensitive). 1.15.0 (Blueprint Section 12 follow-up, CAL-007): permission calling-request.act-for-organization (received by Calling, grantable to cfmeet.meeting-service only, sensitive). 1.16.0 (final closure, organization event delivery): permission meeting-organization-events.apply (received by the Meeting Service, grantable to cfmeet.organizations only). 1.17.0 (ADR 0058 Amendment A2, automatic organization service bindings): permission platform-identity.bind-organization-services (received by Platform Access, grantable to cfmeet.organizations only, sensitive)."
+      "description": "Shared definitions: service identity, runtime environment, request/correlation ids, UUIDs, application environment kind, principal kind, key ids, internal permissions. Part F: internal permissions telephony-leg.media (Calling -> Telephony: answer / built-in prompt / capture of internal enterprise SIP legs) telephony-enterprise.offer (Telephony -> Calling: internal enterprise SIP dialog offers and keypad input) and telephony-capture.deliver (Telephony -> Calling: edge media captures — voicemail / recording audio with integrity metadata). Part IV: platform-credential.authenticate, platform-principal.resolve, platform-principal.register, platform-identity.read and platform-identity.administer (received by Platform Access) and number-resource.read (received by Numbering). Numbering routing grant permissions (number-route.resolve, number-caller-identity.authorize, number-sms-sender.authorize, number-grant.verify). 1.8.0 number-sms-route.resolve (Part IV M). 1.9.0 number-usage.report, number-risk.report and number-relay.lease (Part IV S, T and P §§119–120). 1.9.1 cfmeet.messaging named as a service identity (Part V A). 1.10.0 (Part VI): service identities cfmeet.developer-platform and cfmeet.api-gateway; permission developer-request.forward. 1.12.0 (Part VI §51): permission meeting-request.forward (API Gateway -> Meeting Service platform-credential meetings requests). 1.13.0 (Blueprint Sections 3-5): service identity cfmeet.organizations; permissions organization.read, organization.write, organization.act-for-user, organization.administer and organization.migrate (received by Organizations). 1.14.0 (Blueprint Section 7, ADR 0058): permission platform-identity.provision-first-party (received by Platform Access, grantable to cfmeet.organizations only, sensitive). 1.15.0 (Blueprint Section 12 follow-up, CAL-007): permission calling-request.act-for-organization (received by Calling, grantable to cfmeet.meeting-service only, sensitive). 1.16.0 (final closure, organization event delivery): permission meeting-organization-events.apply (received by the Meeting Service, grantable to cfmeet.organizations only). 1.17.0 (ADR 0058 Amendment A2, automatic organization service bindings): permission platform-identity.bind-organization-services (received by Platform Access, grantable to cfmeet.organizations only, sensitive). 1.18.0 (Notification Service blueprint, roadmap N1; owner decision D-13): service identity cfmeet.notifications and twelve permissions — received by cfmeet.notifications: notifications-event.publish (Meeting Service, Organizations, Communications, Calling, Messaging, Developer Platform), notifications-user.forward (Meeting Service), notifications-call-push.dispatch (Calling), notifications-observability.read, notifications-operations.replay (sensitive), notifications-operations.reroute (sensitive) (operator console); granted only to cfmeet.notifications: account-contacts.read (Meeting Service, sensitive), meeting-notification-recipients.read (Meeting Service, sensitive), messaging-wakeups.authorize (Messaging), communications-restrictions.read (Communications), organization-invitations.read (Organizations), account-route-lease.claim (Meeting Service)."
     },
     {
       "id": "cfmeet.platform.service-token-header",
@@ -1110,6 +1117,105 @@
       "authority": "generated",
       "generated_by": "python3 scripts/contracts/bundle_openapi.py",
       "description": "Self-contained Swagger rendering of the canonical Communications consumer contract."
+    },
+    {
+      "id": "cfmeet.notifications.common",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "notifications/common/v1.schema.json",
+      "owner": "notifications",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N2+). Shared vocabulary of the unified Notification Service (Document 4): lanes, priorities, channels, categories (11 preference categories + SECURITY, OPERATOR_ALERTS, MESSAGES), producers, the 31 event types + control event, recipient refs, the routing-fence Route, the HPKE Sealed part and its plaintext, inbox items with a closed action enum, preferences (categories, channel matrix, quiet hours, conversation and contact levels), push platforms, ingest outcomes and the error envelope."
+    },
+    {
+      "id": "cfmeet.notifications.event",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "notifications/events/v1.schema.json",
+      "owner": "notifications",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N3, N7). Envelope cfmeet.notifications.event v1 posted to I1 by producer outboxes: 31 inbound types (30 core + operator.alert.fired, D-15) and the control event notifications.cancel; per-type producer, priority, data schema, sealed allowance and legacy idempotency-key formats; forbidden data keys and unsealed secrets are refused (counter-examples). Machine-readable catalogue: x-cfmeet-catalogue."
+    },
+    {
+      "id": "cfmeet.notifications.inbox-changed-event",
+      "version": "1.0.0",
+      "kind": "json-schema",
+      "path": "notifications/events/inbox-changed/v1.schema.json",
+      "owner": "notifications",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N8). Outbound internal event notifications.inbox.changed {accountRef, unreadCount, version} for a future realtime nudge (D-6)."
+    },
+    {
+      "id": "cfmeet.notifications.http-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "notifications/http/v1.openapi.json",
+      "owner": "notifications",
+      "visibility": "public",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N5, N8–N10). Public user APIs U1–U9 (inbox, preferences, push endpoints; served through the Meeting Service relay) and the Resend provider callback POST /api/v1/notifications/provider-events/resend. Not yet served."
+    },
+    {
+      "id": "cfmeet.notifications.internal-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "notifications/internal/v1.openapi.json",
+      "owner": "notifications",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N3–N13). Internal signed API I1–I11 and the optional I12 operator-alert ingest (D-15 approved), each with its x-cfmeet-internal-permission."
+    },
+    {
+      "id": "cfmeet.meeting-service.notification-owner-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "meeting-service/notification-owner/v1.openapi.json",
+      "owner": "meeting-service",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6: X1, X2; N12: X6, X7). Meeting Service / Account owner APIs for the Notification Service only: resolveAccountContacts (account-contacts.read), resolveConferenceRecipients (meeting-notification-recipients.read), claimCriticalSendLeases and completeCriticalSends (account-route-lease.claim). Not yet served."
+    },
+    {
+      "id": "cfmeet.messaging.notification-owner-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "messaging/notification-owner/v1.openapi.json",
+      "owner": "messaging",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Messaging X3 authorizeWakeups (messaging-wakeups.authorize) for the Notification Service only. Not yet served."
+    },
+    {
+      "id": "cfmeet.communications.notification-owner-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "communications/notification-owner/v1.openapi.json",
+      "owner": "communications",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Communications Hub X4 checkCommunicationRestrictions (communications-restrictions.read) for the Notification Service only. Not yet served."
+    },
+    {
+      "id": "cfmeet.organizations.notification-owner-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "organizations/notification-owner/v1.openapi.json",
+      "owner": "organizations",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Organizations X5 resolveInvitationInvitee (organization-invitations.read; D-5 approved) for the Notification Service only; never the invitee email. Not yet served."
     }
   ]
 }

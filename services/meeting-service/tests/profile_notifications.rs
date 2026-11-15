@@ -754,3 +754,66 @@ async fn s11_a_queue_outage_retries_without_emailing_anyone_twice() {
     assert_eq!(h.tick().await.sent, 0);
     assert_eq!(h.mail.sent().len(), 3);
 }
+
+/// Notification Service N0-3 (S-11) and N0-12: a recipient the ledger can never accept
+/// (a malformed legacy address) or a suppressed recipient is recorded as not sent, and the
+/// notice still reaches everyone else in the same pass instead of retrying forever.
+#[tokio::test]
+async fn s11_a_poison_or_suppressed_recipient_never_blocks_the_others() {
+    let h = some!(Harness::new(true).await);
+    let app = &h.app;
+    let owner = app.user("owner").await;
+    let start = Utc::now() + Duration::days(2);
+    let (sid, c) = scheduled(app, &owner, "Poison", start).await;
+    let cid = uuid(&c["id"]);
+    let good = unique_email("good");
+    let suppressed = unique_email("bounced");
+    for address in [good.clone(), suppressed.clone(), unique_email("poison")] {
+        let (s, _) = invite(app, &owner, sid, json!({ "inviteeEmail": address })).await;
+        assert_eq!(s, StatusCode::CREATED);
+    }
+    // A legacy row the ledger's address check refuses (no dot in the domain); the recipient
+    // query only requires an '@'.
+    sea_orm::ConnectionTrait::execute_unprepared(
+        &app.db.conn,
+        &format!(
+            "UPDATE meeting_invitations SET invitee_email = 'poison@localhost' \
+              WHERE meeting_space_id = '{sid}' AND invitee_email LIKE 'poison-%'"
+        ),
+    )
+    .await
+    .unwrap();
+    h.mail.suppress(&suppressed);
+    let (s, _) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/reschedule"),
+            Auth::Bearer(&owner.token),
+            json!({ "scheduledStartAt": rfc(start + Duration::hours(1)) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    let t = h.tick().await;
+    assert_eq!((t.sent, t.retried), (1, 0), "{t:?}");
+    let to: Vec<_> = h.mail.sent().into_iter().map(|e| e.to).collect();
+    assert_eq!(to, vec![good.clone()]);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM meeting_notification_recipients r JOIN meeting_notifications n ON n.id = r.notification_id \
+              WHERE n.conference_id = '{cid}' AND r.outcome = 'SUPPRESSED'"
+        ))
+        .await,
+        2,
+        "the poison and the suppressed recipient are recorded as not sent"
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM meeting_notifications WHERE conference_id = '{cid}' AND status = 'PENDING'"
+        ))
+        .await,
+        0,
+        "the notice is finished, not retried"
+    );
+    // Nothing more on later passes.
+    assert_eq!(h.tick().await.sent, 0);
+    assert_eq!(h.mail.sent().len(), 1);
+}

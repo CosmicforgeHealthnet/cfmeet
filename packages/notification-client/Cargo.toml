@@ -1,0 +1,34 @@
+[package]
+name = "cf-notification-client"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+description = "CF Meet Notification Service producer client (roadmap N1): the cfmeet.notifications.event envelope builder and validator (closed catalogue, forbidden data keys, sealed allowance, legacy idempotency-key formats, size limits), HPKE (RFC 9180) sealing of codes / tokens / addresses to the service key, and the routing-fence decision helper (Document 4 §9.3, §9.4, §9.8). Opening sealed parts is a separate feature that only the Notification Service enables."
+
+# Stand-alone workspace: consumed by producer services (and the Notification Service) as a
+# path dependency. It never depends on any deployable service.
+[workspace]
+
+[lib]
+name = "cf_notification_client"
+path = "src/lib.rs"
+
+[features]
+default = []
+# Opening sealed parts (renderer only). Producers never enable it: they can seal, never open.
+open = []
+
+[dependencies]
+base64 = "0.22"
+# HPKE base mode, DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM (RustCrypto).
+hpke = { version = "0.15.1", default-features = false, features = ["alloc", "x25519", "hkdfsha2", "aes", "getrandom"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+thiserror = "2.0"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+zeroize = { version = "1.8", features = ["derive"] }
+
+[dev-dependencies]
+jsonschema = { version = "0.58", default-features = false }

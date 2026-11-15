@@ -268,6 +268,7 @@ pub struct SendRequest {
     #[serde(default)]
     pub attachment_ids: Vec<Uuid>,
     /// `false`: no push notification jobs for this message (mirrored / migrated writes).
+    /// Honoured only for delegated callers ([`SendRequest::with_notify_authority`]).
     #[serde(default)]
     pub notify: Option<bool>,
     /// MANAGED only: `STANDARD` (default) or `ANNOUNCEMENT`.
@@ -280,6 +281,23 @@ pub struct SendRequest {
     /// only; at most [`MAX_MENTIONS`]). PRIVATE_E2EE mentions stay inside the ciphertext.
     #[serde(default)]
     pub mentioned_principal_ids: Vec<Uuid>,
+}
+
+impl SendRequest {
+    /// S-4: `notify: false` (no push jobs for the recipients) is reserved for mirrored and
+    /// migrated writes, i.e. a first-party backend on the delegated mirror
+    /// (`messaging-application.delegate`). Any other caller — a customer credential, a
+    /// gateway-forwarded credential or an end-user client token — cannot silence other
+    /// members' notifications: the field stays accepted (the contract is unchanged) and
+    /// is ignored. The legacy import path never reaches here (it records `notify: false`
+    /// itself).
+    pub fn with_notify_authority(mut self, delegated: bool) -> Self {
+        if !delegated && self.notify == Some(false) {
+            crate::metrics::inc("messaging_notify_suppression_ignored_total", &[]);
+            self.notify = None;
+        }
+        self
+    }
 }
 
 /// Most principals one message may mention.

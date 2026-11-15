@@ -91,6 +91,22 @@ def mirror_key(contract_id: str) -> str:
 # route pass - add a test that exercises it.
 BASELINE: dict[str, int] = {}
 
+# Contracts the owner FROZE before their routes exist (contract-first interfaces, not
+# routes). Their operations cannot be referenced by a test because nothing serves them
+# yet; they are reported as ``frozen_unimplemented`` instead of ``untested``. This is
+# not a baseline: an entry is valid only while its contract is ``experimental``, names
+# the roadmap step that implements it, and must be removed (making every operation
+# subject to the normal gate) as soon as that step serves the routes.
+# Notification Service blueprint (owner decision D-13), roadmap N1.
+FROZEN_UNIMPLEMENTED: dict[str, str] = {
+    "cfmeet.notifications.http-api": "Notification Service N5 / N8-N10",
+    "cfmeet.notifications.internal-api": "Notification Service N3-N13",
+    "cfmeet.meeting-service.notification-owner-api": "Notification Service N6 (X1, X2) / N12 (X6, X7)",
+    "cfmeet.messaging.notification-owner-api": "Notification Service N6 (X3)",
+    "cfmeet.communications.notification-owner-api": "Notification Service N6 (X4)",
+    "cfmeet.organizations.notification-owner-api": "Notification Service N6 (X5)",
+}
+
 LITERAL_PATTERNS = (
     re.compile(r'r#+"(.*?)"#+', re.S),
     re.compile(r'"((?:[^"\\\n]|\\.)*)"'),
@@ -247,13 +263,32 @@ def split_literals(corpus: Corpus, owner: str, require: str | None = None) -> tu
     return full, suffixes
 
 
+def frozen_errors(root: Path, frozen: dict[str, str]) -> list[str]:
+    """A frozen entry must name an existing, still-experimental OpenAPI contract."""
+    manifest = json.loads((root / "packages/contracts/manifest.json").read_text(encoding="utf-8"))
+    lifecycle = {c["id"]: c.get("lifecycle") for c in manifest["contracts"] if c.get("kind") == "openapi"}
+    errors = []
+    for cid, step in sorted(frozen.items()):
+        if cid not in lifecycle:
+            errors.append(f"FROZEN_UNIMPLEMENTED entry {cid} matches no OpenAPI contract (remove it)")
+        elif lifecycle[cid] != "experimental":
+            errors.append(f"FROZEN_UNIMPLEMENTED entry {cid} is {lifecycle[cid]}: once {step} serves it, remove the entry")
+        elif not step.strip():
+            errors.append(f"FROZEN_UNIMPLEMENTED entry {cid} must name the roadmap step that implements it")
+    return errors
+
+
 def analyse(
     root: Path,
     mirrors: tuple = MIRRORS,
     sweeps: dict[str, tuple[str, str]] = SWEEPS,
+    frozen: dict[str, str] | None = None,
 ) -> tuple[dict[str, dict], list[str]]:
     """({contract key: {"owner", "total", "untested", "route_only"}}, errors)."""
-    errors: list[str] = []
+    if frozen is None:
+        # The real register applies to this repository; synthetic test trees pass their own.
+        frozen = FROZEN_UNIMPLEMENTED if root.resolve() == ROOT.resolve() else {}
+    errors: list[str] = frozen_errors(root, frozen)
     contracts = load_contracts(root)
     corpus = load_corpus(root)
     report: dict[str, dict] = {}
@@ -269,6 +304,15 @@ def analyse(
                 swept = True
             else:
                 errors.append(f"sweep for {cid} no longer found ({rel} must contain {marker!r}); update SWEEPS")
+        if cid in frozen:
+            report[cid] = {
+                "owner": owner,
+                "total": len(ops),
+                "untested": [],
+                "route_only": [],
+                "frozen_unimplemented": unreferenced,
+            }
+            continue
         report[cid] = {
             "owner": owner,
             "total": len(ops),
@@ -334,7 +378,8 @@ def main(argv: list[str] | None = None) -> int:
         untested = sum(len(v["untested"]) for v in report.values())
         print(f"{'contract':58} {'ops':>5} {'untested':>9} {'baseline':>9} {'route-only':>11}")
         for key, v in sorted(report.items()):
-            print(f"{key:58} {v['total']:>5} {len(v['untested']):>9} {BASELINE.get(key, '-'):>9} {len(v['route_only']):>11}")
+            frozen_note = f"  (frozen, not implemented: {len(v['frozen_unimplemented'])})" if "frozen_unimplemented" in v else ""
+            print(f"{key:58} {v['total']:>5} {len(v['untested']):>9} {BASELINE.get(key, '-'):>9} {len(v['route_only']):>11}{frozen_note}")
             if args.list:
                 for m, p in v["untested"]:
                     print(f"    {m:7} {p}")

@@ -509,3 +509,289 @@ async fn developer_access_decision_notice_is_queued_once() {
         1
     );
 }
+
+/// A provider that takes `delay` per message and records every ledger id it was asked to
+/// send (duplicates included).
+struct SlowProvider {
+    delay: std::time::Duration,
+    sent: std::sync::Mutex<Vec<Uuid>>,
+}
+
+#[async_trait::async_trait]
+impl email_delivery::EmailProvider for SlowProvider {
+    fn name(&self) -> &'static str {
+        "slow"
+    }
+
+    async fn send(
+        &self,
+        m: &email_delivery::ProviderMessage<'_>,
+    ) -> Result<Option<String>, ProviderError> {
+        tokio::time::sleep(self.delay).await;
+        self.sent.lock().unwrap().push(m.id);
+        Ok(Some(format!("slow-{}", m.id)))
+    }
+}
+
+/// Notification Service N0-4 (S-8): a batch that takes longer than the lease used to be
+/// re-claimed by a second worker while the first was still sending it, so messages went
+/// out twice. The lease is now renewed before every send and a lost row is skipped.
+#[tokio::test]
+async fn two_workers_never_send_a_message_twice_when_a_batch_outlives_the_lease() {
+    let app = app!();
+    let db = app.state.db.clone();
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        ids.push(
+            email_delivery::enqueue(&db, email(&format!("slow-{i}")))
+                .await
+                .unwrap()
+                .id,
+        );
+    }
+    make_due(&app).await;
+    let provider = Arc::new(SlowProvider {
+        delay: std::time::Duration::from_millis(800),
+        sent: Default::default(),
+    });
+    // 5 messages × 0.8 s = 4 s per batch, lease 2 s: without renewal the lease lapses
+    // mid-batch and the second worker re-claims the unsent rest.
+    let first = EmailWorker::new(db.clone(), provider.clone(), settings()).with_lease_secs(2);
+    let second = EmailWorker::new(db.clone(), provider.clone(), settings()).with_lease_secs(2);
+    let a = tokio::spawn(async move { first.tick(Utc::now()).await.unwrap() });
+    let mut second_reports = Vec::new();
+    while !a.is_finished() {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        second_reports.push(second.tick(Utc::now()).await.unwrap());
+    }
+    let a = a.await.unwrap();
+    second_reports.push(second.tick(Utc::now()).await.unwrap());
+
+    let sent = provider.sent.lock().unwrap().clone();
+    let mut unique = sent.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(
+        sent.len(),
+        unique.len(),
+        "a message was sent twice: {sent:?}"
+    );
+    assert_eq!(sent.len(), 5, "every message is sent exactly once");
+    assert_eq!(
+        a.accepted + second_reports.iter().map(|r| r.accepted).sum::<u64>(),
+        5
+    );
+    for id in ids {
+        assert_eq!(status_of(&app, id).await.0, "ACCEPTED");
+    }
+}
+
+/// Notification Service N0-12 (S-12): after a complaint, or a second bounce, reported by
+/// the provider's signed webhook, new non-security mail to that address is refused with
+/// SUPPRESSED; sign-in, recovery and security mail is still queued.
+#[tokio::test]
+async fn complained_or_twice_bounced_recipients_are_suppressed_except_for_security_mail() {
+    let app = app!();
+    let raw = b"resend-webhook-signing-secret-32b";
+    let mut state = app.state.clone();
+    state.email_webhook_secret = Some(format!(
+        "whsec_{}",
+        base64::engine::general_purpose::STANDARD.encode(raw)
+    ));
+    let router = backend::routes::create_routes(state);
+    let db = app.state.db.clone();
+    let worker = EmailWorker::new(
+        db.clone(),
+        Arc::new(RecordingProvider::default()),
+        settings(),
+    );
+    let to = |address: &str, key: &str, category: &'static str| NewEmail {
+        category,
+        idempotency_key: Some(key.into()),
+        to: address.into(),
+        ..email(key)
+    };
+    let mut n = 0;
+    let mut event = |id: Uuid, kind: &str| {
+        n += 1;
+        let evt = format!("evt_s12_{n}");
+        let body =
+            json!({"type": kind, "data": {"email_id": format!("rec_{}", id.simple())}}).to_string();
+        let (ts, sig) = signed(raw, &evt, &body);
+        Request::post("/api/v1/email/provider-events/resend")
+            .header("content-type", "application/json")
+            .header("svix-id", evt)
+            .header("svix-timestamp", ts)
+            .header("svix-signature", sig)
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let send_and_report = |id: Uuid, req: Request<Body>| {
+        let (db, router, worker) = (db.clone(), router.clone(), &worker);
+        async move {
+            worker.tick(Utc::now()).await.unwrap();
+            db.execute_unprepared(&format!(
+                "UPDATE email_deliveries SET provider='resend' WHERE id='{id}'"
+            ))
+            .await
+            .unwrap();
+            assert_eq!(router.oneshot(req).await.unwrap().status(), StatusCode::OK);
+        }
+    };
+
+    // Complained once.
+    let c = email_delivery::enqueue(
+        &db,
+        to(
+            "carol@example.com",
+            "s12-c1",
+            category::MEETING_NOTIFICATION,
+        ),
+    )
+    .await
+    .unwrap();
+    let req = event(c.id, "email.complained");
+    send_and_report(c.id, req).await;
+    // Bounced once, then twice.
+    let b1 = email_delivery::enqueue(
+        &db,
+        to("bob@example.com", "s12-b1", category::MEETING_INVITATION),
+    )
+    .await
+    .unwrap();
+    let req = event(b1.id, "email.bounced");
+    send_and_report(b1.id, req).await;
+    // One bounce is not enough.
+    assert!(email_delivery::enqueue(
+        &db,
+        to("bob@example.com", "s12-b2", category::MEETING_NOTIFICATION)
+    )
+    .await
+    .is_ok());
+    let b2 = email_delivery::enqueue(
+        &db,
+        to("bob@example.com", "s12-b2", category::MEETING_NOTIFICATION),
+    )
+    .await
+    .unwrap();
+    let req = event(b2.id, "email.bounced");
+    send_and_report(b2.id, req).await;
+
+    for (address, key) in [
+        ("Carol@Example.com", "s12-c2"),
+        ("bob@example.com", "s12-b3"),
+    ] {
+        for category in [
+            category::MEETING_NOTIFICATION,
+            category::MEETING_INVITATION,
+            category::ORGANIZATION_INVITATION,
+            category::DEVELOPER_PLATFORM,
+        ] {
+            match email_delivery::enqueue(&db, to(address, &format!("{key}-{category}"), category))
+                .await
+            {
+                Err(backend::error::ApiError::Conflict(m)) => {
+                    assert_eq!(
+                        m,
+                        email_delivery::RECIPIENT_SUPPRESSED,
+                        "{address} {category}"
+                    )
+                }
+                other => panic!("{address} {category}: expected SUPPRESSED, got {other:?}"),
+            }
+        }
+        // Account recovery, sign-in and security notices are never suppressed.
+        for category in email_delivery::UNSUPPRESSIBLE_CATEGORIES {
+            email_delivery::enqueue(&db, to(address, &format!("{key}-{category}"), category))
+                .await
+                .unwrap_or_else(|e| panic!("{address} {category} must still be queued: {e:?}"));
+        }
+    }
+    // Other recipients are unaffected.
+    assert!(email_delivery::enqueue(
+        &db,
+        to("dave@example.com", "s12-d", category::MEETING_NOTIFICATION)
+    )
+    .await
+    .is_ok());
+}
+
+/// Notification Service N0-8 (S-5): Redis holds neither the code nor the address; the code
+/// verifies once; a code issued by the previous image (plaintext under the address) still
+/// verifies until it expires and is never written again.
+#[tokio::test]
+async fn otp_codes_are_stored_as_salted_hashes_under_address_digests() {
+    use backend::services::otp::{email_key, OtpType};
+    let app = app!();
+    let otp = app.state.otp_service.clone();
+    let redis = app.state.redis.clone();
+    let address = format!(
+        "Otp-{}@Example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let hashed_key = format!("otp:verify:h:{}", email_key(&address));
+    let legacy_key = format!("otp:verify:{}", address.to_lowercase());
+
+    otp.store_code(&address, "482913", OtpType::Verification)
+        .await
+        .unwrap();
+    let stored = redis
+        .get(&hashed_key)
+        .await
+        .unwrap()
+        .expect("stored under the digest");
+    assert!(!stored.contains("482913"), "no plaintext code at rest");
+    assert!(
+        !hashed_key.contains('@') && !hashed_key.contains("otp-"),
+        "no address in the key"
+    );
+    assert_eq!(
+        redis.get(&legacy_key).await.unwrap(),
+        None,
+        "the legacy key is never written"
+    );
+    assert!(otp.has_code(&address, OtpType::Verification).await.unwrap());
+
+    assert!(!otp
+        .verify_code(&address, "000000", OtpType::Verification)
+        .await
+        .unwrap());
+    assert!(otp
+        .verify_code(&address.to_uppercase(), "482913", OtpType::Verification)
+        .await
+        .unwrap());
+    assert!(
+        !otp.verify_code(&address, "482913", OtpType::Verification)
+            .await
+            .unwrap(),
+        "single use"
+    );
+    assert_eq!(redis.get(&hashed_key).await.unwrap(), None);
+
+    // A code issued by the previous image before the release.
+    redis.set(&legacy_key, "731842", Some(600)).await.unwrap();
+    assert!(otp.has_code(&address, OtpType::Verification).await.unwrap());
+    assert!(!otp
+        .verify_code(&address, "731843", OtpType::Verification)
+        .await
+        .unwrap());
+    assert!(otp
+        .verify_code(&address, "731842", OtpType::Verification)
+        .await
+        .unwrap());
+    assert_eq!(redis.get(&legacy_key).await.unwrap(), None, "consumed");
+
+    // A new code replaces a legacy one (which then no longer verifies).
+    redis.set(&legacy_key, "111111", Some(600)).await.unwrap();
+    otp.store_code(&address, "222222", OtpType::Verification)
+        .await
+        .unwrap();
+    assert!(!otp
+        .verify_code(&address, "111111", OtpType::Verification)
+        .await
+        .unwrap());
+    assert!(otp
+        .verify_code(&address, "222222", OtpType::Verification)
+        .await
+        .unwrap());
+}

@@ -21,7 +21,11 @@ def permission_registry():
                           (REPO / 'packages/service-auth/src/identity.rs').read_text()))
     text = (REPO / 'packages/service-auth/src/permissions.rs').read_text()
     registry = {}
-    for block in re.findall(r'\n    PermissionDefinition \{\n(.*?)\n    \},', text, re.S):
+    # Registry entries are written both on one line and over several lines: split the
+    # REGISTRY table at every entry start and read each entry's fields.
+    table = text[text.index('pub const REGISTRY: &[PermissionDefinition] = &['):]
+    table = table[:table.index('\n];\n')]
+    for block in table.split('PermissionDefinition {')[1:]:
         name = re.search(r'name: "([^"]+)"', block)
         receiver = re.search(r'receiver: services::([A-Z_]+)', block)
         grantable = re.search(r'grantable_to: &\[(.*?)\]', block, re.S)
@@ -89,10 +93,27 @@ class ResourceGate(unittest.TestCase):
 class Grants(unittest.TestCase):
     def test_every_grant_exists_in_the_permission_registry_for_that_receiver_and_issuer(self):
         registry = permission_registry()
-        self.assertEqual(len(registry), (REPO / 'packages/service-auth/src/permissions.rs').read_text()
-                         .count('\n    PermissionDefinition {\n'))
+        text = (REPO / 'packages/service-auth/src/permissions.rs').read_text()
+        all_permissions = re.findall(r'    InternalPermission::([A-Za-z]+),\n', text[text.index('pub const ALL'):])
+        self.assertEqual(len(registry), len(all_permissions))
         self.assertGreater(len(registry), 60)
         self.assertEqual(cr.validate_grants(registry), [])
+
+    def test_meeting_notice_preference_grant_is_in_the_hub_release_and_an_operation(self):
+        # Notification Service N0-1 (S-1): without communications-preferences.read the
+        # Meeting Service cannot read opt-outs and every meeting notice fails closed. The Hub
+        # bundle is rebuilt from HUB_INCOMING on every release, so the grant must be there,
+        # and the activation operation applies the same grant without a Hub release.
+        import communications_release
+        registry = permission_registry()
+        self.assertIn('communications-preferences.read', communications_release.HUB_INCOMING['meeting-service'])
+        self.assertIn(('activate-meeting-notice-preferences', 'communications', 'meeting-service',
+                       ('communications-preferences.read',)), cr.GRANTS)
+        self.assertEqual(cr.ACTIVATIONS['activate-meeting-notice-preferences'][0], ())
+        # Every Hub incoming grant is received by the Hub and grantable to that issuer.
+        rows = tuple(('hub-release', 'communications', issuer, tuple(perms))
+                     for issuer, perms in communications_release.HUB_INCOMING.items())
+        self.assertEqual(cr.validate_grants(registry, rows), [])
 
     def test_invalid_grants_are_reported(self):
         registry = permission_registry()
@@ -602,6 +623,19 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         workflow = yaml.safe_load((REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text())
         options = (workflow.get('on') or workflow[True])['workflow_dispatch']['inputs']['operation']['options']
         self.assertEqual(tuple(options), cr.OPERATIONS)
+
+
+class PublicInternalDenial(unittest.TestCase):
+    def test_only_a_marked_nginx_404_proves_the_denial(self):
+        # Notification Service N0-6: a Meeting Service 404 (route token unset) is not proof.
+        self.assertTrue(cr.public_denial_confirmed('HTTP/2 404\r\nserver: nginx\r\nx-cfmeet-ingress: denied\r\n\r\n'))
+        self.assertTrue(cr.public_denial_confirmed('HTTP/1.1 404 Not Found\nX-CFMeet-Ingress: Denied\n'))
+        for bad in ('HTTP/2 404\r\nserver: nginx\r\n', 'HTTP/2 401\r\nx-cfmeet-ingress: denied\r\n',
+                    'HTTP/2 200\r\n', '', 'HTTP/2 404\r\nx-cfmeet-ingress: allowed\r\n'):
+            self.assertFalse(cr.public_denial_confirmed(bad), bad)
+
+    def test_the_operation_is_offered_without_prerequisites(self):
+        self.assertEqual(cr.ACTIVATIONS['activate-public-internal-denial'][0], ())
 
 
 class RestoreTest(unittest.TestCase):

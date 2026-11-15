@@ -1,0 +1,28 @@
+//! CF Meet Notification Service producer client (`packages/notification-client`,
+//! roadmap N1, Document 4 §12).
+//!
+//! Keeps every producer integration identical:
+//!
+//! * [`catalogue`] — the closed catalogue of the 31 inbound event types and the control
+//!   event (mirrors `x-cfmeet-catalogue` in `cfmeet.notifications.event`);
+//! * [`envelope`] — the `cfmeet.notifications.event` v1 builder and validator (forbidden
+//!   data keys, sealed allowance, legacy idempotency-key formats, CRITICAL rules, size);
+//! * [`seal`] — HPKE (RFC 9180) sealing of codes, tokens and invitee addresses to the
+//!   service key (`open` feature: the service renderer only);
+//! * [`routing`] — the routing fence protocol v1 decision helper (§9.3), the guard-trigger
+//!   rule (§9.4) and the CRITICAL reroute rules (§9.8).
+//!
+//! Nothing here talks to the network or a database: producers persist envelopes in their
+//! own transactional outbox, and their relays post them to I1.
+
+pub mod catalogue;
+pub mod envelope;
+pub mod routing;
+pub mod seal;
+
+pub use catalogue::{
+    spec, EventSpec, Lane, LegacyKey, Priority, Producer, CATALOGUE, CONTROL_EVENT,
+};
+pub use envelope::{validate, Envelope, EnvelopeBuilder, EnvelopeError};
+pub use routing::{decide, Decision, Route, RouteRef, RoutingMode, RoutingState, ROUTING_PROTOCOL};
+pub use seal::{Sealed, SealedPlaintext, SealingKey};

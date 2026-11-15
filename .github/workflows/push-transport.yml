@@ -1,0 +1,50 @@
+name: Push transport package
+
+# packages/push-transport (cf-push-transport, Notification Service roadmap N4): the APNs,
+# FCM and Web Push adapters moved verbatim out of Messaging with their unit tests
+# (metadata-only payloads, RFC 8291 vectors, Web Push SSRF host allowlist, ES256 tokens).
+# Messaging's integration suite (tests/push_adapters.rs against verifying local fakes)
+# still runs in messaging.yml, which also triggers on this package. Nothing here deploys.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "packages/push-transport/**"
+      - ".github/workflows/push-transport.yml"
+  pull_request:
+    paths:
+      - "packages/push-transport/**"
+      - ".github/workflows/push-transport.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: push-transport-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    working-directory: packages/push-transport
+
+jobs:
+  test:
+    name: fmt / clippy / test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/push-transport -> target
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: cargo test (adapter unit tests, RFC 8291 Appendix A vector)
+        run: cargo test --locked

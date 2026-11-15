@@ -120,6 +120,11 @@ counters!(
     email_complained,
     email_webhook_rejected,
     email_webhook_duplicates,
+    // Notification Service N0: lease renewal (S-8), bounce / complaint suppression (S-12)
+    // and invalid meeting-notice recipients that no longer block the others (S-11).
+    email_lease_lost,
+    email_suppressed,
+    meeting_notification_invalid_recipients,
     // Final completion: conference lifecycle (empty instant conferences, archive).
     conferences_empty_ended,
     conferences_archive_ended,

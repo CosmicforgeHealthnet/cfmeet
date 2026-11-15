@@ -1,0 +1,178 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Communications Hub — Notification Service owner API",
+    "version": "1.0.0",
+    "description": "X4 checkCommunicationRestrictions (blueprint Document 4 §3.4): batch block / privacy / operator-hold check for notifications, replacing the per-recipient policy/check calls. Frozen by roadmap N1; implemented in N6. Grantable to cfmeet.notifications only."
+  },
+  "paths": {
+    "/internal/v1/communications/restrictions/check": {
+      "post": {
+        "operationId": "checkCommunicationRestrictions",
+        "summary": "Batch restriction check (X4)",
+        "description": "{actorRef, recipientRefs ≤ 100, action} → per recipient: blocked, privacy-denied, operator hold.",
+        "tags": [
+          "Notification owner"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-restrictions.read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "recipientRefs",
+                  "action"
+                ],
+                "properties": {
+                  "actorRef": {
+                    "anyOf": [
+                      {
+                        "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "recipientRefs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": {
+                      "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+                    }
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "CONTACT_REQUEST",
+                      "CONTACT_CONNECTED",
+                      "MESSAGE",
+                      "CALL",
+                      "GROUP_INVITATION",
+                      "OTHER"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-recipient restrictions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "results"
+                  ],
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "recipientRef",
+                          "blocked",
+                          "privacyDenied",
+                          "operatorHold"
+                        ],
+                        "properties": {
+                          "recipientRef": {
+                            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+                          },
+                          "blocked": {
+                            "type": "boolean"
+                          },
+                          "privacyDenied": {
+                            "type": "boolean"
+                          },
+                          "operatorHold": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (FORBIDDEN): the issuer does not hold the permission in the receiver's trust bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer EdDSA service token from packages/service-auth; audience cfmeet.communications; issuer must be cfmeet.notifications holding the stated permission in the receiver's trust bundle."
+      }
+    }
+  }
+}

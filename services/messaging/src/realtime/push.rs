@@ -8,13 +8,15 @@
 //!   fetches and decrypts the message itself after waking up. A database CHECK refuses
 //!   content-like payload keys.
 //! * Jobs are leased (`FOR UPDATE SKIP LOCKED`), retried with bounded backoff and expire.
+//!   The lease token is the fence: immediately before each authorization check and each
+//!   provider call the job's lease is renewed under its token, and a job whose lease was
+//!   re-claimed by another dispatcher is skipped, never sent twice (S-8). Each of those
+//!   calls is bounded by a third of the lease.
 //!   Without a configured provider they end as `NOT_CONFIGURED` — never reported as
 //!   delivered. The APNs, FCM and Web Push adapters live in
 //!   [`super::push_adapters`] (each enabled only with its credentials);
 //!   [`LocalTestPush`] is an explicitly local adapter for tests and development.
 //! * A push is never proof of message delivery.
-
-use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use sea_orm::FromQueryResult;
@@ -34,34 +36,10 @@ use crate::{
 
 pub const PLATFORMS: &[&str] = &["APNS", "FCM", "WEB_PUSH", "LOCAL_TEST"];
 
-/// Outcome of one provider call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PushOutcome {
-    Sent,
-    Retryable(String),
-    /// The provider refused the handle for good (unregistered app, bad token).
-    InvalidHandle,
-    Permanent(String),
-}
-
-#[async_trait::async_trait]
-pub trait PushProvider: Send + Sync {
-    fn name(&self) -> &'static str;
-    /// Whether this provider can deliver to `platform` in this deployment.
-    fn supports(&self, platform: &str) -> bool;
-    /// Provider-specific checks of a handle at registration (e.g. the Web Push host
-    /// allowlist); structural checks run regardless.
-    fn validate_handle(&self, _platform: &str, _handle: &str) -> Result<(), &'static str> {
-        Ok(())
-    }
-    async fn send(&self, platform: &str, handle: &str, payload: &Value) -> PushOutcome;
-    /// The Web Push application-server (VAPID) public key clients pass to
-    /// `pushManager.subscribe` (base64url, uncompressed P-256 point); `None` when Web Push is
-    /// not configured. Public by nature; the private key never leaves the adapter.
-    fn web_push_application_server_key(&self) -> Option<String> {
-        None
-    }
-}
+// The provider boundary (`PushOutcome`, `PushProvider`) and the local test adapter moved to
+// packages/push-transport with the adapters (Notification Service roadmap N4); re-exported
+// here under their previous paths so every caller and test is unchanged.
+pub use cf_push_transport::provider::{LocalTestPush, PushOutcome, PushProvider};
 
 /// `GET /v1/messaging/push/configuration`: which push platforms this deployment delivers
 /// to, and the Web Push application-server key. Nothing secret, nothing per user.
@@ -95,38 +73,6 @@ impl PushProvider for UnconfiguredPush {
 
     async fn send(&self, _platform: &str, _handle: &str, _payload: &Value) -> PushOutcome {
         PushOutcome::Permanent("no push provider configured".into())
-    }
-}
-
-/// A LOCAL adapter (tests / development only; refused in staging and production by the
-/// configuration): records what would have been sent to `LOCAL_TEST` registrations.
-#[derive(Default)]
-pub struct LocalTestPush {
-    pub sent: Mutex<Vec<(String, Value)>>,
-    pub fail_next: Mutex<u32>,
-}
-
-#[async_trait::async_trait]
-impl PushProvider for LocalTestPush {
-    fn name(&self) -> &'static str {
-        "local-test"
-    }
-
-    fn supports(&self, platform: &str) -> bool {
-        platform == "LOCAL_TEST"
-    }
-
-    async fn send(&self, _platform: &str, handle: &str, payload: &Value) -> PushOutcome {
-        let mut fail = self.fail_next.lock().unwrap();
-        if *fail > 0 {
-            *fail -= 1;
-            return PushOutcome::Retryable("injected failure".into());
-        }
-        self.sent
-            .lock()
-            .unwrap()
-            .push((handle.to_string(), payload.clone()));
-        PushOutcome::Sent
     }
 }
 
@@ -291,6 +237,32 @@ pub struct PushReport {
     pub disabled: usize,
     pub failed: usize,
     pub expired: usize,
+    /// Claimed jobs skipped because their lease lapsed and another dispatcher re-claimed
+    /// them (that dispatcher sends them).
+    pub lease_lost: usize,
+}
+
+/// How long a dispatcher holds a claimed job. Renewed under the lease token before each
+/// external call of the job, so a slow provider earlier in a batch cannot let a later
+/// job's lease lapse into another replica's claim while this one still sends it.
+pub const LEASE: chrono::Duration = chrono::Duration::seconds(60);
+
+/// Upper bound of one authorization check or one provider call: a third of [`LEASE`], so
+/// the lease renewed just before the call always outlives it. (The adapters' own HTTP
+/// timeouts are shorter; this only bounds a call that hangs.)
+const CALL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Extends the lease of a job this dispatcher still holds. `false`: the lease token no
+/// longer matches (the lease lapsed and another dispatcher re-claimed the job, or the job
+/// is no longer pending) — the caller must not send it.
+async fn renew_lease(state: &AppState, job: Uuid, token: Uuid) -> Result<bool> {
+    let renewed = db::exec(
+        &state.db,
+        "UPDATE messaging_push_jobs SET lease_expires_at = $3 WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
+        vec![job.into(), token.into(), (state.now() + LEASE).into()],
+    )
+    .await?;
+    Ok(renewed == 1)
 }
 
 #[derive(FromQueryResult)]
@@ -418,7 +390,7 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
              JOIN messaging_outbox_events e ON e.id=j.event_id JOIN messaging_conversations c ON c.id=m.conversation_id \
              WHERE m.conversation_id=j.conversation_id AND d.id=j.device_id AND m.state='ACTIVE' \
              AND c.lifecycle_state='ACTIVE' AND e.conversation_event_sequence>=m.visible_from_event) AS member_active",
-        vec![now.into(), batch.into(), token.into(), (now + chrono::Duration::seconds(60)).into()],
+        vec![now.into(), batch.into(), token.into(), (now + LEASE).into()],
     )
     .await?;
     let mut report = PushReport {
@@ -440,13 +412,31 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
             report.not_configured += 1;
             ("NOT_CONFIGURED", None, None)
         } else {
-            let outcome = match authorized(state, &job).await {
+            if !renew_lease(state, job.id, token).await? {
+                lease_lost(&mut report);
+                continue;
+            }
+            let verdict = tokio::time::timeout(CALL_DEADLINE, authorized(state, &job))
+                .await
+                .unwrap_or_else(|_| Err(Error::code(ErrorCode::ServiceUnavailable)));
+            let outcome = match verdict {
                 Ok(true) => {
-                    state
-                        .realtime
-                        .push
-                        .send(&job.platform, &job.push_handle, &job.payload)
+                    // The fence: the send happens only while this dispatcher provably
+                    // holds the job, for at least the whole (bounded) call.
+                    if !renew_lease(state, job.id, token).await? {
+                        lease_lost(&mut report);
+                        continue;
+                    }
+                    let send =
+                        state
+                            .realtime
+                            .push
+                            .send(&job.platform, &job.push_handle, &job.payload);
+                    tokio::time::timeout(CALL_DEADLINE, send)
                         .await
+                        .unwrap_or_else(|_| {
+                            PushOutcome::Retryable("provider call timed out".into())
+                        })
                 }
                 Ok(false) => {
                     report.disabled += 1;
@@ -511,6 +501,34 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
         );
     }
     Ok(report)
+}
+
+/// How long a push job in a final state (`SENT`, `FAILED`, `EXPIRED`, `DISABLED`,
+/// `NOT_CONFIGURED`) is kept after `completed_at` (delivery diagnostics, the owner's push
+/// status view) before [`purge_completed`] removes it. Pending jobs are never purged.
+pub const JOB_RETENTION: chrono::Duration = chrono::Duration::days(30);
+
+/// Most jobs one [`purge_completed`] pass removes.
+pub const PURGE_BATCH: i64 = 5_000;
+
+/// One bounded retention pass: deletes at most `batch` final-state jobs completed more
+/// than [`JOB_RETENTION`] ago, oldest first. Idempotent and safe on several instances.
+/// Run hourly by the maintenance worker; deliberately without a new index (no migration,
+/// so the previous image still passes readiness after a rollback; the table is small until
+/// push moves to the Notification Service in N9). Returns the number of jobs deleted.
+pub async fn purge_completed(state: &AppState, batch: i64) -> Result<u64> {
+    let cutoff = state.now() - JOB_RETENTION;
+    Ok(db::exec(
+        &state.db,
+        "DELETE FROM messaging_push_jobs WHERE id IN (SELECT id FROM messaging_push_jobs WHERE status <> 'PENDING' AND completed_at < $1 ORDER BY completed_at LIMIT $2)",
+        vec![cutoff.into(), batch.into()],
+    )
+    .await?)
+}
+
+fn lease_lost(report: &mut PushReport) {
+    report.lease_lost += 1;
+    crate::metrics::inc("messaging_push_lease_lost_total", &[]);
 }
 
 fn status_label(s: &str) -> &'static str {

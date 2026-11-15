@@ -4,6 +4,7 @@ import re
 import secrets
 import urllib.request
 import uuid
+import controlled_otp
 import production as p
 
 
@@ -11,6 +12,13 @@ def api(path,body):
     request=urllib.request.Request('https://api.cfmeet.com/api/v1/auth/'+path,
         data=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
     with urllib.request.urlopen(request,timeout=30) as response: return json.load(response)
+
+
+def controlled_input(redis_url,email):
+    """Input of the in-container reader: issued-code replacement (N0-8) or legacy read."""
+    code=controlled_otp.new_code()
+    return {'url':redis_url,'hashed':controlled_otp.hashed_key(email),'legacy':controlled_otp.legacy_key(email),
+            'code':code,'sealed':controlled_otp.sealed(code)}
 
 
 def accounts(namespace=None,count=3):
@@ -38,7 +46,10 @@ def cmd(*parts):
  return n.decode()
 if u.password:cmd('AUTH',urllib.parse.unquote(u.password))
 if u.path.strip('/'):cmd('SELECT',int(u.path.strip('/')))
-print(cmd('GET',x['key']) or '')
+# N0-8: a hashed code was issued -> replace it with the controlled one; else (previous
+# image) read the plaintext code.
+if cmd('EXISTS',x['hashed'])=='1':print(x['code'] if cmd('SET',x['hashed'],x['sealed'],'EX','86400','XX')=='OK' else '')
+else:print(cmd('GET',x['legacy']) or '')
 '''
     for account in values:
         account['userId']=api('register',dict(username=account['username'],email=account['email'],
@@ -46,7 +57,7 @@ print(cmd('GET',x['key']) or '')
         # Only retrieve the verification code for this newly created controlled account.
         code=p.run('docker','run','--rm','-i','--network','container:cfmeet-production-backend',
             'python:3.12-slim','python','-c',redis_reader,
-            input=json.dumps({'url':redis_url,'key':'otp:verify:'+account['email']}))
+            input=json.dumps(controlled_input(redis_url,account['email'])))
         assert code.isdigit() and len(code)==6
         api('verify-email',dict(email=account['email'],token=code))
         assert api('login',dict(email=account['email'],password=account['password']))['user']['id']==account['userId']

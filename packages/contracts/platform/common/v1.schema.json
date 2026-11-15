@@ -158,7 +158,19 @@
         "platform-identity.provision-first-party",
         "platform-identity.bind-organization-services",
         "calling-request.act-for-organization",
-        "meeting-organization-events.apply"
+        "meeting-organization-events.apply",
+        "notifications-event.publish",
+        "notifications-user.forward",
+        "notifications-call-push.dispatch",
+        "notifications-observability.read",
+        "notifications-operations.replay",
+        "notifications-operations.reroute",
+        "account-contacts.read",
+        "meeting-notification-recipients.read",
+        "messaging-wakeups.authorize",
+        "communications-restrictions.read",
+        "organization-invitations.read",
+        "account-route-lease.claim"
       ]
     }
   }

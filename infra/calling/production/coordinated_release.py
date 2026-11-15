@@ -568,6 +568,10 @@ GRANTS = (
     # Customer API families through the gateway (receivers authorize the gateway's forwards).
     ('activate-gateway-families', 'calling', 'api-gateway', ('calling-request.forward',)),
     ('activate-gateway-families', 'messaging', 'api-gateway', ('messaging-request.forward',)),
+    # Notification Service N0-1 (S-1): the Meeting Service checks notification opt-outs at the
+    # Hub before sending a meeting notice. The Hub release (communications_release.HUB_INCOMING)
+    # carries the same grant; this operation applies it without a Hub release.
+    ('activate-meeting-notice-preferences', 'communications', 'meeting-service', ('communications-preferences.read',)),
 )
 
 
@@ -1664,6 +1668,61 @@ def activate_org_events(sha, run_id, confirm):
                            'CF_MEETING_SERVICE_BASE_URL': private_url(SERVICES['meeting-service']['tls'])})], post=post)
 
 
+def activate_meeting_notice_preferences(sha, run_id, confirm):
+    """N0-1 (S-1): grant communications-preferences.read to the Meeting Service in the Hub's
+    trust bundle (merged; no existing issuer, key or grant is dropped). Only the Hub is
+    recreated; a failure restores the previous bundle. No flag, provider or route changes."""
+    has_signing_identity('meeting-service')
+    apply_activation('activate-meeting-notice-preferences', sha, run_id, [])
+
+
+PUBLIC_SITE = Path('/etc/nginx/sites-available/api.cfmeet.com')
+
+
+def public_denial_confirmed(headers_text):
+    """True when a public response is the N0-6 nginx denial (404 + X-CFMeet-Ingress: denied),
+    not an answer of the Meeting Service."""
+    lines = [line.strip() for line in headers_text.replace('\r', '').split('\n') if line.strip()]
+    status = lines[0].split()[1] if lines and lines[0].startswith('HTTP/') and len(lines[0].split()) > 1 else ''
+    marked = any(line.lower().split(':', 1)[0] == 'x-cfmeet-ingress'
+                 and line.split(':', 1)[1].strip().lower() == 'denied' for line in lines if ':' in line)
+    return status == '404' and marked
+
+
+def public_denial_probe(path):
+    proc = subprocess.run(['curl', '-sS', '--max-time', '8', '--resolve', 'api.cfmeet.com:443:127.0.0.1',
+                           '-o', '/dev/null', '-D', '-', 'https://api.cfmeet.com' + path],
+                          text=True, capture_output=True)
+    if proc.returncode != 0:
+        raise RuntimeError('Public ingress probe failed to complete: ' + path)
+    return public_denial_confirmed(proc.stdout)
+
+
+def activate_public_internal_denial(sha, run_id, confirm):
+    """N0-6 (S-3): the public server block refuses the Meeting Service's operator routes
+    (/internal/operations/*, /internal/metrics, /internal/rtc/metrics). Host nginx only: no
+    container changes. Each denial is proven through the public host; any failed proof
+    restores the previous site file. Signed provider callbacks are left reachable."""
+    previous = PUBLIC_SITE.read_text()
+    entry = begin('activate-public-internal-denial', sha, run_id)
+    try:
+        release.secure_public_ingress()
+        p.reload_host_nginx()  # probes must reach the new worker generation
+        results = {path: public_denial_probe(path) for path in release.PUBLIC_DENIAL_PROBES}
+        emit('publicInternalDenial', results)
+        if not all(results.values()):
+            raise RuntimeError('Public ingress still reaches a Meeting Service operator route')
+    except Exception:
+        if PUBLIC_SITE.read_text() != previous:
+            PUBLIC_SITE.write_text(previous)
+            p.reload_host_nginx()
+        entry['status'] = 'failed'
+        commit(entry)
+        raise
+    entry['status'] = 'done'
+    commit(entry)
+
+
 INVENTORY_SQL = """BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;
 SELECT json_build_object(
  'organizations', (SELECT count(*) FROM organizations),
@@ -2426,6 +2485,10 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, confirm)),
     'activate-production-access-review': (('activate-developer-console',), lambda sha, run_id, confirm:
                                           developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
+    # Notification Service N0-1: the missing Hub preference grant (meeting notices fail closed).
+    'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),
+    # Notification Service N0-6: public host refuses the Meeting Service operator routes.
+    'activate-public-internal-denial': ((), activate_public_internal_denial),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
     + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')

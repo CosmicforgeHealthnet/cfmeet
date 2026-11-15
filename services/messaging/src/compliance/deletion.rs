@@ -2,7 +2,8 @@
 //!
 //! * `PRINCIPAL_ERASURE` — every message the principal sent (tombstoned `DELETED` /
 //!   `DATA_ERASURE` with its durable event, then purged), their unsent uploads, their
-//!   presence preference and shared last-seen time.
+//!   presence preference and shared last-seen time, and their devices' push
+//!   registrations (provider handles) with every push job for those devices (S-7).
 //! * `CONVERSATION_PURGE` — every message and attachment of one conversation.
 //!
 //! Legal holds win: a held message is still tombstoned (no member sees it again) but its
@@ -262,8 +263,34 @@ async fn process(state: &AppState, d: &DeletionRow) -> Result<Counts> {
         ] {
             db::exec(&state.db, sql, vec![d.environment_id.into(), p.into()]).await?;
         }
+        erase_push(state, d.environment_id, p).await?;
     }
     Ok(counts)
+}
+
+/// S-7: the principal's push registrations (provider handles) and every push job for
+/// their devices, in one transaction. The registrations are locked first, so a push
+/// fan-out committing a new job for one of them waits and then fails its foreign key
+/// (and is retried, finding no registration) instead of failing this erasure. Device
+/// records themselves stay (MLS protocol state, like handshake records).
+async fn erase_push(state: &AppState, environment_id: Uuid, principal_id: Uuid) -> Result<()> {
+    state
+        .db
+        .transaction::<_, (), Error>(move |txn| {
+            Box::pin(async move {
+                let args = || vec![environment_id.into(), principal_id.into()];
+                for sql in [
+                    "SELECT 1 FROM messaging_push_registrations WHERE environment_id = $1 AND principal_id = $2 FOR UPDATE",
+                    "DELETE FROM messaging_push_jobs WHERE registration_id IN                        (SELECT id FROM messaging_push_registrations WHERE environment_id = $1 AND principal_id = $2)                        OR device_id IN (SELECT id FROM messaging_devices WHERE environment_id = $1 AND principal_id = $2)",
+                    "DELETE FROM messaging_push_registrations WHERE environment_id = $1 AND principal_id = $2",
+                ] {
+                    db::exec(txn, sql, args()).await?;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .map_err(Error::from)
 }
 
 /// Runs at most `batch` pending requests (leased).

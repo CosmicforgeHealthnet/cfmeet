@@ -581,10 +581,9 @@ pub async fn register_user(
     if !(200..300).contains(&r.status) {
         bail!("register {email}: {} {}", r.status, r.text);
     }
-    let key = format!("otp:verify:{}", email.to_lowercase());
     let mut code = None;
     for _ in 0..100 {
-        code = crate::redis::get(redis_url, &key).await?;
+        code = crate::redis::controlled_otp(redis_url, "otp:verify", email).await?;
         if code.is_some() {
             break;
         }

@@ -1,6 +1,7 @@
 import api, { publicApi } from "./api";
 import { storageStore } from "@/store";
 import { signOutMessaging } from "@/lib/messaging/signout";
+import { allowCallingRegistration, signOutCalling } from "@/lib/calling/signout";
 import { accountSession, clearBrowserSession } from "@/lib/auth/session";
 import type {
   RegisterRequest,
@@ -24,6 +25,8 @@ import { DEFAULT_WORKSPACE_KEY, TAB_WORKSPACE_KEY } from "@/lib/workspace/worksp
 async function establish(response: LoginResponse, remember: boolean) {
   await accountSession.establish(response.access_token, response.refresh_token, remember);
   storageStore.setUser(response.user);
+  // A fresh sign-in may register this browser's Calling endpoint again (S-10).
+  allowCallingRegistration();
   await declareThisBrowser(response.access_token);
 }
 
@@ -96,8 +99,9 @@ export const authService = {
   /** Ends this session at the API (other sessions stay signed in) and in this browser. */
   logout: async () => {
     try {
-      // While still signed in: revoke this browser's messaging device, erase its keys.
-      await signOutMessaging();
+      // While still signed in: revoke this browser's Calling endpoint (S-10) and messaging
+      // device, erase its keys. Both are bounded and never throw.
+      await Promise.all([signOutCalling(), signOutMessaging()]);
       await api.post<MessageResponse>("/auth/logout");
     } finally {
       await authService.forgetLocalSession();
@@ -109,7 +113,7 @@ export const authService = {
    * (`POST /api/v2/me/sessions/revoke-all`), then this browser's state.
    */
   logoutEverywhere: async () => {
-    await signOutMessaging();
+    await Promise.all([signOutCalling(), signOutMessaging()]);
     // A failure keeps this browser signed in (nothing was revoked); the caller shows it.
     const result = (await apiV2.post<AccountSessionRevokeResponse>("/me/sessions/revoke-all")).data;
     await authService.forgetLocalSession();

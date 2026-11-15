@@ -60,6 +60,43 @@ pub mod category {
     pub const OPERATIONS_ACCEPTANCE: &str = "OPERATIONS_ACCEPTANCE";
     pub const NOTIFICATION: &str = "NOTIFICATION";
     pub const LEGACY_QUEUE: &str = "LEGACY_QUEUE";
+    /// Device step-up codes (account_devices.rs).
+    pub const SECURITY_DEVICE_STEP_UP: &str = "SECURITY_DEVICE_STEP_UP";
+}
+
+/// Categories that are never suppressed after bounces or complaints: account recovery,
+/// sign-in codes and security notices must still be attempted (Notification Service N0-12;
+/// an operator investigates repeated bounces instead), and operator acceptance mail is the
+/// evidence that the transport works.
+pub const UNSUPPRESSIBLE_CATEGORIES: &[&str] = &[
+    category::AUTH_VERIFICATION,
+    category::AUTH_PASSWORD_RESET,
+    category::SECURITY_PASSWORD_CHANGED,
+    category::SECURITY_DEVICE_STEP_UP,
+    category::NOTIFICATION,
+    category::OPERATIONS_ACCEPTANCE,
+];
+
+/// The `ApiError::Conflict` message of an enqueue refused because the recipient is
+/// suppressed (S-12): one complaint, or two bounces, recorded for the same address.
+pub const RECIPIENT_SUPPRESSED: &str = "EMAIL_RECIPIENT_SUPPRESSED";
+
+/// Whether new non-security mail to this recipient is refused (N0-12): the provider
+/// reported a complaint, or at least two bounces, for the address (by its hash).
+pub async fn recipient_suppressed<C: ConnectionTrait>(conn: &C, hash: &str) -> ApiResult<bool> {
+    let row = conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT (count(*) FILTER (WHERE status = 'COMPLAINED') > 0
+                     OR count(*) FILTER (WHERE status = 'BOUNCED') >= 2) AS suppressed
+               FROM email_deliveries
+              WHERE recipient_hash = $1 AND status IN ('BOUNCED', 'COMPLAINED')",
+            [hash.into()],
+        ))
+        .await?;
+    Ok(row
+        .and_then(|r| r.try_get::<bool>("", "suppressed").ok())
+        .unwrap_or(false))
 }
 
 /// Statuses that are final (content erased, never re-sent).
@@ -131,6 +168,12 @@ pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult
     let subject = clean_header(&email.subject, 200);
     if subject.is_empty() {
         return Err(ApiError::InternalError("Email subject is empty".into()));
+    }
+    if !UNSUPPRESSIBLE_CATEGORIES.contains(&email.category)
+        && recipient_suppressed(conn, &recipient_hash(&to)).await?
+    {
+        inc(&OM.email_suppressed);
+        return Err(ApiError::Conflict(RECIPIENT_SUPPRESSED.into()));
     }
     let to_name = email
         .to_name
@@ -573,6 +616,9 @@ pub struct TickReport {
     pub retried: u64,
     pub failed: u64,
     pub expired: u64,
+    /// Claimed rows whose lease lapsed before their send and were re-claimed elsewhere
+    /// (skipped, never sent twice by this worker).
+    pub lease_lost: u64,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -601,6 +647,7 @@ pub struct EmailWorker {
     provider: Arc<dyn EmailProvider>,
     settings: WorkerSettings,
     holder: String,
+    lease_secs: i64,
 }
 
 impl EmailWorker {
@@ -614,7 +661,36 @@ impl EmailWorker {
             provider,
             settings,
             holder: format!("email-{}", Uuid::new_v4().simple()),
+            lease_secs: LEASE_SECS,
         }
+    }
+
+    /// Overrides the lease length (tests; production keeps [`LEASE_SECS`], which exceeds
+    /// the rate-limit spacing plus the longest provider timeout).
+    pub fn with_lease_secs(mut self, secs: i64) -> Self {
+        self.lease_secs = secs.max(1);
+        self
+    }
+
+    /// N0-4 (S-8): renews this worker's lease on every row it still holds and reports
+    /// whether `id` is among them. A row whose lease lapsed and was re-claimed by another
+    /// worker is no longer held, so it is skipped instead of being sent a second time.
+    /// Called immediately before each provider call, so a batch never outlives its lease.
+    async fn renew(&self, id: Uuid) -> ApiResult<bool> {
+        let rows = self
+            .db
+            .query_all(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "UPDATE email_deliveries
+                    SET lease_expires_at = now() + make_interval(secs => $2), updated_at = now()
+                  WHERE lease_holder = $1 AND status = 'SENDING'
+              RETURNING id",
+                [self.holder.clone().into(), self.lease_secs.into()],
+            ))
+            .await?;
+        Ok(rows
+            .iter()
+            .any(|r| r.try_get::<Uuid>("", "id").ok() == Some(id)))
     }
 
     async fn claim(&self) -> ApiResult<Vec<Claimed>> {
@@ -635,7 +711,7 @@ impl EmailWorker {
                     d.text_body, d.attempts, d.expires_at",
             [
                 self.holder.clone().into(),
-                LEASE_SECS.into(),
+                self.lease_secs.into(),
                 (self.settings.batch as i64).into(),
             ],
         ))
@@ -742,6 +818,13 @@ impl EmailWorker {
             };
             if n > 0 {
                 tokio::time::sleep(spacing).await;
+            }
+            if !self.renew(job.id).await? {
+                inc(&OM.email_lease_lost);
+                tracing::warn!(delivery_id = %job.id, category = %job.category,
+                    "email lease lost before sending; another worker holds it");
+                report.lease_lost += 1;
+                continue;
             }
             let message = ProviderMessage {
                 id: job.id,

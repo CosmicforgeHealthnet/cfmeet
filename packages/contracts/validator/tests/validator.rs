@@ -277,6 +277,76 @@ fn contracts_for_unimplemented_services_are_rejected() {
     );
 }
 
+fn edit_planned_owners(s: &Sandbox, f: impl FnOnce(&mut Vec<Value>)) {
+    s.edit("manifest.json", |m| {
+        f(m["planned_owners"].as_array_mut().unwrap());
+    });
+}
+
+#[test]
+fn notification_contracts_are_valid_only_through_their_planned_owner() {
+    // Roadmap N1 froze the Notification Service contracts before services/notifications
+    // exists: they are valid only because `notifications` is a declared planned owner.
+    let s = Sandbox::new();
+    s.edit("manifest.json", |m| {
+        m.as_object_mut().unwrap().remove("planned_owners");
+    });
+    assert_rejected(
+        &s.run(),
+        "owner `notifications` is not an existing deployable service",
+    );
+}
+
+#[test]
+fn planned_owner_contracts_must_stay_experimental() {
+    let s = Sandbox::new();
+    s.edit_manifest(|c| {
+        contract(c, "cfmeet.notifications.internal-api")["lifecycle"] = json!("beta");
+    });
+    assert_rejected(
+        &s.run(),
+        "owner `notifications` is a planned owner: its contracts must be experimental",
+    );
+}
+
+#[test]
+fn planned_owner_entry_must_go_once_the_service_exists() {
+    // Once N2 creates services/notifications the exception must be removed.
+    let s = Sandbox::new();
+    fs::create_dir_all(s.repo.join("services/notifications")).unwrap();
+    assert_rejected(
+        &s.run(),
+        "services/notifications now exists: remove `notifications` from planned_owners",
+    );
+}
+
+#[test]
+fn planned_owners_are_narrow() {
+    // An unused planned owner, `platform`, and duplicates are refused.
+    let s = Sandbox::new();
+    edit_planned_owners(&s, |p| {
+        p.push(json!({ "owner": "directory", "approval": "x", "until": "y" }));
+        p.push(json!({ "owner": "platform", "approval": "x", "until": "y" }));
+        p.push(p[0].clone());
+    });
+    let report = s.run();
+    assert_rejected(
+        &report,
+        "planned_owners.directory]: planned owner owns no contract",
+    );
+    assert_rejected(&report, "`platform` cannot be a planned owner");
+    assert_rejected(&report, "planned owner listed more than once");
+}
+
+#[test]
+fn planned_owner_entries_need_an_approval_reference() {
+    let s = Sandbox::new();
+    edit_planned_owners(&s, |p| {
+        p[0].as_object_mut().unwrap().remove("approval");
+    });
+    assert_rejected(&s.run(), "approval");
+}
+
 #[test]
 fn messaging_contracts_require_the_messaging_service() {
     // The registered Messaging contracts are valid only because services/messaging exists:
