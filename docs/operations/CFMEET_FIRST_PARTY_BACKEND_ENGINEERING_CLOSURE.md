@@ -250,6 +250,7 @@ The production multi-device suite also passed: replacement, fan-out and rekey (Â
 | Developer Platform and API Gateway | [43709293595](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43709293595) | **30/30**, cleanup with 0 problems |
 | Personal Calling and Communications, real voice and video | [43709750585](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43709750585) | **24/24** |
 | Meetings, real LiveKit room | [43710752927](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43710752927) | **22/22** |
+| Call recording, real media | [43713116133](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43713116133) | **12/12**. The first attempt ([43712045458](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43712045458)) was refused by the runtime's active-calls guard, which defers a restart while calls are live; nothing changed |
 | Web Push activation | [43706099426](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43706099426) | activated; `WEB_PUSH` adapter running |
 | Production-access review activation | [43708560267](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43708560267) | refused before the VPS: no reviewers named (owner) |
 | **Final `certify`** | [43711424389](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43711424389) | **`CERTIFIED_READ_ONLY`** |
@@ -271,7 +272,7 @@ The production multi-device suite also passed: replacement, fan-out and rekey (Â
 | Personal E2EE Messaging | E2EE 16/16; web journey 11/11 |
 | Calling and Enterprise Calling | 24/24; 21/21 |
 | Meetings | 22/22 |
-| Recording | covered by Enterprise Calling's recording-permission checks; the dedicated recording suite (12/12 on 2026-11-13) was not re-run because Calling's recording code is unchanged |
+| Recording | 12/12 on the released Calling image: consent and non-participant denial, notice evidence, retention deadline, encrypted real-media playback, cross-user and cross-tenant denial, access audit, deletion revokes access, physical object deletion, retention worker |
 | Organizations and Messaging | 18/18 |
 | Developer Platform and API Gateway | 30/30 |
 | Cross-service authorization and revocation | E2EE (fan-out revocation, sign-out everywhere), Organizations (revocation, suspension), Developer (revoked or forged credentials) |
