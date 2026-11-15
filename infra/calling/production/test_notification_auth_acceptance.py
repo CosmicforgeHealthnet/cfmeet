@@ -7,6 +7,15 @@ import notification_auth_acceptance as a
 
 
 class AuthProbeSafety(unittest.TestCase):
+    def test_only_request_correlation_id_is_ignored_when_comparing_denials(self):
+        first = {'success': False, 'error': {'code': 'BAD_REQUEST', 'message': 'Invalid or expired reset code', 'requestId': 'a'}}
+        second = {'success': False, 'error': dict(first['error'], requestId='b')}
+        self.assertEqual(a.denial_shape(first), a.denial_shape(second))
+        second['error']['message'] = 'Account missing'
+        self.assertNotEqual(a.denial_shape(first), a.denial_shape(second))
+        with self.assertRaises(AssertionError):
+            a.denial_shape({})
+
     def fixture(self):
         account = {'username': 'cfmeet_accept_a_1234abcd',
                    'email': 'cfmeet_accept_a_1234abcd@example.invalid',

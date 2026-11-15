@@ -27,6 +27,12 @@ def request(method, path, body=None, token=None, expected=200):
     return value
 
 
+def denial_shape(value):
+    """Request IDs are deliberately unique and carry no account-existence information."""
+    assert isinstance(value, dict) and isinstance(value.get('error'), dict), 'Missing error envelope'
+    return dict(value, error={k: v for k, v in value['error'].items() if k != 'requestId'})
+
+
 def redis(cr, env, command, values):
     out = mail.redis_command(cr, env, command, values)
     assert out is not None, 'Controlled fixture Redis operation failed'
@@ -92,7 +98,7 @@ def run_pending(account, registration, redis_url, legacy=False):
         denied = request('POST', '/api/v1/auth/verify-reset-token', {'email': address, 'token': wrong}, expected=400)
         unknown = request('POST', '/api/v1/auth/verify-reset-token', {
             'email': 'cfmeet_unknown_' + uuid.uuid4().hex + '@example.invalid', 'token': wrong}, expected=400)
-        assert denied == unknown, 'Reset probe distinguishes an unknown address from an incorrect code'
+        assert denial_shape(denied) == denial_shape(unknown), 'Reset probe distinguishes an unknown address from an incorrect code'
         probe = request('POST', '/api/v1/auth/verify-reset-token', {'email': address, 'token': code})
         assert probe['valid'] is True
         replacement = 'Aa1!' + secrets.token_urlsafe(28)
