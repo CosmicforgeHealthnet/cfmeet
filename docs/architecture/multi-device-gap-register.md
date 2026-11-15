@@ -30,13 +30,13 @@ Specification: *CF Meet — Final backend security, linked devices and multi-dev
 | G11 | Existing sessions not logged out by the migration (§10) | — | Additive migration; unclassified sign-ins keep working and do not count | `unclassified_sign_ins_keep_working_and_never_count` |
 | G12 | E2EE only from authorized devices (§4, §5) | Any signed-in session could enroll | `ACCOUNT_E2EE_REQUIRES_TRUSTED_DEVICE`: enrollment through the relay needs a trusted device | `unified_messaging_api` (DEVICE_NOT_TRUSTED), production acceptance `untrusted_browser_refused_e2ee_enrollment` |
 | G13 | Multi-device MLS: sync, removal at the rekey boundary, no old secrets for new devices (§5) | Supported by Messaging; not proven for a multi-device account | Real-OpenMLS test with a mobile, two web devices and a peer, including replacement | `services/messaging/tests/messaging.rs::one_account_with_mobile_and_two_web_devices_replaces_its_mobile` |
-| G14 | Controlled production activation; no claim without evidence (§12) | Unconditional refusal | `MESSAGING_E2EE_PRODUCTION_RELEASE_FILE` with the actual status; coordinated `activate-personal-e2ee`; safe defaults widened only after it | `production_e2ee_needs_a_valid_owner_release_record`, offline release tests |
+| G14 | Controlled production activation; no claim without evidence (§12) | Unconditional refusal | `MESSAGING_E2EE_PRODUCTION_RELEASE_FILE` with the actual status; coordinated `activate-personal-encryption`; safe defaults widened only after it | `production_e2ee_needs_a_valid_owner_release_record`, offline release tests |
 | G15 | Notify surviving devices of a replacement (§2C.13, §9) | Hub change feed only | Security log `GET /api/v2/me/security-events` plus an email notice | first-mobile test (event and email) |
 | G16 | Cap reconciliation (§10) | Messaging 10, Hub 20, Account none | Account enforces 1 + `ACCOUNT_MAX_WEB_DEVICES`; downstream caps stay as ceilings (≥ 5, never 1) | ADR 0060 §2 |
 | G17 | Calling: one answer wins across mobile and web (§7) | Already satisfied | No change | Calling `ringing.rs` arbitration; enterprise acceptance |
 | G18 | Organization authorization unchanged by linking (§8) | Satisfied: membership is checked live per request | No change; devices carry no organization rights | organization acceptance (unchanged code path) |
 | G19 | Production checks for `callerDisplayName`, `canViewRecordings`, `SIGNALING_CREDENTIAL_EXPIRED` | Unit and contract tests only | Direct checks in `communications-verify` | `communications_acceptance.py::calling_api_checks`, `expired_signaling_check` |
-| G20 | Real production multi-device encrypted exchange | Blocked (E2EE off) | `messaging-e2ee-verify`: real OpenMLS clients and a read-only storage check | `infra/calling/production/e2ee_acceptance.py`, `certification/src/bin/cfmeet-e2ee-acceptance.rs` |
+| G20 | Real production multi-device encrypted exchange | Blocked (E2EE off) | `messaging-encrypted-verify`: real OpenMLS clients and a read-only storage check | `infra/calling/production/e2ee_acceptance.py`, `certification/src/bin/cfmeet-e2ee-acceptance.rs` |
 
 ## 3. Not done (documented residual)
 

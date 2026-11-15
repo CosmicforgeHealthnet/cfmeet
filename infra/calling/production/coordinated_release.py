@@ -1234,8 +1234,8 @@ def safe_defaults():
         for name in ('developer-platform', 'developer-platform-worker'):
             rules[name]['DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE'] = (None, 'shadow', 'active')
     # Personal E2EE devices may be on only after the owner's recorded release decision
-    # (activate-personal-e2ee), and only with the release record mounted (checked below).
-    if done('activate-personal-e2ee'):
+    # (activate-personal-encryption), and only with the release record mounted (checked below).
+    if done('activate-personal-encryption'):
         rules['messaging']['MESSAGING_E2EE_DEVICES_ENABLED'] = (None, 'false', 'true')
     return rules
 
@@ -1738,7 +1738,7 @@ def first_party_feature_changes(meeting_env):
 
 E2EE_RELEASE_SOURCE = p.ROOT / 'messaging' / 'e2ee-production-release.json'
 E2EE_RELEASE_TARGET = '/run/messaging/e2ee-production-release.json'
-E2EE_CONFIRM = 'owner-approved-e2ee-without-independent-assessment'
+E2EE_CONFIRM = 'owner-approved-encryption-without-independent-assessment'
 E2EE_DECISION_LOG = 'production personal E2EE enabled by owner release decision'
 
 
@@ -1761,7 +1761,7 @@ def activate_personal_e2ee(sha, run_id, confirm):
     start unless the mounted release record validates; the multi-device Account policy (trusted
     devices only) gates enrollment. Organization MANAGED messaging is unchanged."""
     if confirm != E2EE_CONFIRM:
-        raise RuntimeError('activate-personal-e2ee needs confirm=' + E2EE_CONFIRM + ' (owner decision)')
+        raise RuntimeError('activate-personal-encryption needs confirm=' + E2EE_CONFIRM + ' (owner decision)')
     messaging, meeting = env_of('messaging'), env_of('meeting-service')
     if messaging.get('CF_RUNTIME_ENVIRONMENT') != 'production':
         raise RuntimeError('Messaging is not the production runtime')
@@ -1782,7 +1782,7 @@ def activate_personal_e2ee(sha, run_id, confirm):
             raise RuntimeError('Messaging did not log the owner release decision at startup')
         emit('e2eeStartup', 'release decision validated by Messaging')
 
-    apply_activation('activate-personal-e2ee', sha, run_id, [
+    apply_activation('activate-personal-encryption', sha, run_id, [
         ('messaging', {'MESSAGING_E2EE_DEVICES_ENABLED': 'true',
                        'MESSAGING_E2EE_PRODUCTION_RELEASE_FILE': E2EE_RELEASE_TARGET},
          {'mounts': [(str(E2EE_RELEASE_SOURCE), E2EE_RELEASE_TARGET)]})], post=started)
@@ -2268,7 +2268,7 @@ ACTIVATIONS = {
     'activate-gateway-routing': (('activate-developer-platform',), activate_gateway_routing),
     'activate-first-party-features': ((), activate_first_party_features),
     # Owner decision 2026-11-15: personal E2EE without an independent assessment (recorded).
-    'activate-personal-e2ee': (('activate-first-party-features',), activate_personal_e2ee),
+    'activate-personal-encryption': (('activate-first-party-features',), activate_personal_e2ee),
     'activate-web-origins': (('activate-gateway-routing',), activate_web_origins),
     'activate-gateway-docs': (('activate-gateway-routing',), activate_gateway_docs),
     'activate-developer-console': (('activate-developer-platform',), activate_developer_console),

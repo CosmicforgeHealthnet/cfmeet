@@ -91,10 +91,10 @@ def run(operation, sha, run_id):
     elif operation == 'messaging-ingress':
         import messaging_runtime
         messaging_runtime.reinstall_ingress(run_id)
-    elif operation in ('messaging-verify', 'messaging-e2ee-verify'):
+    elif operation in ('messaging-verify', 'messaging-encrypted-verify'):
         import e2ee_acceptance
         env = p.env_of(p.inspect('cfmeet-messaging'))
-        if operation == 'messaging-e2ee-verify' or e2ee_acceptance.release_status(env):
+        if operation == 'messaging-encrypted-verify' or e2ee_acceptance.release_status(env):
             # Personal E2EE is on under the owner's release record: the real multi-device
             # encrypted exchange replaces the guard-only journey.
             e2ee_acceptance.execute(sha, run_id)

@@ -318,7 +318,7 @@ E2EE_RELEASE_TARGET = '/run/messaging/e2ee-production-release.json'
 
 def e2ee_setting(env):
     """The production E2EE switch a reconfiguration must keep: off, or on ONLY under the owner's
-    release record (coordinated activate-personal-e2ee). Anything else is refused."""
+    release record (coordinated activate-personal-encryption). Anything else is refused."""
     if env.get('MESSAGING_E2EE_DEVICES_ENABLED', 'false') == 'false':
         return {'MESSAGING_E2EE_DEVICES_ENABLED': 'false'}
     assert env.get('MESSAGING_E2EE_DEVICES_ENABLED') == 'true' \

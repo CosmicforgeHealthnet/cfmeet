@@ -427,7 +427,7 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         envs = {'messaging': {'MESSAGING_E2EE_DEVICES_ENABLED': 'true'}}
         with patch.object(cr, 'done', lambda op: False):
             self.assertIn('messaging MESSAGING_E2EE_DEVICES_ENABLED', cr.safe_default_violations(envs))
-        with patch.object(cr, 'done', lambda op: op == 'activate-personal-e2ee'):
+        with patch.object(cr, 'done', lambda op: op == 'activate-personal-encryption'):
             self.assertEqual(cr.safe_default_violations(envs), ['messaging MESSAGING_E2EE_PRODUCTION_RELEASE_FILE'])
             envs['messaging']['MESSAGING_E2EE_PRODUCTION_RELEASE_FILE'] = cr.E2EE_RELEASE_TARGET
             self.assertEqual(cr.safe_default_violations(envs), [])
@@ -445,7 +445,18 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         self.assertNotIn('assessmentReference', record)
         with self.assertRaisesRegex(RuntimeError, 'owner decision'):
             cr.activate_personal_e2ee('a' * 40, '1', '')
-        self.assertEqual(cr.ACTIVATIONS['activate-personal-e2ee'][0], ('activate-first-party-features',))
+        self.assertEqual(cr.ACTIVATIONS['activate-personal-encryption'][0], ('activate-first-party-features',))
+
+    def test_every_operation_and_confirmation_passes_the_workflow_input_patterns(self):
+        # The workflows refuse names outside these patterns before reaching the VPS.
+        import re
+        for op in cr.OPERATIONS:
+            self.assertRegex(op, r'^[a-z][a-z-]{1,40}$', op)
+        self.assertRegex(cr.E2EE_CONFIRM, r'^[a-z,-]{0,120}$')
+        workflow = (Path(__file__).resolve().parents[3] / '.github/workflows/cfmeet-calling-production.yml').read_text()
+        options = re.search(r'options: \[([^\]]+)\]', workflow).group(1)
+        for op in (o.strip() for o in options.split(',')):
+            self.assertRegex(op, r'^[a-z][a-z-]{1,79}$', op)
 
     def test_new_services_are_private_bounded_and_dark(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(p, 'SECRETS', Path(folder)):

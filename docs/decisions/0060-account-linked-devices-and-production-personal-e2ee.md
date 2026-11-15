@@ -51,7 +51,7 @@ Production E2EE was refused unconditionally pending an independent cryptographic
 6. **Compatibility.**
    * Sign-ins that never declare a device (all existing ones, and older clients) stay *unclassified*. They work as before and do not count against limits, so nobody is signed out by the migration.
    * Logout-everywhere revokes every device.
-7. **Production personal E2EE (owner decision 2026-11-15).** Production E2EE is allowed only with a release record (`MESSAGING_E2EE_PRODUCTION_RELEASE_FILE`), written by the coordinated `activate-personal-e2ee`. The record states the **actual** status:
+7. **Production personal E2EE (owner decision 2026-11-15).** Production E2EE is allowed only with a release record (`MESSAGING_E2EE_PRODUCTION_RELEASE_FILE`), written by the coordinated `activate-personal-encryption`. The record states the **actual** status:
    * `independentAssessment: NOT_PERFORMED`;
    * accepted residual risks: `NO_INDEPENDENT_CRYPTOGRAPHIC_ASSESSMENT`, `KEY_TRANSPARENCY_UNWITNESSED` (no witnesses are configured) and `WEB_CODE_DELIVERY_TRUST` (AD-06).
 

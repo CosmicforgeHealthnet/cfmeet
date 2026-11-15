@@ -1,4 +1,4 @@
-"""Production multi-device personal E2EE acceptance (messaging-e2ee-verify).
+"""Production multi-device personal E2EE acceptance (messaging-encrypted-verify).
 
 Runs the real-OpenMLS acceptance client (certification/src/bin/cfmeet-e2ee-acceptance.rs,
 built static by the workflow into ./bin/) against https://api.cfmeet.com with two fresh,
@@ -7,7 +7,7 @@ the exchanged phrases was ever stored and that every message of the conversation
 PRIVATE_E2EE ciphertext. Never emits tokens, passwords, keys or account addresses.
 
 Only runs when production E2EE is on under the owner's release record
-(coordinated activate-personal-e2ee); otherwise it reports BLOCKED and fails.
+(coordinated activate-personal-encryption); otherwise it reports BLOCKED and fails.
 """
 import json
 import os
@@ -59,7 +59,7 @@ def execute(sha, run_id):
     status = release_status(env)
     if status is None:
         print(json.dumps({'verdict': 'BLOCKED', 'reason': 'production E2EE devices are not enabled under an owner release record'}))
-        raise RuntimeError('Personal E2EE is not activated in production (activate-personal-e2ee)')
+        raise RuntimeError('Personal E2EE is not activated in production (activate-personal-encryption)')
     assert BINARY.is_file(), 'The workflow did not provide the acceptance client'
     folder = p.ROOT / 'messaging' / ('e2ee-acceptance-' + run_id)
     folder.mkdir(mode=0o700, parents=True, exist_ok=False)
