@@ -492,6 +492,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-push-transport"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "hmac 0.12.1",
+ "p256",
+ "rand 0.8.8",
+ "reqwest",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+]
+
+[[package]]
 name = "cf-scan-gateway-contract"
 version = "0.1.0"
 dependencies = [
@@ -2520,6 +2538,7 @@ dependencies = [
  "cf-communications-policy",
  "cf-messaging-crypto",
  "cf-object-storage",
+ "cf-push-transport",
  "cf-scan-gateway-contract",
  "cf-service-auth",
  "cf-usage-facts",

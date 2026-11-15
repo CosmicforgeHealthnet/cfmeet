@@ -89,6 +89,8 @@ jobs:
           # CosmicForge shared security scan gateway and its wire contract.
           - services/security-scan-gateway
           - packages/scan-gateway-contract
+          # Push transport moved out of Messaging (Notification Service N4).
+          - packages/push-transport
           # Part V K §158: every service lockfile is audited (these four were not).
           - services/platform-access
           - services/sms-gateway

@@ -14,8 +14,6 @@
 //!   [`LocalTestPush`] is an explicitly local adapter for tests and development.
 //! * A push is never proof of message delivery.
 
-use std::sync::Mutex;
-
 use chrono::{DateTime, Utc};
 use sea_orm::FromQueryResult;
 use serde::Deserialize;
@@ -34,34 +32,10 @@ use crate::{
 
 pub const PLATFORMS: &[&str] = &["APNS", "FCM", "WEB_PUSH", "LOCAL_TEST"];
 
-/// Outcome of one provider call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PushOutcome {
-    Sent,
-    Retryable(String),
-    /// The provider refused the handle for good (unregistered app, bad token).
-    InvalidHandle,
-    Permanent(String),
-}
-
-#[async_trait::async_trait]
-pub trait PushProvider: Send + Sync {
-    fn name(&self) -> &'static str;
-    /// Whether this provider can deliver to `platform` in this deployment.
-    fn supports(&self, platform: &str) -> bool;
-    /// Provider-specific checks of a handle at registration (e.g. the Web Push host
-    /// allowlist); structural checks run regardless.
-    fn validate_handle(&self, _platform: &str, _handle: &str) -> Result<(), &'static str> {
-        Ok(())
-    }
-    async fn send(&self, platform: &str, handle: &str, payload: &Value) -> PushOutcome;
-    /// The Web Push application-server (VAPID) public key clients pass to
-    /// `pushManager.subscribe` (base64url, uncompressed P-256 point); `None` when Web Push is
-    /// not configured. Public by nature; the private key never leaves the adapter.
-    fn web_push_application_server_key(&self) -> Option<String> {
-        None
-    }
-}
+// The provider boundary (`PushOutcome`, `PushProvider`) and the local test adapter moved to
+// packages/push-transport with the adapters (Notification Service roadmap N4); re-exported
+// here under their previous paths so every caller and test is unchanged.
+pub use cf_push_transport::provider::{LocalTestPush, PushOutcome, PushProvider};
 
 /// `GET /v1/messaging/push/configuration`: which push platforms this deployment delivers
 /// to, and the Web Push application-server key. Nothing secret, nothing per user.
@@ -95,38 +69,6 @@ impl PushProvider for UnconfiguredPush {
 
     async fn send(&self, _platform: &str, _handle: &str, _payload: &Value) -> PushOutcome {
         PushOutcome::Permanent("no push provider configured".into())
-    }
-}
-
-/// A LOCAL adapter (tests / development only; refused in staging and production by the
-/// configuration): records what would have been sent to `LOCAL_TEST` registrations.
-#[derive(Default)]
-pub struct LocalTestPush {
-    pub sent: Mutex<Vec<(String, Value)>>,
-    pub fail_next: Mutex<u32>,
-}
-
-#[async_trait::async_trait]
-impl PushProvider for LocalTestPush {
-    fn name(&self) -> &'static str {
-        "local-test"
-    }
-
-    fn supports(&self, platform: &str) -> bool {
-        platform == "LOCAL_TEST"
-    }
-
-    async fn send(&self, _platform: &str, handle: &str, payload: &Value) -> PushOutcome {
-        let mut fail = self.fail_next.lock().unwrap();
-        if *fail > 0 {
-            *fail -= 1;
-            return PushOutcome::Retryable("injected failure".into());
-        }
-        self.sent
-            .lock()
-            .unwrap()
-            .push((handle.to_string(), payload.clone()));
-        PushOutcome::Sent
     }
 }
 

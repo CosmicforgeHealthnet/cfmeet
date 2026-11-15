@@ -26,6 +26,8 @@ COPY packages/messaging-crypto packages/messaging-crypto
 COPY packages/object-storage packages/object-storage
 # Shared scan gateway wire contract (signed verdicts); not the gateway itself.
 COPY packages/scan-gateway-contract packages/scan-gateway-contract
+# Push transport (APNs / FCM / Web Push adapters; Notification Service roadmap N4).
+COPY packages/push-transport packages/push-transport
 COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging
