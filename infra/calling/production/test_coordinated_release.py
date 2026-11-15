@@ -474,7 +474,7 @@ class SafeDefaultsAndRouting(unittest.TestCase):
 
         with patch.object(cr, 'env_of', lambda name: env), \
                 patch.object(messaging_runtime, 'protected_file', return_value=key) as protected, \
-                patch.object(cr.p, 'run', return_value='DER'), \
+                patch.object(cr.p, 'run', return_value='-----BEGIN PUBLIC KEY-----\nX\n-----END PUBLIC KEY-----'), \
                 patch.object(cr, 'apply_activation', apply):
             cr.activate_web_push('a' * 40, '1', '')
         self.assertEqual(protected.call_args[0][0], 'web-push-vapid.pem')
@@ -492,6 +492,14 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         with patch.object(cr.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '{"message":"push adapters","platforms":"[]"}', '')):
             with self.assertRaisesRegex(RuntimeError, 'Web Push adapter'):
                 calls['post']()
+
+    def test_the_public_key_check_runs_real_openssl_with_text_output(self):
+        # Regression (activate-web-push run 43702218850): DER output is binary and p.run
+        # decodes text, which raised UnicodeDecodeError on the VPS.
+        with tempfile.TemporaryDirectory() as d:
+            key = Path(d) / 'vapid.pem'
+            key.write_text(cr.vapid_private_key_pem())
+            self.assertTrue(cr.vapid_public_key_present(key))
 
     def test_the_vapid_key_is_a_pkcs8_p256_pem(self):
         pem = cr.vapid_private_key_pem()
