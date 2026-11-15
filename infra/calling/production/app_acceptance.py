@@ -21,8 +21,9 @@ def controlled_input(redis_url,email):
             'code':code,'sealed':controlled_otp.sealed(code)}
 
 
-def accounts(namespace=None,count=3):
+def accounts(namespace=None,count=3,security_checks=False):
     assert count in (2,3)
+    assert not security_checks or (count == 3 and namespace and namespace.startswith('organizations-'))
     if namespace is not None:
         assert re.fullmatch(r'[a-z0-9-]{1,64}',namespace), 'Invalid controlled fixture namespace'
     path=p.SECRETS/('cfmeet-acceptance-'+namespace+'.json' if namespace else 'calling-acceptance-accounts.json')
@@ -52,8 +53,17 @@ if cmd('EXISTS',x['hashed'])=='1':print(x['code'] if cmd('SET',x['hashed'],x['se
 else:print(cmd('GET',x['legacy']) or '')
 '''
     for account in values:
-        account['userId']=api('register',dict(username=account['username'],email=account['email'],
-            password=account['password'],confirm_password=account['password']))['user_id']
+        registration=api('register',dict(username=account['username'],email=account['email'],
+            password=account['password'],confirm_password=account['password']))
+        account['userId']=registration['user_id']
+        if security_checks and account is not values[-1]:
+            import notification_auth_acceptance
+            try:
+                notification_auth_acceptance.run_pending(account,registration,redis_url,legacy=account is values[1])
+            finally:
+                p.write_private(path,json.dumps(values))
+            assert api('login',dict(email=account['email'],password=account['password']))['user']['id']==account['userId']
+            continue
         # Only retrieve the verification code for this newly created controlled account.
         code=p.run('docker','run','--rm','-i','--network','container:cfmeet-production-backend',
             'python:3.12-slim','python','-c',redis_reader,

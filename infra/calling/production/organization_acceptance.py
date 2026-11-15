@@ -579,5 +579,6 @@ class Realtime:
 def run(run_id, emit):
     """Creates the three acceptance accounts (app_acceptance) and runs the journey."""
     import app_acceptance
-    accounts = app_acceptance.accounts('organizations-' + run_id.replace('_', '-').lower()[:50], count=3)
+    accounts = app_acceptance.accounts('organizations-' + run_id.replace('_', '-').lower()[:50], count=3,
+                                      security_checks=True)
     return Journey(accounts, emit).run()
