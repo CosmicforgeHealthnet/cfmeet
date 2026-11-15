@@ -148,6 +148,15 @@ def grant(bundle,issuer,key,permissions):
     bundle['trusted_issuers'].append(dict(issuer=issuer,audience=bundle['receiver'],
         runtime_environment=bundle['runtime_environment'],keys=[key],permissions=permissions))
 
+# Grants the Communications Hub's trust bundle gives each owner service. The Hub bundle is
+# rebuilt from this table on every release preparation, so a permission missing here is
+# dropped at the next release. Notification Service N0-1 (S-1): the Meeting Service reads
+# notification opt-outs (communications-preferences.read) before it sends a meeting notice;
+# without the grant every meeting notice fails closed.
+HUB_INCOMING={'meeting-service':['communications-user.forward','communications-account.apply','communications-preferences.read'],
+              'calling':['communications-policy.check','communications-block.apply'],
+              'messaging':['communications-policy.check','communications-block.apply']}
+
 def prepare_trust():
     WORK.mkdir(exist_ok=True,mode=0o700)
     keyfile=WORK/'communications.pem'
@@ -175,10 +184,7 @@ def prepare_trust():
     for service,name in OWNERS.items():
         c=p.inspect(name);e=p.env_of(c)
         key=public_key(mount_source(c,e['CF_SERVICE_AUTH_PRIVATE_KEY_FILE']),e['CF_SERVICE_AUTH_KEY_ID'])
-        incoming={'meeting-service':['communications-user.forward','communications-account.apply'],
-                  'calling':['communications-policy.check','communications-block.apply'],
-                  'messaging':['communications-policy.check','communications-block.apply']}
-        if service in incoming:grant(hub,'cfmeet.'+service,key,incoming[service])
+        if service in HUB_INCOMING:grant(hub,'cfmeet.'+service,key,HUB_INCOMING[service])
         old=e.get('CF_SERVICE_TRUST_BUNDLE_FILE')
         bundle=json.loads(Path(mount_source(c,old)).read_text()) if old else dict(bundle_version=1,receiver='cfmeet.'+service,runtime_environment='production',trusted_issuers=[])
         # Repeated release preparation reads the original bundle or our already

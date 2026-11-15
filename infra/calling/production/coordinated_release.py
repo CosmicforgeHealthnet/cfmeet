@@ -568,6 +568,10 @@ GRANTS = (
     # Customer API families through the gateway (receivers authorize the gateway's forwards).
     ('activate-gateway-families', 'calling', 'api-gateway', ('calling-request.forward',)),
     ('activate-gateway-families', 'messaging', 'api-gateway', ('messaging-request.forward',)),
+    # Notification Service N0-1 (S-1): the Meeting Service checks notification opt-outs at the
+    # Hub before sending a meeting notice. The Hub release (communications_release.HUB_INCOMING)
+    # carries the same grant; this operation applies it without a Hub release.
+    ('activate-meeting-notice-preferences', 'communications', 'meeting-service', ('communications-preferences.read',)),
 )
 
 
@@ -1664,6 +1668,14 @@ def activate_org_events(sha, run_id, confirm):
                            'CF_MEETING_SERVICE_BASE_URL': private_url(SERVICES['meeting-service']['tls'])})], post=post)
 
 
+def activate_meeting_notice_preferences(sha, run_id, confirm):
+    """N0-1 (S-1): grant communications-preferences.read to the Meeting Service in the Hub's
+    trust bundle (merged; no existing issuer, key or grant is dropped). Only the Hub is
+    recreated; a failure restores the previous bundle. No flag, provider or route changes."""
+    has_signing_identity('meeting-service')
+    apply_activation('activate-meeting-notice-preferences', sha, run_id, [])
+
+
 INVENTORY_SQL = """BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY;
 SELECT json_build_object(
  'organizations', (SELECT count(*) FROM organizations),
@@ -2426,6 +2438,8 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, confirm)),
     'activate-production-access-review': (('activate-developer-console',), lambda sha, run_id, confirm:
                                           developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
+    # Notification Service N0-1: the missing Hub preference grant (meeting notices fail closed).
+    'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
     + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')
