@@ -8,6 +8,10 @@
 //!   fetches and decrypts the message itself after waking up. A database CHECK refuses
 //!   content-like payload keys.
 //! * Jobs are leased (`FOR UPDATE SKIP LOCKED`), retried with bounded backoff and expire.
+//!   The lease token is the fence: immediately before each authorization check and each
+//!   provider call the job's lease is renewed under its token, and a job whose lease was
+//!   re-claimed by another dispatcher is skipped, never sent twice (S-8). Each of those
+//!   calls is bounded by a third of the lease.
 //!   Without a configured provider they end as `NOT_CONFIGURED` — never reported as
 //!   delivered. The APNs, FCM and Web Push adapters live in
 //!   [`super::push_adapters`] (each enabled only with its credentials);
@@ -233,6 +237,32 @@ pub struct PushReport {
     pub disabled: usize,
     pub failed: usize,
     pub expired: usize,
+    /// Claimed jobs skipped because their lease lapsed and another dispatcher re-claimed
+    /// them (that dispatcher sends them).
+    pub lease_lost: usize,
+}
+
+/// How long a dispatcher holds a claimed job. Renewed under the lease token before each
+/// external call of the job, so a slow provider earlier in a batch cannot let a later
+/// job's lease lapse into another replica's claim while this one still sends it.
+pub const LEASE: chrono::Duration = chrono::Duration::seconds(60);
+
+/// Upper bound of one authorization check or one provider call: a third of [`LEASE`], so
+/// the lease renewed just before the call always outlives it. (The adapters' own HTTP
+/// timeouts are shorter; this only bounds a call that hangs.)
+const CALL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Extends the lease of a job this dispatcher still holds. `false`: the lease token no
+/// longer matches (the lease lapsed and another dispatcher re-claimed the job, or the job
+/// is no longer pending) — the caller must not send it.
+async fn renew_lease(state: &AppState, job: Uuid, token: Uuid) -> Result<bool> {
+    let renewed = db::exec(
+        &state.db,
+        "UPDATE messaging_push_jobs SET lease_expires_at = $3 WHERE id = $1 AND lease_token = $2 AND status = 'PENDING'",
+        vec![job.into(), token.into(), (state.now() + LEASE).into()],
+    )
+    .await?;
+    Ok(renewed == 1)
 }
 
 #[derive(FromQueryResult)]
@@ -360,7 +390,7 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
              JOIN messaging_outbox_events e ON e.id=j.event_id JOIN messaging_conversations c ON c.id=m.conversation_id \
              WHERE m.conversation_id=j.conversation_id AND d.id=j.device_id AND m.state='ACTIVE' \
              AND c.lifecycle_state='ACTIVE' AND e.conversation_event_sequence>=m.visible_from_event) AS member_active",
-        vec![now.into(), batch.into(), token.into(), (now + chrono::Duration::seconds(60)).into()],
+        vec![now.into(), batch.into(), token.into(), (now + LEASE).into()],
     )
     .await?;
     let mut report = PushReport {
@@ -382,13 +412,31 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
             report.not_configured += 1;
             ("NOT_CONFIGURED", None, None)
         } else {
-            let outcome = match authorized(state, &job).await {
+            if !renew_lease(state, job.id, token).await? {
+                lease_lost(&mut report);
+                continue;
+            }
+            let verdict = tokio::time::timeout(CALL_DEADLINE, authorized(state, &job))
+                .await
+                .unwrap_or_else(|_| Err(Error::code(ErrorCode::ServiceUnavailable)));
+            let outcome = match verdict {
                 Ok(true) => {
-                    state
-                        .realtime
-                        .push
-                        .send(&job.platform, &job.push_handle, &job.payload)
+                    // The fence: the send happens only while this dispatcher provably
+                    // holds the job, for at least the whole (bounded) call.
+                    if !renew_lease(state, job.id, token).await? {
+                        lease_lost(&mut report);
+                        continue;
+                    }
+                    let send =
+                        state
+                            .realtime
+                            .push
+                            .send(&job.platform, &job.push_handle, &job.payload);
+                    tokio::time::timeout(CALL_DEADLINE, send)
                         .await
+                        .unwrap_or_else(|_| {
+                            PushOutcome::Retryable("provider call timed out".into())
+                        })
                 }
                 Ok(false) => {
                     report.disabled += 1;
@@ -453,6 +501,11 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
         );
     }
     Ok(report)
+}
+
+fn lease_lost(report: &mut PushReport) {
+    report.lease_lost += 1;
+    crate::metrics::inc("messaging_push_lease_lost_total", &[]);
 }
 
 fn status_label(s: &str) -> &'static str {
