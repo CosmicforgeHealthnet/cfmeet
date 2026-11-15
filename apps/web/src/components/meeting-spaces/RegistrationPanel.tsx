@@ -120,7 +120,7 @@ export default function RegistrationPanel({ space }: { space: MeetingSpaceRespon
               </div>
               <label className="relative min-w-0 flex-1 sm:max-w-xs">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, email, company" className="h-10 w-full rounded-full border border-border bg-background pl-9 pr-3 text-sm outline-none focus:border-primary" />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, email, company" className="h-10 w-full rounded-full border border-transparent bg-muted/70 focus:bg-background pl-9 pr-3 text-sm outline-none focus:border-primary" />
               </label>
               <button type="button" onClick={exportCsv} disabled={!shown.length} className="inline-flex h-10 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50 sm:ml-auto"><Download className="size-4" />Export CSV</button>
             </div>

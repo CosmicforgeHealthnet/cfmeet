@@ -69,7 +69,7 @@ export function NiceSelect<T extends string>({
             else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
             else if (e.key === "Enter") { e.preventDefault(); pick(options[active]); }
           }}
-          className="flex h-11 w-full items-center gap-2.5 rounded-xl border border-border bg-background px-3 text-left text-sm transition-colors hover:bg-muted/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+          className="flex h-11 w-full items-center gap-2.5 rounded-xl border border-transparent bg-muted/70 px-3 text-left text-sm transition-colors hover:bg-muted focus:border-primary focus:bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
         >
           {CurrentIcon && <CurrentIcon className="size-4 shrink-0 text-primary" aria-hidden />}
           <span className={cn("min-w-0 flex-1 truncate", current ? "font-medium text-foreground" : "text-muted-foreground")}>{current?.label ?? placeholder}</span>

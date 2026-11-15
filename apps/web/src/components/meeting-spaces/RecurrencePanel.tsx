@@ -157,7 +157,7 @@ function RecurrenceEditor({ space, rule }: { space: MeetingSpaceResponse; rule: 
     </> : <>
       <Segmented label="Repeats" value={r.freq} onChange={freq => setR({ ...r, freq })} options={[{ value: "DAILY", label: "Daily" }, { value: "WEEKLY", label: "Weekly" }, { value: "MONTHLY", label: "Monthly" }]} />
       <label className="flex items-center gap-3 text-sm text-foreground">Every
-        <input type="number" min={1} max={30} value={r.interval} onChange={e => setR({ ...r, interval: Math.max(1, Number(e.target.value) || 1) })} className="h-10 w-20 rounded-xl border border-border bg-background px-3 text-sm" />
+        <input type="number" min={1} max={30} value={r.interval} onChange={e => setR({ ...r, interval: Math.max(1, Number(e.target.value) || 1) })} className="h-10 w-20 rounded-xl border border-transparent bg-muted/70 focus:bg-background px-3 text-sm" />
         {{ DAILY: "day", WEEKLY: "week", MONTHLY: "month" }[r.freq]}{r.interval > 1 ? "s" : ""}
       </label>
       {r.freq === "WEEKLY" && <div className="grid gap-2"><span className="text-sm font-medium text-foreground">On</span>
@@ -168,7 +168,7 @@ function RecurrenceEditor({ space, rule }: { space: MeetingSpaceResponse; rule: 
       </div>}
       <Segmented label="Ends" value={ends} onChange={setEnds} options={[{ value: "COUNT", label: "After" }, { value: "UNTIL", label: "On a date" }]} />
       {ends === "COUNT"
-        ? <label className="flex items-center gap-3 text-sm text-foreground"><input type="number" min={1} max={500} value={r.count ?? 10} onChange={e => setR({ ...r, count: Math.max(1, Number(e.target.value) || 1) })} className="h-10 w-24 rounded-xl border border-border bg-background px-3 text-sm" /> meetings</label>
+        ? <label className="flex items-center gap-3 text-sm text-foreground"><input type="number" min={1} max={500} value={r.count ?? 10} onChange={e => setR({ ...r, count: Math.max(1, Number(e.target.value) || 1) })} className="h-10 w-24 rounded-xl border border-transparent bg-muted/70 focus:bg-background px-3 text-sm" /> meetings</label>
         : <Field label="Last date" type="date" value={r.until ?? ""} onChange={e => setR({ ...r, until: e.target.value })} />}
       <p className="rounded-xl bg-primary/5 px-3 py-2.5 text-sm font-medium text-primary">{describeRule(rrule)}</p>
     </>}

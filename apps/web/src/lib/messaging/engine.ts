@@ -1905,8 +1905,11 @@ export class MessagingEngine {
       void this.flush();
       return;
     }
+    const key = `p${uuid()}`;
+    this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text, file: null, note: null, transferred: false });
     if (conv.securityProfile === "PRIVATE_E2EE" && this.crypto && this.snapshot.phase === "ready" && (await this.updateAwaitingSetup(conv))) {
       // Nobody else can decrypt yet: hold it sealed on this device, never report it sent.
+      this.settlePending(conversationId, key, null);
       const clientMessageId = uuid();
       const createdAt = new Date().toISOString();
       await this.crypto.call("holdDraft", { conversationId, clientMessageId, text, createdAt });
@@ -1915,8 +1918,6 @@ export class MessagingEngine {
       this.scheduleSync(conversationId);
       return;
     }
-    const key = `p${uuid()}`;
-    this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text, file: null, note: null, transferred: false });
     return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text));
   }
 

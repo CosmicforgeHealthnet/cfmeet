@@ -475,9 +475,10 @@ function lastSeenText(iso: string) {
 }
 
 /** WhatsApp ticks: one = sent, two = delivered, two coloured = read. */
-function Ticks({ receipt }: { receipt: "sent" | "delivered" | "read" }) {
-  if (receipt === "sent") return <Check className="size-4" aria-label="Sent" />;
-  return <CheckCheck className={cn("size-4", receipt === "read" && "text-[#5EEAD4] dark:text-[#0E7490]")} aria-label={receipt === "read" ? "Read" : "Delivered"} />;
+function Ticks({ receipt, list }: { receipt: "sent" | "delivered" | "read"; list?: boolean }) {
+  if (receipt === "sent") return <Check className="size-4 shrink-0" aria-label="Sent" />;
+  const read = list ? "text-sky-500" : "text-[#5EEAD4] dark:text-[#0E7490]";
+  return <CheckCheck className={cn("size-4 shrink-0", receipt === "read" && read)} aria-label={receipt === "read" ? "Read" : "Delivered"} />;
 }
 
 /* ─── Message bubble ──────────────────────────────────────────────────── */
@@ -1136,7 +1137,7 @@ function PersonalMessages() {
               const preview = latest
                 ? (latest.text ?? (latest.file ? `📎 ${latest.file.name}` : null) ?? latest.note ?? "")
                 : summary
-                  ? summary.lifecycle !== "ACTIVE" ? "Message deleted" : c.securityProfile === "PRIVATE_E2EE" ? "Encrypted message" : (summary.previewText ?? (summary.attachmentCount ? "📎 Attachment" : ""))
+                  ? summary.lifecycle !== "ACTIVE" ? "Message deleted" : c.securityProfile === "PRIVATE_E2EE" ? "" : (summary.previewText ?? (summary.attachmentCount ? "📎 Attachment" : ""))
                   : "No messages yet";
               const at = latest?.createdAt ?? summary?.createdAt ?? null;
               const mine = latest ? latest.mine : summary?.senderPrincipalId === s.identity?.principalId;
@@ -1167,9 +1168,11 @@ function PersonalMessages() {
                       </span>
                       <span className="mt-0.5 flex items-center justify-between gap-2">
                         <span className={cn("flex min-w-0 items-center gap-1 text-sm", unread ? "font-medium text-foreground" : "text-muted-foreground")}>
-                          {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Check className="size-4 shrink-0 text-muted-foreground" aria-label="Sent" /> : null}
+                          {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Ticks receipt={latest.seenBy?.length ? "read" : latest.receipt ?? "sent"} list /> : null}
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
-                          <span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span>
+                          {!latest && summary && summary.lifecycle === "ACTIVE" && c.securityProfile === "PRIVATE_E2EE"
+                            ? <span aria-label="Loading message" className="h-3 w-32 animate-pulse rounded-full bg-muted" />
+                            : <span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span>}
                         </span>
                         {unread ? (
                           <span className="flex shrink-0 items-center gap-1">

@@ -24,7 +24,7 @@ const keys = {
   members: (orgId: string, teamId: string) => ["org-teams", orgId, teamId, "members"] as const,
 };
 const ROLE_LABEL: Record<string, string> = { TEAM_MANAGER: "Team manager", TEAM_MEMBER: "Member" };
-const field = "h-11 w-full rounded-xl border border-border bg-background px-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+const field = "h-11 w-full rounded-xl border border-transparent bg-muted/70 px-3.5 text-sm outline-none focus:border-primary focus:bg-background focus:ring-2 focus:ring-primary/20";
 const primaryBtn = "inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50";
 const COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#4f46e5", "#ea580c"];
 const colorFor = (k: string) => COLORS[([...k].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % COLORS.length];

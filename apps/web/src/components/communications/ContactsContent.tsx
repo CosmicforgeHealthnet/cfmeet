@@ -179,7 +179,7 @@ function AddContactDialog({ open, onOpenChange, areas }: { open: boolean; onOpen
           </div>
           <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (normalized) resolve.mutate(normalized); }}>
             <input autoFocus aria-label="CF Meet ID" placeholder="CF-…" value={value} maxLength={40} onChange={(e) => setValue(e.target.value)} data-testid="find-id"
-              className="h-12 w-full rounded-xl border border-border bg-background px-4 font-mono text-base outline-none placeholder:font-sans focus:border-primary focus:ring-2 focus:ring-primary/20" />
+              className="h-12 w-full rounded-xl border border-transparent bg-muted/70 px-4 focus:bg-background font-mono text-base outline-none placeholder:font-sans focus:border-primary focus:ring-2 focus:ring-primary/20" />
             {value && !normalized ? <p className="px-1 text-xs text-muted-foreground">A CF Meet ID is CF- followed by 26 letters and numbers.</p> : null}
             <button type="submit" disabled={!normalized || resolve.isPending} data-testid="find-submit" className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
               {resolve.isPending ? <Spinner /> : <Search className="size-4" />}Find

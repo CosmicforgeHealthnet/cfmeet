@@ -15,7 +15,7 @@ const listKey = (id: string) => ["contact-lists", id] as const;
 const COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#4f46e5", "#ea580c"];
 const colorFor = (k: string) => COLORS[([...k].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % COLORS.length];
 const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("") || "?";
-const field = "h-11 w-full rounded-xl border border-border bg-background px-3.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+const field = "h-11 w-full rounded-xl border border-transparent bg-muted/70 px-3.5 text-sm outline-none focus:border-primary focus:bg-background focus:ring-2 focus:ring-primary/20";
 const primaryBtn = "inline-flex h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50";
 
 /** Contacts → Lists: your own groups of contacts, like "Family" or "Work". Only you see them. */

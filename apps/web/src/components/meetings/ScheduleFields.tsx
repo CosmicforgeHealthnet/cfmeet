@@ -76,7 +76,7 @@ export function TimeZoneField({ id, label = "Meeting timezone", value, onChange,
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex h-11 w-full items-center gap-2.5 rounded-xl border border-border bg-background px-3 text-left text-sm text-foreground transition-colors hover:bg-muted/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+        className="flex h-11 w-full items-center gap-2.5 rounded-xl border border-transparent bg-muted/70 focus:bg-background px-3 text-left text-sm text-foreground transition-colors hover:bg-muted/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
       >
         <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1 truncate">{value.replaceAll("_", " ")}</span>

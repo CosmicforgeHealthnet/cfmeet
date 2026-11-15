@@ -47,7 +47,7 @@ export function SideSection({ title, children }: { title?: string; children: Rea
   return (
     <section className="px-4 pt-4">
       {title ? <p className="px-2 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</p> : null}
-      <div className="overflow-hidden rounded-2xl bg-muted/40 ring-1 ring-border">{children}</div>
+      <div className="rounded-2xl bg-muted/40 ring-1 ring-border [&>*:first-child]:rounded-t-2xl [&>*:last-child]:rounded-b-2xl">{children}</div>
     </section>
   );
 }

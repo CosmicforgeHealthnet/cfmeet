@@ -166,7 +166,7 @@ export default function CreateMeetingSpaceContent() {
                   rows={3}
                   placeholder="Agenda, links or notes for attendees"
                   onChange={e => setDescription(e.target.value)}
-                  className="min-h-[88px] rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="min-h-[88px] rounded-xl border border-transparent bg-muted/70 focus:bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </label>
             </div>
@@ -367,7 +367,7 @@ function TypeSelect({ value, onChange }: { value: MeetingType; onChange: (v: Mee
             else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
             else if (e.key === "Enter") { e.preventDefault(); pick(meetingTypes[active]); }
           }}
-          className="flex h-11 w-full items-center gap-2.5 rounded-xl border border-border bg-background px-3 text-left text-sm transition-colors hover:bg-muted/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          className="flex h-11 w-full items-center gap-2.5 rounded-xl border border-transparent bg-muted/70 focus:bg-background px-3 text-left text-sm transition-colors hover:bg-muted/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
         >
           <CurrentIcon className="size-4 shrink-0 text-primary" aria-hidden />
           <span className="min-w-0 flex-1 truncate font-medium text-foreground">{current.label}</span>
