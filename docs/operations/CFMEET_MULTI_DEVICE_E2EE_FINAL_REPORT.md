@@ -38,6 +38,9 @@
 | [43662628261](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43662628261) | `activate-personal-e2ee` | refused by the workflow's input pattern before contacting the VPS; nothing changed. Renamed in `45801c93` |
 | [43663108367](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43663108367) | `activate-personal-encryption` | **success** (details below) |
 | [43666265601](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43666265601) | `messaging-encrypted-verify` | **PASS 16/16** (§4) |
+| [43667132691](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43667132691) | `communications-verify` (image_sha = head) | refused by its own guard ("Requested source is not the recorded release") before any check; re-run with the released SHA |
+| [43668595661](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43668595661) | `communications-verify` (image_sha `c6de964c`) | **PASS 24/24** (§5) |
+| [43670057279](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43670057279) | `certify` | **CERTIFIED_READ_ONLY**: 13/13 services; provider safe defaults PASS (no violations); core identity PASS |
 
 Release run 43660073717:
 
@@ -108,7 +111,13 @@ Activation run 43663108367:
 * `canViewRecordings` on `GET /v1/calls/{id}` (false for a credential without `enterprise.recording.read`);
 * a genuinely expired signaling credential answers `401 SIGNALING_CREDENTIAL_EXPIRED` with `WWW-Authenticate: error="invalid_token"`, while a forged credential keeps `AUTHENTICATION_FAILED`.
 
-Result: see §7.
+Result, run [43668595661](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43668595661): **24/24 PASS**. It includes:
+
+* `calling_invitation_carries_caller_display_name`;
+* `call_read_reports_can_view_recordings_from_the_credential_scope`;
+* `expired_signaling_credential_answers_signaling_credential_expired`;
+* real voice and video media in both directions (native and Hub-launched calls);
+* block/unblock, ID rotation, and Meetings independently available.
 
 ## 6. Tests run before deployment
 
@@ -145,7 +154,14 @@ Result: see §7.
 
 ## 7. Final certification
 
-Pending at the time of writing: `communications-verify` and the final `certify`. This section is completed with their runs.
+Final `certify` run [43670057279](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43670057279):
+
+* **CERTIFIED_READ_ONLY**: all 13 services certified (running, revision, readiness, database, migrations, anonymous refusal, service identity);
+* provider safe defaults PASS with no violations: E2EE on is accepted only because `activate-personal-encryption` is recorded and the release record is mounted;
+* core identity PASS;
+* public API and gateway certification passed.
+
+This is the platform's own operational certification. **It is not an independent cryptographic certification**, which has not been performed.
 
 ## 8. Remaining requirements and limitations (not claimed)
 
