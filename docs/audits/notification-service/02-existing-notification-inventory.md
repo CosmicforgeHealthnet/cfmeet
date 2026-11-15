@@ -1,6 +1,6 @@
 # Document 2 — Existing Notification Inventory
 
-*In this document "NS" means the proposed unified notification service. Revision 2 (owner decision D-0) updates the migration-action columns.*
+*In this document "NS" means the proposed unified notification service. Revision 2 (owner decision D-0) updates the migration-action columns. Line references are pinned to the audit base `6f3743f`; reconciliation with `main` @ `3763392` changed none of them except the Messaging Web Push activation status above (README §Reconciliation).*
 
 This is a service-by-service inventory of notification producers, consumers, APIs, tables, workers, events, feature flags and production states. It reflects `main` at `6f3743f` (2026-11-15).
 
@@ -76,7 +76,7 @@ Full table: evidence/01 §1.8.
 | Push job fan-out from the outbox (`messaging.message.created`, kind `APPLICATION`, `notify != false`) | `src/realtime/fanout.rs:125-134`, `push.rs:240-283` | implemented; runs in production; jobs end `NOT_CONFIGURED` |
 | Leased push dispatcher with dispatch-time reauthorization (device active, membership, history window, DIRECT block, Hub policy for personal scope) | `push.rs:319-534`; spawned `main.rs:408-411` | implemented; dormant (no provider) |
 | APNs (`.p8`, HTTP/2), FCM HTTP v1, Web Push (RFC 8291/8292, VAPID) | `push_adapters.rs:132-683` | implemented; **not configured** (`MESSAGING_PUSH_PROVIDER=none`); tested only against fakes |
-| VAPID public key route | `GET /v1/messaging/push/configuration` (`push.rs:66-81`), commit `42b509c` | implemented; `activate-web-push` has **no recorded run** (absent from the certify journal) |
+| VAPID public key route | `GET /v1/messaging/push/configuration` (`push.rs:66-81`), commit `42b509c` | implemented. `activate-web-push` was **attempted** on 2026-11-15 (run 43702218850) and **failed before any change** (commit `de7b863`, now on `main`, fixes the public-key derivation). Not activated at reconciliation time (`main` @ `3763392`) |
 | Push registration | `PUT/DELETE /v1/messaging/devices/{deviceId}/push-registration` | implemented; **no client calls it** |
 | Realtime gateway (WS `/v1/realtime`, inbox events, receipts, typing, presence) | `src/realtime/*` | implemented; activated (readiness: broker redis, clientTokens enabled) |
 | Read/delivery cursors, unread counts | `messages/receipts.rs`; `GET /v1/conversations/{id}/unread` | implemented; activated |
@@ -379,7 +379,7 @@ Contact requests, accept/decline, cancellation, expiry, removal, blocks, privacy
 | 21 | `organization_invitations` | Organizations | `token_hash` unique; status; `expires_at` | — | `email_normalized` | — | **never read by NS directly** (event payload refs only) |
 | 22 | `calling_outbox_events` | Calling | `evt_` UNIQUE; `source_event_id` FK; DEAD_LETTER; destination outcomes | **no sweep** | none (projection whitelist) | publisher | add a notifications destination (Phase 2) |
 | 23 | `call_invitations`, `call_answer_claims`, `call_answer_group_claims`, `call_endpoints` (`push_target_ref`) | Calling | arbitration uniqueness | — | — | ringing | **never touched** |
-| 24 | `voicemail_mailboxes`, `voicemail_messages` | Calling | `owner_type` ∈ PRINCIPAL/EXTENSION/QUEUE/RING_GROUP | per mailbox | audio refs | — | recipients resolved by Calling (Document 4 §4.3) |
+| 24 | `voicemail_mailboxes`, `voicemail_messages` | Calling | `owner_type` ∈ PRINCIPAL/EXTENSION/QUEUE/RING_GROUP | per mailbox | audio refs | — | recipients resolved by Calling (Document 4 §4) |
 | 25 | `calling_incidents` | Calling | `UNIQUE dedupe_key WHERE OPEN` | resolved +365 d | — | CLI | monitoring, not NS |
 | 26 | `devplat_webhook_subscriptions/_events/_deliveries/_attempts` | Developer Platform | delivery state machine; `UNIQUE (subscription_id, event_id)` | never deleted | sealed secrets | worker | **untouched** (customer webhooks ≠ notifications) |
 | 27 | `devplat_credential_lifecycle_notices` | Developer Platform | PK `(credential_id, event_type, threshold_days, expires_at)` | append-only | — | sweep | source of the developer human notice (Phase 4) |

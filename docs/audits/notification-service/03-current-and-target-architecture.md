@@ -1,6 +1,6 @@
 # Document 3 — Current and Target Architecture (revision 2: unified service)
 
-**Revision 2 (owner decision D-0):** the target is one notification system that every service uses (§3.1, §5). Sections 1–2 describe the current state and are unchanged.
+**Revision 2 (owner decision D-0):** the target is one notification system that every service uses (§3.1, §5). Sections 1–2 describe the current state at the audit base `6f3743f`. Reconciliation with `main` @ `3763392` found no change to any notification code path (README §Reconciliation).
 
 The diagrams use Mermaid, which renders on GitHub. Every box in the current-state diagram exists on `main` at `6f3743f`. Its production state is shown in brackets.
 
@@ -215,8 +215,8 @@ The Hub governs only the personal-communications scope (`packages/communications
 | Criterion | Option B (unified) | Option A (orchestration) | How B handles its weak points |
 |---|---|---|---|
 | Owner goal (one system) | **meets it** | does not | — |
-| Reliability of sign-in email | depends on NS availability | stays in Meeting | **critical lane**, 2 replicas, Account transactional outbox (codes are never lost, only delayed), deployed alerting before the move, break-glass fallback to the old Meeting path until Phase 8, moved **last** |
-| Duplicate control during migration | per-message routing fence: each message is created in exactly one ledger | dual-enqueue into one ledger | the fence is decided once at enqueue time inside the producer; the old ledger drains only rows created before the fence |
+| Reliability of sign-in email | depends on NS availability | stays in Meeting | **critical lane**, 2 replicas, Account transactional outbox (codes are never lost, only delayed), X6/X7 lease protocol, deployed alerting before the move, **AUTO failover after 60 s and FORCED mode** to the retained old Meeting path (verified with both replicas or the service database down, Document 4 §10.4), moved **last** |
+| Duplicate control during migration | routing fence protocol v1: a sticky decision per message in the producer's own transaction, guard triggers on old-path tables, acknowledgement boundary, audited reroute, hourly audit (Document 4 §9) | dual-enqueue into one ledger | the old and new ledgers are in different databases, so the decision is made where the message is created; mixed versions, retries, crashes and rollback are covered in Document 4 §9.6–§9.8 |
 | Code ownership | one team owns all delivery; E2EE checks stay in Messaging via `authorizeWakeups` | split | Messaging authority preserved by an API, not copied |
 | Operational complexity | +2 containers, +1 DB; old pipelines retired later (net simpler) | +1 container; three pipelines remain | — |
 | Performance | one async hop for every notification; the call push fast path is ≤ 1 s and best-effort | same, minus email | ringing never waits for push |
@@ -236,7 +236,7 @@ The Hub governs only the personal-communications scope (`packages/communications
 | Message wake-ups | Messaging publishes `messaging.message.created` (ids only). The service asks Messaging `authorizeWakeups(conversation, sequence)` for the principals entitled to a wake-up (membership, history window, blocks, device state), at fan-out **and again at dispatch**. Payload stays the 5-key metadata object |
 | Call push | Calling `PushDispatcher` → service fast lane (post-commit, ≤ 1 s, no queue). The WebSocket ring path is unchanged |
 | Email | the service owns the ledger: a port of `email_deliveries` with improvements (sealed content, keyed recipient digest, suppression list, lease renewal), providers and the Resend Svix webhook. Producers never send email directly again |
-| Code emails | Account writes `account_notification_outbox` **in the same transaction** that stores the code, with the code sealed to the service's public key (HPKE). The service decrypts only to render, and erases content at the final state, as the ledger does today |
+| Code emails | Account writes `account_notification_outbox` **in the same transaction** that stores the code and its route decision. The code is sealed twice: to the service's public key (HPKE) and to Account's local fallback key, so the fallback can send the same code. The service decrypts only to render, sends only under an X6 lease, and erases content at the final state |
 
 ---
 
@@ -318,7 +318,7 @@ There are no cycles. Producers call NS only from outbox workers, and NS calls pr
 2. The relay posts `account.verification-code.requested` with priority CRITICAL.
 3. The service renders it (template `auth.verification`), writes an email ledger row (`idempotency_key = otp:verify:<recipient>:<digest>`, the existing key format) and sends it through Resend.
 4. Content is erased at the final state.
-5. If NS is down, the row waits in the Account outbox. The break-glass flag `ACCOUNT_EMAIL_FALLBACK=local` lets Account send through the retained legacy ledger until Phase 8.
+5. If NS is down (both replicas, or its database), relay PW1 reroutes never-leased CRITICAL decisions to the retained old Meeting ledger after 60 s (AUTO), with the same code and no duplicate. The operator can also force all new CRITICAL decisions to the old path without a restart (FORCED). See Document 4 §10.4.
 
 **Meeting reminder:**
 1. Meeting commits a conference schedule change together with an outbox row (`meeting-service.conference.rescheduled`, `cancelKey = conference:<id>`).
@@ -365,7 +365,7 @@ Monitoring of the notification service itself must **not** depend on the notific
 | Resource | Recommendation | Rationale |
 |---|---|---|
 | Containers | **2 replicas** of `cfmeet-notification-service` (API + workers in each; `SKIP LOCKED` makes them safe to run concurrently) | the critical lane must survive a process crash or a rolling release. Both replicas run on the same VPS, which protects against process failure, not host failure (the whole platform shares that host today) |
-| Memory limit | 256 MiB each (expected resident < 96 MiB) | gate: 5,076 − (512 + 832) = 3,732 ≥ 1,024 ✔ |
+| Memory limit | 256 MiB each (expected resident < 96 MiB) | gate: 5,076 − (512 + 832) = 3,732 ≥ 1,024 ✔ (single sample from certify 43670057279; the 7-day minimum, Q16, is OUTSTANDING) |
 | CPU | no limit needed; < 1 vCPU combined at current volumes | email rendering and push signing are cheap |
 | Database | new `cfmeet_notifications` in the existing `cfmeet-core-db` (Postgres 16), with migrator and runtime roles via `provision-service-database.sh` | same isolation model as the other service databases |
 | Queue | Postgres `FOR UPDATE SKIP LOCKED`, separate partial indexes per lane; no Redis or managed queue | volumes are tiny (email ledger "all counts 0" at 2026-11-12) |

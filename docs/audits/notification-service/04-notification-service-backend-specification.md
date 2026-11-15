@@ -114,29 +114,31 @@ Media auto-download, chat lock and theme are not notification settings and stay 
 |---|---|---|
 | POST `/api/v1/notifications/provider-events/resend` | Svix signature (port of `verify_svix`, `email_delivery.rs:941-983`); 404 until a secret is configured; 256 KiB cap | the same processing as today (`apply_provider_event`); dedupe by `(provider, event_id)`; monotonic status. **Unknown message IDs are ignored.** During the drain, Resend is configured with both the old Meeting endpoint and this one, and each applies only its own messages |
 
-### 3.3 Internal APIs on the service (9 NEW + 1 optional)
+### 3.3 Internal APIs on the service (11 NEW + 1 optional)
 
-All use `cf-service-auth`: an Ed25519 single-audience token, a receiver trust bundle, durable `jti` nonces, and request binding emitted from day one.
+All use `cf-service-auth`: an Ed25519 single-audience token, a receiver trust bundle, durable `jti` nonces, and request binding emitted from day one. **Counting unit:** one operation = one HTTP method on one path = one operationId.
 
 | Op | Method & path | operationId | Permission (grantable_to) | Contract |
 |---|---|---|---|---|
-| I1 | POST `/internal/v1/notification-events` | `ingestNotificationEvents` | `notifications-event.publish` (meeting-service, organizations, communications, calling, messaging, developer-platform) | `{events:[≤100]}` → per-event `ACCEPTED\|DUPLICATE\|REJECTED`. `producer == issuer`; per-producer type allowlist; dedupe `(producer,eventId)` + digest; 503 + `Retry-After` under backpressure. CRITICAL events are admitted even under STANDARD backpressure |
+| I1 | POST `/internal/v1/notification-events` | `ingestNotificationEvents` | `notifications-event.publish` (meeting-service, organizations, communications, calling, messaging, developer-platform) | `{events:[≤100]}` → per-event `ACCEPTED\|DUPLICATE\|REJECTED\|HELD`. `producer == issuer`; per-producer type allowlist; dedupe `(producer,eventId)` + digest. **Each event carries `route {decisionId, routingVersion, protocol}`** (§9). An event whose route is not `NEW` is REJECTED. An event for a category whose service-side mode is not ACTIVE/SHADOW is **HELD** (stored, never sent, alert raised), never dropped. 503 + `Retry-After` under backpressure. CRITICAL events are admitted even under STANDARD backpressure. `ACCEPTED` is returned only after the event is committed: this is the responsibility boundary (§9.5) |
 | I2 | POST `/internal/v1/notifications/dispatch` | `dispatchNotificationsUser` | `notifications-user.forward` (meeting-service) | relay envelope (`packages/communications-policy` `Dispatch`); path allowlist U1–U9 |
 | I3 | POST `/internal/v1/push/call-invitations` | `dispatchCallPush` | `notifications-call-push.dispatch` (calling) | `{pushTargetRefs≤20, payload: cfmeet.calling.push-invitation v1, expiresAt}` → per-target outcome. **Synchronous, ≤ 1 s, no queue, no retry** (the WS ring and recovery API cover failure); APNs VoIP / FCM high priority |
-| I4 | GET `/internal/v1/admin/deliveries` | `listNotificationDeliveries` | `notifications-observability.read` (operator-console) | PII-free search by notification/delivery/event id |
-| I5 | GET `/internal/v1/admin/dead-letters` | `listNotificationDeadLetters` | same | FAILED deliveries, REJECTED events |
-| I6 | POST `/internal/v1/admin/dead-letters/replay` | `replayNotificationDeadLetters` | `notifications-operations.replay` (operator-console, sensitive) | refuses expired or superseded items and **refuses CRITICAL items older than their code expiry** |
+| I4 | GET `/internal/v1/admin/deliveries` | `listNotificationDeliveries` | `notifications-observability.read` (operator-console) | PII-free search by notification/delivery/event/decision id |
+| I5 | GET `/internal/v1/admin/dead-letters` | `listNotificationDeadLetters` | same | FAILED deliveries, REJECTED and HELD events |
+| I6 | POST `/internal/v1/admin/dead-letters/replay` | `replayNotificationDeadLetters` | `notifications-operations.replay` (operator-console, sensitive) | refuses expired or superseded items, items whose route decision is no longer `NEW`, and CRITICAL items older than their code expiry |
 | I7 | GET `/internal/v1/admin/shadow-report` | `getNotificationShadowReport` | `notifications-observability.read` | counts per category and channel |
-| I8 | GET `/internal/v1/admin/routing` | `getNotificationRouting` | same | current fence and authority per (category, channel); changed only by coordinated-release operations |
-| I9 | GET/DELETE `/internal/v1/admin/email-suppressions` | `listEmailSuppressions` / `removeEmailSuppression` | `notifications-operations.replay` | keyed digests only (no addresses) |
-| I10 *(optional, Phase 4.7)* | POST `/internal/v1/operator-alerts` | `ingestOperatorAlert` | static bearer file held by Alertmanager (Alertmanager cannot sign service tokens), on a private listener reachable only from the monitoring network | Alertmanager webhook payload → operator group email |
+| I8 | GET `/internal/v1/admin/routing` | `getNotificationRouting` | same | current mode, fence and version per (category, channel), plus the **route audit**: per category and hour, the count of accepted decision IDs and a SHA-256 over their sorted list (compared by certify with the producer's own digest, §9.10). Changed only by coordinated-release operations |
+| I9 | GET `/internal/v1/admin/email-suppressions` | `listEmailSuppressions` | `notifications-operations.replay` | keyed digests only (no addresses) |
+| I10 | DELETE `/internal/v1/admin/email-suppressions/{digest}` | `removeEmailSuppression` | same | audited |
+| I11 | POST `/internal/v1/admin/reroute/cancel` | `cancelForReroute` | `notifications-operations.reroute` (operator-console, sensitive) | first phase of the two-phase reroute (§9.8): `{decisionIds≤500}` → per ID `CANCELLED` (never dispatched; now terminal `CANCELLED_FOR_REROUTE`) or `IN_FLIGHT_OR_SENT` (must not be rerouted). Idempotent |
+| I12 *(optional, Phase 4.7, D-15)* | POST `/internal/v1/operator-alerts` | `ingestOperatorAlert` | static bearer file held by Alertmanager (Alertmanager cannot sign service tokens), on a private listener reachable only from the monitoring network | Alertmanager webhook payload → operator group email |
 
 **Not exposed as endpoints, by design:**
 - Template resolution (internal).
 - Scheduling and cancellation: driven by producer events (`conference.*`, `cancelKey`, `notifications.cancel`).
 - Health: `/health`, `/ready` (DB, migrations, worker heartbeats per lane, breaker states).
 
-### 3.4 New internal read APIs on existing services (5 NEW)
+### 3.4 New internal APIs on existing services (7 NEW)
 
 | Op | Owner | Method & path | operationId | Permission | Returns |
 |---|---|---|---|---|---|
@@ -145,6 +147,8 @@ All use `cf-service-auth`: an Ed25519 single-audience token, a receiver trust bu
 | X3 | Messaging | POST `/internal/v1/notifications/wakeups/authorize` | `authorizeWakeups` | `messaging-wakeups.authorize` | for `(conversationId, eventSequence, senderPrincipal)`: the entitled principals (ACTIVE member, history window, not the sender, DIRECT block check, conversation ACTIVE, `mentionsRecipient` flag for MANAGED). The port of `push.rs:262-271, 319-339, 417-420` logic, exposed instead of executed locally |
 | X4 | Hub | POST `/internal/v1/communications/restrictions/check` | `checkCommunicationRestrictions` | `communications-restrictions.read` | batch `{actorRef, recipientRefs≤100, action}` → blocked / privacy-denied / operator hold per recipient. Replaces the per-recipient ~6-call `policy/check` for notifications |
 | X5 | Organizations | POST `/internal/v1/organization-invitations/{id}/invitee/resolve` | `resolveInvitationInvitee` | `organization-invitations.read` | `{status, inviteeAccountRef?}` (never the email). Owner decision D-5 |
+| X6 | Account (Meeting) | POST `/internal/v1/accounts/notification-route-decisions/leases` | `claimCriticalSendLeases` | `account-route-lease.claim` (notifications) | CRITICAL lane only (§9.8). `{decisionIds≤100, leaseSeconds≤30}` → per ID `GRANTED` (route still `NEW`; `send_lease_until` set from the Meeting DB clock) \| `REVOKED` (rerouted or superseded) \| `EXPIRED` (code expired). The service sends a CRITICAL email only under a granted lease and aborts the provider call if the lease would lapse. This is a fencing token, not a read |
+| X7 | Account (Meeting) | POST `/internal/v1/accounts/notification-route-decisions/completions` | `completeCriticalSends` | `account-route-lease.claim` (notifications) | `{decisionIds≤100}` held under a live lease → sets `ns_completed_at` (terminal; never reroutable). Called immediately after the provider accepts |
 
 ---
 
@@ -192,6 +196,7 @@ This envelope aligns with `cfmeet.platform.event-envelope`. Producers build it w
     "expiresAt": "RFC3339|null",
     "cancelKey": "string<=200|null"
   },
+  "route": { "decisionId": "uuid", "routingVersion": 7, "protocol": 1 },
   "data": { "codeTtlMinutes": 1440 },
   "sealed": { "kid": "notif-hpke-2026-11", "enc": "base64url", "ct": "base64url" }
 }
@@ -208,6 +213,7 @@ This envelope aligns with `cfmeet.platform.event-envelope`. Producers build it w
 | `producer` | must equal the authenticated service identity |
 | `eventType` | must be in that producer's closed allowlist (as Developer Platform `catalog.rs:29-52` does) |
 | CRITICAL priority | allowed only for `account.*` types from `cfmeet.meeting-service` (the Account authority) |
+| `route` | required: the producer's decision (§9.2). `route.decisionId` is unique per producer (`uq_notif_event_inbox_decision`); I1 rejects any event whose decision is not `NEW` and supports `dryRun:true` probes for the reroute check (§9.5) |
 
 **Versioning.** `schemaVersion` versions the envelope; `eventVersion` versions each type. The service accepts the current and previous `eventVersion` per type. A breaking change is a new contract entry in `packages/contracts/manifest.json`.
 
@@ -239,9 +245,9 @@ Control event: `notifications.cancel` (`cancelKey`).
 
 ---
 
-## 6. Data design (16 tables)
+## 6. Data design (17 tables in the service + 5 producer-side tables)
 
-All tables follow `docs/architecture/migration-conventions.md` (raw SQL `UP`/`DOWN`, history table `notifications_seaql_migrations`, prefix `notif_`). The server refuses to start with pending migrations. The full DDL for all 16 tables follows the summary.
+All tables follow `docs/architecture/migration-conventions.md` (raw SQL `UP`/`DOWN`, history table `notifications_seaql_migrations`, prefix `notif_`). The server refuses to start with pending migrations. The full DDL for all 17 service tables follows the summary. The 5 producer-side tables used by the routing fence are specified in §9.2.
 
 | # | Table | Purpose | Key constraints | Retention |
 |---|---|---|---|---|
@@ -261,6 +267,7 @@ All tables follow `docs/architecture/migration-conventions.md` (raw SQL `UP`/`DO
 | 14 | `notif_preferences` | account-level categories, channels, quiet hours | PK `account_ref`; `version` | life of account |
 | 15 | `notif_conversation_preferences` | conversation notification mute | PK `(account_ref, conversation_id)`; `muted_until` only with MUTED | life |
 | 16 | `notif_contact_preferences` | contact notification mute | PK `(account_ref, contact_ref)` | life |
+| 17 | `notif_preference_change_log` | 7-day log of preference writes made through the service, for rollback write-back to the Hub (Document 5 §6, 4.2) | PK `(account_ref, scope, changed_at)` | 7 d |
 
 ```sql
 -- m20270101_000001_notifications_foundation (illustrative date)
@@ -276,9 +283,12 @@ CREATE TABLE notif_event_inbox (               -- 1. ingest dedupe
   reject_reason   VARCHAR(64),
   envelope        JSONB        NOT NULL CHECK (pg_column_size(envelope) <= 8192),  -- sealed part stays sealed
   received_at     TIMESTAMPTZ  NOT NULL DEFAULT now(), processed_at TIMESTAMPTZ,
+  route_decision_id UUID NOT NULL,            -- producer decision (§9.2); route must be NEW
+  routing_version INT NOT NULL, routing_protocol SMALLINT NOT NULL,
   lease_id UUID, lease_until TIMESTAMPTZ, attempts INT NOT NULL DEFAULT 0,
   PRIMARY KEY (producer, event_id)
 );
+CREATE UNIQUE INDEX uq_notif_event_inbox_decision ON notif_event_inbox (producer, route_decision_id);
 CREATE INDEX ix_notif_event_inbox_due ON notif_event_inbox (lane, received_at) WHERE state = 'PENDING';
 
 CREATE TABLE notif_notifications (             -- 2. one logical notification per recipient
@@ -293,7 +303,7 @@ CREATE TABLE notif_notifications (             -- 2. one logical notification pe
   template_key    VARCHAR(64)  NOT NULL,
   params          JSONB        NOT NULL CHECK (pg_column_size(params) <= 2048),  -- never codes/tokens
   policy_snapshot JSONB        NOT NULL,       -- decision, reasons, preference version (audit)
-  state           VARCHAR(16)  NOT NULL CHECK (state IN ('ROUTED','SUPPRESSED','CANCELLED','EXPIRED','SHADOW')),
+  state           VARCHAR(24)  NOT NULL CHECK (state IN ('ROUTED','SUPPRESSED','CANCELLED','CANCELLED_FOR_REROUTE','EXPIRED','SHADOW','HELD')),
   deliver_after   TIMESTAMPTZ, expires_at TIMESTAMPTZ,
   created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
   UNIQUE (recipient_ref, dedupe_key)
@@ -385,7 +395,7 @@ CREATE TABLE notif_shadow_observations (       -- 9. temporary; dropped in Phase
 
 ```sql
 CREATE TABLE notif_email_messages (            -- port of email_deliveries
-  id               UUID PRIMARY KEY,           -- also the Resend Idempotency-Key
+  id               UUID PRIMARY KEY,           -- UUIDv5(service namespace, idempotency_key): deterministic, so a re-created row reuses the same Resend Idempotency-Key after a crash
   delivery_id      UUID UNIQUE REFERENCES notif_deliveries(id) ON DELETE SET NULL,
   category         VARCHAR(48)  NOT NULL CHECK (category ~ '^[A-Z][A-Z0-9_]{1,47}$'),
   lane             VARCHAR(10)  NOT NULL CHECK (lane IN ('CRITICAL','STANDARD')),
@@ -460,6 +470,16 @@ CREATE TABLE notif_contact_preferences (       -- 16. port of communication_cont
   version BIGINT NOT NULL DEFAULT 1, source_version BIGINT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (account_ref, contact_ref)
 );
+
+CREATE TABLE notif_preference_change_log (     -- 17. rollback write-back source (7 days)
+  account_ref VARCHAR(64) NOT NULL,
+  scope VARCHAR(16) NOT NULL CHECK (scope IN ('ACCOUNT','CONVERSATION','CONTACT')),
+  scope_ref VARCHAR(64),                       -- conversation id or contact ref
+  changed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  new_value JSONB NOT NULL CHECK (pg_column_size(new_value) <= 2048),
+  version BIGINT NOT NULL,
+  PRIMARY KEY (account_ref, scope, changed_at)
+);
 ```
 
 All default values equal today's Hub behaviour: an absent row means everything is enabled.
@@ -507,9 +527,9 @@ Defaults are unchanged.
 
 | Threat | Protection |
 |---|---|
-| Cross-account / cross-tenant leakage | `VerifiedAccount` filtering; 404 for foreign IDs; tenant scope on push endpoints and events; authorization-matrix test suite for U1–U9 and I1–I10 |
+| Cross-account / cross-tenant leakage | `VerifiedAccount` filtering; 404 for foreign IDs; tenant scope on push endpoints and events; authorization-matrix test suite for U1–U9, I1–I12 and X1–X7 |
 | Forged service events | `cf-service-auth`; `producer == issuer`; per-producer type allowlist; durable `jti` |
-| Unauthorized recipient lookup | no lookup API; X1–X5 grantable to `cfmeet.notifications` only; admin APIs PII-free |
+| Unauthorized recipient lookup | no lookup API; X1–X7 grantable to `cfmeet.notifications` only; admin APIs PII-free |
 | **Code/token exposure** (new: the service now carries codes and tokens) | HPKE-sealed from the producer's outbox to render time; bodies sealed at rest and erased at the final state; never logged; I6 refuses to replay expired CRITICAL items; codes still verified only by Account, so a leaked email body cannot be verified anywhere else; HPKE private key 0400, rotatable (`kid`) |
 | Device-token theft | handles sealed (AES-256-GCM, `cf-webhooks::secret_box`), never returned, `UNIQUE handle_digest`; disabled on device revoke, session end, suspension and erasure (fixes S-7, S-13) |
 | Spam / abuse | ingest limits per producer; per-recipient caps; coalescing; suppression list; user API rate limits |
@@ -526,22 +546,229 @@ Defaults are unchanged.
 
 ---
 
-## 9. Routing fence: one system per message
+## 9. Routing fence protocol v1: one system per message
 
-`notif_routing(category, channel)` holds `mode`, `fence_at` and `version`. **The producer reads the same value** (through its release-managed configuration, set by the same coordinated-release operation) and decides **once, at message creation**:
+The old and new ledgers live in **different databases**:
+- the old email ledger, `meeting_notifications` and `account_notification_outbox` are in the Meeting database (`rtc_db`, legacy `cosmicforge-db` container);
+- `messaging_push_jobs` is in `cfmeet_messaging`;
+- the new ledger is in `cfmeet_notifications`.
 
-| Producer path | Before the fence | After the fence |
+No transaction spans them. The fence therefore relies on one rule: **every routing decision is made, recorded and enforced inside the producer's own database transaction**, the same transaction that writes either the old-path row or the outbox row, and the service only ever acts on decisions that say `NEW`.
+
+### 9.1 Invariants
+
+| # | Invariant | Enforced by |
 |---|---|---|
-| Meeting `EmailService` / `email_delivery::enqueue` callers | old ledger row (`email_deliveries`) | `NOTIFICATION` outbox event → the service. **No old ledger row** |
-| Meeting notification worker (reminders, changes) | old worker renders and sends | jobs created after the fence are not created (the service schedules from `conference.*` events); old PENDING jobs finish |
-| Account code and security emails | old path (direct enqueue) | `account_notification_outbox` → the service. Break-glass `ACCOUNT_EMAIL_FALLBACK=local` re-routes new messages to the old ledger instantly |
-| Messaging push | `messaging_push_jobs` | `message.created` → the service; Messaging creates no new push jobs |
-| Calling push | `NoPushTransport` | `CALLING_PUSH_TRANSPORT=notifications` |
-| Hub preference writes | Hub tables | the service's tables (facade) |
+| F1 | Every routable message has exactly one decision row, keyed by its deterministic idempotency key | `notification_route_decisions` primary key, in the producer database |
+| F2 | A decision is created in the same transaction as the old-path row (route `OLD`) **or** the outbox row (route `NEW`), never both | producer code + legacy-table guard triggers (§9.4) |
+| F3 | A decision never changes silently. It changes only through an audited reroute that increments `decision_version` and records `reason` (§9.8) | trigger refusing any other update |
+| F4 | The service sends nothing whose decision is not `NEW` | I1 rejects non-`NEW` routes; CRITICAL sends require an X6 lease and are reported complete through X7 |
+| F5 | Responsibility moves to the service only when I1 returns `ACCEPTED` (committed). Before that, the producer may reroute unilaterally | §9.5 |
+| F6 | No component running a pre-fence binary can write to an old-path table for a fenced category | guard triggers (§9.4) + release-tooling rollback floor (§9.6) |
 
-Because each message exists in exactly one system, there is no cross-ledger duplication. Existing idempotency key formats are kept, so even a mis-ordered retry across the fence collapses: the old ledger and the new one never hold the same key, because the routing decision precedes key creation.
+**Definition used in this blueprint:** a *silent duplicate* is the same logical notification delivered by both systems without a recorded decision, lease or operator action that explains it. The protocol makes silent duplicates impossible by construction, and detects any violation within one hour (§9.10). Residual duplicates that remain possible are listed in §9.11; each one is recorded and counted.
 
-Provider idempotency (the Resend key is the ledger ID; SMTP has none) is **not** relied on for migration safety.
+### 9.2 Producer-side tables (5 new tables, additive)
+
+These are created in the Meeting database (3) and the Messaging database (2). They are proposals only; no migration is authorized by this audit.
+
+```sql
+-- Meeting database and Messaging database (one copy each)
+CREATE TABLE notification_routing_state (       -- runtime-readable routing switch (no container restart)
+  category        VARCHAR(40) PRIMARY KEY,
+  mode            VARCHAR(12) NOT NULL CHECK (mode IN ('LEGACY_ONLY','SHADOW','FENCED_OLD','FENCED_NEW')),
+  canary_percent  SMALLINT NOT NULL DEFAULT 0 CHECK (canary_percent BETWEEN 0 AND 100),
+  critical_fallback VARCHAR(8) NOT NULL DEFAULT 'AUTO' CHECK (critical_fallback IN ('AUTO','FORCED','OFF')),
+  routing_version INT NOT NULL,
+  protocol        SMALLINT NOT NULL DEFAULT 1,
+  changed_by_run  VARCHAR(64) NOT NULL,
+  changed_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE notification_route_decisions (     -- one row per routable message (F1)
+  idempotency_key  VARCHAR(160) PRIMARY KEY,    -- today's key formats (otp:verify:…, meeting-notification:…, event id for push)
+  decision_id      UUID NOT NULL UNIQUE,
+  category         VARCHAR(40) NOT NULL,
+  route            VARCHAR(4)  NOT NULL CHECK (route IN ('OLD','NEW')),
+  decision_version INT NOT NULL DEFAULT 1,
+  routing_version  INT NOT NULL,                -- notification_routing_state.routing_version used
+  reason           VARCHAR(32) NOT NULL CHECK (reason IN ('ROUTED','REROUTED_UNACKED','REROUTED_CANCELLED','REROUTED_CRITICAL_LEASE','AUTO_FAILOVER','REROUTED_POSSIBLE_DUPLICATE')),
+  ns_acked_at      TIMESTAMPTZ,                 -- set when I1 returned ACCEPTED (F5)
+  send_lease_until TIMESTAMPTZ,                 -- CRITICAL only (X6), Meeting DB clock
+  lease_count      INT NOT NULL DEFAULT 0,      -- CRITICAL only: leases ever granted
+  ns_completed_at  TIMESTAMPTZ,                 -- CRITICAL only: service reported the provider accepted it (X7); terminal
+  decided_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at       TIMESTAMPTZ NOT NULL         -- purge after expiry + 30 d
+);
+-- trigger: UPDATE allowed only for (route, decision_version+1, reason REROUTED_*/AUTO_FAILOVER, ns_acked_at,
+--          send_lease_until, lease_count+1, ns_completed_at); a row with ns_completed_at set can never be rerouted
+
+-- Meeting database only
+CREATE TABLE account_notification_outbox (      -- CRITICAL lane outbox (sealed payloads)
+  id UUID PRIMARY KEY, decision_id UUID NOT NULL UNIQUE REFERENCES notification_route_decisions(decision_id),
+  event JSONB NOT NULL,                          -- envelope; code sealed to the service key (HPKE)
+  fallback_sealed BYTEA NOT NULL,                -- the same code sealed to Account's local fallback key (AES-256-GCM)
+  state VARCHAR(12) NOT NULL CHECK (state IN ('PENDING','ACKED','SUPERSEDED','EXPIRED')),
+  attempts INT NOT NULL DEFAULT 0, next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  lease_id UUID, lease_until TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL
+);
+```
+
+The Meeting `outbox_events` table gains the channel `NOTIFICATION` for non-CRITICAL Meeting events, and each such row references a `decision_id`. Messaging's outbox publication carries the decision in its event.
+
+Counted as producer-side additive tables: Meeting `notification_routing_state`, `notification_route_decisions`, `account_notification_outbox`; Messaging `notification_routing_state`, `notification_route_decisions`. Producers without an old delivery path (Hub, Organizations, Calling, Developer Platform) need **no** decision table: everything they publish is new-only, so nothing can duplicate.
+
+### 9.3 Decision algorithm (inside the producer transaction)
+
+```
+route_message(key, category, build_old_row, build_event):
+  state    = SELECT * FROM notification_routing_state WHERE category = $category   -- cached ≤ 5 s, re-read on version change
+  existing = SELECT * FROM notification_route_decisions WHERE idempotency_key = $key FOR UPDATE
+  if existing:                          -- retry of the same message (resend, duplicate request, crash replay)
+      return existing.route             -- sticky: follow the earlier decision; write nothing new
+  route = OLD if state.mode in (LEGACY_ONLY, SHADOW, FENCED_OLD)
+          NEW if state.mode = FENCED_NEW and canary(key, state.canary_percent)
+          else OLD
+  if category is CRITICAL and state.critical_fallback = FORCED: route = OLD
+  INSERT notification_route_decisions(key, decision_id, category, route, routing_version=state.routing_version, reason=ROUTED)
+  if route = OLD: build_old_row(decision_id)       -- email_deliveries / meeting_notifications / messaging_push_jobs
+  else:           build_event(decision_id)         -- outbox_events NOTIFICATION / account_notification_outbox / Messaging publication
+  -- SHADOW mode additionally writes a shadow event (state SHADOW) that the service may never send (I1 marks it SHADOWED)
+```
+
+Requirements:
+- **Deterministic keys everywhere.** Categories that today use random or no keys get deterministic ones:
+  - `NOTIFICATION` device notices: `device-linked:<link_id>`;
+  - `MEETING_INVITATION`: `meeting-invitation:<invitation_id>`;
+  - `ORGANIZATION_INVITATION`: `org-invitation:<invitation_id>:<token_version>`.
+  
+  This is part of N7.
+- **Push keys.** The key is the Messaging outbox `event_id`. The decision covers every device fan-out for that event.
+- **Canary is a pure function** of the key: `hash(key) mod 100 < canary_percent`. A retry therefore always yields the same route, even if it bypasses the existing-row check.
+
+### 9.4 Legacy-table guard triggers (mixed-version protection in the database)
+
+A `BEFORE INSERT` trigger is added to each old-path table:
+- `email_deliveries` (keyed by `idempotency_key`);
+- `meeting_notifications` (keyed by `dedupe_key`);
+- `messaging_push_jobs` (keyed by `event_id`).
+
+The trigger:
+1. looks up the category's `notification_routing_state.mode`;
+2. if the mode is `LEGACY_ONLY`, allows the insert (pre-fence behaviour; old binaries work unchanged);
+3. otherwise requires a `notification_route_decisions` row for the key with `route = OLD`. If none exists, it **raises** `ROUTING_DECISION_REQUIRED`.
+
+**Effect:** once a category leaves `LEGACY_ONLY`, a pre-fence binary (which writes old-path rows without decisions) fails loudly instead of creating a second copy. The release tooling makes sure such a binary is never running then (§9.6). The trigger is the second, independent line of defence.
+
+The trigger is installed by the **fence-capable release's migration**, with every category initialised to `LEGACY_ONLY`. In that state its behaviour is a no-op.
+
+### 9.5 Responsibility boundary (acknowledgement)
+
+| State of the message | Who is responsible | Producer may reroute? |
+|---|---|---|
+| Decision `NEW`, outbox row PENDING (I1 never returned `ACCEPTED`) | producer | **yes, unilaterally**. In one producer transaction: decision → `OLD` (`REROUTED_UNACKED`), outbox row → `SUPERSEDED`, old-path row created. Zero duplicate risk: the service never committed the event |
+| Decision `NEW`, `ns_acked_at` set | the service | only through §9.8 (two-phase cancel, or a CRITICAL lease) |
+| Decision `OLD` | producer (old path) | no reroute to NEW (old path finishes it) |
+
+**Crash safety of the acknowledgement:**
+- The relay marks the row `ACKED` only after receiving `ACCEPTED`.
+- If the relay crashes between the service commit and marking `ACKED`, it re-posts the event, and I1 answers `DUPLICATE` (`ACCEPTED` semantics). The relay must treat `DUPLICATE` as acknowledged.
+- Unilateral reroute of an unacked row therefore requires one more step first. The producer calls I1 with the same event ID in **probe mode** (`dryRun:true`); `UNKNOWN` confirms the service never committed it.
+- If the service is unreachable:
+  - **CRITICAL rows** may still be rerouted under the lease rule of §9.8. The service can only send a CRITICAL email under a lease recorded in the producer's own decision row, so a decision that was never leased is provably unsent.
+  - **STANDARD rows** wait: delay, never duplication.
+
+### 9.6 Mixed-version deployments
+
+| Situation | Protection |
+|---|---|
+| Producer replicas on different versions during a rolling release | A category may leave `LEGACY_ONLY` only through an activation operation. That operation **refuses** unless certify shows every running replica of the producer reporting `routingProtocol >= 1` in `/ready`. Pre-fence binaries do not report it. The guard trigger (§9.4) catches anything that slips through |
+| Producer image rollback to a pre-fence version | **Rollback floor.** The coordinated release refuses to deploy a producer image without fence support while any category of that producer is not `LEGACY_ONLY`. The operator must first route every category back to `LEGACY_ONLY`, through routing operations (§9.8) that drain or reroute in-flight messages |
+| Service replicas on different versions | The envelope carries `route.protocol`. Each service release supports protocols N and N−1. An unsupported protocol gets I1 503 (`PROTOCOL_UNSUPPORTED`), the producer retries, and another replica accepts. A protocol bump needs two releases (expand, then contract) |
+| Producer and service disagree on mode (operator error) | Producer `FENCED_NEW` with service mode `OFF`: I1 answers `HELD`. The event is stored, never sent, and an alert fires; the operator fixes the mode and HELD events resume. Producer `FENCED_OLD` with service `ACTIVE`: the service receives nothing new for that category, so nothing duplicates. Certify fails on any disagreement (check "routing agreement") |
+| Config cache staleness (≤ 5 s) | Harmless. Each decision records the `routing_version` it used. A decision is sticky once made, and both routes are valid during the transition window |
+
+### 9.7 Retries and crashes
+
+| Event | Outcome |
+|---|---|
+| User or business retry (resend verification, repeated invitation request) with the same key | existing decision found and followed (sticky); no second row in either system |
+| Retry with a new key (for example a new code) | a new message with its own decision; never a duplicate of the old one |
+| Producer crash before commit | nothing written (decision, old row and outbox row are one transaction) |
+| Outbox relay crash after the service commit | re-post → `DUPLICATE` → treated as acknowledged |
+| Service crash after the provider accepted, before commit | the row is re-claimed; Resend receives the **same** `Idempotency-Key` (UUIDv5 of the key) and returns the original result within Resend's idempotency window. SMTP has no idempotency: a residual duplicate is possible and counted (§9.11) |
+| Service crash between lease grant (X6) and send | the lease lapses (≤ 30 s); the re-claim requests a new lease |
+| Legacy email worker crash | unchanged existing behaviour (old ledger lease and retry; N0-4 fixes the lease length) |
+
+### 9.8 Rollback and reroute
+
+**Routing rollback** sets `notification_routing_state.mode` to `FENCED_OLD` (or `LEGACY_ONLY` once drained) through one operation, without a restart. It affects **only new decisions**. Messages already decided keep their route.
+
+In-flight `NEW` messages are handled as follows:
+
+| Message state | Path |
+|---|---|
+| Unacked (outbox PENDING) | unilateral reroute (§9.5) |
+| Acked, service healthy | **drain in the service** (default; no action needed) |
+| Acked, service unhealthy, STANDARD lane | **two-phase reroute:** (1) I11 `cancelForReroute` → the service marks never-dispatched items `CANCELLED_FOR_REROUTE` and reports the rest as `IN_FLIGHT_OR_SENT`; (2) for `CANCELLED` IDs only, one producer transaction: decision → `OLD` (`REROUTED_CANCELLED`), old-path row recreated from source data. `IN_FLIGHT_OR_SENT` items are never rerouted. If the service is unreachable, STANDARD items wait: delay, never duplication |
+| Acked, CRITICAL lane (codes, security notices) | **lease-fenced reroute** (below) |
+
+**CRITICAL lease protocol (X6/X7):**
+1. Before every CRITICAL provider call, the service claims a lease through X6. In one row-locked Meeting transaction, Account checks `route = NEW`, `ns_completed_at IS NULL` and no live lease; it then sets `send_lease_until = now() + 30 s` and increments `lease_count`.
+2. The service makes the provider call with a 20 s timeout, so it always finishes inside the lease.
+3. Immediately afterwards it calls X7 `completeCriticalSends`, which sets `ns_completed_at`. Completed decisions are terminal and can never be rerouted.
+4. Reroute rules, enforced by Account in the same row-locked transaction that writes the old-ledger row:
+
+| Decision state | Reroute allowed? | Duplicate risk |
+|---|---|---|
+| `lease_count = 0` (never leased) | **yes**, automatic or manual (`REROUTED_CRITICAL_LEASE` / `AUTO_FAILOVER`) | **none**: the service never had permission to send, and any later X6 claim answers `REVOKED` |
+| live lease (`send_lease_until > now()`) | no; wait for expiry | — |
+| `ns_completed_at` set | **never** | — |
+| leased at least once, lease expired, not completed (the service crashed during or after a provider call) | **not automatic.** Manual break-glass only (`critical_fallback = FORCED`), recorded `REROUTED_POSSIBLE_DUPLICATE` | at most one extra email carrying the **same** code; recorded and counted |
+
+**Reroute capability per category:**
+
+| Category | Reroute content source | Reroutable? |
+|---|---|---|
+| Verification / reset / step-up codes | `fallback_sealed` (same code, Account key) | yes (lease-fenced) |
+| Security notices | re-rendered from the account event | yes (lease-fenced) |
+| Meeting reschedule / cancel / reminder | re-rendered from the conference (X2 data is Meeting's own) | yes (two-phase) |
+| Developer notices | re-rendered from Developer Platform data | yes (two-phase) |
+| Invitation emails (token) | token never stored by the producer | **no.** Cancelled items are reported to the inviter as delivery FAILED (`emailDelivery`), and the inviter can resend, which mints a new token |
+| Push wake-ups | ephemeral | no (they expire within 24 h) |
+| In-app | no old path | n/a |
+
+### 9.9 Reminder scheduling takeover (time partition)
+
+The old reminder scan (`enqueue_due_reminders`) and the service scheduler must never both produce a reminder for the same start. The takeover therefore happens in two steps:
+1. **Phase 4.3a.** Meeting's existing scan remains the only reminder *trigger*. Each reminder it finds is routed by the decision protocol (key = today's `reminder_key`, `reminder:<conference>:<start_epoch>`), so OLD reminders render in Meeting and NEW reminders render in the service.
+2. **Phase 4.3b (scheduler takeover).** One operation records a boundary `B` (UTC) in both the Meeting routing state and `notif_routing`.
+   - The Meeting scan handles only starts `< B`.
+   - The service scheduler handles only starts `>= B`, scheduling from `conference.*` events.
+   - `B` is chosen at least `lead + 24 h` in the future, so every start is owned by exactly one side by construction, independent of timing or clock skew within that margin.
+
+### 9.10 Detection (cross-ledger audit)
+
+| Check | Where | Frequency | Violation |
+|---|---|---|---|
+| Old-path rows whose decision is `NEW` (or missing, outside `LEGACY_ONLY`) | Meeting and Messaging DB (one SQL each) | hourly (certify extension) | any row |
+| Decisions `NEW` acked but absent from the service | producer digest vs I8 route audit (per category and hour) | hourly | digest mismatch → list diff |
+| Service rows whose decision is not in the producer's `NEW` set | I8 digest vs producer | hourly | any |
+| HELD events | I5 | continuous (alert) | any |
+| CRITICAL sends without a granted lease | service metric `notif_critical_send_without_lease_total` | continuous | > 0 |
+
+Any violation pages through the operator path (D-9) and freezes the affected category (`FENCED_OLD`) automatically.
+
+### 9.11 Residual duplicates (recorded, never silent)
+
+| Residual | Bound | How it is recorded |
+|---|---|---|
+| SMTP provider: crash after the SMTP server accepted, before commit | one extra identical email per crash | `notif_email_messages.attempts > 1` with `last_error_class = COMMIT_LOST`; metric |
+| Resend: retry after Resend's idempotency window | one extra identical email | same |
+| CRITICAL lane: manual FORCED reroute of a leased-but-uncompleted decision (the service crashed mid-send) | at most one extra email with the **same** code | decision `REROUTED_POSSIBLE_DUPLICATE`; metric `account_critical_possible_duplicate_total` |
+| Push: a wake-up retried after a provider timeout | one extra metadata-only wake-up; collapse ID replaces the visible notification | delivery attempts |
+
+The old and new **ledgers never hold the same message**. That is invariant F2, checked hourly.
 
 ---
 
@@ -552,7 +779,7 @@ Provider idempotency (the Resend key is the ledger ID; SMTP has none) is **not**
 | Class | Flows | Requirement | Design |
 |---|---|---|---|
 | R0 synchronous critical | sign-in, code verification, ringing, message send | must work with the service down | the service is never in these paths |
-| R1 critical delivery | verification, reset and step-up codes; security notices | durable; p95 handoff to provider ≤ baseline + 5 s; survives service restarts | Account transactional outbox; CRITICAL lane on both replicas; dedicated claim index; alerting before cutover; break-glass fallback until Phase 8 |
+| R1 critical delivery | verification, reset and step-up codes; security notices | durable; p95 handoff to provider ≤ baseline + 5 s (baseline = Q17, outstanding); survives service restarts | Account transactional outbox; CRITICAL lane on both replicas; X6/X7 leases; AUTO and FORCED fallback (§10.4) until Phase 8 |
 | R2 time-sensitive | call push, message wake-ups, missed calls, reminders | at-least-once, expire when late | CALL fast lane (≤ 1 s, best-effort); HIGH priority |
 | R3 informational | org, contacts, developer, recordings | delay tolerated | STANDARD |
 
@@ -560,9 +787,9 @@ Provider idempotency (the Resend key is the ledger ID; SMTP has none) is **not**
 
 | Failure | Behaviour |
 |---|---|
-| Service outage (both replicas) | Producer outboxes hold events: Account outbox (new, **unbounded retries for CRITICAL until the code expires**), Hub, Organizations, Calling, Messaging, Meeting. Users waiting for a code see a delay. Runbook: if the outage exceeds 2 min, the operator sets `ACCOUNT_EMAIL_FALLBACK=local` (one operation). Ringing, sign-in and messaging are unaffected |
+| Service outage (both replicas) | Producer outboxes hold events (Hub, Organizations, Calling, Messaging, Meeting). CRITICAL: AUTO failover to the old path after 60 s (§10.4). Ringing, sign-in and messaging are unaffected |
 | One replica down | the other claims everything (`SKIP LOCKED`) |
-| Service database outage | `/ready` 503; same as a service outage |
+| Service database outage | `/ready` 503; same as a service outage (the Meeting DB is a separate container, §10.4) |
 | Redis outage | not used by the service. Meeting OTP state uses Redis (unchanged, existing risk) |
 | Email provider outage | ledger retry (ported); provider breaker; optional SMTP secondary provider for CRITICAL (D-14) |
 | Push provider outage | breaker; DEFERRED; expire |
@@ -582,20 +809,77 @@ Provider idempotency (the Resend key is the ledger ID; SMTP has none) is **not**
 
 **Exactly-once external delivery is not claimed.**
 
+### 10.4 Emergency authentication-email fallback (verified design)
+
+The fallback is the **retained old Meeting email path**: `email_deliveries` plus the existing `EmailWorker` with its Resend/SMTP providers. It is fed by the routing protocol, not by a container restart.
+
+**Two modes**, both set in `notification_routing_state` in the Meeting database:
+
+| Mode | When | What happens |
+|---|---|---|
+| **AUTO** (default once a CRITICAL category is `FENCED_NEW`) | the Account outbox relay cannot get `ACCEPTED` from I1 for 60 s, or X6 has not granted a lease within 60 s of creation | the relay reroutes **never-leased** CRITICAL decisions to the old ledger (`AUTO_FAILOVER`). The code comes from `fallback_sealed`, so it is the same code, and there is no duplicate (§9.8). New CRITICAL decisions keep trying `NEW` first, each with its own 60 s budget |
+| **FORCED** (manual break-glass, one coordinated-release operation, no restart) | operator decision | every new CRITICAL decision routes `OLD` immediately. Leased-but-uncompleted decisions may be rerouted with the recorded possible-duplicate reason |
+
+A code that has expired is never sent by either path. Users can always request a new code, which creates a new key and a new decision.
+
+**Fallback dependency matrix.** "Fallback works" means a code email reaches the provider through the old path.
+
+| Failure | Sign-in / code verification | Code email via the service | Fallback | Evidence it is independent |
+|---|---|---|---|---|
+| One service replica down | unaffected | the other replica serves | not needed | `SKIP LOCKED` claims |
+| **Both service replicas down** | unaffected (Account never calls the service synchronously) | unavailable | **AUTO after 60 s**: unacked or never-leased rows reroute; new rows reroute after their 60 s budget | the old path runs entirely inside the Meeting Service process and its database |
+| **Service database (`cfmeet_notifications` in `cfmeet-core-db`) down** | unaffected for Meeting-local sign-in: the Meeting database is in the separate legacy `cosmicforge-db` container (certify 43670057279: meeting `database.host = postgres`, `rtc_db`; core services use `cfmeet-core-db`) | unavailable (I1 cannot commit; X6 leases are in the Meeting DB, but the service cannot run its claim loop) | **AUTO** as above | the old path needs only the Meeting DB, Redis and the provider. Note: `cfmeet-core-db` also hosts Platform Access, Hub, Messaging and Calling, so other features degrade; that is pre-existing and out of scope |
+| Service up, provider down | unaffected | retries, then the provider breaker opens | **the same provider is down for both paths.** The fallback only helps if a *different* transport is configured for the old path (D-14: keep a working SMTP account on the legacy worker while Resend serves the service, or the reverse). Without D-14 the result is delay, not loss | — |
+| Service partitioned from the Meeting Service (X6 unreachable) | unaffected | cannot obtain leases → sends nothing (safe) | AUTO after 60 s for never-leased rows | lease protocol |
+| Meeting database down | **sign-in is down today as well** (pre-existing) | — | — | unchanged risk |
+| Redis down | sign-in codes fail today (OTP state in Redis) | — | — | unchanged risk |
+| Legacy worker not running or credentials missing | unaffected | unaffected | **fallback broken.** Prevented by the readiness invariants below | certify check |
+
+**Fallback readiness invariants.** These are certified weekly and before every CRITICAL routing change:
+1. The Meeting Service email worker is running with a configured provider. It keeps its **own** mounted credentials, which are not moved: the same Resend key is mounted in both containers, or SMTP per D-14.
+2. A **fallback drill** (`email-acceptance` with `confirm=fallback`) sends a controlled acceptance email through the old path, with category `OPERATIONS_ACCEPTANCE`, and requires provider acceptance. With Resend and a webhook secret, it also requires `DELIVERED`.
+3. `notification_routing_state.critical_fallback = AUTO` for every `FENCED_NEW` CRITICAL category.
+4. The Account fallback key is mounted (`fallback_sealed` can be decrypted). A self-test runs at startup.
+5. Alert rules for the CRITICAL lane are live and have delivered a test alert (D-9).
+6. With Resend, the Meeting Service's own webhook endpoint stays registered at Resend (with its secret) for as long as the fallback exists, so fallback emails also produce delivery evidence. Both endpoints stay registered until Phase 8.
+
+**Verification tests** (Document 7): ST-20, R-18, R-19, R-21, R-22, R-23 and gate A4.6.
+
+The fallback stays in place until Phase 8 retirement, and is removed only after 90 days of the CRITICAL lane with zero AUTO or FORCED use (Document 5 §10).
+
 ---
 
-## 11. Workers
+## 11. Workers (canonical register)
+
+**In the service (5 permanent + 1 temporary):**
 
 | Worker | Lane | Cadence |
 |---|---|---|
 | W1 ingest processor | all | 100 ms wake + poll |
-| W2 critical dispatcher | CRITICAL | 100 ms |
+| W2 critical dispatcher (claims X6 leases, reports X7 completion) | CRITICAL | 100 ms |
 | W3 standard dispatcher (email, push, in-app) | HIGH / STANDARD | 500 ms |
-| W4 scheduler (reminders, deferrals, expiry, cancel) | — | 5 s |
+| W4 scheduler (reminders after takeover §9.9, deferrals, expiry, cancel) | — | 5 s |
 | W5 retention and erasure | — | hourly |
-| W6 shadow comparator (temporary) | — | 60 s |
+| W6 shadow comparator (temporary; removed in Phase 8) | — | 60 s |
 
 The CALL fast lane is a synchronous handler (I3), not a worker.
+
+**Producer-side (1 new + 6 extended existing):**
+
+| Worker | Owner | Change |
+|---|---|---|
+| PW1 Account notification outbox relay (AUTO failover, §10.4) | Meeting Service | **new** |
+| Meeting outbox relay (`workers/outbox_relay.rs`) | Meeting Service | extended: channel `NOTIFICATION` with route decisions |
+| Messaging outbox publisher | Messaging | extended: route decision + publication to the service |
+| Hub outbox dispatcher | Communications Hub | extended: destination `NOTIFICATIONS` |
+| Organizations outbox worker | Organizations | extended: subscriber `cfmeet.notifications` |
+| Calling outbox publisher | Calling | extended: destination `notifications` + missed-call fact |
+| Developer Platform worker | Developer Platform | extended: publication |
+
+**Retained unchanged until Phase 8 (not counted as new work):**
+- Meeting `EmailWorker`: the fallback path.
+- Meeting notification worker: the reminder trigger until takeover, §9.9.
+- Messaging push dispatcher: until Phase 4.1.
 
 ---
 
@@ -603,7 +887,7 @@ The CALL fast lane is a synchronous handler (I3), not a worker.
 
 | Package | Change |
 |---|---|
-| `packages/service-auth` | identity `cfmeet.notifications`; new permissions (I1–I9, X1–X5) |
+| `packages/service-auth` | identity `cfmeet.notifications`; new permissions (I1–I12, X1–X7) |
 | `packages/push-transport` | optional intermediate step (N4); the adapters end up inside the service |
 | `packages/webhooks` | `retry`, `secret_box` |
 | new `packages/notification-client` | outbox helpers for producers: envelope builder, HPKE sealing, routing-fence check. Keeps every producer integration identical |
@@ -618,4 +902,46 @@ The CALL fast lane is a synchronous handler (I3), not a worker.
 | Metrics | per lane and channel: ingested, delivered, failed, pending, oldest age, latency, breaker state, suppression count, shadow mismatches |
 | Alert rules | CRITICAL oldest pending > 60 s; CRITICAL failure rate above baseline; dead letters > 0; breaker open > 5 min; replica down |
 | Deployment | 2 `SERVICES` entries (or 1 entry with 2 replicas) in the coordinated release, 256 MiB each; activation operations per phase (`activate-notifications-*`) |
-| Runbooks | outage → break-glass; replay; provider credential rotation; HPKE key rotation |
+| Runbooks | outage → AUTO/FORCED fallback (§10.4); replay; provider credential rotation; HPKE key rotation |
+
+---
+
+## 14. Email provider architecture (preserved) and delivery evidence
+
+### 14.1 What is preserved
+
+The service's email channel is a **port** of the existing adapter architecture, not a redesign. **No new provider dependency is introduced** (brief Part 2 rule 7).
+
+| Element today (Meeting Service) | In the service |
+|---|---|
+| `EmailProvider` trait with `ResendProvider`, `SmtpProvider`, `RecordingProvider` (tests), and no provider (`email_delivery.rs:270-540`) | the same trait and the same three adapters, moved with their unit tests |
+| Provider selection `EMAIL_PROVIDER` = `resend` \| `smtp` \| `none`; unset → `smtp` if `SMTP_HOST` is set, else `none` (`config/email.rs:137-263`) | the same rules under `NOTIFICATIONS_EMAIL_PROVIDER`, with the same variable names prefixed `NOTIFICATIONS_` (`…_RESEND_API_KEY_FILE`, `…_SMTP_HOST`, …), file-based secrets only |
+| Error classification (Resend 429/409/4xx/5xx; SMTP 535 → temporary authentication error) | identical |
+| Svix-verified Resend webhooks | identical (public route §3.2) |
+| `none` → no worker, mail stays queued | identical, plus mandatory expiry (codes never linger) |
+| Release-tooling safe defaults (provider variables refused until activation) | identical pattern, new activation operations |
+
+Provider choice remains **owner configuration**, not code. The Meeting Service keeps its own provider configuration throughout, because it is the fallback path (§10.4).
+
+### 14.2 Development is independent of provider activation
+
+| Track | Owner | Depends on |
+|---|---|---|
+| **N-track** (engineering N1–N10, Document 6) | engineering | `RecordingProvider` and test adapters only. **No production provider is required to build, test or deploy the service dark or in shadow** |
+| **E-track** (provider activation on the existing Meeting path: Resend per `docs/operations/resend-email-owner-handoff.md`, or a working SMTP account) | owner | nothing in the N-track |
+| **Moving email categories** (Phases 4.3–4.6) | both | E-track evidence gates (§14.3) |
+
+### 14.3 Real delivery evidence gates
+
+*Real delivery evidence* means one of the following for a real message to a controlled inbox:
+- Resend: an `email.delivered` webhook event, verified by Svix;
+- SMTP: a `250` acceptance **and** a confirmed receipt in an owner-controlled acceptance mailbox, recorded in a dated ops report.
+
+Provider acceptance alone (`ACCEPTED`) is not delivery evidence.
+
+| Gate | Required before | Evidence |
+|---|---|---|
+| E1 | any email category moves (4.3) | the old path delivers in production: `email-acceptance confirm=otp` PASS with delivery evidence (fixes S-2) |
+| E2 | any email category moves (4.3) | the service path delivers the same provider's acceptance email with delivery evidence |
+| E3 | security notices move (4.5) | ≥ 14 days of STANDARD categories from the service: delivered ratio ≥ the old path's baseline (Q1/Q17); bounce and complaint ratios ≤ baseline + 2σ; zero F2 violations |
+| E4 | authentication codes move (4.6) | E3, plus `email-acceptance confirm=otp` through the service with delivery evidence at every canary step, plus a successful fallback drill (§10.4 invariant 2) within the previous 7 days |

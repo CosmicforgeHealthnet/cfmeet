@@ -14,6 +14,20 @@
 
 **Production acceptance is never claimed from U or I alone (Part 2 rule 13).**
 
+**Count summary** (canonical; also in README §Canonical register):
+
+| Group | IDs | Count |
+|---|---|---|
+| Functional | F-01 … F-23 | 23 |
+| Reliability | R-01 … R-23 | 23 |
+| Security | ST-01 … ST-20 | 20 |
+| Migration and fence | M-01 … M-21 | 21 |
+| **Test cases total** | | **87** |
+| Production acceptance measures | G-01 … G-28 | 28 |
+| Delivery evidence gates | E1 … E4 (Document 4 §14.3) | 4 |
+
+Security *tests* use `ST-nn`. Security *issues* in Document 8 use `S-n`.
+
 Each test row also states which adapter it needs:
 - **T** = an internal test adapter, such as `LOCAL_TEST` push, `RecordingProvider` email, or fake providers.
 - **R** = real provider credentials.
@@ -24,7 +38,7 @@ Each test row also states which adapter it needs:
 
 | ID | Scenario | Levels | Adapter | Pass criteria |
 |---|---|---|---|---|
-| F-01 | Each of the 24 inbound event types produces the expected notification, channels and template | U, I | T | golden output per type; forbidden keys refused |
+| F-01 | Each of the 31 inbound event types (30 core + 1 optional) and the `notifications.cancel` control event produces the expected notification, channels and template | U, I | T | golden output per type; forbidden keys refused |
 | F-02 | Web-only account (no mobile, no push endpoint) receives in-app and email, and no push is attempted | I, C | T | deliveries contain no PUSH row |
 | F-03 | Multiple linked browsers: read on browser A updates the unread count on browser B | I, C | T | U2 on B reflects the change within the poll interval; `version` increments |
 | F-04 | One-primary-mobile replacement: the old phone's push endpoint is disabled, the new phone gets subsequent wake-ups, and the old phone gets none | C | T | follows ADR 0060. Account → Hub event → `notif_push_endpoints.enabled=false` in the same transaction as receipt |
@@ -69,32 +83,37 @@ Each test row also states which adapter it needs:
 | R-15 | Delayed and reordered events: reminder arrives after cancel | I | reminder dropped (subject version) |
 | R-16 | Calling push fast path with NS down or slow | C | `calling_call_ring_seconds` p95 unchanged versus baseline; call established via WS |
 | R-17 | CRITICAL lane under a STANDARD flood (50k STANDARD pending) | I, S | CRITICAL p95 handoff unchanged; STANDARD backpressure does not refuse CRITICAL ingest |
-| R-18 | Both replicas down for 10 min | C | codes are delayed, not lost (Account outbox); delivered after recovery if not expired; expired codes are not sent |
-| R-19 | Break-glass `ACCOUNT_EMAIL_FALLBACK=local` | C, P | new code emails go through the retained old ledger within one poll interval; no message exists in both ledgers |
+| R-18 | Both replicas down for 10 min **with fallback OFF** (test configuration only) | C | codes are delayed, not lost (Account outbox); delivered after recovery if not expired; expired codes are not sent |
+| R-19 | FORCED fallback | C, P | `critical_fallback = FORCED` set by one operation **without a container restart**; new code emails go through the old ledger within the 5 s routing cache; no message in both ledgers; switching back restores `NEW` routing for new decisions only |
 | R-20 | One replica killed mid-batch | I | the other replica completes; no duplicate (lease renewal + key) |
+| R-21 | **AUTO failover, both service replicas stopped** | C, P (maintenance window) | a verification code requested during the outage is delivered through the old path within 60 s + delivery time; it is the **same** code (`fallback_sealed`); when the replicas return, the service's committed copy gets `REVOKED` from X6 and is never sent |
+| R-22 | **Service database unavailable** (`cfmeet-core-db` stopped in staging; the Meeting DB in its separate container stays up) | C, S | sign-in and code verification work; AUTO failover delivers codes via the old path; on recovery no duplicate (lease audit) |
+| R-23 | Fallback readiness broken (legacy worker credentials removed in staging) | C | certify fails "fallback readiness"; the activation operation for any CRITICAL routing change refuses |
 
 ## 3. Security tests
 
 | ID | Scenario | Levels | Pass criteria |
 |---|---|---|---|
-| S-01 | Forged event: wrong key, wrong audience, expired token, replayed `jti` | I | 401 `INTERNAL_AUTHENTICATION_FAILED`, no rows |
-| S-02 | Producer identity spoof: Calling token claiming `producer: cfmeet.organizations` | I | REJECTED |
-| S-03 | Event type outside the producer allowlist | I | REJECTED `UNKNOWN_EVENT_TYPE` |
-| S-04 | Cross-tenant / cross-account: authorization-matrix suite for U1–U9 and I1–I10 (foreign IDs, other account's items, preferences or devices, revoked session, platform-tenant scope) | I | 404 / 401; table fingerprints unchanged (Messaging matrix pattern) |
-| S-05 | Revoked device delivery: revoke → a queued push is not sent | I, C | DISABLED |
-| S-06 | E2EE payload confidentiality: inspect every PUSH payload for PRIVATE_E2EE | I | only `{v,type,conversationId,eventSequence,sequence}` (messages) or the call schema; Web Push ciphertext decrypts to metadata only (RFC 8291 vector) |
-| S-07 | Token disclosure: APIs, admin endpoints and logs never return or print push handles, invitation tokens or OTPs | U, I | grep-based log test; response schema has no handle field |
-| S-08 | Preference bypass: an event claiming `priority: HIGH` cannot skip mute unless the category is security | U | suppressed |
-| S-09 | Stale org membership: `membership.removed` then a pending ORG_* delivery | I | CANCELLED |
-| S-10 | Replay and idempotency attacks on U3–U5 (same key, different body) | I | `IDEMPOTENCY_CONFLICT` |
-| S-11 | Dangerous links: no URL is returned by U1; `action.kind` is a closed enum | U | schema validation |
-| S-12 | Shared handle: the same Web Push subscription registered by two accounts | I | second registration refused (`UNIQUE handle_digest`) |
-| S-13 | Erasure: account erased → all NS rows for `recipient_ref` gone within 24 h | I | 0 rows |
-| S-14 | CRITICAL priority and `sealed` payloads accepted only from the producers and event types allowed for them (Account for `account.*`; Meeting for invitation types) | I | REJECTED otherwise |
-| S-17 | Sealed-content handling: codes, tokens and addresses are decryptable only by the renderer; absent from logs, inbox, push payloads and admin APIs; email bodies erased at the final state; expired CRITICAL items cannot be replayed (I6) | U, I | grep and schema checks pass; replay refused |
-| S-18 | Owner read APIs X1–X5 refuse every caller except `cfmeet.notifications`, and X5 never returns an email address | I | 403; schema check |
-| S-15 | Forbidden data keys (`email`, `token`, `content`, …) in an event | U | REJECTED |
-| S-16 | Public exposure: no `/internal/*` NS or Meeting route reachable from the internet | P (certify probe) | nginx 404 |
+| ST-01 | Forged event: wrong key, wrong audience, expired token, replayed `jti` | I | 401 `INTERNAL_AUTHENTICATION_FAILED`, no rows |
+| ST-02 | Producer identity spoof: Calling token claiming `producer: cfmeet.organizations` | I | REJECTED |
+| ST-03 | Event type outside the producer allowlist | I | REJECTED `UNKNOWN_EVENT_TYPE` |
+| ST-04 | Cross-tenant / cross-account: authorization-matrix suite for U1–U9 and I1–I12 and X1–X7 (foreign IDs, other account's items, preferences or devices, revoked session, platform-tenant scope) | I | 404 / 401; table fingerprints unchanged (Messaging matrix pattern) |
+| ST-05 | Revoked device delivery: revoke → a queued push is not sent | I, C | DISABLED |
+| ST-06 | E2EE payload confidentiality: inspect every PUSH payload for PRIVATE_E2EE | I | only `{v,type,conversationId,eventSequence,sequence}` (messages) or the call schema; Web Push ciphertext decrypts to metadata only (RFC 8291 vector) |
+| ST-07 | Token disclosure: APIs, admin endpoints and logs never return or print push handles, invitation tokens or OTPs | U, I | grep-based log test; response schema has no handle field |
+| ST-08 | Preference bypass: an event claiming `priority: HIGH` cannot skip mute unless the category is security | U | suppressed |
+| ST-09 | Stale org membership: `membership.removed` then a pending ORG_* delivery | I | CANCELLED |
+| ST-10 | Replay and idempotency attacks on U3–U5 (same key, different body) | I | `IDEMPOTENCY_CONFLICT` |
+| ST-11 | Dangerous links: no URL is returned by U1; `action.kind` is a closed enum | U | schema validation |
+| ST-12 | Shared handle: the same Web Push subscription registered by two accounts | I | second registration refused (`UNIQUE handle_digest`) |
+| ST-13 | Erasure: account erased → all NS rows for `recipient_ref` gone within 24 h | I | 0 rows |
+| ST-14 | CRITICAL priority and `sealed` payloads accepted only from the producers and event types allowed for them (Account for `account.*`; Meeting for invitation types) | I | REJECTED otherwise |
+| ST-15 | Forbidden data keys (`email`, `token`, `content`, …) in an event | U | REJECTED |
+| ST-16 | Public exposure: no `/internal/*` NS or Meeting route reachable from the internet | P (certify probe) | nginx 404 |
+| ST-17 | Sealed-content handling: codes, tokens and addresses are decryptable only by the renderer; absent from logs, inbox, push payloads and admin APIs; email bodies erased at the final state; expired CRITICAL items cannot be replayed (I6) | U, I | grep and schema checks pass; replay refused |
+| ST-18 | Owner APIs X1–X7 refuse every caller except `cfmeet.notifications`, and X5 never returns an email address | I | 403; schema check |
+| ST-19 | Fallback key handling: `fallback_sealed` is decryptable only with Account's local key; never logged; startup self-test fails closed if the key is missing | U, I | grep and schema checks; self-test |
+| ST-20 | Lease forgery and bypass: X6/X7 refuse every caller except `cfmeet.notifications`; the service cannot send a CRITICAL email without a granted lease (`notif_critical_send_without_lease_total` stays 0 under fault injection); a `REVOKED` lease aborts the send | I | 403; metric 0; no provider call |
 
 ## 4. Migration-specific tests
 
@@ -105,44 +124,61 @@ Each test row also states which adapter it needs:
 | M-03 | Routing fence: messages created before the fence exist only in the old ledger, after it only in the service ledger; no message in both (SQL join on idempotency key across both databases) | 0 overlaps |
 | M-04 | Fence boundary at millisecond granularity (job created at T−1 ms vs T) | the correct single owner |
 | M-05 | Routing mismatch detection: service ACTIVE while the producer is still routing to the old path (mis-set) | the producer decision still sends one message to one system; certify reports FAIL "routing disagreement" |
+| M-06 | Push registry copy path (Q6 > 0, or Web Push activated in Messaging first): copy, facade switch with freeze, decisions per `event_id`, verify counts and that sealed handles round-trip | equal counts; no plaintext handle in the NS DB |
+| M-07 | Producer flag off mid-stream | no further events; already-queued rows handled |
 | M-08 | Drain completion: old ledger non-final rows reach 0; Resend events for old message IDs still applied by the old endpoint during the drain | 0 stuck rows |
 | M-09 | Preference copy + catch-up + freeze: counts and versions equal; writes during the freeze are retried successfully; rollback write-back restores Hub values | equal; no lost write |
-| M-06 | Push registry migration (Q6 > 0 path): copy, dual-read, fence, verify counts and that sealed handles round-trip | equal counts; no plaintext handle in the NS DB |
-| M-07 | Producer flag off mid-stream | no further events; already-queued rows handled |
+| M-10 | Sticky decision: the same idempotency key routed twice (business retry, duplicate request), including across a routing-mode change | one decision, one row in one system |
+| M-11 | Guard trigger: old-path insert without an `OLD` decision is refused when the category is not `LEGACY_ONLY`, and allowed in `LEGACY_ONLY` | `ROUTING_DECISION_REQUIRED`; no row |
+| M-12 | Mixed producer versions: one pre-fence and one fence-capable replica running | the activation operation refuses (certify: `routingProtocol` missing); if forced in a test, the trigger rejects the pre-fence writes; 0 duplicates |
+| M-13 | Rollback floor: deploying a pre-fence producer image while any category is not `LEGACY_ONLY` | the release tooling refuses |
+| M-14 | Crash matrix (kill points: before commit; after commit, before relay; after the service commit, before ACK; after provider accept, before the service commit) | exactly one system holds the message; the outcome per kill point matches Document 4 §9.7 |
+| M-15 | Unilateral reroute of an unacked message: `dryRun` probe `UNKNOWN` → reroute; probe `KNOWN` → refuse | correct per case; F2 holds |
+| M-16 | Two-phase reroute (I11): `CANCELLED` items rerouted, `IN_FLIGHT_OR_SENT` items not; invitations reported `emailDelivery: FAILED` | correct per item |
+| M-17 | CRITICAL lease protocol: never-leased → automatic reroute, exact; live lease → blocked; completed → terminal; leased-uncompleted → FORCED only, recorded `REROUTED_POSSIBLE_DUPLICATE` | as specified in Document 4 §9.8 |
+| M-18 | Reminder time partition: starts `< B` reminded only by Meeting, `>= B` only by the service, with ±5 min clock skew injected | exactly one reminder per start |
+| M-19 | Audit detection: an injected violation (the same key in both ledgers) is detected within one cycle and the category is frozen (`FENCED_OLD`) | detected; frozen; alert delivered |
+| M-20 | Service mixed versions: protocol N and N−1 accepted; unsupported protocol → 503 `PROTOCOL_UNSUPPORTED` and the producer retries | no loss; no duplicate |
+| M-21 | Mode disagreement: producer `FENCED_NEW`, service `OFF` | event `HELD`, never sent, alert; resumes when fixed |
 
 ## 5. Production acceptance (baseline-derived)
 
-The targets are formulas over the **Phase 0 baseline** (Document 5 §2). No absolute performance guarantee is invented. Notation:
+The targets are formulas over the **Phase 0 baseline** (Document 5 §2). **Every `B(·)` is BLOCKED until the matching query (Q1–Q18) is MEASURED.** All 18 are OUTSTANDING as of 2026-11-15. Email baselines are taken over the 14 days after gate E1. No absolute performance guarantee is invented. Notation:
 - `B(x)` = the baseline value of metric x over the 14 days before the stage;
 - `σ` = the baseline daily standard deviation.
 
-| Gate | Measure | Target |
-|---|---|---|
-| A1 dark (P1) | `/ready` uptime 24 h; MemAvailable after deploy | 100 %; ≥ 1,024 MiB above gate (resource gate) |
-| A2 shadow exit (P2) | Event capture `ingested/emitted` | ≥ 99.9 % per producer |
-| | Recipient + policy mismatch versus legacy | ≤ 0.1 %, every case explained |
-| | p95 ingest-to-processed lag | ≤ max(60 s, 2 × `B(producer outbox p95 lag)`) |
-| | Producer outbox DEAD for the NS destination | 0 |
-| A3 in-app (P3) | U1/U2 error rate | ≤ 0.5 % 5xx |
-| | U2 p95 latency | ≤ `B(Hub /bootstrap p95)` (a comparable relay read) |
-| | Wrong-recipient reports | 0 |
-| | Notification loss: events accepted versus items created (for in-app-enabled categories) | ≥ 99.9 % (remainder explained by policy suppression) |
-| A4.3 standard email | Messages per (notice, recipient) across both ledgers | exactly 1 (SQL check) |
-| | Email failure rate (FAILED+EXPIRED / created) | ≤ `B` + 2σ (requires a working transport: N0-2) |
-| | Delivery latency, notice created → ledger ACCEPTED, p95 | ≤ `B` + 30 s |
-| | Messages with the same idempotency key in both ledgers | 0 |
-| A4.1 push | Invalid-handle rate | ≤ `B` once established (first activation: track only) |
-| | Payload validation failures | 0 |
-| | Push to a revoked device | 0 |
-| A4.1 call push | `calling_call_ring_seconds` p95 / answer rate | unchanged within `B` ± 2σ |
-| A4.2 preferences | Copy parity; facade error rate | 100 % equal; ≤ baseline Hub error rate |
-| A4.6 critical lane | p95 code email handoff (outbox commit → provider ACCEPTED) | ≤ `B(Q17, AUTH_*)` + 5 s |
-| | Code email failure rate | ≤ `B` (and 0 lost: every AUTH_* outbox row reaches a terminal state) |
-| | `email-acceptance confirm=otp` through the service | PASS at every canary step |
-| | Break-glass use | 0 during the 60-day acceptance window |
-| | Ringing works with NS stopped (R-12, run in production during a maintenance window by the owner) | PASS |
-| Rollback drill (each stage) | Time from trigger to legacy authority | ≤ 1 coordinated-release operation; no duplicate; no loss (reconciliation SQL) |
-| User-visible consistency | Read on one device reflected on another | within the poll interval (30 s) |
+Every measure has an ID (G-nn) so it can be counted and referenced. "BLOCKED" means the baseline query is OUTSTANDING.
+
+| ID | Gate (phase) | Measure | Target | Baseline dependency |
+|---|---|---|---|---|
+| G-01 | A1 dark (P1) | `/ready` uptime 24 h; MemAvailable after deploy | 100 %; ≥ 1,024 MiB above gate (resource gate) | Q16 |
+| G-02 | A2 shadow exit (P2) | Event capture `ingested/emitted` | ≥ 99.9 % per producer | — |
+| G-03 | A2 | Recipient + policy mismatch versus legacy | ≤ 0.1 %, every case explained | — |
+| G-04 | A2 | p95 ingest-to-processed lag | ≤ max(60 s, 2 × `B(producer outbox p95 lag)`) | Q10–Q12 |
+| G-05 | A2 | Producer outbox DEAD for the service destination | 0 | — |
+| G-06 | A3 in-app (P3) | U1/U2 error rate | ≤ 0.5 % 5xx | — |
+| G-07 | A3 | U2 p95 latency | ≤ `B(Hub /bootstrap p95)` (a comparable relay read) | Hub metric (not a Q; measure during P2) |
+| G-08 | A3 | Wrong-recipient reports | 0 | — |
+| G-09 | A3 | Notification loss: events accepted versus items created (in-app categories) | ≥ 99.9 % (remainder explained by policy suppression) | — |
+| G-10 | A4.1 push | Invalid-handle rate | ≤ `B` once established (first activation: track only) | Q6/Q7 |
+| G-11 | A4.1 | Payload validation failures | 0 | — |
+| G-12 | A4.1 | Push to a revoked device | 0 | — |
+| G-13 | A4.1 call push | `calling_call_ring_seconds` p95 / answer rate | unchanged within `B` ± 2σ | Calling metric over the 14 days before 4.1 |
+| G-14 | A4.1 call push | Ringing works with the service stopped (R-12/R-16, maintenance window) | PASS | — |
+| G-15 | A4.2 preferences | Copy parity; facade error rate | 100 % equal; ≤ baseline Hub error rate | Q8/Q9 |
+| G-16 | A4.3 standard email | **E1 and E2 passed** (Document 4 §14.3) | required before the first category moves | — |
+| G-17 | A4.3 | Messages per (notice, recipient) across both ledgers; audit violations (Document 4 §9.10) | exactly 1; 0 violations | — |
+| G-18 | A4.3 | Email failure rate (FAILED+EXPIRED / created) | ≤ `B` + 2σ | Q1/Q2 after E1 — **BLOCKED** |
+| G-19 | A4.3 | Delivery latency, notice created → provider ACCEPTED, p95 | ≤ `B` + 30 s | Q17 after E1 — **BLOCKED** |
+| G-20 | A4.5 security notices | **E3 passed** | required | Q1/Q17 after E1 — **BLOCKED** |
+| G-21 | A4.6 critical lane | **E4 passed**; R-19, R-21, R-22 passed in production within 7 days | required | — |
+| G-22 | A4.6 | p95 code email handoff (outbox commit → provider ACCEPTED) | ≤ `B(Q17, AUTH_*)` + 5 s | Q17 after E1 — **BLOCKED** |
+| G-23 | A4.6 | Code email failure rate; loss | ≤ `B`; 0 lost (every AUTH_* decision reaches a terminal state) | Q1/Q2 after E1 — **BLOCKED** |
+| G-24 | A4.6 | `email-acceptance confirm=otp` through the service, with delivery evidence | PASS at every canary step | — |
+| G-25 | A4.6 | CRITICAL sends without a lease; possible-duplicate reroutes | 0; each one recorded and explained | — |
+| G-26 | A4.6 (operational acceptance) | AUTO or FORCED fallback use | 0 during the 60-day window | — |
+| G-27 | Rollback drill (each stage) | Time from trigger to the old path for new decisions | ≤ 1 coordinated-release operation, no restart; no duplicate; no loss (audit) | — |
+| G-28 | User-visible consistency | Read on one device reflected on another | within the poll interval (30 s) | — |
 
 ## 6. Test adapters versus real credentials
 
@@ -150,7 +186,8 @@ The targets are formulas over the **Phase 0 baseline** (Document 5 §2). No abso
 |---|---|---|
 | Event ingest, policy, inbox, dedupe, fencing, rollback | ✔ | |
 | Email orchestration up to the ledger | ✔ (`RecordingProvider`) | |
-| Email actually delivered | | ✔ Resend (`activate-resend-email`; webhook secret for DELIVERED evidence) |
+| Email actually delivered (gates E1–E4) | | ✔ real delivery evidence (Document 4 §14.3): Resend with webhook secret (`email.delivered`), **or** SMTP `250` plus receipt in an owner-controlled acceptance mailbox. Provider activation is the owner's E-track, independent of service development |
+| Old-path fallback drill (`confirm=fallback`) | | ✔ the Meeting Service's own provider credentials (kept mounted until Phase 8) |
 | Push payload shape, whitelist, RFC 8291 encryption, SSRF guard | ✔ (fakes, existing `tests/push_adapters.rs`) | |
 | Web Push to a real browser | | ✔ VAPID key (generated on the VPS by `activate-web-push`) plus a real browser subscription (Chromium in CI can subscribe through FCM's endpoint, so this is verifiable in the coordinated-release journey) |
 | FCM to a real Android device | | ✔ FCM service account |
@@ -158,4 +195,4 @@ The targets are formulas over the **Phase 0 baseline** (Document 5 §2). No abso
 | Calling background ring (CallKit/ConnectionService) | | ✔ as above, plus the mobile build |
 | SMS | n/a (not in scope; disabled) | — |
 
-**Certification boundary:** until each R row passes in production, its capability stays `IMPLEMENTED_PENDING_CONFIGURATION`. This matches the convention in `docs/operations/*`.
+**Certification boundary:** until each row needing real credentials passes in production, its capability stays `IMPLEMENTED_PENDING_CONFIGURATION`. This matches the convention in `docs/operations/*`.

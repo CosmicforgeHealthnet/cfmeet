@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Status | **AUDIT ONLY. No implementation is authorized.** |
-| Revision | **2 (2026-11-15).** The owner chose full consolidation: one notification system used by every service, with all current notification pipelines moving into it. Revision 1 recommended a narrower orchestration service and is kept as a superseded alternative (Document 3 §3.2) |
+| Revision | **2, corrected before coding (2026-11-15):** counts reconciled; routing fence strengthened; provider activation separated; fallback verified; milestones split; reconciled with `main` @ `3763392`; Q1–Q18 marked outstanding. **2 (2026-11-15).** The owner chose full consolidation: one notification system used by every service, with all current notification pipelines moving into it. Revision 1 recommended a narrower orchestration service and is kept as a superseded alternative (Document 3 §3.2) |
 | Repository | `CosmicforgeHealthnet/cfmeet`, `main` at `6f3743f806434a55bad8297f104d28a55e350e2e` (2026-11-15) |
 | Production | `https://api.cfmeet.com` (single Contabo VPS, coordinated release path) |
 | Production evidence | read-only `certify` run [43670057279](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43670057279) (2026-11-15 02:56 UTC, `CERTIFIED_READ_ONLY`, artifact 14144111736); release run history; unauthenticated `GET https://api.cfmeet.com/health` = 200; dated ops reports under `docs/operations/` |
@@ -144,18 +144,24 @@ Items marked * are optional phases.
 
 ## 6. Scale of the work
 
+These counts are the **canonical register** (`README.md` §Canonical register). Every document uses these numbers.
+
 | Item | Count |
 |---|---|
-| New public (user) APIs | **9**: inbox ×5, preferences GET/PUT, push registration PUT/DELETE. Existing Hub, Messaging and Meeting endpoints stay as compatibility facades |
-| New public provider callback | 1 (Resend events to the new service) |
-| New internal APIs on the new service | **9**: ingest, user dispatch, call fast path, 6 operator APIs. +1 optional Alertmanager receiver |
-| New internal APIs on existing services | **5**: Account `resolveAccountContacts`; Meeting `resolveConferenceRecipients`; Messaging `authorizeWakeups`; Hub `checkCommunicationRestrictions`; Organizations `resolveInvitationInvitee` |
-| New tables (new service) | **16** (Document 4 §6) |
-| Additive tables/migrations in existing services | 4: Account `account_notification_outbox` (new table, sealed critical-lane payloads); Meeting `outbox_events` gains channel `NOTIFICATION`; Hub outbox destination CHECK; Calling outbox destination + missed-call fact |
-| Workers | **5 permanent + 1 temporary**: ingest, critical dispatcher, standard dispatcher, scheduler, retention; shadow comparator |
-| Inbound event types | **31** (Document 4 §5) |
-| Outbound events | 1 (`notifications.inbox.changed`) |
-| Infrastructure | **2 containers** (2 replicas for the critical lane, ≤ 256 MiB each), 1 database in the existing `cfmeet-core-db`, **no Redis, no new server**. The release gate passes: 5,076 − (512 + 832) = 3,732 MiB ≥ 1,024 MiB |
+| New public (user) APIs | **9** (U1–U9): inbox ×5, preferences GET/PUT, push registration PUT/DELETE |
+| Existing public operations kept as facades (no contract change) | **11** (Document 4 §3.1) |
+| New public provider callback | **1** (Resend events to the new service) |
+| New internal APIs on the new service | **11 + 1 optional** (I1–I11; I12 Alertmanager receiver, optional) |
+| New internal APIs on existing services | **7** (X1–X7): Account `resolveAccountContacts`, `claimCriticalSendLeases`, `completeCriticalSends`; Meeting `resolveConferenceRecipients`; Messaging `authorizeWakeups`; Hub `checkCommunicationRestrictions`; Organizations `resolveInvitationInvitee` |
+| New tables in the service | **17** (Document 4 §6) |
+| New producer-side tables | **5**: Meeting `notification_routing_state`, `notification_route_decisions`, `account_notification_outbox`; Messaging `notification_routing_state`, `notification_route_decisions` (Document 4 §9.2) |
+| Changes to existing tables | **6**: Meeting `outbox_events` channel `NOTIFICATION`; Hub outbox destination CHECK; Calling outbox destination + missed-call fact; guard triggers on `email_deliveries`, `meeting_notifications`, `messaging_push_jobs` |
+| Workers | service: **5 permanent + 1 temporary**; producer-side: **1 new + 6 extended** (Document 4 §11) |
+| Inbound event types | **31** (30 core + 1 optional), plus 1 control event (`notifications.cancel`) |
+| Outbound events | **1** (`notifications.inbox.changed`) |
+| Test cases | **87** (F 23, R 23, ST 20, M 21), plus **28** production acceptance measures (G-01 … G-28) and **4** delivery-evidence gates (E1–E4) |
+| Outstanding baseline measurements | **18** (Q1–Q18, all OUTSTANDING) |
+| Infrastructure | **2 containers** (≤ 256 MiB each), 1 database in the existing `cfmeet-core-db`, **no Redis, no new server**. Gate on the single sample of 2026-11-15: 5,076 − (512 + 832) = 3,732 MiB ≥ 1,024 MiB |
 
 ---
 
@@ -163,15 +169,16 @@ Items marked * are optional phases.
 
 | Step | What happens |
 |---|---|
-| **N0** | Repair the existing paths; the owner activates Resend in today's Meeting pipeline |
+| **N0** | Repair the existing paths (engineering) |
+| **E-track** (owner, parallel) | Make the existing Meeting email adapters deliver (Resend or SMTP). Delivery-evidence gates E1–E4 gate the *moving* of email categories, never the building of the service |
 | **Phase 0** | Read-only baseline queries |
 | **Phase 1** | Unified service deployed dark (full schema) |
 | **Phase 2** | Shadow: every producer also sends copies; the service computes and never sends |
 | **Phase 3** | In-app inbox for categories with no channel today |
-| **Phase 4**, in order of increasing risk | 4.1 push (no live traffic today) → 4.2 preferences (Hub becomes a facade) → 4.3 developer and meeting emails, including reminder scheduling → 4.4 invitation emails → 4.5 security notices → 4.6 **sign-in/verification/reset/step-up code emails last**, with an emergency fallback to the old Meeting path kept until retirement → 4.7 operator alerts (optional) → 4.8 customer webhooks (only if D-W) |
+| **Phase 4**, in order of increasing risk | 4.1 push (no live traffic today) → 4.2 preferences (Hub becomes a facade) → 4.3 developer and meeting emails, including reminder scheduling → 4.4 invitation emails → 4.5 security notices → 4.6 **sign-in/verification/reset/step-up code emails last**, with a verified AUTO/FORCED fallback to the old Meeting path kept until retirement → 4.7 operator alerts (optional) → 4.8 customer webhooks (only if D-W) |
 | **Phase 5** | History: preferences and push registrations copied; email history left to expire in the old ledger |
 | **Phase 6** | Canary |
-| **Phase 7** | Rollback (route new messages back to the old system; in-flight messages finish where they are) |
+| **Phase 7** | Rollback (new decisions route back to the old system without a restart; existing decisions are sticky; in-flight messages drain or are rerouted only through the audited protocol, Document 4 §9.8) |
 | **Phase 8** | Retire the old pipelines only with evidence |
 
 ---
@@ -186,14 +193,14 @@ Full answers are in `README.md`.
 4. **Stay:** ringing/signaling and arbitration; code generation and verification; ciphertext and membership authority; business data. Customer webhooks stay unless D-W.
 5. **Without downtime?** Yes. Per-channel fences, old paths kept as fallbacks, critical lane last.
 6. **Biggest risks:**
-   - sign-in email now depends on a second service (mitigated by 2 replicas, the critical lane, deployed alerting, a break-glass fallback, and moving it last);
+   - sign-in email now depends on a second service (mitigated by 2 replicas, the critical lane, the X6/X7 lease protocol, deployed alerting, a verified AUTO/FORCED fallback that works with both replicas or the service database down, and moving it last);
    - wider blast radius;
    - re-certifying email and push in the new home;
    - preference single-writer switch;
    - S-1/S-2/S-3 before migration.
-7. **Size:** 9 public, 9 (+1) internal on the service, 5 internal on existing services, 16 tables, 5 (+1) workers, 31 event types.
+7. **Size:** see §6 (canonical register).
 8. **Infrastructure:** about 512 MiB limit in total (2 × 256), 1 database, negligible CPU. €0 additional infrastructure.
 9. **Sequence:** §7.
-10. **Scope / definition of done:** Document 6.
+10. **Scope / definition of done:** Document 6 (milestones M1 engineering complete, M2 operationally accepted, M3 programme accepted, M4 legacy retired).
 
 `CFMEET_NOTIFICATION_SYSTEM_AUDIT_COMPLETE — IMPLEMENTATION_AWAITING_OWNER_APPROVAL`
