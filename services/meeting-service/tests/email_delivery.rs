@@ -715,3 +715,83 @@ async fn complained_or_twice_bounced_recipients_are_suppressed_except_for_securi
     .await
     .is_ok());
 }
+
+/// Notification Service N0-8 (S-5): Redis holds neither the code nor the address; the code
+/// verifies once; a code issued by the previous image (plaintext under the address) still
+/// verifies until it expires and is never written again.
+#[tokio::test]
+async fn otp_codes_are_stored_as_salted_hashes_under_address_digests() {
+    use backend::services::otp::{email_key, OtpType};
+    let app = app!();
+    let otp = app.state.otp_service.clone();
+    let redis = app.state.redis.clone();
+    let address = format!(
+        "Otp-{}@Example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let hashed_key = format!("otp:verify:h:{}", email_key(&address));
+    let legacy_key = format!("otp:verify:{}", address.to_lowercase());
+
+    otp.store_code(&address, "482913", OtpType::Verification)
+        .await
+        .unwrap();
+    let stored = redis
+        .get(&hashed_key)
+        .await
+        .unwrap()
+        .expect("stored under the digest");
+    assert!(!stored.contains("482913"), "no plaintext code at rest");
+    assert!(
+        !hashed_key.contains('@') && !hashed_key.contains("otp-"),
+        "no address in the key"
+    );
+    assert_eq!(
+        redis.get(&legacy_key).await.unwrap(),
+        None,
+        "the legacy key is never written"
+    );
+    assert!(otp.has_code(&address, OtpType::Verification).await.unwrap());
+
+    assert!(!otp
+        .verify_code(&address, "000000", OtpType::Verification)
+        .await
+        .unwrap());
+    assert!(otp
+        .verify_code(&address.to_uppercase(), "482913", OtpType::Verification)
+        .await
+        .unwrap());
+    assert!(
+        !otp.verify_code(&address, "482913", OtpType::Verification)
+            .await
+            .unwrap(),
+        "single use"
+    );
+    assert_eq!(redis.get(&hashed_key).await.unwrap(), None);
+
+    // A code issued by the previous image before the release.
+    redis.set(&legacy_key, "731842", Some(600)).await.unwrap();
+    assert!(otp.has_code(&address, OtpType::Verification).await.unwrap());
+    assert!(!otp
+        .verify_code(&address, "731843", OtpType::Verification)
+        .await
+        .unwrap());
+    assert!(otp
+        .verify_code(&address, "731842", OtpType::Verification)
+        .await
+        .unwrap());
+    assert_eq!(redis.get(&legacy_key).await.unwrap(), None, "consumed");
+
+    // A new code replaces a legacy one (which then no longer verifies).
+    redis.set(&legacy_key, "111111", Some(600)).await.unwrap();
+    otp.store_code(&address, "222222", OtpType::Verification)
+        .await
+        .unwrap();
+    assert!(!otp
+        .verify_code(&address, "111111", OtpType::Verification)
+        .await
+        .unwrap());
+    assert!(otp
+        .verify_code(&address, "222222", OtpType::Verification)
+        .await
+        .unwrap());
+}
