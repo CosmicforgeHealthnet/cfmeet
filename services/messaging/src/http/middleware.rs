@@ -687,6 +687,16 @@ pub async fn delegated_context(
     }
 }
 
+/// Request extension set ONLY by [`require_delegated_application`]: the request is a
+/// first-party backend acting through a peer service granted
+/// `messaging-application.delegate` (the delegated mirror). Never present on `/v1`
+/// requests — customer credentials, gateway-forwarded credentials and client tokens —
+/// so caller-controlled options reserved for mirrored / migrated writes (e.g. a message's
+/// `notify: false`, S-4) can tell the two apart. Handlers read it with
+/// `Option<Extension<DelegatedApplication>>`; a request cannot set an extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DelegatedApplication;
+
 /// `/internal/v1/delegated/**`: a peer granted `messaging-application.delegate` acts as
 /// the backend of its own (first-party) application environment on the standard
 /// customer operations. The handlers see an ordinary [`CustomerCaller`] holding only
@@ -738,6 +748,7 @@ pub async fn require_delegated_application(
     }
     let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
     request.extensions_mut().insert(CustomerCaller(ctx));
+    request.extensions_mut().insert(DelegatedApplication);
     let response = next.run(request).await;
     if mutation && response.status().is_success() {
         state.wake_outbox();

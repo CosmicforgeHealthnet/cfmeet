@@ -783,6 +783,138 @@ async fn push_payloads_are_metadata_only_and_revoked_devices_get_none() {
     let _ = conv;
 }
 
+/// Waits until the outbox published the `messaging.message.created` event of `message`
+/// (push fan-out runs before publication), then returns the push jobs it created.
+async fn push_jobs_of_message(h: &Harness, message: &str) -> i64 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let event = format!(
+        "SELECT count(*) FROM messaging_outbox_events WHERE event_type = 'messaging.message.created' \
+           AND payload->>'message_id' = '{message}' AND published_at IS NOT NULL"
+    );
+    while h.scalar(&event).await == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the message event was never published"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    h.scalar(&format!(
+        "SELECT count(*) FROM messaging_push_jobs j JOIN messaging_outbox_events e ON e.id = j.event_id \
+          WHERE e.payload->>'message_id' = '{message}'"
+    ))
+    .await
+}
+
+/// S-4 (roadmap N0-5): `notify: false` is honoured only for mirrored / migrated writes of a
+/// delegated first-party backend (`messaging-application.delegate`). An end-user client
+/// token or a customer credential sending it still creates the recipients' push jobs;
+/// the field stays accepted.
+#[tokio::test]
+async fn notify_false_is_honoured_only_for_delegated_callers() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.first_party(true);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let path = format!("/v1/conversations/{cid}/messages");
+    let bob_device = h.active_device(&c, bob).await.device_id();
+    let r = h
+        .put(
+            &c,
+            Some(bob),
+            &format!("/v1/messaging/devices/{bob_device}/push-registration"),
+            json!({ "platform": "LOCAL_TEST", "handle": "local-test-handle-notify" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let alice_device = Member {
+        principal: alice,
+        device: h.active_device(&c, alice).await,
+        group: None,
+        cursor: 0,
+    };
+    let silent =
+        |text: &str| json!({ "clientMessageId": Uuid::new_v4(), "text": text, "notify": false });
+
+    // 1. An end-user device with its client token.
+    let token = rt.token(&c, &alice_device).await;
+    let by_client = h
+        .send(
+            axum::http::Method::POST,
+            None,
+            None,
+            &path,
+            Some(silent("from a client token")),
+            &[("authorization", &format!("CF-Client-Token {token}"))],
+        )
+        .await;
+    assert_eq!(by_client.status, StatusCode::CREATED, "{}", by_client.text);
+    let id = by_client.json["messageId"].as_str().unwrap().to_string();
+    assert_eq!(
+        push_jobs_of_message(h, &id).await,
+        1,
+        "a client token cannot suppress the recipient's push"
+    );
+
+    // 2. A customer backend credential on /v1 (no delegated mirror).
+    let by_customer = h
+        .post(&c, Some(alice), &path, silent("from a customer credential"))
+        .await;
+    assert_eq!(
+        by_customer.status,
+        StatusCode::CREATED,
+        "{}",
+        by_customer.text
+    );
+    let id = by_customer.json["messageId"].as_str().unwrap().to_string();
+    assert_eq!(push_jobs_of_message(h, &id).await, 1);
+
+    // 3. The delegated mirror (first-party backend through a peer service): honoured.
+    let alice_s = alice.to_string();
+    let by_delegate = h
+        .call_internal(
+            &peers().meeting,
+            axum::http::Method::POST,
+            &format!("/internal/v1/delegated{path}"),
+            Some(silent("a mirrored write")),
+            Some(c.context.scope.delegated()),
+            &[("cf-acting-principal", alice_s.as_str())],
+        )
+        .await;
+    assert_eq!(
+        by_delegate.status,
+        StatusCode::CREATED,
+        "{}",
+        by_delegate.text
+    );
+    let id = by_delegate.json["messageId"].as_str().unwrap().to_string();
+    assert_eq!(
+        push_jobs_of_message(h, &id).await,
+        0,
+        "a delegated mirrored write keeps notify:false"
+    );
+    // ...and without the flag the delegated path still notifies.
+    let loud = h
+        .call_internal(
+            &peers().meeting,
+            axum::http::Method::POST,
+            &format!("/internal/v1/delegated{path}"),
+            Some(json!({ "clientMessageId": Uuid::new_v4(), "text": "a normal write" })),
+            Some(c.context.scope.delegated()),
+            &[("cf-acting-principal", alice_s.as_str())],
+        )
+        .await;
+    assert_eq!(loud.status, StatusCode::CREATED, "{}", loud.text);
+    let id = loud.json["messageId"].as_str().unwrap().to_string();
+    assert_eq!(push_jobs_of_message(h, &id).await, 1);
+
+    let report = messaging::realtime::push::dispatch_due(&h.state, 100, 3)
+        .await
+        .unwrap();
+    assert_eq!(report.sent, 3, "{report:?}");
+}
+
 #[tokio::test]
 async fn draining_tells_clients_to_reconnect_and_refuses_new_connections() {
     let Some(rt) = Rt::start().await else { return };
