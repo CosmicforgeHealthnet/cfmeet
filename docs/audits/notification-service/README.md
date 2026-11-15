@@ -1,6 +1,8 @@
 # CF Meet Unified Notification Service: Audit and Zero-Disruption Migration Blueprint
 
-**Status:** `CFMEET_NOTIFICATION_SYSTEM_AUDIT_COMPLETE — IMPLEMENTATION_AWAITING_OWNER_APPROVAL`
+**Status:** `BLUEPRINT_APPROVED (D-13) — N0, N1, N4 ENGINEERING_IMPLEMENTED; MERGE, RELEASE AND PRODUCTION VERIFICATION PENDING`
+
+**Engineering report:** [Document 9](09-engineering-report-n0-n1-n4.md) (2026-11-15). Owner decisions D-5, D-10, D-15, D-16 approved; D-W excluded; D-12 decided.
 
 **Revision 2, corrected before coding (2026-11-15).** The owner confirmed full consolidation (D-0): one notification system that every service uses, with every current notification delivery pipeline moving into it. This correction pass leaves the target architecture unchanged. It does the following:
 - reconciles every count;
@@ -31,6 +33,7 @@
 | 6 | [Implementation Roadmap](06-implementation-roadmap.md): milestones M1–M4 |
 | 7 | [Testing and Acceptance Matrix](07-testing-and-acceptance-matrix.md) |
 | 8 | [Risk, Cost and Decision Register](08-risk-cost-and-decision-register.md) |
+| 9 | [Engineering Report: N0, N1, N4](09-engineering-report-n0-n1-n4.md) |
 | — | [evidence/](evidence/): raw audit notes (line references pinned to `6f3743f`) and the certify summary |
 
 ---
@@ -167,4 +170,4 @@ No notification code path cited by the documents changed.
 | D-12 | `register` 409 behaviour: N0-9 |
 | D-6, D-7, D-8 | defaults proposed; non-blocking |
 
-**Do not implement anything until the owner approves.**
+**Approved 2026-11-15 (D-13): N0, N1 and N4 implemented — see Document 9. No live notification-pipeline migration has been made.**

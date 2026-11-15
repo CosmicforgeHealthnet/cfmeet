@@ -18,6 +18,10 @@
 | ID | Decision | Date | Effect |
 |---|---|---|---|
 | **D-0** | **One notification system used by every service; current pipelines move into it** | 2026-11-15 | Option B adopted. Revision 1's orchestration-only design is superseded (Document 3 §3) |
+| **D-13** | Blueprint approved (full consolidation); start N0, N1, N4 | 2026-11-15 | engineering started; report in Document 9 |
+| **D-5, D-10, D-15, D-16** | approved (D-16: AUTO fallback enabled only after real recovery tests prove the old transport works) | 2026-11-15 | X5, event #15, I12 / event #31 in the N1 contracts; D-16 applies in N12 |
+| **D-W** | excluded: customer webhooks stay with the Developer Platform | 2026-11-15 | N16 not planned |
+| **D-12** | security-safe registration responses without exposing account existence | 2026-11-15 | implemented in N0-9 (Document 9) |
 
 ---
 
@@ -67,18 +71,18 @@
 
 | ID | Issue | Severity | Fix | Status |
 |---|---|---|---|---|
-| S-1 | Missing Hub preference grant (meeting notices fail closed) | High | N0-1; disappears once preferences move (N10) | open |
+| S-1 | Missing Hub preference grant (meeting notices fail closed) | High | N0-1; disappears once preferences move (N10) | **fixed in code, pending release** (ffff88d; Document 9) |
 | S-2 | OTP transport not recovered | High | E-track E1 (owner makes the existing Meeting adapters deliver, D-4); later the CRITICAL lane | open |
-| S-3 | `/internal/operations/email/*` public reachability unverified | Medium | N0-6; routes retired in N15 | open |
-| S-4 | Caller-controlled `notify:false` | Medium | N0-5 | open |
-| S-5 | Plaintext OTP in Redis | Medium | N0-8 | open |
-| S-6 | Enumeration | Medium | N0-9 (+ D-12) | open |
-| S-7 | Erasure leaves push handles | Medium | N0-7; service erasure W5 | open |
-| S-8 | Lease < batch, so duplicate sends are possible | Medium | N0-4; lease renewal in the service | open |
-| S-9 | Security notices best-effort | Medium | N0-10; transactional Account outbox in N7 | open |
-| S-10 | Calling endpoint survives logout; `voip` without implementation | Medium | N0-11 | open |
-| S-11 | Poison recipient | Medium | N0-3 | open |
-| S-12 | No bounce suppression | Low/Medium | N0-12; `notif_email_suppressions` | open |
+| S-3 | `/internal/operations/email/*` public reachability unverified | Medium | N0-6; routes retired in N15 | **fixed in code, pending release** (1bbfefd; Document 9) |
+| S-4 | Caller-controlled `notify:false` | Medium | N0-5 | **fixed in code, pending release** (Messaging (Doc 9 §5); Document 9) |
+| S-5 | Plaintext OTP in Redis | Medium | N0-8 | **fixed in code, pending release** (ba0af77; Document 9) |
+| S-6 | Enumeration | Medium | N0-9 (+ D-12) | **fixed in code, pending release** (94d759f; Document 9) |
+| S-7 | Erasure leaves push handles | Medium | N0-7; service erasure W5 | **fixed in code, pending release** (Messaging (Doc 9 §5); Document 9) |
+| S-8 | Lease < batch, so duplicate sends are possible | Medium | N0-4; lease renewal in the service | **fixed in code, pending release** (05bfff0 + Messaging; Document 9) |
+| S-9 | Security notices best-effort | Medium | N0-10; transactional Account outbox in N7 | **fixed in code, pending release** (c684d8c; Document 9) |
+| S-10 | Calling endpoint survives logout; `voip` without implementation | Medium | N0-11 | **fixed in code, pending release** (567e7f2, 9696dd6; Document 9) |
+| S-11 | Poison recipient | Medium | N0-3 | **fixed in code, pending release** (4246235; Document 9) |
+| S-12 | No bounce suppression | Low/Medium | N0-12; `notif_email_suppressions` | **fixed in code, pending release** (4246235; Document 9) |
 | S-13 | Push handles plaintext and shareable across accounts | Medium | sealed + `UNIQUE handle_digest` (N9) | design |
 | S-14 | APNs/FCM see conversation IDs | Low (residual) | documented; prefer Web Push | accepted residual (owner) |
 | S-15 | Org invitation token returned to the inviter | Low/Medium | Organizations backlog | open |
