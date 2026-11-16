@@ -26,7 +26,8 @@ pub struct PreferenceQuery {
     pub account_references: Vec<String>,
 }
 
-fn valid_reference(r: &str) -> bool {
+/// A canonical `cfmeet-user:<uuid>` account reference (lowercase, hyphenated).
+pub(crate) fn valid_reference(r: &str) -> bool {
     r.strip_prefix("cfmeet-user:")
         .and_then(|id| uuid::Uuid::parse_str(id).ok())
         .is_some_and(|id| format!("cfmeet-user:{id}") == r)

@@ -17,6 +17,7 @@ pub mod policy;
 pub mod preferences;
 pub mod profiles;
 pub mod relationships;
+pub mod restrictions;
 pub mod store;
 pub mod sync;
 
