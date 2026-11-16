@@ -92,10 +92,13 @@ fn cases() -> Vec<Case> {
             // new tables; its down only drops what it added.
             // + audit MSG-018 / MSG-009: two new tables (receipt coalescing, Hub timeline
             // versions); its down only drops them.
+            // + CF Meet chat remediation M1: one new table (named application policy
+            // baselines); its down only drops it.
             part_vi: &[
                 "m20261201_000029_public_event_destinations",
                 "m20261202_000030_session_devices_inbox",
                 "m20261203_000031_receipt_coalescing_timeline",
+                "m20261204_000032_application_baselines",
             ],
             seed: "INSERT INTO messaging_webhook_relay (event_id, environment_id, status, attempts, next_attempt_at, \
                      created_at, relayed_at) VALUES \
