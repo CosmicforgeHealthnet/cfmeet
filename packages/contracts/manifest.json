@@ -1153,7 +1153,7 @@
       "visibility": "public",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N5, N8–N10). Public user APIs U1–U9 (inbox, preferences, push endpoints; served through the Meeting Service relay) and the Resend provider callback POST /api/v1/notifications/provider-events/resend. Not yet served."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N5, N8–N10). Public user APIs U1–U9 (inbox, preferences, push endpoints; served through the Meeting Service relay) and the Resend provider callback POST /api/v1/notifications/provider-events/resend. Implemented in services/notifications from N2 (deployed dark); not yet publicly routed: the Meeting Service relay and the gateway entries are held for owner approval of the public-route change."
     },
     {
       "id": "cfmeet.notifications.internal-api",
@@ -1175,7 +1175,7 @@
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6: X1, X2; N12: X6, X7). Meeting Service / Account owner APIs for the Notification Service only: resolveAccountContacts (account-contacts.read), resolveConferenceRecipients (meeting-notification-recipients.read), claimCriticalSendLeases and completeCriticalSends (account-route-lease.claim). Not yet served. 1.1.0 (N6): X2 answers `joinPath` and `endsAt`."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6: X1, X2; N12: X6, X7). Meeting Service / Account owner APIs for the Notification Service only: resolveAccountContacts (account-contacts.read), resolveConferenceRecipients (meeting-notification-recipients.read), claimCriticalSendLeases and completeCriticalSends (account-route-lease.claim). 1.1.0 (N6): X2 answers `joinPath` and `endsAt`. X1 and X2 are served by services/meeting-service from N6 (PR #76), only while NOTIFICATION_OWNER_API_ENABLED=true; X6 and X7 are not yet served (N12)."
     },
     {
       "id": "cfmeet.messaging.notification-owner-api",
@@ -1186,7 +1186,7 @@
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Messaging X3 authorizeWakeups (messaging-wakeups.authorize) for the Notification Service only. Not yet served."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Messaging X3 authorizeWakeups (messaging-wakeups.authorize) for the Notification Service only. Served by services/messaging from N6 (PR #76)."
     },
     {
       "id": "cfmeet.communications.notification-owner-api",
@@ -1197,7 +1197,7 @@
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Communications Hub X4 checkCommunicationRestrictions (communications-restrictions.read) for the Notification Service only. Not yet served."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Communications Hub X4 checkCommunicationRestrictions (communications-restrictions.read) for the Notification Service only. Served by services/communications from N6 (PR #76); calls carry the first-party delegated platform scope."
     },
     {
       "id": "cfmeet.organizations.notification-owner-api",
@@ -1208,7 +1208,7 @@
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Organizations X5 resolveInvitationInvitee (organization-invitations.read; D-5 approved) for the Notification Service only; never the invitee email. Not yet served."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6). Organizations X5 resolveInvitationInvitee (organization-invitations.read; D-5 approved) for the Notification Service only; never the invitee email. Served by services/organizations from N6 (PR #76)."
     }
   ]
 }
