@@ -4,7 +4,7 @@
 /* eslint-disable */
 
 export const CONTRACT_TITLE = "CosmicForge RTC API";
-export const CONTRACT_VERSION = "1.5.0";
+export const CONTRACT_VERSION = "1.6.0";
 
 /** Access-policy configuration (no secrets). */
 export interface AccessConfig {
@@ -3743,6 +3743,7 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/meeting-spaces/{id}/recurrence": "v2_end_recurrence",
   "DELETE /api/v2/meeting-spaces/{id}/registrations/{registrationId}": "v2_cancel_registration",
   "DELETE /api/v2/messaging/relay/{path}": "v2_messaging_relay_delete",
+  "DELETE /api/v2/notifications/devices/{accountDeviceId}/push": "v2_notifications_push_remove",
   "DELETE /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_delete",
   "DELETE /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_delete",
   "DELETE /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}": "v2_remove_organization_team_member",
@@ -3816,6 +3817,9 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/messaging/directory": "v2_messaging_directory",
   "GET /api/v2/messaging/me": "v2_messaging_me",
   "GET /api/v2/messaging/relay/{path}": "v2_messaging_relay_get",
+  "GET /api/v2/notifications": "v2_notifications_list",
+  "GET /api/v2/notifications/preferences": "v2_notifications_preferences_get",
+  "GET /api/v2/notifications/unread-count": "v2_notifications_unread_count",
   "GET /api/v2/organizations/{id}": "v2_get_business_organization",
   "GET /api/v2/organizations/{id}/audit-events": "v2_list_organization_audit_events",
   "GET /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_get",
@@ -3844,6 +3848,7 @@ export const CONTRACT_OPERATIONS = {
   "PATCH /api/v2/meeting-spaces/{id}/members/{memberId}": "v2_update_member",
   "PATCH /api/v2/meeting-spaces/{id}/profile-policy": "v2_update_profile_policy",
   "PATCH /api/v2/messaging/relay/{path}": "v2_messaging_relay_patch",
+  "PATCH /api/v2/notifications/{notificationId}": "v2_notifications_update",
   "PATCH /api/v2/organizations/{id}": "v2_update_business_organization",
   "PATCH /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_patch",
   "PATCH /api/v2/organizations/{id}/members/{userId}": "v2_update_organization_membership",
@@ -3973,6 +3978,8 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/messaging/principals/names": "v2_messaging_principal_names",
   "POST /api/v2/messaging/relay/{path}": "v2_messaging_relay_post",
   "POST /api/v2/messaging/session-tokens": "v2_messaging_session_token",
+  "POST /api/v2/notifications/dismiss": "v2_notifications_dismiss",
+  "POST /api/v2/notifications/read": "v2_notifications_mark_read",
   "POST /api/v2/organization-invitations/accept": "v2_accept_organization_invitation",
   "POST /api/v2/organization-invitations/decline": "v2_decline_organization_invitation",
   "POST /api/v2/organizations": "v2_create_business_organization",
@@ -3994,6 +4001,8 @@ export const CONTRACT_OPERATIONS = {
   "PUT /api/v2/meeting-spaces/{id}/recurrence": "v2_set_recurrence",
   "PUT /api/v2/meeting-spaces/{id}/recurrence/exceptions": "v2_set_recurrence_exception",
   "PUT /api/v2/messaging/relay/{path}": "v2_messaging_relay_put",
+  "PUT /api/v2/notifications/devices/{accountDeviceId}/push": "v2_notifications_push_register",
+  "PUT /api/v2/notifications/preferences": "v2_notifications_preferences_update",
   "PUT /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_put",
   "PUT /api/v2/organizations/{id}/members/{userId}": "v2_upsert_organization_member",
   "PUT /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_put",
