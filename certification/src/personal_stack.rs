@@ -219,6 +219,7 @@ impl PersonalStack {
                 db::migrate(&self.bin.join("account-hardening-migration"), &owner)?;
                 db::migrate(&self.bin.join("organization-integration-migration"), &owner)?;
                 db::migrate(&self.bin.join("lifecycle-delivery-migration"), &owner)?;
+                db::migrate(&self.bin.join("notification-fence-migration"), &owner)?;
                 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
                 let conn = Database::connect(&owner).await?;
                 for auth in ["local", "google"] {

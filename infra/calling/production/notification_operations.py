@@ -253,3 +253,69 @@ def activate_relay(cr, sha, run_id, confirm):
             raise RuntimeError('Notification Service I2 answers %s to an unsigned probe after activation' % status)
 
     cr.apply_activation('activate-notifications-relay', sha, run_id, [('meeting-service', overrides)], post=post)
+
+
+# --- Routing fence v1 (Document 4 §9.6): producers' protocol and the rollback floor ---------
+# Producers with an old delivery path keep their routing decisions in their own database.
+FENCE_PRODUCERS = {
+    'meeting-service': dict(table='notification_routing_state', binary='notification-fence-migration'),
+    'messaging': dict(table='messaging_notification_routing_state', binary='messaging-notification-fence-migration'),
+}
+
+
+def _producer_sql(cr, service):
+    if service == 'meeting-service':
+        return cr.meeting_psql
+    return lambda q, d=cr.SERVICES[service]['db']: cr.release.db_sql(d, q)
+
+
+def fenced_categories(cr, service):
+    """'CATEGORY:MODE' of every category of `service` that is not LEGACY_ONLY ([] before the
+    fence migration exists)."""
+    table = FENCE_PRODUCERS[service]['table']
+    sql = _producer_sql(cr, service)
+    if (sql("SELECT to_regclass('public.%s') IS NOT NULL;" % table) or '').strip() not in ('t', 'true'):
+        return []
+    out = (sql("SELECT coalesce(string_agg(category || ':' || mode, ',' ORDER BY category), '') FROM %s "
+               "WHERE mode <> 'LEGACY_ONLY';" % table) or '').strip()
+    return [x for x in out.split(',') if x]
+
+
+def image_supports_fence(cr, service, image):
+    binary = FENCE_PRODUCERS[service]['binary']
+    out = cr.p.run('docker', 'run', '--rm', '--network', 'none', '--entrypoint', '/bin/sh', image, '-c',
+                   'test -x /app/%s && echo fence || echo none' % binary)
+    return (out or '').strip() == 'fence'
+
+
+def rollback_floor(cr, service, image):
+    """M-13: never run a producer image without the routing fence while any of its categories
+    has left LEGACY_ONLY; route them back first (activate-notifications-routing / §9.8)."""
+    if service not in FENCE_PRODUCERS:
+        return
+    fenced = fenced_categories(cr, service)
+    if fenced and not image_supports_fence(cr, service, image):
+        raise RuntimeError('Rollback floor: %s has categories outside LEGACY_ONLY (%s) and image %s has no routing '
+                           'fence; route every category back to LEGACY_ONLY first' % (service, ', '.join(fenced), image))
+
+
+def routing_protocol(cr, service):
+    """routingProtocol reported by the running producer's readiness JSON (None when absent)."""
+    s = cr.SERVICES[service]
+    out = cr.p.run('docker', 'run', '--rm', '--network', 'container:' + s['container'], cr.PROBE_IMAGE,
+                   '-sS', '--max-time', '4', 'http://127.0.0.1:%d%s' % (s['port'], s['health']))
+    try:
+        value = json.loads(out or '{}').get('routingProtocol')
+    except ValueError:
+        return None
+    return value if isinstance(value, int) else None
+
+
+def require_fence_protocol(cr, service, minimum=1):
+    """M-12: a category of `service` may leave LEGACY_ONLY only while its running image reports
+    routingProtocol >= minimum (pre-fence binaries do not report it)."""
+    value = routing_protocol(cr, service)
+    if value is None or value < minimum:
+        raise RuntimeError('%s reports routingProtocol %s (need >= %d); release a fence-capable image first'
+                           % (service, value, minimum))
+    return value
