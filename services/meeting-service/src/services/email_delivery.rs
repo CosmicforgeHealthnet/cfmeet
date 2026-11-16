@@ -609,6 +609,24 @@ impl WorkerSettings {
     }
 }
 
+/// Smallest ledger retention window the purge applies, in days: a zero or negative
+/// setting must never make the purge erase or delete fresh rows.
+pub const RETENTION_DAYS_MIN: i64 = 1;
+/// Largest ledger retention window the purge applies, in days. Configuration already
+/// limits `EMAIL_LEDGER_RETENTION_DAYS` to 1..=365; this bound keeps a directly built
+/// [`WorkerSettings`] safe and the doubled deletion window well inside `i32`.
+pub const RETENTION_DAYS_MAX: i64 = 3650;
+
+/// The purge's `(scrub, delete)` windows in days, as PostgreSQL `integer`s: the
+/// configured retention clamped to `RETENTION_DAYS_MIN..=RETENTION_DAYS_MAX`, and
+/// twice that for deletion.
+pub fn retention_windows(retention_days: i64) -> (i32, i32) {
+    let days = retention_days.clamp(RETENTION_DAYS_MIN, RETENTION_DAYS_MAX);
+    // Lossless: the clamp keeps `days` (and `2 * days`) far inside `i32`.
+    let scrub = i32::try_from(days).unwrap_or(RETENTION_DAYS_MAX as i32);
+    (scrub, scrub.saturating_mul(2))
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TickReport {
     pub claimed: u64,
@@ -898,28 +916,41 @@ impl EmailWorker {
     }
 
     /// Erase addresses of old final rows; delete rows past twice the retention.
+    ///
+    /// PostgreSQL's `make_interval(days => ...)` takes an `integer`. Binding the
+    /// configured `i64` sends an `int8` parameter and there is no implicit
+    /// `bigint -> integer` cast, so every purge failed with "function
+    /// make_interval(days => bigint) does not exist". The windows are a checked,
+    /// range-limited `i32` (see [`retention_windows`]) and the SQL casts `$1::int`.
     pub async fn purge(&self) -> ApiResult<()> {
-        let days = self.settings.retention_days;
+        let (scrub_days, delete_days) = retention_windows(self.settings.retention_days);
+        if i64::from(scrub_days) != self.settings.retention_days {
+            tracing::warn!(
+                configured = self.settings.retention_days,
+                applied = scrub_days,
+                "email ledger retention outside {RETENTION_DAYS_MIN}..={RETENTION_DAYS_MAX} days; clamped"
+            );
+        }
         self.db
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
                 "UPDATE email_deliveries SET recipient = NULL, recipient_name = NULL
-                  WHERE final_at < now() - make_interval(days => $1) AND recipient IS NOT NULL",
-                [days.into()],
+                  WHERE final_at < now() - make_interval(days => $1::int) AND recipient IS NOT NULL",
+                [scrub_days.into()],
             ))
             .await?;
         self.db
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
-                "DELETE FROM email_deliveries WHERE final_at < now() - make_interval(days => $1)",
-                [(days * 2).into()],
+                "DELETE FROM email_deliveries WHERE final_at < now() - make_interval(days => $1::int)",
+                [delete_days.into()],
             ))
             .await?;
         self.db
             .execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
-                "DELETE FROM email_delivery_events WHERE received_at < now() - make_interval(days => $1)",
-                [(days * 2).into()],
+                "DELETE FROM email_delivery_events WHERE received_at < now() - make_interval(days => $1::int)",
+                [delete_days.into()],
             ))
             .await?;
         Ok(())
