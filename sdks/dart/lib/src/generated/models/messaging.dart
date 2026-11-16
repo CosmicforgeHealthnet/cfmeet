@@ -2486,8 +2486,9 @@ class PolicyView {
   const PolicyView.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory PolicyView.create({required Map<String, Object?> deployment, required String digest, required EffectivePolicy effective, required int platformPolicyVersion, required ApplicationPolicy policy, required int version}) =>
+  factory PolicyView.create({String? applicationBaseline, required Map<String, Object?> deployment, required String digest, required EffectivePolicy effective, required int platformPolicyVersion, required ApplicationPolicy policy, required int version}) =>
       PolicyView.fromJson(<String, Object?>{
+        if (applicationBaseline != null) 'applicationBaseline': applicationBaseline,
         'deployment': deployment,
         'digest': digest,
         'effective': effective.toJson(),
@@ -2498,6 +2499,9 @@ class PolicyView {
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// 1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults ‹- baseline ‹- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE …
+  String? get applicationBaseline => json['applicationBaseline'] as String?;
 
   /// What THIS deployment can run (1.23.0): PRIVATE_E2EE needs E2EE devices, MANAGED the managed key ring. usableProfiles lists, per enabled context, the allowed profiles that are actually available; contextsWithoutUsableProfile names enabled contexts in which no conversation can currently be created. A policy update that would leave a context it configures without a usable profile is refused …
   Map<String, Object?> get deployment => json['deployment']! as Map<String, Object?>;

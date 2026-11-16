@@ -1900,11 +1900,14 @@ fn deployment_view(state: &AppState, effective: &policy::EffectivePolicy) -> Val
 pub async fn policy_view(state: &AppState, ctx: &TrustedContext) -> Result<Value> {
     let (overrides, version) =
         policy::load_application_policy(&state.db, ctx.scope.environment_id, false).await?;
-    let effective =
-        policy::resolve(&overrides, version).map_err(|_| Error::code(ErrorCode::InternalError))?;
+    let baseline = policy::load_baseline(&state.db, ctx.scope.environment_id).await?;
+    let effective = policy::resolve(&policy::layer(baseline, &overrides), version)
+        .map_err(|_| Error::code(ErrorCode::InternalError))?;
     Ok(json!({
         "version": version,
+        // The application's own document (what a PUT replaces), never the baseline.
         "policy": overrides,
+        "applicationBaseline": baseline.map(|b| b.as_str()),
         "effective": effective.to_value(),
         "digest": effective.digest(),
         "platformPolicyVersion": policy::PLATFORM_POLICY_VERSION,
@@ -1924,8 +1927,12 @@ pub async fn update_policy(
     ctx: &TrustedContext,
     update: PolicyUpdate,
 ) -> Result<Value> {
-    let resolved =
-        policy::resolve(&update.policy, update.expected_version + 1).map_err(Error::validation)?;
+    let baseline = policy::load_baseline(&state.db, ctx.scope.environment_id).await?;
+    let resolved = policy::resolve(
+        &policy::layer(baseline, &update.policy),
+        update.expected_version + 1,
+    )
+    .map_err(Error::validation)?;
     // A context this update configures must leave at least one allowed profile that this
     // deployment can actually run (otherwise no conversation of it could ever be created).
     for class in update.policy.contexts.keys() {

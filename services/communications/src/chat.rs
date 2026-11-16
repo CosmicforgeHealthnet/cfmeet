@@ -500,14 +500,62 @@ impl State {
             if a["messageSequence"].as_i64().is_some_and(|s| s <= mark) {
                 continue;
             }
-            data.push(json!({"attachmentId":a["attachmentId"],"messageId":a["messageId"],"state":a["state"],
-                "sizeBytes":a["sizeBytes"],"mediaClass":a["mediaClass"],"createdAt":a["createdAt"]}));
+            data.push(media_item(conversation, a));
         }
         Ok(
             json!({"schemaVersion":1,"conversationId":conversation,"data":data,"nextCursor":v["nextCursor"],
             "download":"Use the Messaging attachment download-grant API; private files are decrypted only on the device"}),
         )
     }
+}
+
+/// U14 / M3: one shared-media item. MANAGED files carry the sanitized name, media type
+/// and kind Messaging holds; PRIVATE_E2EE files carry none of them (they live in the
+/// MLS-encrypted descriptor and are shown only after the device decrypts it). Retrieval
+/// is a reference to the normal access-checked grant operation of THIS conversation and
+/// attachment — `download.path` / `thumbnail.path` relative to the Messaging client API,
+/// reached by CF Meet apps through `/api/v2/messaging/relay/` — never a URL or storage
+/// key; anything else Messaging might send is dropped.
+pub fn media_item(conversation: Uuid, a: &Value) -> Value {
+    let managed = a["securityProfile"] == "MANAGED";
+    let id = a["attachmentId"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok());
+    let grant = |field: &str, operation: &str, thumbnail: bool| -> Value {
+        let Some(id) = id else { return Value::Null };
+        let expected = format!("v1/conversations/{conversation}/attachments/{id}/{operation}");
+        if a[field]["path"].as_str() != Some(expected.as_str()) || a[field]["method"] != "POST" {
+            return Value::Null;
+        }
+        if thumbnail {
+            json!({"method":"POST","path":expected,"mediaType":"image/png"})
+        } else {
+            json!({"method":"POST","path":expected})
+        }
+    };
+    let text = |key: &str, max: usize| {
+        a[key]
+            .as_str()
+            .filter(|t| managed && !t.is_empty() && t.chars().count() <= max)
+            .filter(|t| !t.chars().any(char::is_control))
+            .map(str::to_string)
+    };
+    let kind = a["kind"]
+        .as_str()
+        .filter(|k| managed && ["IMAGE", "DOCUMENT", "FILE", "VOICE_NOTE", "VIDEO"].contains(k));
+    let profile = a["securityProfile"]
+        .as_str()
+        .filter(|p| ["MANAGED", "PRIVATE_E2EE"].contains(p));
+    json!({"attachmentId":a["attachmentId"],"messageId":a["messageId"],"state":a["state"],
+        "sizeBytes":a["sizeBytes"],"mediaClass":a["mediaClass"],"createdAt":a["createdAt"],
+        "securityProfile":profile,"kind":kind,"fileName":text("fileName", 255),"mediaType":text("mediaType", 255),
+        "metadataLocation":match profile {
+            Some("MANAGED") => Some("SERVER"),
+            Some(_) => Some("ENCRYPTED_DESCRIPTOR"),
+            None => None,
+        },
+        "download":grant("download", "download-grants", false),
+        "thumbnail":if managed {grant("thumbnail", "thumbnail-grants", true)} else {Value::Null}})
 }
 fn saved_view(r: &Value, available: bool, reason: Option<&str>) -> Value {
     json!({"schemaVersion":1,"savedId":r["id"],"conversationId":r["conversation_id"],"messageId":r["message_id"],

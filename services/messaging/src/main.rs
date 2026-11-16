@@ -142,11 +142,30 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
-    let personal = cf_communications_policy::Scope::from_env()
-        .map_err(anyhow::Error::msg)?
+    let personal_scope = cf_communications_policy::Scope::from_env().map_err(anyhow::Error::msg)?;
+    let personal = personal_scope
         .map(|scope| cf_communications_policy::PolicyClient::new(service_auth.client(), scope));
     if personal.is_some() && !messaging_migration::communications_ready(&db).await? {
         anyhow::bail!("Communications integration migration is required");
+    }
+    // CF Meet chat remediation M1: CF Meet's own personal application environment gets
+    // the first-party policy baseline (attachments on, 25 MiB, every kind). No other
+    // application environment is touched, and its own application policy still wins.
+    if let Some(scope) = &personal_scope {
+        messaging::conversations::policy::register_baseline(
+            &db,
+            scope.tenant_id,
+            scope.application_id,
+            scope.environment_id,
+            messaging::conversations::policy::ApplicationBaseline::CfMeetFirstParty,
+            chrono::Utc::now(),
+        )
+        .await
+        .map_err(|e| anyhow!("cannot register the CF Meet policy baseline ({e})"))?;
+        tracing::info!(
+            environment_id = %scope.environment_id,
+            "CF Meet first-party messaging policy baseline registered"
+        );
     }
     let mut state = AppState::new(db.clone(), clock, authority, service_auth.clone())
         .with_communications(personal)

@@ -518,23 +518,36 @@ class ClearedForMe {
   Map<String, Object?> toJson() => json;
 }
 
+/// A group both people are CURRENT members of (1.4.0, CF Meet chat M2): never a group the viewer left or was removed from. title / avatarRef are the server-held display metadata of MANAGED groups; a PRIVATE_E2EE group's name lives in its end-to-end encrypted group state, which the server does not hold, so they are null there (clients show their own decrypted name or a generic label). memberCount is …
 class CommonGroup {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const CommonGroup.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CommonGroup.create({required String contextClass, required String conversationId}) =>
+  factory CommonGroup.create({String? avatarRef, required String contextClass, required String conversationId, int? memberCount, String? securityProfile, String? title}) =>
       CommonGroup.fromJson(<String, Object?>{
+        if (avatarRef != null) 'avatarRef': avatarRef,
         'contextClass': contextClass,
         'conversationId': conversationId,
+        if (memberCount != null) 'memberCount': memberCount,
+        if (securityProfile != null) 'securityProfile': securityProfile,
+        if (title != null) 'title': title,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
+  String? get avatarRef => json['avatarRef'] as String?;
+
   String get contextClass => json['contextClass']! as String;
 
   String get conversationId => json['conversationId']! as String;
+
+  int? get memberCount => (json['memberCount'] as num?)?.toInt();
+
+  String? get securityProfile => json['securityProfile'] as String?;
+
+  String? get title => json['title'] as String?;
 
   Map<String, Object?> toJson() => json;
 }
@@ -1576,19 +1589,27 @@ class InvitesPage {
   Map<String, Object?> toJson() => json;
 }
 
+/// A shared file (1.4.0, CF Meet chat M3). MANAGED: fileName (sanitized), mediaType and kind as the server holds them. PRIVATE_E2EE: those are null and metadataLocation is ENCRYPTED_DESCRIPTOR: name, type and thumbnail travel only inside the end-to-end encrypted message and are shown after the device decrypts it. download / thumbnail are never URLs: path is the Messaging client operation (relative, …
 class MediaItem {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const MediaItem.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory MediaItem.create({required String attachmentId, String? createdAt, required String mediaClass, String? messageId, int? sizeBytes, String? state}) =>
+  factory MediaItem.create({required String attachmentId, String? createdAt, Map<String, Object?>? download, String? fileName, String? kind, required String mediaClass, String? mediaType, String? messageId, String? metadataLocation, String? securityProfile, int? sizeBytes, String? state, Map<String, Object?>? thumbnail}) =>
       MediaItem.fromJson(<String, Object?>{
         'attachmentId': attachmentId,
         if (createdAt != null) 'createdAt': createdAt,
+        if (download != null) 'download': download,
+        if (fileName != null) 'fileName': fileName,
+        if (kind != null) 'kind': kind,
         'mediaClass': mediaClass,
+        if (mediaType != null) 'mediaType': mediaType,
         if (messageId != null) 'messageId': messageId,
+        if (metadataLocation != null) 'metadataLocation': metadataLocation,
+        if (securityProfile != null) 'securityProfile': securityProfile,
         if (sizeBytes != null) 'sizeBytes': sizeBytes,
         if (state != null) 'state': state,
+        if (thumbnail != null) 'thumbnail': thumbnail,
       });
 
   /// The JSON object, including fields this SDK version does not know.
@@ -1598,13 +1619,27 @@ class MediaItem {
 
   String? get createdAt => json['createdAt'] as String?;
 
+  Map<String, Object?>? get download => json['download'] == null ? null : json['download']! as Map<String, Object?>;
+
+  String? get fileName => json['fileName'] as String?;
+
+  String? get kind => json['kind'] as String?;
+
   String get mediaClass => json['mediaClass']! as String;
 
+  String? get mediaType => json['mediaType'] as String?;
+
   String? get messageId => json['messageId'] as String?;
+
+  String? get metadataLocation => json['metadataLocation'] as String?;
+
+  String? get securityProfile => json['securityProfile'] as String?;
 
   int? get sizeBytes => (json['sizeBytes'] as num?)?.toInt();
 
   String? get state => json['state'] as String?;
+
+  Map<String, Object?>? get thumbnail => json['thumbnail'] == null ? null : json['thumbnail']! as Map<String, Object?>;
 
   Map<String, Object?> toJson() => json;
 }
@@ -1759,8 +1794,9 @@ class MessagingCapability {
   const MessagingCapability.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory MessagingCapability.create({required bool available, required Map<String, Object?> managed, required Map<String, Object?> privateE2ee, required String reason, required bool securityReady}) =>
+  factory MessagingCapability.create({Map<String, Object?>? attachments, required bool available, required Map<String, Object?> managed, required Map<String, Object?> privateE2ee, required String reason, required bool securityReady}) =>
       MessagingCapability.fromJson(<String, Object?>{
+        if (attachments != null) 'attachments': attachments,
         'available': available,
         'managed': managed,
         'privateE2ee': privateE2ee,
@@ -1770,6 +1806,9 @@ class MessagingCapability {
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// 1.4.0 (CF Meet chat M1): whether the chat attach control may be offered, from Messaging's effective attachment policy (CF Meet: enabled, 25 MiB, five kinds), configured private storage and its upload kill switch. contexts says it per personal context (DIRECT / GROUP). When enabled is false clients hide or disable the attach control; an older Messaging, an inactive account or an unavailable …
+  Map<String, Object?>? get attachments => json['attachments'] == null ? null : json['attachments']! as Map<String, Object?>;
 
   bool get available => json['available']! as bool;
 

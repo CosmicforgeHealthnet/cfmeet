@@ -10,6 +10,33 @@ use common::{realtime::cid, *};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+/// Validates `value` against a component schema of the private Communications contract
+/// (`packages/contracts/messaging/communications-internal/v1.openapi.json`).
+fn conforms_internal(component: &str, value: &Value) {
+    let doc: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packages/contracts/messaging/communications-internal/v1.openapi.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let schema = &doc["components"]["schemas"][component];
+    assert!(schema.is_object(), "no component {component}");
+    let validator = jsonschema::options()
+        .should_validate_formats(true)
+        .build(schema)
+        .unwrap();
+    let errors: Vec<String> = validator
+        .iter_errors(value)
+        .map(|e| format!("{e} at {}", e.instance_path()))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "{component} violated: {errors:?}\n{value:#}"
+    );
+}
+
 /// The personal scope of `c` becomes the one Communications governs.
 fn govern(h: &mut Harness, c: &Customer) {
     h.state.communications = Some(cf_communications_policy::PolicyClient::new(
@@ -289,6 +316,20 @@ async fn e2ee_attachments_are_reported_encrypted_within_the_members_window() {
     assert_eq!(data[0]["mediaClass"], "ENCRYPTED");
     assert_eq!(data[0]["sizeBytes"], 4096);
     assert_eq!(data[0]["uploaderPrincipalId"], json!(alice.principal));
+    // M3: the file name, media type and thumbnail of an E2EE file live inside the
+    // MLS-encrypted descriptor; the server reports none of them (nothing fabricated) and
+    // offers only the normal, access-checked download grant of the ciphertext.
+    assert_eq!(data[0]["securityProfile"], "PRIVATE_E2EE");
+    assert_eq!(data[0]["metadataLocation"], "ENCRYPTED_DESCRIPTOR");
+    for absent in ["fileName", "mediaType", "kind", "thumbnail"] {
+        assert!(data[0][absent].is_null(), "{absent}: {}", r.text);
+    }
+    assert!(!r.text.contains("octet-stream"), "{}", r.text);
+    assert_eq!(
+        data[0]["download"],
+        json!({"method": "POST", "path": format!("v1/conversations/{}/attachments/{attachment}/download-grants", cid(&conv))})
+    );
+    conforms_internal("ConversationAttachments", &r.json);
     assert!(r.json["nextCursor"].is_null());
 
     // The clear-for-me watermark excludes it.
@@ -553,6 +594,292 @@ async fn capabilities_report_managed_messaging_apart_from_e2ee_readiness() {
     // The PRIVATE_E2EE fields keep their previous meaning for older Hub images.
     assert_eq!(managed.json["securityReady"], false);
     assert_eq!(managed.json["available"], false);
+}
+
+/// M1: the capabilities answer carries the effective attachment availability the client
+/// attach control follows — computed from the same policy, storage and kill switch the
+/// upload intent enforces. Off by default (platform policy), on with the CF Meet
+/// first-party baseline (25 MiB, five kinds), off again without private storage.
+#[tokio::test]
+async fn capabilities_report_attachment_availability_from_the_effective_policy() {
+    use messaging::conversations::policy::{register_baseline, ApplicationBaseline};
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    let alice = h.member(&c, 0).await;
+    h.set_policy(
+        &c,
+        json!({"contexts":{"DIRECT":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"MANAGED"},
+                           "GROUP":{"allowedProfiles":["MANAGED","PRIVATE_E2EE"],"defaultProfile":"MANAGED"}}}),
+    )
+    .await;
+    h.state.storage = std::sync::Arc::new(cf_object_storage::MemoryObjectStore::new());
+    govern(&mut h, &c);
+    let body = json!({"principalId": alice.principal});
+    let off = hub(&h, &c, alice.principal, "capabilities", body.clone()).await;
+    assert_eq!(off.status, StatusCode::OK, "{}", off.text);
+    conforms_internal("Capability", &off.json);
+    assert_eq!(off.json["attachments"]["enabled"], false, "{}", off.text);
+    assert_eq!(off.json["attachments"]["reason"], "DISABLED_BY_POLICY");
+    assert_eq!(
+        off.json["attachments"]["contexts"],
+        json!({"DIRECT": false, "GROUP": false})
+    );
+
+    let s = c.context.scope;
+    register_baseline(
+        h.conn(),
+        s.tenant_id,
+        s.application_id,
+        s.environment_id,
+        ApplicationBaseline::CfMeetFirstParty,
+        h.now(),
+    )
+    .await
+    .unwrap();
+    let on = hub(&h, &c, alice.principal, "capabilities", body.clone()).await;
+    conforms_internal("Capability", &on.json);
+    assert_eq!(
+        on.json["attachments"],
+        json!({"enabled": true, "reason": "AVAILABLE", "maxBytes": 26_214_400, "maxPerMessage": 10,
+               "allowedKinds": ["DOCUMENT", "FILE", "IMAGE", "VIDEO", "VOICE_NOTE"],
+               "contexts": {"DIRECT": true, "GROUP": true}}),
+        "{}",
+        on.text
+    );
+
+    h.state.storage = std::sync::Arc::new(cf_object_storage::UnconfiguredStore);
+    let no_storage = hub(&h, &c, alice.principal, "capabilities", body).await;
+    assert_eq!(no_storage.json["attachments"]["enabled"], false);
+    assert_eq!(
+        no_storage.json["attachments"]["reason"],
+        "STORAGE_NOT_CONFIGURED"
+    );
+}
+
+/// M2: groups in common carry the display metadata the server legitimately holds —
+/// title and avatar reference of MANAGED groups, the security profile and the current
+/// member count — and only for groups both principals are CURRENT members of. A member
+/// who left (or was removed) and a non-member see nothing of the group, not even its id.
+#[tokio::test]
+async fn common_groups_carry_display_metadata_for_current_members_only() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    h.allow_managed(&c, "GROUP").await;
+    let people: Vec<Uuid> = (0..3).map(|_| h.principal(&c)).collect();
+    let (alice, bob, carol) = (people[0], people[1], people[2]);
+    let outsider = h.principal(&c);
+    let created = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED",
+                    "title": "Weekend hikers", "avatarRef": "avatar:hikers-1" }),
+        )
+        .await;
+    assert_eq!(created.status, StatusCode::CREATED, "{}", created.text);
+    let gid = created.json["conversationId"].as_str().unwrap().to_string();
+    for p in [bob, carol] {
+        let r = h
+            .post(
+                &c,
+                Some(alice),
+                &format!("/v1/conversations/{gid}/members"),
+                json!({ "principalId": p }),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    }
+    // A second, untitled group of alice and bob only.
+    let untitled = h
+        .create_conversation(
+            &c,
+            alice,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+        )
+        .await;
+    assert_eq!(untitled.status, StatusCode::CREATED, "{}", untitled.text);
+    let uid = untitled.json["conversationId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let r = h
+        .post(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{uid}/members"),
+            json!({ "principalId": bob }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    // Carol leaves the titled group (removed by its owner).
+    let removed = h
+        .delete(
+            &c,
+            Some(alice),
+            &format!("/v1/conversations/{gid}/members/{carol}"),
+        )
+        .await;
+    assert!(removed.status.is_success(), "{}", removed.text);
+    govern(&mut h, &c);
+    let pair = |a: Uuid, b: Uuid| json!({ "actorPrincipalId": a, "targetPrincipalId": b });
+
+    let r = hub(&h, &c, alice, "common-groups", pair(alice, bob)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms_internal("Groups", &r.json);
+    let groups = r.json["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 2, "{}", r.text);
+    let titled = groups
+        .iter()
+        .find(|g| g["conversationId"] == json!(gid))
+        .unwrap();
+    assert_eq!(
+        titled,
+        &json!({"conversationId": gid, "contextClass": "GROUP", "securityProfile": "MANAGED",
+                "title": "Weekend hikers", "avatarRef": "avatar:hikers-1", "memberCount": 2})
+    );
+    let plain = groups
+        .iter()
+        .find(|g| g["conversationId"] == json!(uid))
+        .unwrap();
+    assert!(plain["title"].is_null() && plain["avatarRef"].is_null());
+    assert_eq!(plain["memberCount"], 2);
+
+    // The member who left, and a non-member, learn nothing about the group.
+    for (actor, target) in [(carol, alice), (carol, bob), (outsider, alice)] {
+        let r = hub(&h, &c, actor, "common-groups", pair(actor, target)).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(r.json["groups"], json!([]), "{}", r.text);
+        assert!(!r.text.contains("Weekend hikers"));
+    }
+}
+
+/// M3: the shared-media listing of a MANAGED conversation carries the sanitized file
+/// name, media type and kind the server holds, and safe retrieval references — the
+/// normal, access-checked download / thumbnail grant operations (relative `v1/...`
+/// paths), never a URL or storage key. A thumbnail is offered only once READY. A
+/// non-member is told NOT_FOUND.
+#[tokio::test]
+async fn managed_media_listing_carries_names_types_and_grant_references() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let c = h.first_party(true);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let outsider = h.principal(&c);
+    let conversation = uuid(&conv["conversationId"]);
+    let mut ids = Vec::new();
+    for (name, kind, media) in [
+        ("Holiday.png", "IMAGE", "image/png"),
+        ("Minutes.pdf", "DOCUMENT", "application/pdf"),
+    ] {
+        let sent = h.send_managed(&c, &conv, alice, name).await;
+        assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+        let mid = uuid(&sent.json["messageId"]);
+        let s = c.context.scope;
+        let attachment = Uuid::new_v4();
+        h.sql(&format!(
+            "INSERT INTO messaging_attachments (id, tenant_id, application_id, environment_id, conversation_id, \
+               uploader_principal_id, security_profile, kind, state, object_key, declared_size, verified_size, \
+               declared_sha256, media_type, safe_file_name, scan_status, committed_bytes, message_id, \
+               intent_expires_at, created_at, finalized_at, state_changed_at) \
+             VALUES ('{attachment}', '{}', '{}', '{}', '{conversation}', '{alice}', 'MANAGED', '{kind}', 'READY', \
+               'att/{}/{}/{}', 2048, 2048, repeat('b', 64), '{media}', '{name}', 'CLEAN', 2048, '{mid}', \
+               now() + interval '1 hour', now(), now(), now())",
+            s.tenant_id,
+            s.application_id,
+            s.environment_id,
+            s.environment_id.simple(),
+            conversation.simple(),
+            attachment.simple(),
+        ))
+        .await
+        .unwrap();
+        ids.push(attachment);
+    }
+    // The image has a READY server-made thumbnail (charged to the environment's usage).
+    h.sql(&format!(
+        "INSERT INTO messaging_storage_usage (environment_id, tenant_id, application_id, committed_bytes, updated_at) \
+         VALUES ('{}', '{}', '{}', 4096, now()) ON CONFLICT (environment_id) DO NOTHING",
+        c.context.scope.environment_id, c.context.scope.tenant_id, c.context.scope.application_id,
+    ))
+    .await
+    .unwrap();
+    h.sql(&format!(
+        "INSERT INTO messaging_attachment_derivatives (id, attachment_id, environment_id, security_profile, kind, \
+           status, object_key, media_type, width, height, bytes, sha256, attempts, next_attempt_at, created_at, completed_at) \
+         VALUES ('{}', '{}', '{}', 'MANAGED', 'THUMBNAIL', 'READY', 'drv/{}/thumbnail/{}/t.png', 'image/png', 32, 32, \
+           100, repeat('c', 64), 1, now(), now(), now())",
+        Uuid::new_v4(),
+        ids[0],
+        c.context.scope.environment_id,
+        c.context.scope.environment_id,
+        ids[0],
+    ))
+    .await
+    .unwrap();
+    govern(&mut h, &c);
+
+    let r = hub(
+        &h,
+        &c,
+        bob,
+        "conversations/attachments",
+        json!({"principalId": bob, "conversationId": conversation, "limit": 10}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms_internal("ConversationAttachments", &r.json);
+    let data = r.json["data"].as_array().unwrap();
+    assert_eq!(data.len(), 2, "{}", r.text);
+    let by_id = |id: Uuid| {
+        data.iter()
+            .find(|a| a["attachmentId"] == json!(id))
+            .unwrap()
+    };
+    let image = by_id(ids[0]);
+    assert_eq!(image["fileName"], "Holiday.png");
+    assert_eq!(image["mediaType"], "image/png");
+    assert_eq!(image["kind"], "IMAGE");
+    assert_eq!(image["mediaClass"], "IMAGE");
+    assert_eq!(image["securityProfile"], "MANAGED");
+    assert_eq!(image["metadataLocation"], "SERVER");
+    let base = format!("v1/conversations/{conversation}/attachments/{}", ids[0]);
+    assert_eq!(
+        image["download"],
+        json!({"method": "POST", "path": format!("{base}/download-grants")})
+    );
+    assert_eq!(
+        image["thumbnail"],
+        json!({"method": "POST", "path": format!("{base}/thumbnail-grants"), "mediaType": "image/png"})
+    );
+    let doc = by_id(ids[1]);
+    assert_eq!(doc["fileName"], "Minutes.pdf");
+    assert_eq!(doc["mediaType"], "application/pdf");
+    assert_eq!(doc["mediaClass"], "DOCUMENT");
+    assert!(
+        doc["thumbnail"].is_null(),
+        "no thumbnail until one is READY"
+    );
+    // References only: never a signed URL, storage key or host.
+    for leak in ["http", "att/", "drv/", "X-Amz", "Signature"] {
+        assert!(!r.text.contains(leak), "{leak}: {}", r.text);
+    }
+
+    let r = hub(
+        &h,
+        &c,
+        outsider,
+        "conversations/attachments",
+        json!({"principalId": outsider, "conversationId": conversation, "limit": 10}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    assert!(!r.text.contains("Holiday"));
 }
 
 /// SEC-020: the Hub's relationship reads (`blocks/check`, `common-groups`) answer from

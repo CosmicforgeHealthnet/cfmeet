@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet messaging private Communications integration",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "Private backend interfaces for Sections 4–7 and the Sections 9–23 owner interfaces. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals."
   },
   "tags": [
@@ -1380,6 +1380,71 @@
               "reason",
               "realtime"
             ]
+          },
+          "attachments": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1.4.0 (CF Meet chat M1): whether clients may offer sending files, from the same inputs the upload intent enforces: the effective policy (environment switch, limits, kinds; per-context switch in contexts), configured private attachment storage and the ATTACHMENT_UPLOAD kill switch. Advisory for the UI only; every upload is still authorized and validated by Messaging. maxBytes is the plaintext limit per file (PRIVATE_E2EE ciphertext may be slightly larger).",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED_BY_POLICY",
+                  "STORAGE_NOT_CONFIGURED",
+                  "TEMPORARILY_DISABLED"
+                ]
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxPerMessage": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "allowedKinds": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "IMAGE",
+                    "DOCUMENT",
+                    "FILE",
+                    "VOICE_NOTE",
+                    "VIDEO"
+                  ]
+                }
+              },
+              "contexts": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "DIRECT": {
+                    "type": "boolean"
+                  },
+                  "GROUP": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "DIRECT",
+                  "GROUP"
+                ]
+              }
+            },
+            "required": [
+              "enabled",
+              "reason",
+              "maxBytes",
+              "maxPerMessage",
+              "allowedKinds",
+              "contexts"
+            ]
           }
         },
         "required": [
@@ -1650,6 +1715,110 @@
                 "uploaderPrincipalId": {
                   "type": "string",
                   "format": "uuid"
+                },
+                "securityProfile": {
+                  "type": "string",
+                  "enum": [
+                    "MANAGED",
+                    "PRIVATE_E2EE"
+                  ]
+                },
+                "kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "enum": [
+                    "IMAGE",
+                    "DOCUMENT",
+                    "FILE",
+                    "VOICE_NOTE",
+                    "VIDEO",
+                    null
+                  ]
+                },
+                "fileName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "mediaType": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "metadataLocation": {
+                  "type": "string",
+                  "enum": [
+                    "SERVER",
+                    "ENCRYPTED_DESCRIPTOR"
+                  ]
+                },
+                "download": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "POST"
+                          ]
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^v1/conversations/[0-9a-f-]{36}/attachments/[0-9a-f-]{36}/download-grants$"
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "path"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "thumbnail": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "method": {
+                          "type": "string",
+                          "enum": [
+                            "POST"
+                          ]
+                        },
+                        "path": {
+                          "type": "string",
+                          "pattern": "^v1/conversations/[0-9a-f-]{36}/attachments/[0-9a-f-]{36}/thumbnail-grants$"
+                        },
+                        "mediaType": {
+                          "type": "string",
+                          "enum": [
+                            "image/png"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "method",
+                        "path",
+                        "mediaType"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -1661,7 +1830,8 @@
                 "mediaClass",
                 "createdAt",
                 "uploaderPrincipalId"
-              ]
+              ],
+              "description": "1.4.0 (CF Meet chat M3): MANAGED items carry the sanitized file name, the declared media type and kind the server holds; PRIVATE_E2EE items carry none of them (metadataLocation ENCRYPTED_DESCRIPTOR: they travel only inside the MLS-encrypted attachment descriptor). download / thumbnail never hold a URL: they name the normal access-checked grant operation (path relative to the Messaging client API; CF Meet apps call it through the Meeting relay /api/v2/messaging/relay/v1/...), which re-checks membership, history window and state and returns a short-lived signed read. thumbnail is present only for a READY server-made thumbnail of a MANAGED attachment."
             }
           },
           "nextCursor": {
@@ -1976,12 +2146,39 @@
                   "enum": [
                     "GROUP"
                   ]
+                },
+                "securityProfile": {
+                  "type": "string",
+                  "enum": [
+                    "MANAGED",
+                    "PRIVATE_E2EE"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "avatarRef": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 256
+                },
+                "memberCount": {
+                  "type": "integer",
+                  "minimum": 0
                 }
               },
               "required": [
                 "conversationId",
                 "contextClass"
-              ]
+              ],
+              "description": "1.4.0 (CF Meet chat M2): only groups BOTH principals are current (ACTIVE) members of; a group the actor left or was removed from is never listed. title / avatarRef are the server-held display metadata of MANAGED groups; a PRIVATE_E2EE group's name lives in its encrypted group state, so they are null there (never fabricated)."
             }
           }
         },

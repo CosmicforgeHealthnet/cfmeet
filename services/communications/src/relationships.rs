@@ -502,14 +502,46 @@ impl State {
             .ok_or(Error::Unavailable)?;
         let mut safe = Vec::new();
         for g in groups {
-            let id = uuid_field(g, "conversationId")?;
-            if g["contextClass"] != "GROUP" {
-                return Err(Error::Unavailable);
-            }
-            safe.push(json!({"conversationId":id,"contextClass":"GROUP"}));
+            safe.push(common_group_view(g)?);
         }
         Ok(json!({"schemaVersion":1,"groups":safe}))
     }
+}
+
+/// M2: one group in common, as Messaging (the owner) reported it for the viewer — only
+/// groups BOTH principals are current members of. The display metadata is what Messaging
+/// legitimately holds: the title / avatar reference of a MANAGED group (null for a
+/// PRIVATE_E2EE group, whose name stays inside its encrypted group state) and the current
+/// member count. Values outside the owner's vocabulary or bounds are dropped (an
+/// unexpected profile fails the whole read), never invented.
+pub fn common_group_view(g: &Value) -> Result<Value> {
+    let id = uuid_field(g, "conversationId")?;
+    if g["contextClass"] != "GROUP" {
+        return Err(Error::Unavailable);
+    }
+    // An older Messaging image reports ids only: keep the 1.x shape (metadata null).
+    let profile = match g.get("securityProfile") {
+        None | Some(Value::Null) => None,
+        Some(p) => Some(
+            p.as_str()
+                .filter(|p| ["MANAGED", "PRIVATE_E2EE"].contains(p))
+                .ok_or(Error::Unavailable)?,
+        ),
+    };
+    let managed = profile == Some("MANAGED");
+    let text = |key: &str, max: usize| {
+        g[key]
+            .as_str()
+            .map(str::trim)
+            .filter(|t| managed && !t.is_empty() && t.chars().count() <= max)
+            .filter(|t| !t.chars().any(char::is_control))
+            .map(str::to_string)
+    };
+    Ok(
+        json!({"conversationId":id,"contextClass":"GROUP","securityProfile":profile,
+        "title":text("title", 120),"avatarRef":text("avatarRef", 256),
+        "memberCount":g["memberCount"].as_i64().filter(|n| *n >= 0)}),
+    )
 }
 pub fn uuid_field(v: &Value, key: &str) -> Result<Uuid> {
     v[key]
