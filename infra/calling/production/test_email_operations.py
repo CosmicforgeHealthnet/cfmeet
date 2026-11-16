@@ -161,5 +161,32 @@ class ResendActivation(unittest.TestCase):
                 mail.acceptance_recipient(cr)
 
 
+
+class VpsOnlyResendCredentials(unittest.TestCase):
+    """Owner decision 2026-11-16: Resend credentials live only on the VPS."""
+
+    def workflow(self):
+        return (Path(__file__).resolve().parents[3] / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+
+    def test_the_workflow_never_reads_resend_credentials_from_github(self):
+        text = self.workflow()
+        for forbidden in ('CFMEET_RESEND_API_KEY', 'CFMEET_RESEND_WEBHOOK_SECRET', 'install_secret'):
+            self.assertNotIn(forbidden, text)
+
+    def test_the_workflow_verifies_the_vps_files_without_reading_them_out(self):
+        text = self.workflow()
+        self.assertIn('Verify the Resend credentials on the VPS', text)
+        self.assertIn('dir=/opt/cfmeet-core/secrets', text)
+        self.assertIn("check resend-api-key '^re_[A-Za-z0-9_]{8,200}$' required", text)
+        self.assertIn("check resend-webhook-secret '^whsec_[A-Za-z0-9+/=]{16,200}$' optional", text)
+        self.assertIn('grep -Eq', text)          # the value is matched on the VPS, never echoed
+        self.assertIn('(8#$mode & 8#077) == 0', text)  # no group/other access
+        self.assertIn('[[ "$owner" == 0 ]]', text)     # root-owned
+
+    def test_the_activation_uses_the_same_files(self):
+        self.assertEqual(p.SECRETS / mail.SECRET_KEY_FILE, Path('/opt/cfmeet-core/secrets/resend-api-key'))
+        self.assertEqual(p.SECRETS / mail.SECRET_WEBHOOK_FILE, Path('/opt/cfmeet-core/secrets/resend-webhook-secret'))
+
+
 if __name__ == '__main__':
     unittest.main()

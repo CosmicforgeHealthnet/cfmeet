@@ -297,8 +297,8 @@ def email_acceptance_check(cr, run_id, require_delivered):
 def resend_changes(cr):
     key = p.SECRETS / SECRET_KEY_FILE
     if not key.exists() or not key.read_text().strip().startswith('re_'):
-        raise RuntimeError('No Resend API key on the VPS: set the CFMEET_RESEND_API_KEY secret of the production '
-                           'environment and dispatch again')
+        raise RuntimeError('No Resend API key on the VPS: place the key in /opt/cfmeet-core/secrets/resend-api-key '
+                           '(root-owned, 0400) and dispatch again')
     for path in (p.SECRETS / SECRET_KEY_FILE, p.SECRETS / SECRET_WEBHOOK_FILE):
         if path.exists():
             path.chmod(0o400)

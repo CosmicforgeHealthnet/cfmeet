@@ -164,7 +164,7 @@ The module is `src/services/notification_fence.rs`:
 
 - Credentials will **not** be stored in GitHub. When the work resumes, the owner will place them directly on the VPS as protected secret files.
 - `activate-resend-email` and `email-acceptance` are not run until then.
-- Engineering consequence when resuming: `activate-resend-email` currently reads the key and webhook secret from GitHub `production` secrets. It must first be changed to require pre-placed root-owned 0400 files on the VPS instead, and refuse to proceed otherwise. That change is not made yet; it waits for the resume decision.
+- **Resumed (owner, 2026-11-16) with VPS-only credentials.** `activate-resend-email` and `email-acceptance` no longer read GitHub secrets. They verify over SSH that `/opt/cfmeet-core/secrets/resend-api-key` (required) and `resend-webhook-secret` (optional) exist, are root-owned with no group or other access, and hold values of the expected form. The values are never printed or transferred. The E1 result is recorded below when the runs complete.
 
 Until E1, every email `ACTIVE` routing change stays refused by the N14 gate. The existing Meeting email path stays the only sender.
 
