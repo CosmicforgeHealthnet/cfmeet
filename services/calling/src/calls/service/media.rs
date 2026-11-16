@@ -17,7 +17,7 @@ use crate::{
         errors::{CallError, CallResult},
         events::CallEventType,
         ids::{CallId, CallMediaSessionId, MediaPermissionsId},
-        kinds::{MediaAccess, MediaFailure, MediaSessionStatus},
+        kinds::{CallKind, MediaAccess, MediaFailure, MediaSessionStatus},
     },
     media::{MediaPermissions, MediaResourceName, MEDIA_POLICY_VERSION},
     models::{
@@ -271,6 +271,67 @@ impl CallService {
         }
         .insert(txn)
         .await?)
+    }
+
+    /// C5: VOICE → VIDEO on a live, answered Call (the Call row must be locked by `txn`).
+    /// The kind cascades to every authorized-permissions row (database foreign key); each
+    /// ACTIVE participant's row additionally gains video publishing (revision + 1). Nothing
+    /// is published by this: the provider grant only ALLOWS a client to publish its camera
+    /// when its user chooses. State and version are unchanged (the version counts state
+    /// transitions); the change is evidenced by CALL_KIND_CHANGED. Returns the Call and how
+    /// many participants were granted video.
+    pub(crate) async fn upgrade_kind_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: calls::Model,
+    ) -> CallResult<(calls::Model, usize)> {
+        if call.call_kind != CallKind::Voice {
+            return Ok((call, 0));
+        }
+        let at = self.now().max(call.updated_at);
+        let mut active: calls::ActiveModel = call.into();
+        active.call_kind = Set(CallKind::Video);
+        active.updated_at = Set(at);
+        let call = active.update(txn).await?;
+        let mut granted = 0usize;
+        for row in call_participant_media_permissions::Entity::find()
+            .filter(call_participant_media_permissions::Column::CallId.eq(call.id))
+            .all(txn)
+            .await?
+        {
+            let participant_active = call_participants::Entity::find_by_id(row.participant_id)
+                .one(txn)
+                .await?
+                .is_some_and(|p| p.ended_at.is_none());
+            if !participant_active || row.can_publish_video {
+                continue;
+            }
+            let revision = row.revision.saturating_add(1);
+            let mut update: call_participant_media_permissions::ActiveModel = row.into();
+            update.can_publish_video = Set(true);
+            update.revision = Set(revision);
+            update.policy_version = Set(MEDIA_POLICY_VERSION.to_string());
+            update.updated_at = Set(at);
+            update.update(txn).await?;
+            granted += 1;
+        }
+        self.append_event(
+            txn,
+            cmd,
+            &call,
+            EventDraft::fact(
+                CallEventType::CallKindChanged,
+                data(vec![
+                    ("from_kind", text(CallKind::Voice)),
+                    ("to_kind", text(CallKind::Video)),
+                    ("participants_granted_video", SafeValue::from(granted)),
+                ])?,
+            ),
+            at,
+        )
+        .await?;
+        Ok((call, granted))
     }
 
     /// The participant's persisted authorized permissions (none if never authorized).

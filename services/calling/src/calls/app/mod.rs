@@ -29,6 +29,7 @@ mod privacy;
 pub mod public;
 mod ringing;
 mod transfer;
+mod upgrade;
 mod workers;
 
 use std::sync::Arc;

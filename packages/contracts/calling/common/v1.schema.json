@@ -120,7 +120,8 @@
         "RECORDING_READY",
         "RECORDING_FAILED",
         "RECORDING_DELETED",
-        "ENTERPRISE_ROUTING_STEP"
+        "ENTERPRISE_ROUTING_STEP",
+        "CALL_KIND_CHANGED"
       ]
     },
     "CallInvitationPurpose": {

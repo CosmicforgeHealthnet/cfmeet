@@ -65,7 +65,7 @@ export namespace Calling {
     nextCursor: string | null;
   };
   export type AvailableAction = {
-    action: "ACCEPT" | "DECLINE" | "CANCEL" | "END" | "HOLD" | "RESUME" | "TRANSFER" | "ISSUE_MEDIA_CREDENTIAL";
+    action: "ACCEPT" | "DECLINE" | "CANCEL" | "END" | "HOLD" | "RESUME" | "TRANSFER" | "ISSUE_MEDIA_CREDENTIAL" | "UPGRADE";
     available: boolean;
     /** Why the action is unavailable: the credential lacks calls.write, the Call's state does not allow it, or the configured media provider cannot enforce it. */
     reason?: "INSUFFICIENT_SCOPE" | "STATE" | "CAPABILITY_UNAVAILABLE";
@@ -375,10 +375,10 @@ export namespace Calling {
   export type ConsentParticipants = "NONE" | "ALL_PARTICIPANTS" | "OTHER_PARTICIPANTS";
   /** Opaque, server-generated ContactReference (UUID) of a protected contact, scoped to one tenant / application / environment. It never encodes a number, country, provider or user; knowing it grants nothing. */
   export type ContactReference = Uuid;
-  /** Result of cancel, end, hold and resume: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. */
+  /** Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged. */
   export type ControlResult = {
     call: CommonCallSummary;
-    operation: "CANCEL" | "END" | "HOLD" | "RESUME";
+    operation: "CANCEL" | "END" | "HOLD" | "RESUME" | "UPGRADE";
   };
   /** ISO 3166-1 alpha-2 country code. */
   export type CountryCode = string;
@@ -1398,6 +1398,13 @@ export namespace Calling {
     description?: string | null;
     status?: "ACTIVE" | "DISABLED";
   };
+  /** Body of POST /v1/calls/{call_id}/upgrade (C5): the kind to move to (VIDEO is the only target; a Call never goes back to VOICE) and the expected Call version. No permission can be sent: every active participant's video publish permission is derived by the server, and no camera is turned on. */
+  export type UpgradeRequest = {
+    /** The target kind. Only VIDEO is accepted (400 for VOICE). */
+    kind: "VIDEO";
+    /** The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION. */
+    expectedVersion: number;
+  };
   /** Cost EVIDENCE of a public-network leg, not a price or a charge. KNOWN: reported by the network provider. ESTIMATED: an estimate the provider did not confirm. UNKNOWN: no figure exists — it carries no amount (never zero). */
   export type UsageCost = {
     status: "KNOWN" | "ESTIMATED" | "UNKNOWN";
@@ -2204,6 +2211,11 @@ export namespace Calling {
     updateWebhook: {
       params: { path: { webhook_id: string }; body: UpdateWebhookRequest };
       response: Webhook;
+    };
+    /** POST /v1/calls/{call_id}/upgrade — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    upgradeCall: {
+      params: { path: { call_id: string }; body: UpgradeRequest; idempotencyKey?: string };
+      response: ControlResult;
     };
   }
 }

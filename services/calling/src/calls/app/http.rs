@@ -60,6 +60,7 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/calls/:call_id/hold", post(hold))
         .route("/v1/calls/:call_id/resume", post(resume))
         .route("/v1/calls/:call_id/transfer", post(transfer))
+        .route("/v1/calls/:call_id/upgrade", post(upgrade))
         .route("/v1/calls/:call_id/ivr/input", post(ivr_input))
         .route(
             "/v1/calls/:call_id/sessions/:session_id/media-credentials",
@@ -583,6 +584,45 @@ async fn resume(
     body: Result<Json<VersionBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     version_command(state, ctx, headers, call_id, body, CommandOperation::Resume).await
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpgradeBody {
+    kind: CallKind,
+    expected_version: i64,
+}
+
+/// `POST /v1/calls/:call_id/upgrade` (C5): VOICE → VIDEO of a live Call (calls.write;
+/// Idempotency-Key honoured).
+async fn upgrade(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<UpgradeBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let key = command_key(
+        &headers,
+        CommandOperation::Upgrade,
+        Some(call_uuid),
+        &body,
+        false,
+    )?;
+    let outcome = state
+        .app
+        .upgrade(
+            &CallCommandContext::customer(&ctx),
+            CallId::from_uuid(call_uuid),
+            body.kind,
+            body.expected_version,
+            key.as_ref(),
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
 }
 
 #[derive(Debug, Deserialize, Serialize)]

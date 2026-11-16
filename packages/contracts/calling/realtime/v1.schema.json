@@ -51,7 +51,8 @@
         "call.recording_started",
         "call.recording_stopped",
         "call.voicemail_started",
-        "call.route_changed"
+        "call.route_changed",
+        "call.kind_changed"
       ]
     },
     "SignalInvitation": {

@@ -261,6 +261,12 @@
     },
     {
       "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/upgrade",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
       "method": "GET",
       "path": "/v1/enterprise/audit",
       "class": "PUBLIC_CUSTOMER"

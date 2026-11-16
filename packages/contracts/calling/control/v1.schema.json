@@ -23,6 +23,9 @@
       "$ref": "#/$defs/TransferRequest"
     },
     {
+      "$ref": "#/$defs/UpgradeRequest"
+    },
+    {
       "$ref": "#/$defs/AcceptResult"
     },
     {
@@ -543,7 +546,7 @@
       }
     },
     "ControlResult": {
-      "description": "Result of cancel, end, hold and resume: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is.",
+      "description": "Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -560,7 +563,8 @@
             "CANCEL",
             "END",
             "HOLD",
-            "RESUME"
+            "RESUME",
+            "UPGRADE"
           ]
         }
       }
@@ -945,7 +949,8 @@
             "HOLD",
             "RESUME",
             "TRANSFER",
-            "ISSUE_MEDIA_CREDENTIAL"
+            "ISSUE_MEDIA_CREDENTIAL",
+            "UPGRADE"
           ]
         },
         "available": {
@@ -1456,6 +1461,26 @@
       "properties": {
         "status": {
           "const": "accepted"
+        }
+      }
+    },
+    "UpgradeRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/upgrade (C5): the kind to move to (VIDEO is the only target; a Call never goes back to VOICE) and the expected Call version. No permission can be sent: every active participant's video publish permission is derived by the server, and no camera is turned on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "expectedVersion"
+      ],
+      "properties": {
+        "kind": {
+          "description": "The target kind. Only VIDEO is accepted (400 for VOICE).",
+          "const": "VIDEO"
+        },
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
         }
       }
     }

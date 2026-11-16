@@ -80,6 +80,7 @@ text_enum!(
         RecordingFailed = "RECORDING_FAILED",
         RecordingDeleted = "RECORDING_DELETED",
         EnterpriseRoutingStep = "ENTERPRISE_ROUTING_STEP",
+        CallKindChanged = "CALL_KIND_CHANGED",
     }
 );
 

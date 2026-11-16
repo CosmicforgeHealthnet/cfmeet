@@ -1418,7 +1418,7 @@ typedef ConsentParticipants = String;
 /// Opaque, server-generated ContactReference (UUID) of a protected contact, scoped to one tenant / application / environment. It never encodes a number, country, provider or user; knowing it grants nothing.
 typedef ContactReference = Uuid;
 
-/// Result of cancel, end, hold and resume: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is.
+/// Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged.
 class ControlResult {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const ControlResult.fromJson(this.json);
@@ -4839,6 +4839,30 @@ class UpdateWebhookRequest {
 
   /// Public https endpoint. Server-side validation additionally refuses every loopback / private / link-local / CGNAT / metadata address and re-checks the resolved address at connection time (DNS rebinding); redirects are never followed.
   String? get url => json['url'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Body of POST /v1/calls/{call_id}/upgrade (C5): the kind to move to (VIDEO is the only target; a Call never goes back to VOICE) and the expected Call version. No permission can be sent: every active participant's video publish permission is derived by the server, and no camera is turned on.
+class UpgradeRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UpgradeRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UpgradeRequest.create({required int expectedVersion, required String kind}) =>
+      UpgradeRequest.fromJson(<String, Object?>{
+        'expectedVersion': expectedVersion,
+        'kind': kind,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.
+  int get expectedVersion => (json['expectedVersion']! as num).toInt();
+
+  /// The target kind. Only VIDEO is accepted (400 for VOICE).
+  String get kind => json['kind']! as String;
 
   Map<String, Object?> toJson() => json;
 }

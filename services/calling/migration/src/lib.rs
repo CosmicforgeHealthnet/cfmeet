@@ -54,6 +54,7 @@ mod m20261025_000045_sms_webhook_producer;
 mod m20261113_000046_messaging_webhook_producer;
 mod m20261201_000047_public_event_destinations;
 mod m20261201_000048_enterprise_audit_acting_principal;
+mod m20261202_000049_call_kind_upgrade;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -111,6 +112,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261113_000046_messaging_webhook_producer::Migration),
             Box::new(m20261201_000047_public_event_destinations::Migration),
             Box::new(m20261201_000048_enterprise_audit_acting_principal::Migration),
+            Box::new(m20261202_000049_call_kind_upgrade::Migration),
         ]
     }
 

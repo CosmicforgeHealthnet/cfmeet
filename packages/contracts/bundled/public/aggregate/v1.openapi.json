@@ -26372,6 +26372,94 @@
         ]
       }
     },
+    "/v1/calls/{call_id}/upgrade": {
+      "post": {
+        "operationId": "upgradeCall",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Upgrade a voice call to video",
+        "description": "Requires calls.write (Idempotency-Key honoured). C5: a VOICE Call that is ANSWERED, CONNECTED or HELD becomes VIDEO, once and for good (never back to VOICE). In one transaction under the Call row lock (expectedVersion checked; state and version unchanged) every active participant's authorized permissions gain video publishing, CALL_KIND_CHANGED is recorded and call.kind_changed is signalled to every endpoint of the Call. The media provider then receives each connected session's re-derived permissions (HOLD still masks them); no camera is ever turned on — a client publishes video only when its user chooses. Upgrading a Call that is already VIDEO answers the current Call (Idempotent-Replayed: true). A pre-answer, TRANSFERRING, ENDING or terminal Call is 409 CALL_STATE_CONFLICT; a protected (Privacy Relay) or public-network Call, or a provider that cannot update permissions, is 422 CAPABILITY_UNAVAILABLE.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.UpgradeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command's result (or the recorded response of an identical earlier command).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/calling.IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.ControlResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/calling.Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.upgradeCall",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
     "/v1/commercial-plans": {
       "get": {
         "operationId": "listCommercialPlans",
@@ -53745,7 +53833,8 @@
               "HOLD",
               "RESUME",
               "TRANSFER",
-              "ISSUE_MEDIA_CREDENTIAL"
+              "ISSUE_MEDIA_CREDENTIAL",
+              "UPGRADE"
             ]
           },
           "available": {
@@ -54146,7 +54235,7 @@
         }
       },
       "calling.calling.control.v1.ControlResult": {
-        "description": "Result of cancel, end, hold and resume: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is.",
+        "description": "Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -54163,7 +54252,8 @@
               "CANCEL",
               "END",
               "HOLD",
-              "RESUME"
+              "RESUME",
+              "UPGRADE"
             ]
           }
         }
@@ -55005,6 +55095,26 @@
           },
           "transfer": {
             "$ref": "#/components/schemas/calling.calling.control.v1.CallTransfer"
+          }
+        }
+      },
+      "calling.calling.control.v1.UpgradeRequest": {
+        "description": "Body of POST /v1/calls/{call_id}/upgrade (C5): the kind to move to (VIDEO is the only target; a Call never goes back to VOICE) and the expected Call version. No permission can be sent: every active participant's video publish permission is derived by the server, and no camera is turned on.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "expectedVersion"
+        ],
+        "properties": {
+          "kind": {
+            "description": "The target kind. Only VIDEO is accepted (400 for VOICE).",
+            "const": "VIDEO"
+          },
+          "expectedVersion": {
+            "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+            "type": "integer",
+            "minimum": 1
           }
         }
       },

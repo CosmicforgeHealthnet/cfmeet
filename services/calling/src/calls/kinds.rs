@@ -256,6 +256,7 @@ text_enum!(
         Resume = "RESUME",
         Transfer = "TRANSFER",
         RemoveSession = "REMOVE_SESSION",
+        Upgrade = "UPGRADE",
     }
 );
 

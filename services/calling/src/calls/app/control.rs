@@ -971,6 +971,13 @@ impl AppCallService {
                 app_media,
             ),
             entry("ISSUE_MEDIA_CREDENTIAL", media_state(state), app_media),
+            // C5: a live VOICE Call may become VIDEO (once).
+            entry(
+                "UPGRADE",
+                call.call_kind == crate::calls::kinds::CallKind::Voice
+                    && super::upgrade::upgradable_state(state),
+                permission_update,
+            ),
         ];
         Ok(AvailableActions {
             call_id: call.id,
