@@ -269,6 +269,7 @@ impl AppCallService {
                         can_publish_video: false,
                         can_publish_data: false,
                         can_subscribe: true,
+                        can_share_screen: false,
                     },
                 )
                 .await

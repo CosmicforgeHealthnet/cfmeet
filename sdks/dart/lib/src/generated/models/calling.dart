@@ -430,7 +430,7 @@ class Call {
   const Call.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Call.create({required String? answeredAt, required String? authorizedAt, required Uuid callId, required bool canViewRecordings, required String? connectedAt, required int? connectedDurationMs, required String createdAt, required String durationsAsOf, required String? endedAt, required String? endingAt, required CallFailureCategory? failureCategory, required Uuid initiatorPrincipalId, required List<CallInvitation> invitations, required CallKind kind, required List<CallParticipant> participants, required String requestedAt, required String? ringingAt, required List<CallSession> sessions, required CallState state, required CallTerminalReason? terminalReason, required List<CallTransfer> transfers, required String updatedAt, required int version}) =>
+  factory Call.create({required String? answeredAt, required String? authorizedAt, required Uuid callId, required bool canViewRecordings, required String? connectedAt, required int? connectedDurationMs, required String createdAt, required String durationsAsOf, required String? endedAt, required String? endingAt, required CallFailureCategory? failureCategory, required Uuid initiatorPrincipalId, required List<CallInvitation> invitations, required CallKind kind, required List<CallParticipant> participants, required String requestedAt, required String? ringingAt, required ScreenShare? screenShare, required List<CallSession> sessions, required CallState state, required CallTerminalReason? terminalReason, required List<CallTransfer> transfers, required String updatedAt, required int version}) =>
       Call.fromJson(<String, Object?>{
         'answeredAt': answeredAt,
         'authorizedAt': authorizedAt,
@@ -449,6 +449,7 @@ class Call {
         'participants': participants.map((e) => e.toJson()).toList(),
         'requestedAt': requestedAt,
         'ringingAt': ringingAt,
+        'screenShare': screenShare?.toJson(),
         'sessions': sessions.map((e) => e.toJson()).toList(),
         'state': state,
         'terminalReason': terminalReason,
@@ -495,6 +496,9 @@ class Call {
   String get requestedAt => json['requestedAt']! as String;
 
   String? get ringingAt => json['ringingAt'] as String?;
+
+  /// C6: who is presenting a screen now (null when nobody is).
+  ScreenShare? get screenShare => json['screenShare'] == null ? null : ScreenShare.fromJson(json['screenShare']! as Map<String, Object?>);
 
   List<CallSession> get sessions => (json['sessions']! as List<Object?>).map((e) => CallSession.fromJson(e! as Map<String, Object?>)).toList();
 
@@ -897,11 +901,12 @@ class CallMediaCapabilities {
   const CallMediaCapabilities.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CallMediaCapabilities.create({required bool canPublishAudio, required bool canPublishData, required bool canPublishVideo, required bool canSubscribe}) =>
+  factory CallMediaCapabilities.create({required bool canPublishAudio, required bool canPublishData, required bool canPublishVideo, required bool canShareScreen, required bool canSubscribe}) =>
       CallMediaCapabilities.fromJson(<String, Object?>{
         'canPublishAudio': canPublishAudio,
         'canPublishData': canPublishData,
         'canPublishVideo': canPublishVideo,
+        'canShareScreen': canShareScreen,
         'canSubscribe': canSubscribe,
       });
 
@@ -913,6 +918,9 @@ class CallMediaCapabilities {
   bool get canPublishData => json['canPublishData']! as bool;
 
   bool get canPublishVideo => json['canPublishVideo']! as bool;
+
+  /// The grant includes the screen sources (screen video and screen audio). True only for the Call's current presenter (POST /v1/calls/{call_id}/screen-share) while the Call is not held.
+  bool get canShareScreen => json['canShareScreen']! as bool;
 
   bool get canSubscribe => json['canSubscribe']! as bool;
 
@@ -4337,6 +4345,72 @@ typedef SafeEventData = Map<String, Object?>;
 
 /// Bounded text without control characters that never looks like a telephone number (+‹digit›) or a tel: / sip: URI.
 typedef SafeText = Map<String, Object?>;
+
+/// The Call's current presenter (C6).
+class ScreenShare {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ScreenShare.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ScreenShare.create({required Uuid participantId, required String startedAt}) =>
+      ScreenShare.fromJson(<String, Object?>{
+        'participantId': participantId,
+        'startedAt': startedAt,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get participantId => json['participantId']! as String;
+
+  String get startedAt => json['startedAt']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Body of POST /v1/calls/{call_id}/screen-share and POST /v1/calls/{call_id}/screen-share/stop (C6): the participant that starts or stops presenting. The server decides everything else (policy, one presenter per Call, the provider grant).
+class ScreenShareRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ScreenShareRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ScreenShareRequest.create({required Uuid participantId}) =>
+      ScreenShareRequest.fromJson(<String, Object?>{
+        'participantId': participantId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get participantId => json['participantId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Result of starting or stopping a screen share: the Call and its presenter after the command (null once nobody presents).
+class ScreenShareResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ScreenShareResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ScreenShareResult.create({required CommonCallSummary call, required String operation, required ScreenShare? screenShare}) =>
+      ScreenShareResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'operation': operation,
+        'screenShare': screenShare?.toJson(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  String get operation => json['operation']! as String;
+
+  ScreenShare? get screenShare => json['screenShare'] == null ? null : ScreenShare.fromJson(json['screenShare']! as Map<String, Object?>);
+
+  Map<String, Object?> toJson() => json;
+}
 
 /// Result of removing one session: its media access is revoked and the provider connection removed (or queued for enforcement).
 class SessionRemovalResult {

@@ -26,6 +26,12 @@
       "$ref": "#/$defs/UpgradeRequest"
     },
     {
+      "$ref": "#/$defs/ScreenShareRequest"
+    },
+    {
+      "$ref": "#/$defs/ScreenShareResult"
+    },
+    {
       "$ref": "#/$defs/AcceptResult"
     },
     {
@@ -950,7 +956,9 @@
             "RESUME",
             "TRANSFER",
             "ISSUE_MEDIA_CREDENTIAL",
-            "UPGRADE"
+            "UPGRADE",
+            "START_SCREEN_SHARE",
+            "STOP_SCREEN_SHARE"
           ]
         },
         "available": {
@@ -1481,6 +1489,69 @@
           "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
           "type": "integer",
           "minimum": 1
+        }
+      }
+    },
+    "ScreenShareRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/screen-share and POST /v1/calls/{call_id}/screen-share/stop (C6): the participant that starts or stops presenting. The server decides everything else (policy, one presenter per Call, the provider grant).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participantId"
+      ],
+      "properties": {
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "ScreenShare": {
+      "description": "The Call's current presenter (C6).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participantId",
+        "startedAt"
+      ],
+      "properties": {
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ScreenShareResult": {
+      "description": "Result of starting or stopping a screen share: the Call and its presenter after the command (null once nobody presents).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation",
+        "screenShare"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "START_SCREEN_SHARE",
+            "STOP_SCREEN_SHARE"
+          ]
+        },
+        "screenShare": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ScreenShare"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     }

@@ -65,7 +65,7 @@ export namespace Calling {
     nextCursor: string | null;
   };
   export type AvailableAction = {
-    action: "ACCEPT" | "DECLINE" | "CANCEL" | "END" | "HOLD" | "RESUME" | "TRANSFER" | "ISSUE_MEDIA_CREDENTIAL" | "UPGRADE";
+    action: "ACCEPT" | "DECLINE" | "CANCEL" | "END" | "HOLD" | "RESUME" | "TRANSFER" | "ISSUE_MEDIA_CREDENTIAL" | "UPGRADE" | "START_SCREEN_SHARE" | "STOP_SCREEN_SHARE";
     available: boolean;
     /** Why the action is unavailable: the credential lacks calls.write, the Call's state does not allow it, or the configured media provider cannot enforce it. */
     reason?: "INSUFFICIENT_SCOPE" | "STATE" | "CAPABILITY_UNAVAILABLE";
@@ -135,6 +135,8 @@ export namespace Calling {
     sessions: Array<CallSession>;
     invitations: Array<CallInvitation>;
     transfers: Array<CallTransfer>;
+    /** C6: who is presenting a screen now (null when nobody is). */
+    screenShare: ScreenShare | null;
     /** Whether this caller may read the call's recordings and recording authorizations (GET /v1/calls/{call_id}/recordings, /recording-authorizations): the credential holds enterprise.recording.read. Request recordings only when true; otherwise those routes answer 403. 1.17.0. */
     canViewRecordings: boolean;
   }) & (CallCore);
@@ -241,6 +243,8 @@ export namespace Calling {
     canPublishVideo: boolean;
     canPublishData: boolean;
     canSubscribe: boolean;
+    /** The grant includes the screen sources (screen video and screen audio). True only for the Call's current presenter (POST /v1/calls/{call_id}/screen-share) while the Call is not held. */
+    canShareScreen: boolean;
   };
   /** A logical participant. displayName is presentation metadata only and never identifies anyone. connectedDurationMs is the union of the participant's session connection intervals (concurrent devices are not double counted). */
   export type CallParticipant = {
@@ -1238,6 +1242,21 @@ export namespace Calling {
   export type SafeEventData = { [key: string]: boolean | number | SafeText | Array<SafeText> };
   /** Bounded text without control characters that never looks like a telephone number (+<digit>) or a tel: / sip: URI. */
   export type SafeText = string;
+  /** The Call's current presenter (C6). */
+  export type ScreenShare = {
+    participantId: Uuid;
+    startedAt: string;
+  };
+  /** Body of POST /v1/calls/{call_id}/screen-share and POST /v1/calls/{call_id}/screen-share/stop (C6): the participant that starts or stops presenting. The server decides everything else (policy, one presenter per Call, the provider grant). */
+  export type ScreenShareRequest = {
+    participantId: Uuid;
+  };
+  /** Result of starting or stopping a screen share: the Call and its presenter after the command (null once nobody presents). */
+  export type ScreenShareResult = {
+    call: CommonCallSummary;
+    operation: "START_SCREEN_SHARE" | "STOP_SCREEN_SHARE";
+    screenShare: ScreenShare | null;
+  };
   /** Result of removing one session: its media access is revoked and the provider connection removed (or queued for enforcement). */
   export type SessionRemovalResult = {
     call: CommonCallSummary;
@@ -2157,10 +2176,20 @@ export namespace Calling {
       params: { path: { call_id: string }; body: RecordingActorRequest };
       response: CallRecordingEnvelope;
     };
+    /** POST /v1/calls/{call_id}/screen-share — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    startScreenShare: {
+      params: { path: { call_id: string }; body: ScreenShareRequest; idempotencyKey?: string };
+      response: ScreenShareResult;
+    };
     /** POST /v1/calls/{call_id}/recordings/{recording_id}/stop — scope enterprise.recording.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     stopRecording: {
       params: { path: { call_id: string; recording_id: string }; body: RecordingActorRequest };
       response: CallRecordingEnvelope;
+    };
+    /** POST /v1/calls/{call_id}/screen-share/stop — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    stopScreenShare: {
+      params: { path: { call_id: string }; body: ScreenShareRequest; idempotencyKey?: string };
+      response: ScreenShareResult;
     };
     /** POST /v1/calls/{call_id}/transfer — scope calls.write; auth PLATFORM_CREDENTIAL; retry NEVER; paid telecom */
     transferCall: {

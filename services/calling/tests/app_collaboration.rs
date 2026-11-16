@@ -316,3 +316,248 @@ async fn upgrades_are_version_scope_and_state_checked() {
     assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
     assert_eq!(a.call_view(call).await["kind"], "VOICE");
 }
+
+// ---------------------------------------------------------------------------------------
+// C6 — screen sharing
+// ---------------------------------------------------------------------------------------
+
+async fn share(a: &AppWorld, call: Uuid, participant: Uuid, stop: bool) -> common::TestResponse {
+    let path = if stop {
+        format!("/v1/calls/{call}/screen-share/stop")
+    } else {
+        format!("/v1/calls/{call}/screen-share")
+    };
+    a.post(&path, json!({ "participantId": participant })).await
+}
+
+/// The provider identity of `device`'s live session in `call`.
+async fn identity_of(a: &AppWorld, call: Uuid, device: &common::app::Device) -> String {
+    let session = a.session_on(call, device.endpoint).await.unwrap();
+    a.h()
+        .conn()
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            format!("SELECT media_identity FROM call_sessions WHERE id = '{session}'"),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get_by_index::<String>(0)
+        .unwrap()
+}
+
+/// Whether the provider grant of `device`'s connection includes the screen sources.
+async fn screen_grant(a: &AppWorld, call: Uuid, device: &common::app::Device) -> bool {
+    let identity = identity_of(a, call, device).await;
+    a.media()
+        .participant(&AppWorld::room(call), &identity)
+        .unwrap()
+        .permissions
+        .can_share_screen
+}
+
+async fn stop_events(a: &AppWorld, call: Uuid, reason: &str) -> i64 {
+    scalar(
+        a,
+        &format!(
+            "SELECT count(*) FROM call_events WHERE call_id = '{call}' \
+              AND event_type = 'CALL_SCREEN_SHARE_STOPPED' AND payload->>'stop_reason' = '{reason}'"
+        ),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn only_the_single_presenter_is_granted_the_screen_sources() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let (call, caller, callee, third) = a.connected_group_call("VOICE").await;
+    let mut third_signals = a.h().bus.subscribe(third.endpoint);
+    let alice = a.participant_of(call, caller.principal).await;
+    let bob = a.participant_of(call, callee.principal).await;
+    let actions = a.get(&format!("/v1/calls/{call}/actions")).await.json;
+    assert!(action(&actions, "START_SCREEN_SHARE"));
+    assert!(!action(&actions, "STOP_SCREEN_SHARE"));
+    for device in [&caller, &callee, &third] {
+        assert!(!screen_grant(&a, call, device).await);
+    }
+
+    let r = share(&a, call, alice, false).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    common::contracts::check(
+        "calling/control/v1.schema.json#/$defs/ScreenShareResult",
+        &r.json,
+    );
+    assert_eq!(r.json["screenShare"]["participantId"], alice.to_string());
+    // Only the presenter's grant carries the screen sources; nobody else's.
+    assert!(screen_grant(&a, call, &caller).await);
+    assert!(!screen_grant(&a, call, &callee).await);
+    assert!(!screen_grant(&a, call, &third).await);
+    let view = a.call_view(call).await;
+    assert_eq!(view["screenShare"]["participantId"], alice.to_string());
+    common::contracts::check_openapi_component("Call", &view);
+    let started: Vec<_> = drain(&mut third_signals)
+        .into_iter()
+        .filter(|s| s["type"] == "call.screen_share_started")
+        .collect();
+    assert_eq!(started.len(), 1);
+    assert_eq!(started[0]["data"]["participantId"], alice.to_string());
+    // A new media credential of the presenter is admitted with the screen grant.
+    let session = a.session_on(call, caller.endpoint).await.unwrap();
+    assert!(a.connect(call, session).await.permissions.can_share_screen);
+
+    // One presenter per Call: a second presenter is refused; the presenter's repeat is a
+    // no-op; another participant cannot stop the presenter.
+    let r = share(&a, call, bob, false).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    assert!(!screen_grant(&a, call, &callee).await);
+    let r = share(&a, call, alice, false).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.headers.get("idempotent-replayed").unwrap(), "true");
+    let r = share(&a, call, bob, true).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    let actions = a.get(&format!("/v1/calls/{call}/actions")).await.json;
+    assert!(!action(&actions, "START_SCREEN_SHARE"));
+    assert!(action(&actions, "STOP_SCREEN_SHARE"));
+
+    // HOLD masks the screen sources; RESUME restores them for the (unchanged) presenter.
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.command(call, "hold", version).await.status,
+        StatusCode::OK
+    );
+    assert!(!screen_grant(&a, call, &caller).await);
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.command(call, "resume", version).await.status,
+        StatusCode::OK
+    );
+    assert!(screen_grant(&a, call, &caller).await);
+
+    // Stop revokes the source; a repeat is a no-op.
+    let r = share(&a, call, alice, true).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert!(r.json["screenShare"].is_null());
+    assert!(!screen_grant(&a, call, &caller).await);
+    assert_eq!(stop_events(&a, call, "STOPPED").await, 1);
+    let r = share(&a, call, alice, true).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.headers.get("idempotent-replayed").unwrap(), "true");
+    assert!(a.call_view(call).await["screenShare"].is_null());
+    let stopped = drain(&mut third_signals)
+        .into_iter()
+        .filter(|s| s["type"] == "call.screen_share_stopped")
+        .count();
+    assert_eq!(stopped, 1);
+
+    // The presenter leaving clears the state (the group Call continues).
+    assert_eq!(share(&a, call, bob, false).await.status, StatusCode::OK);
+    let bob_session = a.session_on(call, callee.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/sessions/{bob_session}/remove"),
+            json!({ "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert!(a.call_view(call).await["screenShare"].is_null());
+    assert_eq!(stop_events(&a, call, "PRESENTER_LEFT").await, 1);
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+    assert!(drain(&mut third_signals)
+        .iter()
+        .any(|s| s["type"] == "call.screen_share_stopped"
+            && s["data"]["participantId"] == bob.to_string()));
+
+    // Ending the Call clears it too.
+    assert_eq!(share(&a, call, alice, false).await.status, StatusCode::OK);
+    let (_, version) = a.state(call).await;
+    assert_eq!(a.command(call, "end", version).await.status, StatusCode::OK);
+    assert!(a.call_view(call).await["screenShare"].is_null());
+    assert_eq!(stop_events(&a, call, "CALL_ENDED").await, 1);
+    let r = share(&a, call, alice, false).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+}
+
+#[tokio::test]
+async fn concurrent_presenters_never_both_win_and_held_calls_refuse() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let (call, caller, callee) = a.connected_call("VIDEO").await;
+    let alice = a.participant_of(call, caller.principal).await;
+    let bob = a.participant_of(call, callee.principal).await;
+    let (x, y) = tokio::join!(share(&a, call, alice, false), share(&a, call, bob, false));
+    let mut statuses = [x.status, y.status];
+    statuses.sort();
+    assert_eq!(
+        statuses,
+        [StatusCode::OK, StatusCode::CONFLICT],
+        "{} / {}",
+        x.text,
+        y.text
+    );
+    assert_eq!(
+        scalar(
+            &a,
+            &format!(
+                "SELECT count(*) FROM call_participant_media_permissions \
+                  WHERE call_id = '{call}' AND screen_share_started_at IS NOT NULL"
+            )
+        )
+        .await,
+        1
+    );
+    let presenter = if x.status == StatusCode::OK {
+        alice
+    } else {
+        bob
+    };
+    assert_eq!(
+        share(&a, call, presenter, true).await.status,
+        StatusCode::OK
+    );
+    // A held Call cannot start a presentation; an unknown participant is not found.
+    let (_, version) = a.state(call).await;
+    assert_eq!(
+        a.command(call, "hold", version).await.status,
+        StatusCode::OK
+    );
+    let r = share(&a, call, alice, false).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    let r = share(&a, call, Uuid::new_v4(), false).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+}
+
+#[tokio::test]
+async fn the_screen_share_policy_switch_refuses_new_presentations() {
+    use std::sync::Arc;
+    let Some(db) = common::TestDb::new().await else {
+        return;
+    };
+    let media = Arc::new(common::fake_media::FakeMediaProvider::default());
+    let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
+    let mut runtime = common::test_runtime(Some(media.clone()), bus.clone());
+    runtime.app_config.screen_share_enabled = false;
+    let h = common::Harness::with_runtime(
+        Arc::new(db),
+        calling::domain::ManualClock::new(common::t0()),
+        media,
+        bus,
+        runtime,
+    );
+    let a = AppWorld {
+        w: common::calls::CallWorld::in_harness(h, "noshare", EnvironmentKind::Production).await,
+    };
+    let (call, caller, _callee) = a.connected_call("VIDEO").await;
+    let alice = a.participant_of(call, caller.principal).await;
+    let actions = a.get(&format!("/v1/calls/{call}/actions")).await.json;
+    assert!(!action(&actions, "START_SCREEN_SHARE"));
+    let r = share(&a, call, alice, false).await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "CAPABILITY_UNAVAILABLE");
+    assert!(!screen_grant(&a, call, &caller).await);
+    // Stopping always works (nothing to stop here: an idempotent no-op).
+    assert_eq!(share(&a, call, alice, true).await.status, StatusCode::OK);
+}

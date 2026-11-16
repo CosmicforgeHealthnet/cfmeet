@@ -52,7 +52,9 @@
         "call.recording_stopped",
         "call.voicemail_started",
         "call.route_changed",
-        "call.kind_changed"
+        "call.kind_changed",
+        "call.screen_share_started",
+        "call.screen_share_stopped"
       ]
     },
     "SignalInvitation": {

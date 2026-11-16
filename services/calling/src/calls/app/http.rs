@@ -61,6 +61,11 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/calls/:call_id/resume", post(resume))
         .route("/v1/calls/:call_id/transfer", post(transfer))
         .route("/v1/calls/:call_id/upgrade", post(upgrade))
+        .route("/v1/calls/:call_id/screen-share", post(start_screen_share))
+        .route(
+            "/v1/calls/:call_id/screen-share/stop",
+            post(stop_screen_share),
+        )
         .route("/v1/calls/:call_id/ivr/input", post(ivr_input))
         .route(
             "/v1/calls/:call_id/sessions/:session_id/media-credentials",
@@ -622,6 +627,69 @@ async fn upgrade(
             key.as_ref(),
         )
         .await?;
+    Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ScreenShareBody {
+    participant_id: Uuid,
+}
+
+/// `POST /v1/calls/:call_id/screen-share` (C6): the named participant starts presenting
+/// (calls.write; Idempotency-Key honoured).
+async fn start_screen_share(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<ScreenShareBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    screen_share_command(state, ctx, headers, call_id, body, true).await
+}
+
+/// `POST /v1/calls/:call_id/screen-share/stop` (C6): the presenter stops.
+async fn stop_screen_share(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<ScreenShareBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    screen_share_command(state, ctx, headers, call_id, body, false).await
+}
+
+async fn screen_share_command(
+    state: AppState,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    call_id: String,
+    body: Result<Json<ScreenShareBody>, JsonRejection>,
+    start: bool,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let operation = if start {
+        CommandOperation::StartScreenShare
+    } else {
+        CommandOperation::StopScreenShare
+    };
+    let key = command_key(&headers, operation, Some(call_uuid), &body, false)?;
+    let cmd = CallCommandContext::customer(&ctx);
+    let call_id = CallId::from_uuid(call_uuid);
+    let participant = CallParticipantId::from_uuid(body.participant_id);
+    let outcome = if start {
+        state
+            .app
+            .start_screen_share(&cmd, call_id, participant, key.as_ref())
+            .await?
+    } else {
+        state
+            .app
+            .stop_screen_share(&cmd, call_id, participant, key.as_ref())
+            .await?
+    };
     Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
 }
 

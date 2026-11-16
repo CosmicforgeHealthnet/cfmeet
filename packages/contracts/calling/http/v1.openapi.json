@@ -1462,6 +1462,172 @@
         }
       }
     },
+    "/v1/calls/{call_id}/screen-share": {
+      "post": {
+        "operationId": "startScreenShare",
+        "tags": [
+          "Call Controls"
+        ],
+        "summary": "Start presenting a screen",
+        "description": "Requires calls.write (Idempotency-Key honoured). C6: the named participant becomes the Call's presenter. Allowed for an active participant with a live media session of an ANSWERED or CONNECTED application Call (VOICE or VIDEO) when the deployment's screen-sharing policy is on. One presenter per Call: while another participant presents, 409 CONFLICT; the presenter repeating its start answers the current state (Idempotent-Replayed: true). Only the presenter's media grant includes the screen sources (canShareScreen); it is pushed to the media provider after commit, HOLD masks it, and stopping, the presenter leaving or the Call ending revokes it. Records CALL_SCREEN_SHARE_STARTED and signals call.screen_share_started (data.participantId) to every endpoint of the Call. Policy off, or a provider that cannot update permissions: 422 CAPABILITY_UNAVAILABLE; a held, pre-answer or finished Call: 409 CALL_STATE_CONFLICT; a participant without a live session: 409 CALL_RESOURCE_STATE_CONFLICT.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CallId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/control/v1.schema.json#/$defs/ScreenShareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command's result (or the recorded response of an identical earlier command).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/control/v1.schema.json#/$defs/ScreenShareResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/calls/{call_id}/screen-share/stop": {
+      "post": {
+        "operationId": "stopScreenShare",
+        "tags": [
+          "Call Controls"
+        ],
+        "summary": "Stop presenting a screen",
+        "description": "Requires calls.write (Idempotency-Key honoured). C6: the presenter stops presenting; the screen sources are revoked at the media provider after commit (reconciliation repairs a failed push). Records CALL_SCREEN_SHARE_STOPPED and signals call.screen_share_stopped (data.participantId). Stopping when nobody presents answers the current state (Idempotent-Replayed: true); another participant cannot stop the presenter (409 CONFLICT). Works in every Call state.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CallId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/calling/control/v1.schema.json#/$defs/ScreenShareRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command's result (or the recorded response of an identical earlier command).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/calling/control/v1.schema.json#/$defs/ScreenShareResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/v1/calls/{call_id}/sessions/{session_id}/media-credentials": {
       "post": {
         "operationId": "issueSessionMediaCredential",
@@ -12062,6 +12228,7 @@
           "sessions",
           "invitations",
           "transfers",
+          "screenShare",
           "canViewRecordings"
         ],
         "properties": {
@@ -12099,6 +12266,17 @@
             "items": {
               "$ref": "https://schemas.cfmeet.com/calling/control/v1.schema.json#/$defs/CallTransfer"
             }
+          },
+          "screenShare": {
+            "description": "C6: who is presenting a screen now (null when nobody is).",
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/calling/control/v1.schema.json#/$defs/ScreenShare"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "canViewRecordings": {
             "type": "boolean",
