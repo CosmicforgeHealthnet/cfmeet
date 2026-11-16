@@ -18,8 +18,8 @@ Statuses are kept separate, as the mission requires:
 | Section | Engineering | Production | Accepted | Evidence |
 |---|---|---|---|---|
 | **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **blocked: owner credentials** — run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) stopped at `CFMEET_RESEND_API_KEY is missing`, nothing changed | — | §3 |
-| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75) | see §4 | 24 h dark observation pending | §2.1, §4 |
-| **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 | n/a (no traffic until N7) | §2.2 |
+| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75) | `PRODUCTION_DEPLOYED_AND_VERIFIED` dark: release 43819010350 | 24 h dark observation from 07:43 UTC | §2.1, §4 |
+| **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
 | **N6** owner APIs X1–X5 | in progress (see §2.4) | — | n/a | §2.4 |
 | **N7** producer publications + routing fence | **not built** | — | — | §5 |
@@ -99,7 +99,22 @@ Owner action (docs/operations/resend-email-owner-handoff.md §4–§6): create a
 
 ## 4. Production evidence
 
-*(release, verification and certification run ids are recorded here as they complete)*
+### 4.1 N2 dark release
+
+| | |
+|---|---|
+| Merge | PR [#75](https://github.com/CosmicforgeHealthnet/cfmeet/pull/75) → `main` `5c9fb38f0ab8f3f9fd6dc83b0213788a54f685ea` |
+| Release | run [43819010350](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43819010350) `release` on `5c9fb38`, success (07:43 UTC) |
+| Scope | replaced: `notifications`, `notifications-2` (new), `calling`, `meeting-service` (build inputs changed since `163be40`); 11 services kept on `163be40` |
+| Resource gate | MemAvailable 5,068 MiB; required 1,344 MiB (2 × 256 MiB + transient); remaining 3,724 MiB; shortfall 0 |
+| Pre-release backup | 16 databases, `/opt/cfmeet-core/backups/43819010350-1/manifest.json`; restore-tested organizations, platform-access, meeting-service (PASS) |
+| Provisioning | database `cfmeet_notifications` + roles, signing key, empty trust bundle, data key; private TLS route 8456 installed |
+| Migration | `notifications-migration up`: `notifications_seaql_migrations` applied 1 (`m20261116_000001_notifications_foundation`) |
+| Verification | 33 checks PASS (running ×15 incl. `notifications` and `notifications-2`, migrations ×11 incl. `notifications`, `provider_features_off`, internal-not-public, CORS, swagger, Organizations event delivery); violations: none; regression (Meetings health, Messaging/Calling/Platform TLS readiness, LiveKit keys) PASS |
+| Dark state | every `notif_routing` row `OFF`, `NOTIFICATIONS_EMAIL_PROVIDER=none`, `NOTIFICATIONS_PUSH_PROVIDER=none`, no owner API, no producer grant: nothing can be delivered |
+| Certification | run [43828926604](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43828926604) `certify` (read-only) — result recorded below |
+
+**N2 production status: `PRODUCTION_DEPLOYED_AND_VERIFIED` (dark).** The 24-hour zero-traffic observation of Document 6 N2 row 14 starts at the release (2026-11-16 07:43 UTC).
 
 ---
 
