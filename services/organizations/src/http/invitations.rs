@@ -505,6 +505,51 @@ pub async fn decline(
     Ok(respond(StatusCode::OK, row.to_json(now)))
 }
 
+/// The `cfmeet-user:<uuid>` account reference of the Notification Service contracts.
+pub fn account_ref(user: Uuid) -> String {
+    format!("cfmeet-user:{user}")
+}
+
+/// `{status, inviteeAccountRef}` of one invitation for the Notification Service (X5).
+/// `inviteeAccountRef` is the account Organizations knows for the invitee: the user who
+/// accepted or declined (`invitee_user_id`). Invitations are addressed by email and
+/// Organizations keeps no email → account mapping, so a PENDING, REVOKED or EXPIRED
+/// invitation that no account has answered reports `null`. Never the email or the token.
+pub fn invitee_document(inv: &InvitationRow, now: DateTime<Utc>) -> Value {
+    json!({
+        "status": inv.effective_status(now),
+        "inviteeAccountRef": inv.invitee_user_id.map(account_ref),
+    })
+}
+
+/// No request body is defined: empty or `{}` only.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyBody {}
+
+/// `POST /internal/v1/organization-invitations/{invitationId}/invitee/resolve` — X5
+/// `resolveInvitationInvitee` (contract `organizations/notification-owner/v1`), for the
+/// Notification Service only (`organization-invitations.read`). Read-only; a PENDING
+/// invitation past its expiry reports EXPIRED. Unknown id → 404 `NOT_FOUND`.
+pub async fn resolve_invitee(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(invitation_id): Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationInvitationsRead)?;
+    let _: (EmptyBody, Value) = parse(&body)?;
+    let inv: InvitationRow = db::one(
+        &state.db,
+        &format!("SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE id = $1"),
+        vec![invitation_id.into()],
+    )
+    .await?
+    .ok_or_else(|| ApiError::with_message(ErrorCode::NotFound, "The invitation was not found."))?;
+    let now = db::now(&state.db).await?;
+    Ok(respond(StatusCode::OK, invitee_document(&inv, now)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
