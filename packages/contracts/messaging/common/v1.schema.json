@@ -2265,6 +2265,17 @@
               ]
             }
           }
+        },
+        "applicationBaseline": {
+          "description": "1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults <- baseline <- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE / VIDEO. null for every other environment. `policy` stays the application's own document.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "CFMEET_FIRST_PARTY",
+            null
+          ]
         }
       }
     },
