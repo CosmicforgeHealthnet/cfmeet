@@ -160,7 +160,18 @@ impl AppCallService {
             }
         }
         let actor = actor.ok_or(CallError::TargetUnavailable)?;
+        // The device evidence belongs to one party. Communications denies a check whose
+        // credential belongs to neither the actor nor the target, so it is attached only
+        // to the pairs its owner is part of (every pair of the initiator, or the owner's
+        // own pair). Every pair is still checked. Evidence of a principal who is not an
+        // active party is refused outright (C7: a Call can have more than one target).
+        if let Some((owner, _)) = evidence {
+            if owner != actor && !targets.contains(&owner) {
+                return Err(CallError::TargetUnavailable);
+            }
+        }
         for target in targets {
+            let own = evidence.filter(|(owner, _)| *owner == actor || *owner == target);
             client
                 .check(
                     delegated.clone(),
@@ -168,8 +179,8 @@ impl AppCallService {
                         action: Action::DirectCall,
                         actor_principal_id: actor,
                         target_principal_id: target,
-                        credential_issued_at: evidence.map(|x| x.1),
-                        credential_principal_id: evidence.map(|x| x.0),
+                        credential_issued_at: own.map(|x| x.1),
+                        credential_principal_id: own.map(|x| x.0),
                         conversation_id: None,
                     },
                 )
