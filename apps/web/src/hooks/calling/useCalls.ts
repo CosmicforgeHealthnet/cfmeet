@@ -2,7 +2,7 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { callsService, endpointsService } from "@/services/calling";
-import type { CallHistoryFilters, CommandRequest, CreateCallRequest, InvitationCommandRequest, IvrInputRequest, TransferRequest } from "@/types/calling";
+import type { AddParticipantsRequest, CallHistoryFilters, CommandRequest, CreateCallRequest, InvitationCommandRequest, IvrInputRequest, ScreenShareRequest, TransferRequest, UpgradeRequest } from "@/types/calling";
 
 export const callingKeys = {
   all: ["calling"] as const,
@@ -45,7 +45,10 @@ export type CallingMutation =
   | { operation: "accept" | "decline"; callId: string; body: InvitationCommandRequest; key: string }
   | { operation: "transfer"; callId: string; body: TransferRequest; key: string }
   | { operation: "removeSession"; callId: string; sessionId: string; body: CommandRequest; key: string }
-  | { operation: "ivrInput"; callId: string; body: IvrInputRequest };
+  | { operation: "ivrInput"; callId: string; body: IvrInputRequest }
+  | { operation: "upgrade"; callId: string; body: UpgradeRequest; key: string }
+  | { operation: "startScreenShare" | "stopScreenShare"; callId: string; body: ScreenShareRequest; key: string }
+  | { operation: "addParticipants"; callId: string; body: AddParticipantsRequest; key: string };
 
 export function useCallingMutation() {
   const queryClient = useQueryClient();
@@ -59,6 +62,10 @@ export function useCallingMutation() {
         case "decline": return callsService.decline(input.callId, input.body, input.key);
         case "removeSession": return callsService.removeSession(input.callId, input.sessionId, input.body, input.key);
         case "ivrInput": return callsService.ivrInput(input.callId, input.body);
+        case "upgrade": return callsService.upgrade(input.callId, input.body, input.key);
+        case "startScreenShare": return callsService.startScreenShare(input.callId, input.body, input.key);
+        case "stopScreenShare": return callsService.stopScreenShare(input.callId, input.body, input.key);
+        case "addParticipants": return callsService.addParticipants(input.callId, input.body, input.key);
         default: return callsService[input.operation](input.callId, input.body, input.key);
       }
     },

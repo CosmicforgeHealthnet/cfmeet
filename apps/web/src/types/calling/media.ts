@@ -10,6 +10,8 @@ export interface CallMediaCapabilities {
   canPublishVideo: boolean;
   canPublishData: boolean;
   canSubscribe: boolean;
+  /** C6: the grant includes the screen sources (the Call's current presenter only). */
+  canShareScreen: boolean;
 }
 
 export interface MediaCredential {

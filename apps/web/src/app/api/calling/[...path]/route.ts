@@ -10,7 +10,9 @@ import type { Call } from "@/types/calling";
  * the request: it is injected from the verified login (principalId / initiatorPrincipalId /
  * transferringParticipantId) and ownership is checked before anything reaches Calling.
  *
- *  - Call control follows the party rules of ADR 0009 (CAL-002, `call-permissions.ts`).
+ *  - Call control follows the party rules of ADR 0009 (CAL-002, `call-permissions.ts`); upgrade
+ *    to video (C5), screen sharing (C6, always for the user's own participant) and inviting
+ *    people (C7, as the user's own participant) are active-party commands.
  *  - Recording consent / controls and abuse reports are participant-bound (CAL-005).
  *  - Voicemail and forwarding are self-service, bound to the signed-in principal (CAL-006);
  *    the backend's `VoicemailRequester::Principal` (principalId) gives the owner view only.
@@ -78,6 +80,8 @@ const CONSENT_DECISIONS = new Set(["GRANTED", "DECLINED"]);
 const SELF_FORWARDING_DESTINATIONS = new Set(["PRINCIPAL", "EXTENSION", "VOICEMAIL"]);
 /** Upper bounds of the self-service mailbox discovery (pages × 100 mailboxes, ownership probes). */
 const MAILBOX_PAGES = 5;
+/** People one "add people" request may invite (Calling's group limit is 16 including the initiator). */
+const MAX_INVITED = 15;
 const MAILBOX_PROBES = 50;
 
 type Body = Record<string, unknown>;
@@ -398,6 +402,23 @@ async function authorizeCallRoute(
     if (method !== "POST" || !mayControl(call, principalId, op as ControlOperation)) return false;
     if (op === "transfer") body.transferringParticipantId = mine.participantId;
     return true;
+  }
+  // ---- C5 / C6 / C7: active parties only; the acting participant comes from the login ----
+  if (path.length === 4 && op === "upgrade" && body) {
+    if (method !== "POST" || !mayControl(call, principalId, "upgrade")) return false;
+    return { body: { kind: body.kind, expectedVersion: body.expectedVersion } };
+  }
+  if (op === "screen-share" && (path.length === 4 || (path.length === 5 && path[4] === "stop"))) {
+    if (method !== "POST" || !active || !mayControl(call, principalId, "screenShare")) return false;
+    return { body: { participantId: active.participantId } };
+  }
+  if (path.length === 4 && op === "participants" && body) {
+    if (method !== "POST" || !active || !mayControl(call, principalId, "invite")) return false;
+    const targets = body.targetPrincipalIds;
+    if (!Array.isArray(targets) || targets.length < 1 || targets.length > MAX_INVITED || !targets.every((t) => typeof t === "string" && uuid.test(t))) {
+      throw new CallingHttpError(400, "VALIDATION_ERROR", `Choose between 1 and ${MAX_INVITED} people to add.`);
+    }
+    return { body: { invitingParticipantId: active.participantId, targetPrincipalIds: targets, expectedVersion: body.expectedVersion } };
   }
   if (path.length === 4 && ["accept", "decline"].includes(op) && body) {
     if (method !== "POST") return false;

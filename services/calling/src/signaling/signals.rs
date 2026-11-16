@@ -60,6 +60,17 @@ pub enum SignalType {
     /// The Call's public route changed (a failover to another interconnect on the SAME
     /// Call); no provider, route or number detail is carried.
     RouteChanged,
+    /// C5: the Call's kind changed (VOICE → VIDEO: `callKind` is VIDEO; data:
+    /// participantsGrantedVideo). Clients refresh the Call and offer their camera — nobody's
+    /// camera is turned on by the server.
+    KindChanged,
+    /// C6: a participant started presenting its screen (data: participantId).
+    ScreenShareStarted,
+    /// C6: the presenter stopped, left, or the Call ended (data: participantId).
+    ScreenShareStopped,
+    /// C7: participants were invited into the ongoing Call (data: participantsAdded,
+    /// activeParticipants). Clients refresh the Call.
+    ParticipantsChanged,
 }
 
 impl SignalType {
@@ -91,6 +102,10 @@ impl SignalType {
         SignalType::RecordingStopped,
         SignalType::VoicemailStarted,
         SignalType::RouteChanged,
+        SignalType::KindChanged,
+        SignalType::ScreenShareStarted,
+        SignalType::ScreenShareStopped,
+        SignalType::ParticipantsChanged,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -122,6 +137,10 @@ impl SignalType {
             SignalType::RecordingStopped => "call.recording_stopped",
             SignalType::VoicemailStarted => "call.voicemail_started",
             SignalType::RouteChanged => "call.route_changed",
+            SignalType::KindChanged => "call.kind_changed",
+            SignalType::ScreenShareStarted => "call.screen_share_started",
+            SignalType::ScreenShareStopped => "call.screen_share_stopped",
+            SignalType::ParticipantsChanged => "call.participants_changed",
         }
     }
 }

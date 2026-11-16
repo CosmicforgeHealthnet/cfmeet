@@ -590,6 +590,7 @@ consult a switch (`tests/feature_rollback.rs`).
 |---|---|---|
 | `CALLING_NEW_CALLS_ENABLED` | `true` | Master switch: every new call — application, app-to-phone, callback relay, enterprise, inbound public and enterprise SIP offers |
 | `CALLING_APP_CALLING_ENABLED` | `true` | New application (app-to-app RTC) calls |
+| `CALLING_SCREEN_SHARE_ENABLED` | `true` | New screen-share presentations in live application calls (C6; stopping always works) |
 | `CALLING_PUBLIC_OUTBOUND_ENABLED` | `false` | App-to-phone calls (and the outbound legs of every public class) |
 | `CALLING_PUBLIC_INBOUND_ENABLED` | `false` | Phone-to-app / phone-to-phone inbound calls |
 | `CALLING_CALLBACK_RELAY_ENABLED` | `false` | Callback relay (requires public outbound too) |

@@ -5,7 +5,9 @@
  * status (connecting / network interrupted / retrying in n s / could not restore) with an
  * automatic rejoin, and the controls the signed-in party may use — Leave for anyone, End for
  * all / Hold / Resume for any active participant (ADR 0009 party rules), Cancel for the caller
- * before the answer.
+ * before the answer. Any active party may also turn a voice call into a video call (C5: the
+ * camera button appears; no camera is turned on), share its screen when Calling offers it (C6:
+ * one presenter per call, shown on everyone's stage) and add people (C7).
  *
  * Design (Google Meet / Duo call screen): a full-screen stage — big avatar with ripples while it
  * rings, a live timer once connected, their video full-bleed with yours in a corner window —
@@ -14,14 +16,14 @@
  */
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Circle, Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, PhoneOff, Play, RefreshCw, Users } from "lucide-react";
+import { Circle, Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, PhoneOff, Play, RefreshCw, UserPlus, Users, Video } from "lucide-react";
 import { useCalling } from "@/context/CallingContext";
 import { useCall, useCallActions, useCallingMutation } from "@/hooks/calling/useCalls";
 import { usePrincipalNames } from "@/hooks/calling/usePrincipalNames";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
 import { callerLabel } from "@/lib/calling/incoming-call";
-import { ownSession, visibleControls } from "@/lib/calling/call-permissions";
+import { isPresenter, ownSession, visibleControls } from "@/lib/calling/call-permissions";
 import { mediaStatusLabel } from "@/lib/calling/media-reconnect";
 import { cn } from "@/lib/utils";
 import { rememberedCallName } from "@/lib/calling/call-names";
@@ -29,7 +31,8 @@ import { Popover } from "radix-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import CallRecordingControls from "./CallRecordingControls";
 import AbuseReportDialog from "./AbuseReportDialog";
-import CallMedia, { CallButton, CallCameraButton, CallFlipButton, CallMicButton, CallMicToggle, CallSpeakerButton, CallVideoStage, MutedTag, useAnyVideo } from "./CallMedia";
+import AddPeopleDialog from "./AddPeopleDialog";
+import CallMedia, { CallButton, CallCameraButton, CallFlipButton, CallMicButton, CallMicToggle, CallScreenShareButton, CallSpeakerButton, CallVideoStage, MutedTag, useAnyVideo } from "./CallMedia";
 
 const COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#4f46e5", "#ea580c"];
 const colorFor = (key: string) => COLORS[([...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % COLORS.length];
@@ -64,6 +67,8 @@ function CameraPreview() {
 type StageProps = {
   inRoom: boolean;
   video: boolean;
+  /** Show the local camera preview before the call's video arrives (calls placed as video only). */
+  preview?: boolean;
   group: boolean;
   seed: string;
   counterpart: string;
@@ -88,11 +93,11 @@ function StageInRoom(p: StageProps) {
   const anyVideo = useAnyVideo();
   return <StageView {...p} anyVideo={p.video && anyVideo} />;
 }
-export function StageView({ inRoom, video, group, seed, counterpart, status, ringing, connected, held, failed, error, onRetry, onMinimise, controls, hangup, footerLinks, anyVideo }: StageProps & { anyVideo: boolean }) {
+export function StageView({ inRoom, video, preview = video, group, seed, counterpart, status, ringing, connected, held, failed, error, onRetry, onMinimise, controls, hangup, footerLinks, anyVideo }: StageProps & { anyVideo: boolean }) {
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       {inRoom && video ? <CallVideoStage /> : null}
-      {video && !anyVideo ? <CameraPreview /> : null}
+      {preview && !anyVideo ? <CameraPreview /> : null}
       {!anyVideo && !video && <div aria-hidden className="pointer-events-none absolute left-1/2 top-[42%] size-[30rem] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-20 blur-[110px]" style={{ backgroundColor: colorFor(seed) }} />}
 
       <header className={cn("relative z-10 flex h-16 items-center px-3 sm:h-20 sm:px-5", anyVideo && "bg-gradient-to-b from-black/70 to-transparent")}>
@@ -149,6 +154,7 @@ export default function ActiveCallDock() {
   const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const connectedNow = call.data?.state === "CONNECTED";
   useEffect(() => {
@@ -180,7 +186,7 @@ export default function ActiveCallDock() {
   const seed = party[0]?.principalId ?? counterpart;
   const controls = call.data
     ? visibleControls(call.data, calling.principalId, (name) => !!actions.data?.actions.some((a) => a.action === name && a.available))
-    : { cancel: false, end: false, hold: false, resume: false, transfer: false };
+    : { cancel: false, end: false, hold: false, resume: false, transfer: false, upgrade: false, screenShare: false, invite: false };
   const session = call.data ? ownSession(call.data, calling.principalId, calling.device.endpoint?.endpointId) : undefined;
   const group = party.length > 1;
   const asOf = call.data ? Date.parse(call.data.durationsAsOf) : NaN;
@@ -191,6 +197,16 @@ export default function ActiveCallDock() {
   };
   const command = (operation: "cancel" | "end" | "hold" | "resume") => run(() =>
     mutation.mutateAsync({ operation, callId: media.callId, body: { expectedVersion: call.data!.version }, key: newIdempotencyKey() }));
+  // C5: the call becomes a video call; every party's camera button appears (cameras stay off).
+  const upgrade = () => run(() =>
+    mutation.mutateAsync({ operation: "upgrade", callId: media.callId, body: { kind: "VIDEO", expectedVersion: call.data!.version }, key: newIdempotencyKey() }));
+  // C6: the adapter names the signed-in user's own participant as the presenter.
+  const screenShare = (operation: "startScreenShare" | "stopScreenShare") =>
+    mutation.mutateAsync({ operation, callId: media.callId, body: {}, key: newIdempotencyKey() });
+  const presenting = call.data ? isPresenter(call.data, calling.principalId) : false;
+  const presenter = call.data?.screenShare ? call.data.participants.find((p) => p.participantId === call.data!.screenShare!.participantId) : undefined;
+  const presenterLabel = presenting ? "You're presenting"
+    : presenter ? `${presenter.displayName || names.data?.[presenter.principalId] || "Someone"} is presenting` : null;
 
   const state = call.data?.state;
   const held = state === "HELD";
@@ -199,11 +215,15 @@ export default function ActiveCallDock() {
     : held ? "On hold"
     : state === "ANSWERED" ? "Connecting…"
     : ringing ? "Calling…"
-    : elapsed !== null && mediaState.status === "connected" ? clock(elapsed)
+    : elapsed !== null && mediaState.status === "connected" ? (presenterLabel ? `${clock(elapsed)} · ${presenterLabel}` : clock(elapsed))
     : mediaState.status === "idle" || mediaState.status === "connecting" && !mediaState.attempt ? "Connecting…"
     : mediaStatusLabel(mediaState);
   const dot = mediaState.status === "connected" && !held && !ringing ? "bg-emerald-400" : mediaState.status === "failed" ? "bg-red-500" : "animate-pulse bg-amber-400";
-  const video = media.kind === "VIDEO";
+  // Placed as video: the local preview and the automatic camera at join. Upgraded later (C5):
+  // the video stage and the camera button only — the user turns the camera on.
+  const placedVideo = media.kind === "VIDEO";
+  const video = placedVideo || call.data?.kind === "VIDEO";
+  const canPublishVideo = !!media.credential?.capabilities.canPublishVideo || call.data?.kind === "VIDEO";
   const hangUpNow = (operation: "cancel" | "end" | "leave") => {
     const data = call.data;
     calling.leaveMedia();
@@ -223,19 +243,25 @@ export default function ActiveCallDock() {
   const stageControls = (
     <>
       {inRoom && <CallSpeakerButton />}
-      {inRoom && video && <CallCameraButton allowed={!!media.credential?.capabilities.canPublishVideo} />}
+      {inRoom && video && <CallCameraButton allowed={canPublishVideo} />}
       {inRoom && <CallMicButton allowed={!!media.credential?.capabilities.canPublishAudio} />}
       {inRoom && video && <CallFlipButton />}
       <Popover.Root>
         <Popover.Trigger asChild><span><CallButton icon={<MoreHorizontal />} label="More" /></span></Popover.Trigger>
         <Popover.Portal>
           <Popover.Content side="top" sideOffset={10} collisionPadding={12} className="dark z-[80] w-60 rounded-2xl bg-[#2D2E31] p-1.5 text-white shadow-2xl ring-1 ring-white/10">
+            {controls.invite ? <Popover.Close asChild><button type="button" className={moreItem} onClick={() => setAdding(true)}><UserPlus className="size-4 text-white/60" />Add people</button></Popover.Close> : null}
             {me && connectedNow && call.data?.canViewRecordings ? <Popover.Close asChild><button type="button" className={moreItem} onClick={() => setRecording(true)}><Circle className="size-4 text-red-400" />Record call</button></Popover.Close> : null}
             <Popover.Close asChild><Link href={`/calling?call=${encodeURIComponent(media.callId)}`} onClick={() => setFull(false)} className={moreItem}><Info className="size-4 text-white/60" />Call details</Link></Popover.Close>
             <Popover.Close asChild><button type="button" className={moreItem} onClick={() => setReporting(true)}><Flag className="size-4 text-white/60" />Report a problem</button></Popover.Close>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
+      {controls.upgrade && !video && <CallButton icon={<Video />} label="Video" disabled={mutation.isPending} onClick={() => void upgrade()} />}
+      {inRoom && (controls.screenShare || presenting) && (
+        <CallScreenShareButton presenting={presenting} onError={(e) => setError(callingErrorMessage(e))}
+          onStart={() => screenShare("startScreenShare")} onStop={() => screenShare("stopScreenShare")} />
+      )}
       {controls.hold && <CallButton icon={<Pause />} label="Hold" disabled={mutation.isPending} onClick={() => void command("hold")} />}
       {controls.resume && <CallButton icon={<Play />} label="Resume" tone="warn" disabled={mutation.isPending} onClick={() => void command("resume")} />}
     </>
@@ -248,7 +274,7 @@ export default function ActiveCallDock() {
   );
 
   const stage = (
-    <Stage inRoom={inRoom} video={video} group={group} seed={seed} counterpart={counterpart} status={status} ringing={ringing}
+    <Stage inRoom={inRoom} video={video} preview={placedVideo} group={group} seed={seed} counterpart={counterpart} status={status} ringing={ringing}
       connected={!!connectedNow} held={held} failed={mediaState.status === "failed"} error={error} onRetry={calling.retryMedia}
       onMinimise={() => setFull(false)} controls={stageControls} hangup={hangupButton} footerLinks={footerLinks} />
   );
@@ -279,7 +305,7 @@ export default function ActiveCallDock() {
         : "fixed bottom-20 right-3 w-[min(24rem,calc(100vw-1.5rem))] rounded-full bg-[#2D2E31] p-2 pl-2.5 shadow-2xl ring-1 ring-white/10 md:bottom-4")}>
       {/* One media connection for both layouts, so audio never drops when you minimise. */}
       {media.credential ? (
-        <CallMedia key={media.credential.token} credential={media.credential} video={video} className={full ? "h-full" : undefined}
+        <CallMedia key={media.credential.token} credential={media.credential} video={placedVideo} className={full ? "h-full" : undefined}
           onConnected={mediaEvents.connected} onDisconnected={mediaEvents.disconnected}
           onProviderReconnecting={mediaEvents.providerReconnecting} onProviderReconnected={mediaEvents.providerReconnected}
           onError={(e) => setError(callingErrorMessage(e))}>
@@ -293,6 +319,10 @@ export default function ActiveCallDock() {
         </DialogContent>
       </Dialog>
       <AbuseReportDialog callId={media.callId} open={reporting} onOpenChange={setReporting} />
+      {call.data && controls.invite ? (
+        <AddPeopleDialog callId={media.callId} version={call.data.version} principalId={calling.principalId}
+          participantPrincipalIds={call.data.participants.map((p) => p.principalId)} open={adding} onOpenChange={setAdding} />
+      ) : null}
     </section>
   );
 }

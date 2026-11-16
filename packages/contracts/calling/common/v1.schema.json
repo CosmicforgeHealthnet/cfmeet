@@ -120,7 +120,10 @@
         "RECORDING_READY",
         "RECORDING_FAILED",
         "RECORDING_DELETED",
-        "ENTERPRISE_ROUTING_STEP"
+        "ENTERPRISE_ROUTING_STEP",
+        "CALL_KIND_CHANGED",
+        "CALL_SCREEN_SHARE_STARTED",
+        "CALL_SCREEN_SHARE_STOPPED"
       ]
     },
     "CallInvitationPurpose": {
@@ -193,12 +196,16 @@
       "description": "Media capabilities the server authorizes for one session's media connection. Derived from server state (call kind, participant permissions, hold); never chosen by the client. There is no administrative, recording, room-creation or room-listing capability.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["canPublishAudio", "canPublishVideo", "canPublishData", "canSubscribe"],
+      "required": ["canPublishAudio", "canPublishVideo", "canPublishData", "canSubscribe", "canShareScreen"],
       "properties": {
         "canPublishAudio": { "type": "boolean" },
         "canPublishVideo": { "type": "boolean" },
         "canPublishData": { "type": "boolean" },
-        "canSubscribe": { "type": "boolean" }
+        "canSubscribe": { "type": "boolean" },
+        "canShareScreen": {
+          "description": "The grant includes the screen sources (screen video and screen audio). True only for the Call's current presenter (POST /v1/calls/{call_id}/screen-share) while the Call is not held.",
+          "type": "boolean"
+        }
       }
     },
     "CallCore": {

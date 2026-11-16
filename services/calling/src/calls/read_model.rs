@@ -258,6 +258,14 @@ impl From<&CallTransfer> for TransferView {
     }
 }
 
+/// The Call's current presenter (C6).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenShareView {
+    pub participant_id: String,
+    pub started_at: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CallView {
@@ -269,6 +277,8 @@ pub struct CallView {
     pub sessions: Vec<SessionView>,
     pub invitations: Vec<InvitationView>,
     pub transfers: Vec<TransferView>,
+    /// C6: who is presenting a screen now (`null` when nobody is).
+    pub screen_share: Option<ScreenShareView>,
     /// Whether THIS caller may read the call's recordings and recording authorizations
     /// (`GET /v1/calls/{id}/recordings`, `/recording-authorizations`): its credential holds
     /// `enterprise.recording.read`. Clients request recordings only when true (an ordinary
@@ -286,6 +296,10 @@ impl From<&CallDetail> for CallView {
             sessions: d.sessions.iter().map(Into::into).collect(),
             invitations: d.invitations.iter().map(Into::into).collect(),
             transfers: d.transfers.iter().map(Into::into).collect(),
+            screen_share: d.screen_share.map(|(participant, since)| ScreenShareView {
+                participant_id: participant.to_string(),
+                started_at: ts(since),
+            }),
             can_view_recordings: false,
         }
     }

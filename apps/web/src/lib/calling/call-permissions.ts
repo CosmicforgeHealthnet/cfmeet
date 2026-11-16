@@ -10,13 +10,15 @@
  *    transfer target, so a transferred call stays controllable;
  *  - transfer: an active participant transferring its OWN place;
  *  - cancel: pre-answer only, and it belongs to the initiator (a recipient declines its offer);
+ *  - upgrade to video (C5), screen sharing (C6, for one's OWN participant only) and inviting
+ *    people (C7): any ACTIVE participant;
  *  - after termination an ex-participant may REPLAY a command with its original idempotency
  *    key (the backend answers the recorded result); no new command can succeed then.
  *
  * Dependency-free on purpose (node tests import it with --experimental-strip-types).
  */
 
-export type ControlOperation = "cancel" | "end" | "hold" | "resume" | "transfer" | "leave" | "ivrInput";
+export type ControlOperation = "cancel" | "end" | "hold" | "resume" | "transfer" | "leave" | "ivrInput" | "upgrade" | "screenShare" | "invite";
 
 export interface PermissionParticipant {
   participantId: string;
@@ -78,6 +80,9 @@ export function mayControl(call: PermissionCall, principalId: string, operation:
     case "hold":
     case "resume":
     case "transfer":
+    case "upgrade":
+    case "screenShare":
+    case "invite":
       return active || replay;
     case "ivrInput":
       // Enterprise IVR menus answer the caller's keypad only.
@@ -91,15 +96,23 @@ export function mayControl(call: PermissionCall, principalId: string, operation:
  * The UI decision: which controls to render for the signed-in user (no replays: a terminal
  * Call shows no controls). `available` is the server's `GET /v1/calls/{id}/actions` answer.
  */
+export type VisibleControl = "cancel" | "end" | "hold" | "resume" | "transfer" | "upgrade" | "screenShare" | "invite";
+
+/** The server action (GET /v1/calls/{id}/actions) behind each control. */
+const ACTION_OF: Record<VisibleControl, string> = {
+  cancel: "CANCEL", end: "END", hold: "HOLD", resume: "RESUME", transfer: "TRANSFER",
+  upgrade: "UPGRADE", screenShare: "START_SCREEN_SHARE", invite: "ADD_PARTICIPANTS",
+};
+
 export function visibleControls(
   call: PermissionCall,
   principalId: string,
   available: (action: string) => boolean,
-): Record<"cancel" | "end" | "hold" | "resume" | "transfer", boolean> {
+): Record<VisibleControl, boolean> {
   const live = !isWindingDown(call.state);
   const active = !!activeParticipant(call, principalId);
-  const show = (operation: "cancel" | "end" | "hold" | "resume" | "transfer") =>
-    live && active && mayControl(call, principalId, operation) && available(operation.toUpperCase());
+  const show = (operation: VisibleControl) =>
+    live && active && mayControl(call, principalId, operation) && available(ACTION_OF[operation]);
   return {
     cancel: show("cancel"),
     // Before the answer the initiator cancels; ending is for answered calls.
@@ -107,7 +120,16 @@ export function visibleControls(
     hold: show("hold"),
     resume: show("resume"),
     transfer: show("transfer"),
+    upgrade: show("upgrade"),
+    screenShare: show("screenShare"),
+    invite: show("invite"),
   };
+}
+
+/** C6: whether the signed-in user is the call's current presenter. */
+export function isPresenter(call: PermissionCall & { screenShare?: { participantId: string } | null }, principalId: string): boolean {
+  const mine = activeParticipant(call, principalId);
+  return !!mine && call.screenShare?.participantId === mine.participantId;
 }
 
 /** The signed-in user's own live session on this device (for leave / media join). */

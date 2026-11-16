@@ -119,6 +119,60 @@ class ActivateIvrVersionRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// Body of POST /v1/calls/{call_id}/participants (C7): the active participant who invites, the principals to invite (resolved in the credential's scope, like call creation) and the expected Call version.
+class AddParticipantsRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddParticipantsRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddParticipantsRequest.create({required int expectedVersion, required Uuid invitingParticipantId, required List<Uuid> targetPrincipalIds}) =>
+      AddParticipantsRequest.fromJson(<String, Object?>{
+        'expectedVersion': expectedVersion,
+        'invitingParticipantId': invitingParticipantId,
+        'targetPrincipalIds': targetPrincipalIds,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.
+  int get expectedVersion => (json['expectedVersion']! as num).toInt();
+
+  Uuid get invitingParticipantId => json['invitingParticipantId']! as String;
+
+  List<Uuid> get targetPrincipalIds => (json['targetPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Result of inviting participants: the Call (state and version unchanged), the inviter and every new RECIPIENT participant with the number of PENDING ring offers issued to its eligible endpoints.
+class AddParticipantsResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddParticipantsResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddParticipantsResult.create({required CommonCallSummary call, required Uuid invitingParticipantId, required String operation, required List<Map<String, Object?>> participants}) =>
+      AddParticipantsResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'invitingParticipantId': invitingParticipantId,
+        'operation': operation,
+        'participants': participants,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  Uuid get invitingParticipantId => json['invitingParticipantId']! as String;
+
+  String get operation => json['operation']! as String;
+
+  List<Map<String, Object?>> get participants => (json['participants']! as List<Object?>).map((e) => e! as Map<String, Object?>).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Organization-level administrative capabilities (second key after the credential's enterprise scopes). MANAGE_PUBLIC_FORWARDING and MANAGE_RECORDING are granted by a CF Meet operator only.
 ///
 /// One of: MANAGE_ROUTING, MANAGE_PUBLIC_FORWARDING, MANAGE_VOICEMAIL, MANAGE_RECORDING.
@@ -430,7 +484,7 @@ class Call {
   const Call.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Call.create({required String? answeredAt, required String? authorizedAt, required Uuid callId, required bool canViewRecordings, required String? connectedAt, required int? connectedDurationMs, required String createdAt, required String durationsAsOf, required String? endedAt, required String? endingAt, required CallFailureCategory? failureCategory, required Uuid initiatorPrincipalId, required List<CallInvitation> invitations, required CallKind kind, required List<CallParticipant> participants, required String requestedAt, required String? ringingAt, required List<CallSession> sessions, required CallState state, required CallTerminalReason? terminalReason, required List<CallTransfer> transfers, required String updatedAt, required int version}) =>
+  factory Call.create({required String? answeredAt, required String? authorizedAt, required Uuid callId, required bool canViewRecordings, required String? connectedAt, required int? connectedDurationMs, required String createdAt, required String durationsAsOf, required String? endedAt, required String? endingAt, required CallFailureCategory? failureCategory, required Uuid initiatorPrincipalId, required List<CallInvitation> invitations, required CallKind kind, required List<CallParticipant> participants, required String requestedAt, required String? ringingAt, required ScreenShare? screenShare, required List<CallSession> sessions, required CallState state, required CallTerminalReason? terminalReason, required List<CallTransfer> transfers, required String updatedAt, required int version}) =>
       Call.fromJson(<String, Object?>{
         'answeredAt': answeredAt,
         'authorizedAt': authorizedAt,
@@ -449,6 +503,7 @@ class Call {
         'participants': participants.map((e) => e.toJson()).toList(),
         'requestedAt': requestedAt,
         'ringingAt': ringingAt,
+        'screenShare': screenShare?.toJson(),
         'sessions': sessions.map((e) => e.toJson()).toList(),
         'state': state,
         'terminalReason': terminalReason,
@@ -495,6 +550,9 @@ class Call {
   String get requestedAt => json['requestedAt']! as String;
 
   String? get ringingAt => json['ringingAt'] as String?;
+
+  /// C6: who is presenting a screen now (null when nobody is).
+  ScreenShare? get screenShare => json['screenShare'] == null ? null : ScreenShare.fromJson(json['screenShare']! as Map<String, Object?>);
 
   List<CallSession> get sessions => (json['sessions']! as List<Object?>).map((e) => CallSession.fromJson(e! as Map<String, Object?>)).toList();
 
@@ -897,11 +955,12 @@ class CallMediaCapabilities {
   const CallMediaCapabilities.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CallMediaCapabilities.create({required bool canPublishAudio, required bool canPublishData, required bool canPublishVideo, required bool canSubscribe}) =>
+  factory CallMediaCapabilities.create({required bool canPublishAudio, required bool canPublishData, required bool canPublishVideo, required bool canShareScreen, required bool canSubscribe}) =>
       CallMediaCapabilities.fromJson(<String, Object?>{
         'canPublishAudio': canPublishAudio,
         'canPublishData': canPublishData,
         'canPublishVideo': canPublishVideo,
+        'canShareScreen': canShareScreen,
         'canSubscribe': canSubscribe,
       });
 
@@ -913,6 +972,9 @@ class CallMediaCapabilities {
   bool get canPublishData => json['canPublishData']! as bool;
 
   bool get canPublishVideo => json['canPublishVideo']! as bool;
+
+  /// The grant includes the screen sources (screen video and screen audio). True only for the Call's current presenter (POST /v1/calls/{call_id}/screen-share) while the Call is not held.
+  bool get canShareScreen => json['canShareScreen']! as bool;
 
   bool get canSubscribe => json['canSubscribe']! as bool;
 
@@ -1418,7 +1480,7 @@ typedef ConsentParticipants = String;
 /// Opaque, server-generated ContactReference (UUID) of a protected contact, scoped to one tenant / application / environment. It never encodes a number, country, provider or user; knowing it grants nothing.
 typedef ContactReference = Uuid;
 
-/// Result of cancel, end, hold and resume: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is.
+/// Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged.
 class ControlResult {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const ControlResult.fromJson(this.json);
@@ -4338,6 +4400,72 @@ typedef SafeEventData = Map<String, Object?>;
 /// Bounded text without control characters that never looks like a telephone number (+‹digit›) or a tel: / sip: URI.
 typedef SafeText = Map<String, Object?>;
 
+/// The Call's current presenter (C6).
+class ScreenShare {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ScreenShare.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ScreenShare.create({required Uuid participantId, required String startedAt}) =>
+      ScreenShare.fromJson(<String, Object?>{
+        'participantId': participantId,
+        'startedAt': startedAt,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get participantId => json['participantId']! as String;
+
+  String get startedAt => json['startedAt']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Body of POST /v1/calls/{call_id}/screen-share and POST /v1/calls/{call_id}/screen-share/stop (C6): the participant that starts or stops presenting. The server decides everything else (policy, one presenter per Call, the provider grant).
+class ScreenShareRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ScreenShareRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ScreenShareRequest.create({required Uuid participantId}) =>
+      ScreenShareRequest.fromJson(<String, Object?>{
+        'participantId': participantId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get participantId => json['participantId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Result of starting or stopping a screen share: the Call and its presenter after the command (null once nobody presents).
+class ScreenShareResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ScreenShareResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ScreenShareResult.create({required CommonCallSummary call, required String operation, required ScreenShare? screenShare}) =>
+      ScreenShareResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'operation': operation,
+        'screenShare': screenShare?.toJson(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  String get operation => json['operation']! as String;
+
+  ScreenShare? get screenShare => json['screenShare'] == null ? null : ScreenShare.fromJson(json['screenShare']! as Map<String, Object?>);
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Result of removing one session: its media access is revoked and the provider connection removed (or queued for enforcement).
 class SessionRemovalResult {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -4839,6 +4967,30 @@ class UpdateWebhookRequest {
 
   /// Public https endpoint. Server-side validation additionally refuses every loopback / private / link-local / CGNAT / metadata address and re-checks the resolved address at connection time (DNS rebinding); redirects are never followed.
   String? get url => json['url'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Body of POST /v1/calls/{call_id}/upgrade (C5): the kind to move to (VIDEO is the only target; a Call never goes back to VOICE) and the expected Call version. No permission can be sent: every active participant's video publish permission is derived by the server, and no camera is turned on.
+class UpgradeRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UpgradeRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UpgradeRequest.create({required int expectedVersion, required String kind}) =>
+      UpgradeRequest.fromJson(<String, Object?>{
+        'expectedVersion': expectedVersion,
+        'kind': kind,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.
+  int get expectedVersion => (json['expectedVersion']! as num).toInt();
+
+  /// The target kind. Only VIDEO is accepted (400 for VOICE).
+  String get kind => json['kind']! as String;
 
   Map<String, Object?> toJson() => json;
 }
