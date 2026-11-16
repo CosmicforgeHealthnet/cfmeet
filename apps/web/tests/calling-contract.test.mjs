@@ -69,6 +69,8 @@ test("the adapter's participant-bound and self-service operations exist in the C
   for (const [method, path] of [
     ["POST", "/v1/calls/{id}/end"], ["POST", "/v1/calls/{id}/hold"], ["POST", "/v1/calls/{id}/resume"], ["POST", "/v1/calls/{id}/cancel"],
     ["POST", "/v1/calls/{id}/transfer"], ["POST", "/v1/calls/{id}/sessions/{id}/remove"],
+    ["POST", "/v1/calls/{id}/upgrade"], ["POST", "/v1/calls/{id}/screen-share"], ["POST", "/v1/calls/{id}/screen-share/stop"],
+    ["POST", "/v1/calls/{id}/participants"],
     ["GET", "/v1/calls/{id}/recording-authorizations"], ["POST", "/v1/calls/{id}/recording-consent"],
     ["GET", "/v1/calls/{id}/recordings"], ["POST", "/v1/calls/{id}/recordings"], ["POST", "/v1/calls/{id}/recordings/{id}/stop"],
     ["POST", "/v1/calls/{id}/abuse-reports"], ["GET", "/v1/abuse-reports"],
@@ -142,6 +144,12 @@ test("mirror types carry exactly the contract enums", () => {
   assert.deepEqual(union(`${types}voicemail.ts`, "VoicemailMessageState"), sorted(enterprise.VoicemailMessageState.enum));
   assert.deepEqual(union(`${types}common.ts`, "CallState"), sorted(common.CallState.enum));
   assert.deepEqual(union(`${types}common.ts`, "CallKind"), sorted(common.CallKind.enum));
+  assert.deepEqual(union(`${types}common.ts`, "CallActionName"), sorted(control.AvailableAction.properties.action.enum));
+  assert.deepEqual(union(`${types}common.ts`, "CallControlOperation"), sorted(control.ControlResult.properties.operation.enum));
+  assert.deepEqual(Object.keys(control.UpgradeRequest.properties).sort(), ["expectedVersion", "kind"]);
+  assert.deepEqual(control.ScreenShareRequest.required, ["participantId"]);
+  assert.deepEqual(control.AddParticipantsRequest.required.sort(), ["expectedVersion", "invitingParticipantId", "targetPrincipalIds"]);
+  assert.ok(common.CallMediaCapabilities.required.includes("canShareScreen"));
   assert.ok(control.RecoveredInvitation, "recovered offers come from the control contract");
 });
 

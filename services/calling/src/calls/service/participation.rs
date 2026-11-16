@@ -645,6 +645,22 @@ impl CallService {
             at,
         )
         .await?;
+        // C6: a presenter whose last live session ended stops presenting.
+        let live = call_sessions::Entity::find()
+            .filter(call_sessions::Column::ParticipantId.eq(session.participant_id))
+            .filter(call_sessions::Column::State.ne(SessionState::Ended))
+            .one(txn)
+            .await?;
+        if live.is_none() {
+            self.clear_screen_share_in(
+                txn,
+                cmd,
+                call,
+                Some(session.participant_id),
+                "PRESENTER_LEFT",
+            )
+            .await?;
+        }
         Ok(session)
     }
 }

@@ -60,6 +60,13 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/calls/:call_id/hold", post(hold))
         .route("/v1/calls/:call_id/resume", post(resume))
         .route("/v1/calls/:call_id/transfer", post(transfer))
+        .route("/v1/calls/:call_id/upgrade", post(upgrade))
+        .route("/v1/calls/:call_id/screen-share", post(start_screen_share))
+        .route(
+            "/v1/calls/:call_id/screen-share/stop",
+            post(stop_screen_share),
+        )
+        .route("/v1/calls/:call_id/participants", post(add_participants))
         .route("/v1/calls/:call_id/ivr/input", post(ivr_input))
         .route(
             "/v1/calls/:call_id/sessions/:session_id/media-credentials",
@@ -583,6 +590,158 @@ async fn resume(
     body: Result<Json<VersionBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     version_command(state, ctx, headers, call_id, body, CommandOperation::Resume).await
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpgradeBody {
+    kind: CallKind,
+    expected_version: i64,
+}
+
+/// `POST /v1/calls/:call_id/upgrade` (C5): VOICE → VIDEO of a live Call (calls.write;
+/// Idempotency-Key honoured).
+async fn upgrade(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<UpgradeBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let key = command_key(
+        &headers,
+        CommandOperation::Upgrade,
+        Some(call_uuid),
+        &body,
+        false,
+    )?;
+    let outcome = state
+        .app
+        .upgrade(
+            &CallCommandContext::customer(&ctx),
+            CallId::from_uuid(call_uuid),
+            body.kind,
+            body.expected_version,
+            key.as_ref(),
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AddParticipantsBody {
+    inviting_participant_id: Uuid,
+    target_principal_ids: Vec<Uuid>,
+    expected_version: i64,
+}
+
+/// `POST /v1/calls/:call_id/participants` (C7): an active participant invites principals
+/// into the ongoing Call (calls.write; Idempotency-Key honoured).
+async fn add_participants(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<AddParticipantsBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    if body.target_principal_ids.len() > 64 {
+        return Err(CallingError::Validation("targetPrincipalIds is too long."));
+    }
+    let key = command_key(
+        &headers,
+        CommandOperation::AddParticipants,
+        Some(call_uuid),
+        &body,
+        false,
+    )?;
+    let outcome = state
+        .app
+        .invite_participants(
+            &ctx,
+            CallId::from_uuid(call_uuid),
+            super::InviteParticipants {
+                inviting_participant: CallParticipantId::from_uuid(body.inviting_participant_id),
+                targets: body
+                    .target_principal_ids
+                    .iter()
+                    .map(|p| PrincipalId::from_uuid(*p))
+                    .collect(),
+                expected_version: body.expected_version,
+            },
+            key.as_ref(),
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ScreenShareBody {
+    participant_id: Uuid,
+}
+
+/// `POST /v1/calls/:call_id/screen-share` (C6): the named participant starts presenting
+/// (calls.write; Idempotency-Key honoured).
+async fn start_screen_share(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<ScreenShareBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    screen_share_command(state, ctx, headers, call_id, body, true).await
+}
+
+/// `POST /v1/calls/:call_id/screen-share/stop` (C6): the presenter stops.
+async fn stop_screen_share(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<ScreenShareBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    screen_share_command(state, ctx, headers, call_id, body, false).await
+}
+
+async fn screen_share_command(
+    state: AppState,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    call_id: String,
+    body: Result<Json<ScreenShareBody>, JsonRejection>,
+    start: bool,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let operation = if start {
+        CommandOperation::StartScreenShare
+    } else {
+        CommandOperation::StopScreenShare
+    };
+    let key = command_key(&headers, operation, Some(call_uuid), &body, false)?;
+    let cmd = CallCommandContext::customer(&ctx);
+    let call_id = CallId::from_uuid(call_uuid);
+    let participant = CallParticipantId::from_uuid(body.participant_id);
+    let outcome = if start {
+        state
+            .app
+            .start_screen_share(&cmd, call_id, participant, key.as_ref())
+            .await?
+    } else {
+        state
+            .app
+            .stop_screen_share(&cmd, call_id, participant, key.as_ref())
+            .await?
+    };
+    Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -8,6 +8,7 @@
     "canPublishVideo": false,
     "canPublishData": false,
     "canSubscribe": true,
+    "canShareScreen": false,
     "roomAdmin": true
   }
 }

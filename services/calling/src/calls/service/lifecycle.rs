@@ -607,6 +607,11 @@ impl CallService {
                 plan.at,
             )
             .await?;
+        if plan.to == CallState::Ending || plan.to.is_terminal() {
+            // C6: a finished Call has no presenter (the media is torn down with it).
+            self.clear_screen_share_in(txn, cmd, &call, None, "CALL_ENDED")
+                .await?;
+        }
         if plan.to == CallState::Ending {
             // A Call that is ending rings nobody: every live offer is closed in the SAME
             // transaction as the state change, whichever path ends the Call (END, auto-end,

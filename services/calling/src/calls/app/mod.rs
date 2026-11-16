@@ -24,11 +24,14 @@ pub mod enterprise;
 pub mod history;
 pub mod http;
 pub mod incidents;
+mod invite;
 pub mod media;
 mod privacy;
 pub mod public;
 mod ringing;
+mod screen_share;
 mod transfer;
+mod upgrade;
 mod workers;
 
 use std::sync::Arc;
@@ -45,6 +48,7 @@ pub use auto_end::AutoEndReason;
 pub use blocks::AbuseControls;
 pub use control::{ActionAvailability, AvailableActions};
 pub use create::{CreateAppCall, CreatedAppCall};
+pub use invite::InviteParticipants;
 pub use ringing::{InvitationActor, RecoveredInvitation};
 pub use transfer::TransferRequest;
 pub use workers::WorkerReport;
@@ -119,6 +123,10 @@ pub struct AppCallingConfig {
     /// older than this (counted from its first connection, else its answer) ends
     /// (`MAX_DURATION`).
     pub max_call_duration: Duration,
+    /// `CALLING_SCREEN_SHARE_ENABLED` (default ON): active participants of a live
+    /// application Call (VOICE or VIDEO) may present their screen, one presenter per Call
+    /// (C6). Off refuses NEW presentations only; stopping always works.
+    pub screen_share_enabled: bool,
 }
 
 impl Default for AppCallingConfig {
@@ -140,6 +148,7 @@ impl Default for AppCallingConfig {
             participation_grace: Duration::seconds(60),
             idle_call_timeout: Duration::seconds(600),
             max_call_duration: Duration::seconds(28_800),
+            screen_share_enabled: true,
         }
     }
 }
@@ -153,8 +162,8 @@ impl AppCallingConfig {
     /// `CALLING_TELEPHONY_COMMAND_MAX_ATTEMPTS` (3–1000, default 40),
     /// `CALLING_CALL_SETUP_DEADLINE_SECONDS` (3900–86400, default 7200),
     /// `CALLING_WORKER_BACKLOG_INCIDENT_SECONDS` (60–86400, default 600),
-    /// `CALLING_NEW_CALLS_ENABLED` / `CALLING_APP_CALLING_ENABLED` (true / false, default
-    /// true),
+    /// `CALLING_NEW_CALLS_ENABLED` / `CALLING_APP_CALLING_ENABLED` /
+    /// `CALLING_SCREEN_SHARE_ENABLED` (true / false, default true),
     /// `CALLING_PARTICIPATION_GRACE_SECONDS` (10–600, default 60),
     /// `CALLING_IDLE_CALL_TIMEOUT_SECONDS` (120–86400, default 600; above the grace),
     /// `CALLING_MAX_CALL_DURATION_SECONDS` (1800–172800, default 28800; above the idle
@@ -232,6 +241,7 @@ impl AppCallingConfig {
             )?),
             new_calls_enabled: switch("CALLING_NEW_CALLS_ENABLED")?,
             app_calling_enabled: switch("CALLING_APP_CALLING_ENABLED")?,
+            screen_share_enabled: switch("CALLING_SCREEN_SHARE_ENABLED")?,
             participation_grace: Duration::seconds(number(
                 "CALLING_PARTICIPATION_GRACE_SECONDS",
                 60,
