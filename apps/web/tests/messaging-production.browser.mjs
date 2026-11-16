@@ -228,5 +228,30 @@ test("production: sign in, choose a contact, chat — encryption automatic and i
     assert.deepEqual(s.errors, [], `${s.name}: no page errors`);
   }
   pass("no_exposed_encryption_errors");
+
+  // 8. N0-11: the shipped browser registers its Calling endpoint automatically and
+  //    must revoke that exact endpoint while its session is still authenticated.
+  const endpointPrefix = "cfmeet.calling.endpoint-id.";
+  await a2.page.waitForFunction((prefix) => Object.keys(localStorage).some((k) => k.startsWith(prefix)), endpointPrefix, { timeout: T });
+  const endpointId = await a2.page.evaluate((prefix) => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith(prefix));
+    return key ? localStorage.getItem(key) : null;
+  }, endpointPrefix);
+  assert.match(endpointId ?? "", /^[0-9a-f]{8}-[0-9a-f-]{27}$/i, "this browser registered a Calling endpoint");
+  pass("calling_endpoint_registered_by_web_app");
+  await a2.page.locator("[data-testid=profile-menu-toggle]:visible").first().click();
+  await a2.page.click("[data-testid=logout-open]");
+  const revoked = a2.page.waitForResponse((r) => new URL(r.url()).origin === "https://api.cfmeet.com"
+    && new URL(r.url()).pathname === `/v1/calling/endpoints/${endpointId}`
+    && r.request().method() === "DELETE", { timeout: T });
+  await a2.page.click("[data-testid=logout-confirm]");
+  const revokeResponse = await revoked;
+  assert.equal(revokeResponse.status(), 200, "logout authenticated and revoked its Calling endpoint");
+  const revokedEndpoint = await revokeResponse.json();
+  assert.equal(revokedEndpoint.endpointId, endpointId);
+  assert.equal(revokedEndpoint.status, "REVOKED");
+  await a2.page.waitForURL(/\/login(?:[?#]|$)/, { timeout: T });
+  assert.equal(await a2.page.evaluate((prefix) => Object.keys(localStorage).some((k) => k.startsWith(prefix)), endpointPrefix), false, "logout forgot the Calling endpoint id");
+  pass("web_logout_revokes_registered_calling_endpoint");
   evidence.verdict = "PASS";
 });
