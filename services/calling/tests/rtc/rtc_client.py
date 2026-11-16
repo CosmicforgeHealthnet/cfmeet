@@ -108,6 +108,16 @@ class Client:
             return False, False
         return bool(p.can_publish), bool(p.can_subscribe)
 
+    def sources(self):
+        """The effective LiveKit publish sources of this participant (TrackSource numbers:
+        1 camera, 2 microphone, 3 screen share, 4 screen share audio), as the server last
+        granted them."""
+        try:
+            p = self.room.local_participant.permissions if self.room else None
+        except Exception:  # never connected: there is no local participant
+            p = None
+        return {"ok": True, "sources": sorted(int(s) for s in (p.can_publish_sources if p else []))}
+
     async def publish(self, kind):
         if kind == "audio":
             source = rtc.AudioSource(48000, 1)
@@ -276,6 +286,8 @@ async def main():
                 out = await client.publish(msg["kind"])
             elif cmd == "status":
                 out = client.status()
+            elif cmd == "sources":
+                out = client.sources()
             elif cmd == "wait_subscribed":
                 out = await client.wait_subscribed(msg["count"], msg["timeout"])
             elif cmd == "wait_disconnected":

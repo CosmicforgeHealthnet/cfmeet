@@ -19,15 +19,14 @@ Checks (issue ids from the server-bug document):
   C3  a real LiveKit connection is admitted for both parties: CONNECTED, audio both ways
   C4  a forged signaling credential is refused with 401 AUTHENTICATION_FAILED
   C5  the connected voice call is upgraded to VIDEO and a camera track then flows
-  C6  one presenter at a time; only the presenter's media grant carries SCREEN_SHARE;
-      stopping clears it
+  C6  one presenter at a time; only the presenter's effective LiveKit permission carries
+      the screen sources; stopping clears it
   C7  a third person is invited into the ongoing call, acknowledges, accepts and joins
   M1  attachments enabled for CF Meet (capability and effective policy); a MANAGED image is
       uploaded, scanned CLEAN, sent and downloaded by a member; a non-member gets 404
   M2  groups in common carry the MANAGED group's title for current members only
   M3  shared media carries the sanitized file name, media type and grant operations
 """
-import base64
 import hashlib
 import json
 import os
@@ -44,6 +43,7 @@ RESULT = Path('/result')
 TERMINAL = ('ENDED', 'CANCELLED', 'FAILED', 'NO_ANSWER', 'DECLINED', 'BUSY')
 KINDS = {'IMAGE', 'DOCUMENT', 'FILE', 'VOICE_NOTE', 'VIDEO'}
 MAX_BYTES = 26_214_400
+SCREEN_SOURCES = {3, 4}  # LiveKit TrackSource SCREEN_SHARE, SCREEN_SHARE_AUDIO
 FILE_NAME = 'cfmeet-verification.png'
 
 
@@ -323,7 +323,7 @@ class Journey:
                 client.cmd('verify_received', kind='audio', timeout=12)
             self.check('C3 audio is received in both directions', True)
             self.group_of('C5 voice to video upgrade', lambda: self.c5(call['callId'], clients))
-            self.group_of('C6 screen sharing', lambda: self.c6(call['callId'], a, b))
+            self.group_of('C6 screen sharing', lambda: self.c6(call['callId'], a, b, clients))
             if len(self.people) > 2:
                 self.group_of('C7 invite into an ongoing call', lambda: self.c7(call['callId'], a, self.people[2]))
             else:
@@ -343,13 +343,20 @@ class Journey:
                 return item['participantId']
         raise Failed('active participant missing')
 
-    def grant_sources(self, call_id, person):
-        session = next(x for x in self.view(call_id)['sessions']
-                       if x['endpointId'] == person['endpointId'] and x['state'] != 'ENDED')
-        token = self.signaling(person, 'POST', '/v1/calling/sessions/%s/media-credentials' % session['sessionId'], {})['token']
-        payload = token.split('.')[1]
-        video = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4))).get('video') or {}
-        return set(video.get('canPublishSources') or [])
+    @staticmethod
+    def screen_granted(client):
+        """Whether the connected participant's effective LiveKit permission (pushed by
+        Calling after commit) includes both screen sources. The client credential never
+        carries sources: the media gateway grants them when it admits the connection."""
+        return SCREEN_SOURCES <= set(client.cmd('sources')['sources'])
+
+    def await_screen(self, client, granted, seconds=15):
+        deadline = time.monotonic() + seconds
+        while True:
+            state = self.screen_granted(client)
+            if state == granted or time.monotonic() > deadline:
+                return state
+            time.sleep(.25)
 
     def c5(self, call_id, clients):
         current = self.view(call_id)
@@ -369,24 +376,24 @@ class Journey:
         clients[1].cmd('verify_received', kind='video', timeout=12)
         self.check('C5 after the upgrade a camera track flows to the other party', True)
 
-    def c6(self, call_id, a, b):
+    def c6(self, call_id, a, b, clients):
         pa, pb = self.participant(call_id, a), self.participant(call_id, b)
         started = self.scoped('POST', '/v1/calls/%s/screen-share' % call_id, {'participantId': pa})
         self.check('C6 a participant starts presenting',
                    (started.get('screenShare') or {}).get('participantId') == pa, json.dumps(started.get('screenShare')))
         self.check('C6 the call view names the presenter',
                    (self.view(call_id).get('screenShare') or {}).get('participantId') == pa)
-        presenter, other = self.grant_sources(call_id, a), self.grant_sources(call_id, b)
-        self.check('C6 only the presenter\'s media grant carries SCREEN_SHARE and SCREEN_SHARE_AUDIO',
-                   {'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO'} <= presenter and not ({'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO'} & other),
-                   '%s / %s' % (sorted(presenter), sorted(other)))
+        presenter = self.await_screen(clients[0], True)
+        other = self.screen_granted(clients[1])
+        self.check('C6 only the presenter\'s LiveKit permission carries SCREEN_SHARE and SCREEN_SHARE_AUDIO',
+                   presenter and not other, 'presenter %s / other %s' % (presenter, other))
         status, value = http('POST', self.c['base'] + '/v1/calls/%s/screen-share' % call_id, {'participantId': pb},
                              {'Authorization': 'Bearer ' + self.c['credential'], 'Idempotency-Key': str(uuid.uuid4())})
         self.check('C6 a second presenter is refused with 409', status == 409, '%d %s' % (status, error_code(value)))
         stopped = self.scoped('POST', '/v1/calls/%s/screen-share/stop' % call_id, {'participantId': pa})
         self.check('C6 stopping clears the presenter and the screen grant',
                    stopped.get('screenShare') is None and self.view(call_id).get('screenShare') is None
-                   and not ({'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO'} & self.grant_sources(call_id, a)))
+                   and self.await_screen(clients[0], False) is False)
 
     def c7(self, call_id, a, c):
         current = self.view(call_id)
