@@ -328,6 +328,16 @@ pub struct Peers {
     pub rogue_gateway: Arc<ServiceTokenSigner>,
     /// The Communications Hub, trusted with `messaging-communications.read` / `.apply`.
     pub communications: Arc<ServiceTokenSigner>,
+    /// The Notification Service, trusted with `messaging-wakeups.authorize` (X3).
+    pub notifications: Arc<ServiceTokenSigner>,
+}
+
+/// The Notification Service's permissions in Messaging's bundle.
+pub const NOTIFICATIONS_PERMISSIONS: &[&str] = &["messaging-wakeups.authorize"];
+
+fn notifications_key() -> &'static ServiceSigningKey {
+    static KEY: std::sync::OnceLock<ServiceSigningKey> = std::sync::OnceLock::new();
+    KEY.get_or_init(|| key("notifications-test-1"))
 }
 
 /// The API Gateway's permissions in Messaging's bundle.
@@ -385,6 +395,7 @@ pub fn peers() -> Peers {
         gateway: signer(ServiceId::api_gateway(), gateway_key()),
         rogue_gateway: signer(ServiceId::api_gateway(), &key("api-gateway-rogue-1")),
         communications: signer(ServiceId::communications(), communications_key()),
+        notifications: signer(ServiceId::notifications(), notifications_key()),
     }
 }
 
@@ -414,6 +425,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Arc<ServiceTokenSigner>) {
             issuer(cf_service_auth::services::SMS_GATEWAY, s, &["messaging-sms-bridge.deliver"]),
             issuer(cf_service_auth::services::API_GATEWAY, gateway_key(), GATEWAY_PERMISSIONS),
             issuer(cf_service_auth::services::COMMUNICATIONS, communications_key(), COMMUNICATIONS_PERMISSIONS),
+            issuer(cf_service_auth::services::NOTIFICATIONS, notifications_key(), NOTIFICATIONS_PERMISSIONS),
         ],
     })
     .to_string();

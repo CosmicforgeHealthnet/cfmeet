@@ -400,8 +400,14 @@ pub fn format_time(at: DateTime<Utc>, preferred: Option<&str>, fallback: &str) -
     )
 }
 
+/// The join path under the app URL (`/<meeting code>`): what a join link appends to
+/// `APP_URL` (also answered by the X2 owner API, which never returns a full URL).
+pub fn join_path(space: &meeting_spaces::Model) -> String {
+    format!("/{}", space.meeting_code)
+}
+
 fn join_url(app_url: &str, space: &meeting_spaces::Model) -> String {
-    format!("{}/{}", app_url.trim_end_matches('/'), space.meeting_code)
+    format!("{}{}", app_url.trim_end_matches('/'), join_path(space))
 }
 
 fn digest(email: &str) -> String {
@@ -925,15 +931,17 @@ fn payload_time(payload: &Value, key: &str) -> Option<DateTime<Utc>> {
         .map(|t| t.with_timezone(&Utc))
 }
 
+/// One recipient of a conference notice: an address, and the account registered under it
+/// (none for an email-only participant).
 #[derive(Debug, Clone, FromQueryResult)]
-struct RecipientRow {
-    email: String,
-    user_id: Option<Uuid>,
-    status: Option<String>,
-    role: Option<String>,
-    timezone: Option<String>,
-    display_name: Option<String>,
-    username: Option<String>,
+pub struct RecipientRow {
+    pub email: String,
+    pub user_id: Option<Uuid>,
+    pub status: Option<String>,
+    pub role: Option<String>,
+    pub timezone: Option<String>,
+    pub display_name: Option<String>,
+    pub username: Option<String>,
 }
 
 /// Recipients of a conference notice (see module docs), deduplicated by address.
@@ -961,6 +969,95 @@ SELECT e.email, a.id AS user_id, a.status, a.role, a.timezone, a.display_name, a
  LIMIT $3
 "#;
 
+/// Recipients of a conference notice (module docs; one rule for the worker and the X2
+/// owner API): deduplicated by address, at most `max` (the second value is `true` when
+/// more existed), then without `actor` and without inactive, suspended or guest accounts.
+pub async fn conference_recipients<C: ConnectionTrait>(
+    db: &C,
+    space_id: Uuid,
+    conference_id: Uuid,
+    max: usize,
+    actor: Option<Uuid>,
+) -> ApiResult<(Vec<RecipientRow>, bool)> {
+    let limit = max as i64 + 1;
+    let mut rows = RecipientRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        RECIPIENTS_SQL,
+        [space_id.into(), conference_id.into(), limit.into()],
+    ))
+    .all(db)
+    .await?;
+    let truncated = rows.len() > max;
+    if truncated {
+        rows.truncate(max);
+    }
+    rows.retain(|r| {
+        r.user_id.is_none()
+            || (r.user_id != actor
+                && !matches!(r.status.as_deref(), Some("inactive" | "suspended"))
+                && r.role.as_deref() != Some("guest"))
+    });
+    Ok((rows, truncated))
+}
+
+/// A conference notice: the worker's durable job kinds and the X2 request kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeKind {
+    /// A newly scheduled occurrence (announced by the Notification Service only).
+    Scheduled,
+    Rescheduled,
+    Cancelled,
+    Reminder,
+}
+
+impl NoticeKind {
+    /// The kind of a durable job (`None`: unknown kind).
+    pub fn of_job(kind: &str) -> Option<Self> {
+        match kind {
+            KIND_REMINDER => Some(Self::Reminder),
+            KIND_RESCHEDULED => Some(Self::Rescheduled),
+            KIND_CANCELLED => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+}
+
+/// A notice is only sent while it is still true (one rule for the worker and the X2 owner
+/// API). `announced_start` is the start the notice is about: the reminded start of a
+/// reminder, the new start of a reschedule or schedule notice. `Err` names why not.
+pub fn notice_still_true(
+    kind: NoticeKind,
+    space: &meeting_spaces::Model,
+    conference: &conference_sessions::Model,
+    announced_start: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Result<(), &'static str> {
+    if space.status != SpaceStatus::Active {
+        return Err("SPACE_INACTIVE");
+    }
+    let startable = matches!(
+        conference.status,
+        ConferenceStatus::Created | ConferenceStatus::Preparing | ConferenceStatus::Waiting
+    );
+    let still_true = match kind {
+        NoticeKind::Reminder | NoticeKind::Scheduled => {
+            startable
+                && conference.scheduled_start_at == announced_start
+                && announced_start.is_some_and(|s| s > now)
+        }
+        NoticeKind::Rescheduled => {
+            conference.status == ConferenceStatus::Created
+                && conference.scheduled_start_at == announced_start
+        }
+        NoticeKind::Cancelled => conference.status == ConferenceStatus::Cancelled,
+    };
+    if still_true {
+        Ok(())
+    } else {
+        Err("SUPERSEDED")
+    }
+}
+
 async fn deliver(
     ctx: &NotificationContext,
     job: &JobRow,
@@ -981,54 +1078,29 @@ async fn deliver(
     else {
         return Ok(Outcome::Skipped("CONFERENCE_GONE"));
     };
-    let startable = matches!(
-        conference.status,
-        ConferenceStatus::Created | ConferenceStatus::Preparing | ConferenceStatus::Waiting
-    );
     // A notice is only sent while it is still true.
-    match job.kind.as_str() {
-        KIND_REMINDER => {
-            let start = payload_time(&job.payload, "scheduledStartAt");
-            if !startable
-                || conference.scheduled_start_at != start
-                || start.is_none_or(|s| s <= now)
-            {
-                return Ok(Outcome::Skipped("SUPERSEDED"));
-            }
-        }
-        KIND_RESCHEDULED => {
-            if conference.status != ConferenceStatus::Created
-                || conference.scheduled_start_at != payload_time(&job.payload, "to")
-            {
-                return Ok(Outcome::Skipped("SUPERSEDED"));
-            }
-        }
-        KIND_CANCELLED => {
-            if conference.status != ConferenceStatus::Cancelled {
-                return Ok(Outcome::Skipped("SUPERSEDED"));
-            }
-        }
-        _ => return Ok(Outcome::Skipped("UNKNOWN_KIND")),
+    let Some(kind) = NoticeKind::of_job(&job.kind) else {
+        return Ok(Outcome::Skipped("UNKNOWN_KIND"));
+    };
+    let announced = match kind {
+        NoticeKind::Rescheduled => payload_time(&job.payload, "to"),
+        _ => payload_time(&job.payload, "scheduledStartAt"),
+    };
+    if let Err(reason) = notice_still_true(kind, &space, &conference, announced, now) {
+        return Ok(Outcome::Skipped(reason));
     }
 
-    let limit = ctx.config.max_recipients as i64 + 1;
-    let mut rows = RecipientRow::find_by_statement(Statement::from_sql_and_values(
-        DbBackend::Postgres,
-        RECIPIENTS_SQL,
-        [space.id.into(), conference.id.into(), limit.into()],
-    ))
-    .all(&ctx.db)
+    let (rows, truncated) = conference_recipients(
+        &ctx.db,
+        space.id,
+        conference.id,
+        ctx.config.max_recipients,
+        job.actor_user_id,
+    )
     .await?;
-    if rows.len() > ctx.config.max_recipients {
+    if truncated {
         tracing::warn!(notification_id = %job.id, max = ctx.config.max_recipients, "notification recipients truncated");
-        rows.truncate(ctx.config.max_recipients);
     }
-    rows.retain(|r| {
-        r.user_id.is_none()
-            || (r.user_id != job.actor_user_id
-                && !matches!(r.status.as_deref(), Some("inactive" | "suspended"))
-                && r.role.as_deref() != Some("guest"))
-    });
     if rows.is_empty() {
         return Ok(Outcome::Sent {
             queued: 0,

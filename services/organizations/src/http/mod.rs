@@ -1,4 +1,6 @@
-//! HTTP surface (contract `cfmeet.organizations.internal-api`, served at `/openapi.json`).
+//! HTTP surface (contract `cfmeet.organizations.internal-api`, served at `/openapi.json`),
+//! plus X5 `resolveInvitationInvitee` of the separate Notification Service owner contract
+//! `cfmeet.organizations.notification-owner-api` (not part of the served document).
 //!
 //! * `GET /health` — liveness; `GET /ready` — database reachable and migrations applied.
 //! * `/internal/v1/**` — service-authenticated (every request, unknown paths included):
@@ -97,6 +99,11 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/organization-invitations/decline",
             post(invitations::decline),
+        )
+        // X5 (contract `organizations/notification-owner/v1`, Notification Service only).
+        .route(
+            "/organization-invitations/:invitation_id/invitee/resolve",
+            post(invitations::resolve_invitee),
         )
         .route("/organizations/:id/suspend", post(organizations::suspend))
         .route(
@@ -424,6 +431,10 @@ mod tests {
             ("POST", "/internal/v1/organizations/memberships/resolve"),
             ("POST", "/internal/v1/organizations/authorization/evaluate"),
             ("POST", "/internal/v1/migration/import"),
+            (
+                "POST",
+                "/internal/v1/organization-invitations/00000000-0000-4000-8000-000000000001/invitee/resolve",
+            ),
             (
                 "PUT",
                 "/internal/v1/admin/organizations/00000000-0000-4000-8000-000000000001/scopes/primary/service-bindings/calling",
