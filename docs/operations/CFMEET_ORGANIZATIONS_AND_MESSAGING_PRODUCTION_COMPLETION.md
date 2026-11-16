@@ -1,5 +1,7 @@
 # CF Meet — Session 3: Organizations and organization Messaging production completion
 
+> **Superseded (2026-11-16).** Current production state, feature activation and the remaining blockers are in [CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md](CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md). This report is kept as history; statements here about switches being off or Organizations not being authoritative may be out of date.
+
 **Date:** 2026-11-12. **Repository:** `CosmicforgeHealthnet/cfmeet`, branch `main`. **Production:** Contabo VPS, `https://api.cfmeet.com`.
 **Implementation:** `2ff0c12` (code, contracts), `021e7cd` (handover), `3e11958` (CI fix). **Released:** `3e11958bfd51d1f6283bb8269e369757ccd17b08` (release run 43331884110, certify run 43336196158, both success).
 **Frontend handover:** [`docs/frontend/CFMEET_ORGANIZATIONS_AND_MESSAGING_BACKEND_HANDOVER.md`](../frontend/CFMEET_ORGANIZATIONS_AND_MESSAGING_BACKEND_HANDOVER.md).

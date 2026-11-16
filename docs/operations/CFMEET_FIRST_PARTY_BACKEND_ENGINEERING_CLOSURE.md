@@ -1,5 +1,7 @@
 # CF Meet — first-party backend engineering closure and automatic Messaging
 
+> **Superseded (2026-11-16).** Current production state, feature activation and the remaining blockers are in [CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md](CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md). This report is kept as history; statements here about switches being off or Organizations not being authoritative may be out of date.
+
 **Date:** 2026-11-15 · **Environment:** production (`https://api.cfmeet.com`, `https://www.cfmeet.com`)
 **Baseline:** `main` `cbcbdded` (certified 13-service release `c6de964c` + E2EE activation)
 **Deployed backend release:** `6f3743f806434a55bad8297f104d28a55e350e2e`. Coordinated release [43696469230](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43696469230).
