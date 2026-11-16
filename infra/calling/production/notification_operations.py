@@ -52,6 +52,8 @@ GRANTS = tuple(('activate-notifications-owners', owner, 'notifications', permiss
                for owner, permissions, _probe, _names, _var in OWNERS)
 
 REPLICAS = ('notifications', 'notifications-2')
+SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID', 'CFMEET_COMMUNICATION_ENVIRONMENT_ID',
+              'CFMEET_COMMUNICATION_ENVIRONMENT_KIND', 'CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID')
 
 
 def parse_routing(confirm):
@@ -167,6 +169,13 @@ def activate_owners(cr, sha, run_id, confirm):
         names.extend(authority_names)
         overrides[var] = cr.private_url(tls)
     overrides['NOTIFICATIONS_AUTHORITIES'] = ','.join(names)
+    # X4 requires the first-party delegated scope: the same values the Meeting Service bridge
+    # already uses (non-secret identifiers), copied verbatim.
+    meeting = cr.env_of('meeting-service')
+    for var in SCOPE_VARS:
+        if not meeting.get(var):
+            raise RuntimeError('Meeting Service lacks %s; the Hub owner API needs the first-party scope' % var)
+        overrides[var] = meeting[var]
     cr.has_signing_identity('notifications')
     cr.apply_activation('activate-notifications-owners', sha, run_id,
                         [(replica, dict(overrides)) for replica in REPLICAS])
