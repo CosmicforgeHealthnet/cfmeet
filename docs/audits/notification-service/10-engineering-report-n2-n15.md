@@ -17,7 +17,7 @@ Statuses are kept separate, as the mission requires:
 
 | Section | Engineering | Production | Accepted | Evidence |
 |---|---|---|---|---|
-| **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **SUSPENDED by owner decision (2026-11-16)**: no activation, no acceptance run; run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) had stopped at the credential check, nothing changed | — | §3 |
+| **E-track E1** (Resend on the existing Meeting path) | `ENGINEERING_COMPLETE` (VPS-only credentials, PR #88) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-resend-email` 43963096642, `email-acceptance confirm=otp` 43968733391 | **E1 complete**: Resend ACCEPTED plus signed DELIVERED, OTP journey 10/10 PASS. The recipient was Resend's delivery test inbox; no human inbox yet (§3) | §3 |
 | **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | **`PRODUCTION_DEPLOYED_AND_VERIFIED` (dark)**: readiness fix live since release 43870645555 (`c0714ba`); certify 43919862343 `CERTIFIED_READ_ONLY` (the earlier 43828926604 NOT_CERTIFIED is resolved) | 24 h dark observation from 13:08 UTC | §2.1, §4 |
 | **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
@@ -156,9 +156,11 @@ The module is `src/services/notification_fence.rs`:
 | Return path `send.cfmeet.com` | CNAME `send.forge.rmta.net` → MX `10 feedback.forge.rmta.net`, SPF `v=spf1 ip4:52.3.252.119 ip4:44.222.39.36 ip4:199.249.231.0/24 ~all` |
 | DMARC `_dmarc.cfmeet.com` | **absent** (recommended `v=DMARC1; p=none;`, not required for sending) |
 | Resend verification status | not readable without the API key; to be confirmed in the Resend dashboard |
-| Production secrets | `CFMEET_RESEND_API_KEY`, `CFMEET_RESEND_WEBHOOK_SECRET` and the variable `CFMEET_EMAIL_ACCEPTANCE_RECIPIENT` are **not set** in the GitHub `production` environment |
-| `activate-resend-email` | run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) on `4f9e4f2`: gate PASS, activation base PASS (no image input changed since `163be40`), stopped at the credential check; no VPS change |
-| E1 | **not completed** (`PENDING_OWNER_EMAIL_PROVIDER_ACTIVATION`) |
+| Credentials | **VPS only** (owner decision): `/opt/cfmeet-core/secrets/resend-api-key` and `resend-webhook-secret`, verified present, root-owned, mode 0400 and of the expected form (values never printed or transferred). No GitHub secrets. `CFMEET_EMAIL_ACCEPTANCE_RECIPIENT` is not set, so the default `delivered@resend.dev` is used |
+| `activate-resend-email` (earlier) | run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) on `4f9e4f2`: stopped at the then-GitHub credential check; no VPS change |
+| `activate-resend-email` | run [43963096642](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43963096642) on `463f6b0` (PR #88), 22:06 UTC.<br>• Activation base equivalent to the deployed `44a2e9e` (62 inputs).<br>• Credential check PASS for both files.<br>• Meeting Service recreated with `EMAIL_PROVIDER=resend`, sender `CF Meet <no-reply@cfmeet.com>`, webhook signing configured.<br>• Acceptance email (delivery `bb73a1c1…`) ACCEPTED 22:06:22, signed DELIVERED 22:06:24.<br>• Regression PASS. |
+| `email-acceptance confirm=otp` | run [43968733391](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43968733391) on `13aed26`, 22:46 UTC.<br>• Acceptance email ACCEPTED 22:46:31, signed DELIVERED 22:46:33.<br>• OTP journey PASS on all 10 checks: register, verification email recorded, verification email accepted by Resend, code issued, invalid code refused, valid code verifies, used code refused, sign-in after verification, authenticated session, cleanup deactivated. |
+| E1 | **COMPLETE.** Real provider delivery proven by Resend's signed `email.delivered` webhook events, and the OTP journey passes end to end. Limitation: both proofs used Resend's delivery test inbox (`delivered@resend.dev`). A human-inbox check needs `CFMEET_EMAIL_ACCEPTANCE_RECIPIENT` set to a controlled address, then a re-run of `email-acceptance` |
 
 **Owner decision (2026-11-16): Resend activation is suspended.**
 
@@ -166,7 +168,7 @@ The module is `src/services/notification_fence.rs`:
 - `activate-resend-email` and `email-acceptance` are not run until then.
 - **Resumed (owner, 2026-11-16) with VPS-only credentials.** `activate-resend-email` and `email-acceptance` no longer read GitHub secrets. They verify over SSH that `/opt/cfmeet-core/secrets/resend-api-key` (required) and `resend-webhook-secret` (optional) exist, are root-owned with no group or other access, and hold values of the expected form. The values are never printed or transferred. The E1 result is recorded below when the runs complete.
 
-Until E1, every email `ACTIVE` routing change stays refused by the N14 gate. The existing Meeting email path stays the only sender.
+With E1 recorded, the N14 gate no longer refuses email `ACTIVE` for lack of E1. No email category has been moved to the Notification Service. The Meeting Service email path (now through Resend) remains the only sender. Any move still requires the routing-fence, shadow and acceptance gates of Document 6.
 
 ---
 
