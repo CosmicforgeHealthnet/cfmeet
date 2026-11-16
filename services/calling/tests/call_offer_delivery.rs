@@ -200,7 +200,16 @@ async fn acknowledgements_after_expiry_cancel_and_reconnect() {
     assert_eq!(r.status, StatusCode::GONE, "{}", r.text);
     assert_eq!(r.json["error"]["code"], "INVITATION_EXPIRED");
     assert_eq!(a.state(call).await.0, CallState::Dialing);
-    a.h().state.app.expire_due(100).await.unwrap();
+    // The refused acknowledgement's transaction may still be rolling back (its Call row
+    // lock is released asynchronously); the worker skips locked Calls (SKIP LOCKED) and
+    // picks this one up on a later round, so drive a bounded number of rounds.
+    for _ in 0..100 {
+        a.h().state.app.expire_due(100).await.unwrap();
+        if a.state(call).await.0 == CallState::NoAnswer {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     assert_eq!(a.state(call).await.0, CallState::NoAnswer);
 
     // Cancelled while PENDING: closed with the Call; acknowledging it is refused.
