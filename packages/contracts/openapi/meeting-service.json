@@ -30967,7 +30967,7 @@
     },
     {
       "name": "Organizations (v2)",
-      "description": "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. Blueprint Section 4: once the Organizations Service is authoritative, these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, ownership transfer, lifecycle, audit, provisioning); until then the first-party routes answer FEATURE_DISABLED and the legacy directory routes are unchanged."
+      "description": "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. The Organizations Service is authoritative for organization data (production since the first activation): these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, teams, policies, ownership transfer, lifecycle, audit, provisioning). A deployment whose Organizations Service is not authoritative answers FEATURE_DISABLED. Organization Calling and Messaging relay allowlisted paths to the Calling and Messaging services, which own their data. The public Swagger selector serves these operations as the dedicated Organizations document."
     },
     {
       "name": "Compatibility (v2)",

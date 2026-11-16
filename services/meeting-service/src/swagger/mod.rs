@@ -754,7 +754,7 @@ use utoipa::OpenApi;
         (name = "Q&A (v2)", description = "Part F: questions, upvotes and moderation (separate from chat; anonymous identity never projected)."),
         (name = "Realtime (v2)", description = "Authorized conference event stream (WebSocket) and replay. PostgreSQL is authority; events are delivery only — recover canonical state from GET /api/v2/conferences/{id}."),
         (name = "Waiting Room (v2)", description = "Waiting is a participant admission state. Access policy is always evaluated first."),
-        (name = "Organizations (v2)", description = "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. Blueprint Section 4: once the Organizations Service is authoritative, these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, ownership transfer, lifecycle, audit, provisioning); until then the first-party routes answer FEATURE_DISABLED and the legacy directory routes are unchanged."),
+        (name = "Organizations (v2)", description = "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. The Organizations Service is authoritative for organization data (production since the first activation): these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, teams, policies, ownership transfer, lifecycle, audit, provisioning). A deployment whose Organizations Service is not authoritative answers FEATURE_DISABLED. Organization Calling and Messaging relay allowlisted paths to the Calling and Messaging services, which own their data. The public Swagger selector serves these operations as the dedicated Organizations document."),
         (name = "Compatibility (v2)", description = "Legacy → v2 migration evidence and shadow comparison (platform administrators)."),
         (name = "Recordings (v2)", description = "Part G: composite recording through the provider egress. REQUESTED → RECORDING only on provider evidence; STOPPING → PROCESSING → READY only after provider finalization and storage verification (size + checksum). One active composite recording per conference."),
         (name = "Artifacts (v2)", description = "Part G: recordings, transcripts and generated reports. Access is authorized per request and delivered as a short-lived signed URL; storage keys and provider ids are never exposed. Retention and deletion are confirmed against storage."),
@@ -1075,7 +1075,10 @@ fn swagger_csp() -> String {
 }
 
 fn swagger_config() -> serde_json::Value {
-    let mut urls = vec![serde_json::json!({ "name": "Meetings", "url": "/api-docs/openapi.json" })];
+    let mut urls = vec![
+        serde_json::json!({ "name": "Meetings", "url": "/api-docs/openapi.json" }),
+        serde_json::json!({ "name": "Organizations", "url": ORGANIZATIONS_DOC_PATH }),
+    ];
     urls.extend(
         PEER_DOCS
             .iter()
@@ -1170,6 +1173,222 @@ fn public_doc(service: &str, raw: &str) -> String {
     serde_json::to_string(&doc).expect("filtered public OpenAPI document serializes")
 }
 
+/// Swagger section of the first-party Organizations routes in the Meeting Service contract.
+const ORGANIZATIONS_TAG: &str = "Organizations (v2)";
+/// Served path of the dedicated Organizations document in the public selector.
+const ORGANIZATIONS_DOC_PATH: &str = "/api-docs/organizations.json";
+
+/// Sections of the dedicated Organizations document, in display order.
+const ORGANIZATIONS_SECTIONS: [(&str, &str); 11] = [
+    ("Organizations", "Create a business organization (the caller becomes OWNER), read and update its profile, and list the organizations the caller verifiably belongs to."),
+    ("Members", "Organization membership: list members, add or change a membership, change a member's role or status, and leave an organization."),
+    ("Invitations", "Invite by email or CF Meet ID, list and revoke invitations; the invitee accepts or declines."),
+    ("Teams", "Teams inside an organization and their members."),
+    ("Policies", "The organization policy, changed with compare-and-swap."),
+    ("Lifecycle", "Ownership transfer, suspension, reactivation and archival (OWNER)."),
+    ("Audit", "An organization's audit history."),
+    ("Provisioning", "An organization's technical provisioning state (service bindings for Calling and Messaging)."),
+    ("Workspaces", "The caller's workspaces (Personal and each organization) and the capabilities the server derives for each."),
+    ("Organization Calling", "Organization Enterprise Calling, relayed to the Calling Service for allowlisted paths. Calling owns the call data."),
+    ("Organization Messaging", "Organization-scope Messaging: session-device tokens, colleague resolution and an allowlisted relay to the Messaging Service, which owns the conversation data."),
+];
+
+/// Section of an Organizations operation in the dedicated document, from its path.
+fn organizations_section(path: &str) -> &'static str {
+    if path.starts_with("/api/v2/me/workspaces") {
+        return "Workspaces";
+    }
+    if path.starts_with("/api/v2/organization-invitations") {
+        return "Invitations";
+    }
+    let rest = path
+        .strip_prefix("/api/v2/organizations/{id}")
+        .unwrap_or_default();
+    let section = |prefix: &str| rest == prefix || rest.starts_with(&format!("{prefix}/"));
+    if section("/members") {
+        "Members"
+    } else if section("/invitations") {
+        "Invitations"
+    } else if section("/teams") {
+        "Teams"
+    } else if section("/policies") {
+        "Policies"
+    } else if section("/calling") {
+        "Organization Calling"
+    } else if section("/messaging") {
+        "Organization Messaging"
+    } else if ["/suspend", "/reactivate", "/archive", "/ownership-transfer"]
+        .iter()
+        .any(|p| section(p))
+    {
+        "Lifecycle"
+    } else if section("/audit-events") {
+        "Audit"
+    } else if section("/provisioning") {
+        "Provisioning"
+    } else {
+        "Organizations"
+    }
+}
+
+fn is_http_method(key: &str) -> bool {
+    matches!(
+        key,
+        "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "trace"
+    )
+}
+
+/// Names of the component schemas `value` references, directly or through other schemas.
+fn referenced_schemas(
+    value: &serde_json::Value,
+    schemas: &serde_json::Map<String, serde_json::Value>,
+) -> std::collections::BTreeSet<String> {
+    fn collect(value: &serde_json::Value, out: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(name) = map
+                    .get("$ref")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|r| r.strip_prefix("#/components/schemas/"))
+                {
+                    out.push(name.to_owned());
+                }
+                map.values().for_each(|v| collect(v, out));
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|v| collect(v, out)),
+            _ => {}
+        }
+    }
+    let mut pending = Vec::new();
+    collect(value, &mut pending);
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(name) = pending.pop() {
+        if seen.insert(name.clone()) {
+            if let Some(schema) = schemas.get(&name) {
+                collect(schema, &mut pending);
+            }
+        }
+    }
+    seen
+}
+
+/// Splits the filtered public Meetings document in two: the first-party Organizations
+/// operations move, unchanged except for their section, into a dedicated document, and
+/// the Meetings document keeps everything else. Each operation is documented exactly
+/// once; paths, request and response schemas, authentication and servers are unchanged.
+fn split_organizations(meeting_doc: &str) -> (String, String) {
+    let mut meeting: serde_json::Value =
+        serde_json::from_str(meeting_doc).expect("filtered Meetings document is valid JSON");
+    let mut organization_paths = serde_json::Map::new();
+    let paths = meeting["paths"]
+        .as_object_mut()
+        .expect("Meetings document has paths");
+    for (path, item) in paths.iter_mut() {
+        let item = item.as_object_mut().expect("path item is an object");
+        let moved: Vec<String> = item
+            .iter()
+            .filter(|(key, operation)| {
+                is_http_method(key)
+                    && operation["tags"]
+                        .as_array()
+                        .is_some_and(|tags| tags.iter().any(|t| t == ORGANIZATIONS_TAG))
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        if moved.is_empty() {
+            continue;
+        }
+        let mut target: serde_json::Map<String, serde_json::Value> = item
+            .iter()
+            .filter(|(key, _)| !is_http_method(key))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        for method in moved {
+            let mut operation = item.remove(&method).expect("operation listed above");
+            operation["tags"] = serde_json::json!([organizations_section(path)]);
+            target.insert(method, operation);
+        }
+        organization_paths.insert(path.clone(), serde_json::Value::Object(target));
+    }
+    paths.retain(|_, item| {
+        item.as_object()
+            .is_some_and(|i| i.keys().any(|k| is_http_method(k)))
+    });
+    if let Some(tags) = meeting["tags"].as_array_mut() {
+        tags.retain(|tag| tag["name"] != ORGANIZATIONS_TAG);
+    }
+    meeting["info"]["description"] = serde_json::json!(format!(
+        "{}\n\nOrganizations, memberships, invitations, teams, policies, workspaces and the \
+         organization Calling and Messaging relays are documented in the Organizations \
+         document of this selector (`{ORGANIZATIONS_DOC_PATH}`).",
+        meeting["info"]["description"]
+            .as_str()
+            .unwrap_or("")
+            .trim_end()
+    ));
+
+    let empty = serde_json::Map::new();
+    let all_schemas = meeting["components"]["schemas"]
+        .as_object()
+        .unwrap_or(&empty);
+    let organization_paths = serde_json::Value::Object(organization_paths);
+    let schemas: serde_json::Map<String, serde_json::Value> =
+        referenced_schemas(&organization_paths, all_schemas)
+            .into_iter()
+            .filter_map(|name| all_schemas.get(&name).map(|s| (name, s.clone())))
+            .collect();
+    let mut components = meeting["components"].clone();
+    components["schemas"] = serde_json::Value::Object(schemas);
+    let mut organizations = serde_json::json!({
+        "openapi": meeting["openapi"],
+        "info": {
+            "title": "CF Meet Organizations API",
+            "version": meeting["info"]["version"],
+            "description": "First-party CF Meet business organizations: organization profile, \
+    membership, invitations, teams, policies, lifecycle (ownership transfer, suspension, \
+    reactivation, archival), audit history, provisioning and workspaces, plus the organization-scoped \
+    Calling and Messaging relays. These are not Developer Platform API workspaces.\n\n\
+    The Organizations Service is authoritative for organization data. The CF Meet API serves these \
+    routes at `/api/v2` and relays them to the Organizations Service with the signed-in user as the \
+    verified acting user; membership is always resolved on the server and clients can never assert it. \
+    Organization Calling and Messaging keep their own data in the Calling and Messaging services and \
+    relay only allowlisted paths.\n\n\
+    Authentication: the CF Meet account bearer session, as for every `/api/v2` route.\n\n\
+    Not in this public document: platform administration (`/api/v2/admin/organizations`) and the \
+    Organizations Service's internal service-to-service API (`/internal/v1`), which are documented only \
+    in the private engineering catalogue.",
+        },
+        "servers": meeting["servers"],
+        "paths": organization_paths,
+        "components": components,
+        "tags": ORGANIZATIONS_SECTIONS
+            .iter()
+            .map(|(name, description)| serde_json::json!({ "name": name, "description": description }))
+            .collect::<Vec<_>>(),
+    });
+    if let Some(security) = meeting.get("security") {
+        organizations["security"] = security.clone();
+    }
+    // Declare only sections that still hold operations (an empty heading would render).
+    let used: std::collections::BTreeSet<String> = organizations["paths"]
+        .as_object()
+        .into_iter()
+        .flat_map(|paths| paths.values())
+        .filter_map(serde_json::Value::as_object)
+        .flat_map(|item| item.values())
+        .filter_map(|operation| operation["tags"].as_array())
+        .flatten()
+        .filter_map(|tag| tag.as_str().map(str::to_owned))
+        .collect();
+    if let Some(tags) = organizations["tags"].as_array_mut() {
+        tags.retain(|tag| tag["name"].as_str().is_some_and(|name| used.contains(name)));
+    }
+    (
+        serde_json::to_string(&meeting).expect("Meetings document serializes"),
+        serde_json::to_string(&organizations).expect("Organizations document serializes"),
+    )
+}
+
 fn contract_doc(body: String) -> impl IntoResponse {
     (
         [
@@ -1201,10 +1420,10 @@ pub fn swagger_router(_server_addr: &str) -> Router {
          `packages/contracts/bundled/public/meetings`).",
         openapi.info.description.as_deref().unwrap_or("").trim_end()
     ));
-    let meeting_doc = public_doc(
+    let (meeting_doc, organizations_doc) = split_organizations(&public_doc(
         "Meetings",
         &openapi.to_json().expect("OpenAPI document serializes"),
-    );
+    ));
 
     // Internal specifications are *documentation*, not new externally executable routes.
     // Trying another service's operations requires that service's own reachable ingress,
@@ -1245,6 +1464,13 @@ pub fn swagger_router(_server_addr: &str) -> Router {
             get(move || {
                 let doc = meeting_doc.clone();
                 async move { ([(CONTENT_TYPE, "application/json")], doc) }
+            }),
+        )
+        .route(
+            ORGANIZATIONS_DOC_PATH,
+            get(move || {
+                let doc = organizations_doc.clone();
+                async move { contract_doc(doc) }
             }),
         );
     for (name, path, body) in PEER_DOCS {
@@ -1307,6 +1533,7 @@ mod tests {
         let router = swagger_router("127.0.0.1:18081");
         for path in [
             "/api-docs/openapi.json",
+            "/api-docs/organizations.json",
             "/api-docs/calling.json",
             "/api-docs/communications.json",
             "/api-docs/numbering.json",
@@ -1327,6 +1554,7 @@ mod tests {
         }
         for forbidden in [
             "/api-docs/platform-access.json",
+            "/api-docs/organizations-internal.json",
             "/api-docs/privacy-relay-internal.json",
             "/api-docs/telephony.json",
             "/api-docs/messaging-internal.json",
@@ -1615,12 +1843,13 @@ mod tests {
         let config = swagger_config();
         assert_eq!(
             config["urls"].as_array().unwrap().len(),
-            PEER_DOCS.len() + 1
+            PEER_DOCS.len() + 2,
+            "Meetings and Organizations plus every peer document"
         );
     }
 
-    /// The Swagger selector offers the six legacy services plus Part VI Developer
-    /// Platform and API Gateway. Every operation of
+    /// The Swagger selector offers Meetings, Organizations, the six legacy services plus
+    /// Part VI Developer Platform and API Gateway. Every operation of
     /// every document it serves sits in a named, declared section (never Swagger's
     /// `default`) with a summary, a description and a unique operationId. Checked on the
     /// bytes the router serves, after public filtering, so neither the contracts nor the
@@ -1651,6 +1880,7 @@ mod tests {
             names,
             [
                 "Meetings",
+                "Organizations",
                 "Communications",
                 "Calling",
                 "Numbering / DCNs",
@@ -1757,6 +1987,118 @@ mod tests {
             "{} Swagger documentation problems:\n{}",
             problems.len(),
             problems.join("\n")
+        );
+    }
+
+    #[tokio::test]
+    async fn organizations_have_their_own_document_and_are_documented_once() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        async fn get_json(router: &Router, uri: &str) -> serde_json::Value {
+            let response = router
+                .clone()
+                .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK, "{uri}");
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        }
+
+        // Every public first-party Organizations operation of the Meeting Service contract.
+        let contract: serde_json::Value =
+            serde_json::from_str(&ApiDoc::openapi().to_json().unwrap()).unwrap();
+        let expected: std::collections::BTreeSet<(String, String)> = contract["paths"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(path, _)| !path.starts_with("/api/v2/admin/"))
+            .flat_map(|(path, item)| {
+                item.as_object()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, op)| {
+                        op["tags"]
+                            .as_array()
+                            .is_some_and(|t| t.iter().any(|t| t == ORGANIZATIONS_TAG))
+                    })
+                    .map(move |(m, _)| (m.to_uppercase(), path.clone()))
+            })
+            .collect();
+        assert!(
+            expected.len() >= 40,
+            "organizations operations: {}",
+            expected.len()
+        );
+
+        let router = swagger_router("127.0.0.1:18081");
+        let organizations = get_json(&router, ORGANIZATIONS_DOC_PATH).await;
+        let meetings = get_json(&router, "/api-docs/openapi.json").await;
+        assert_eq!(
+            operations(&organizations),
+            expected,
+            "moved exactly the Organizations operations"
+        );
+        assert!(
+            operations(&meetings).is_disjoint(&expected),
+            "an Organizations operation is still in the Meetings document"
+        );
+        assert!(
+            operations(&meetings).len() > 100,
+            "Meetings document kept its operations"
+        );
+        for path in [
+            "/api/v2/organizations",
+            "/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}",
+            "/api/v2/organizations/{id}/policies",
+            "/api/v2/me/workspaces",
+            "/api/v2/organizations/{id}/calling/{path}",
+            "/api/v2/organizations/{id}/messaging/session-tokens",
+        ] {
+            assert!(organizations["paths"][path].is_object(), "{path}");
+        }
+        // Platform administration and the internal service API stay private.
+        let paths = organizations["paths"].as_object().unwrap();
+        assert!(paths
+            .keys()
+            .all(|p| !p.starts_with("/api/v2/admin/") && !p.starts_with("/internal/")));
+        assert!(meetings["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["name"] != ORGANIZATIONS_TAG));
+        // Same server and authentication as the Meetings document; every reference resolves.
+        assert_eq!(organizations["servers"], meetings["servers"]);
+        assert_eq!(
+            organizations["components"]["securitySchemes"],
+            meetings["components"]["securitySchemes"]
+        );
+        let schemas = organizations["components"]["schemas"].as_object().unwrap();
+        for name in referenced_schemas(&organizations["paths"], schemas) {
+            assert!(schemas.contains_key(&name), "unresolved schema {name}");
+        }
+        assert!(
+            schemas.len() < contract["components"]["schemas"].as_object().unwrap().len(),
+            "only the schemas the Organizations operations use"
+        );
+        assert_eq!(
+            organizations_section("/api/v2/organizations/{id}/teams/{teamId}/members"),
+            "Teams"
+        );
+        assert_eq!(
+            organizations_section("/api/v2/organization-invitations/accept"),
+            "Invitations"
+        );
+        assert_eq!(
+            organizations_section("/api/v2/organizations/{id}/archive"),
+            "Lifecycle"
+        );
+        assert_eq!(
+            organizations_section("/api/v2/organizations/{id}"),
+            "Organizations"
         );
     }
 

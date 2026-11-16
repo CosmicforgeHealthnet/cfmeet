@@ -80,17 +80,18 @@ schema_of() {
 # Every migration binary a service ships, in the order its deployment applies them.
 migrations_for() {
   case "$1" in
-    meeting-service) echo "migration account-communications-migration account-security-migration meetings-calendar-migration profile-notifications-migration account-hardening-migration organization-integration-migration lifecycle-delivery-migration" ;;
+    meeting-service) echo "migration account-communications-migration account-security-migration meetings-calendar-migration profile-notifications-migration account-hardening-migration organization-integration-migration lifecycle-delivery-migration notification-fence-migration" ;;
     communications) echo "communications-migration" ;;
     developer-platform) echo "developer-platform-migration" ;;
     platform-access) echo "platform-access-migration" ;;
     calling) echo "calling-migration calling-communications-migration" ;;
-    messaging) echo "messaging-migration messaging-communications-migration" ;;
+    messaging) echo "messaging-migration messaging-communications-migration messaging-notification-fence-migration" ;;
     numbering) echo "numbering-migration" ;;
     privacy-relay) echo "privacy-relay-migration" ;;
     telephony) echo "telephony-migration" ;;
     sms-gateway) echo "sms-gateway-migration" ;;
     organizations) echo "organizations-migration" ;;
+    notifications) echo "notifications-migration" ;;
     *) return 1 ;;
   esac
 }
@@ -103,7 +104,7 @@ done
 mapfile -t services < <(awk '!/^#/ && NF && $2 == "active" { print $1 }' "$tool_dir/catalog.conf")
 echo "catalog services (${#services[@]}): ${services[*]}"
 check "every active catalog service has a known migration set" bash -c '
-  for s in "$@"; do case "$s" in meeting-service|communications|developer-platform|platform-access|calling|messaging|numbering|privacy-relay|telephony|sms-gateway|organizations) ;; *) echo "unknown: $s"; exit 1 ;; esac; done' _ "${services[@]}"
+  for s in "$@"; do case "$s" in meeting-service|communications|developer-platform|platform-access|calling|messaging|numbering|privacy-relay|telephony|sms-gateway|organizations|notifications) ;; *) echo "unknown: $s"; exit 1 ;; esac; done' _ "${services[@]}"
 
 echo "== create and migrate every database with its real migrations"
 for s in "${services[@]}"; do
