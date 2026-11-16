@@ -52,9 +52,15 @@ fn cases() -> Vec<Case> {
             bin: "calling-migration",
             // + Blueprint Section 12 follow-up (enterprise audit acting principal): one
             // nullable column on the append-only audit; its down only drops that column.
+            // + C5 / C6 / C7 in-call collaboration: kind-upgrade guards (triggers, a cascading
+            // foreign key), the nullable presenter column with its partial unique index, and
+            // widened event / command vocabularies; each down only restores what it changed.
             part_vi: &[
                 "m20261201_000047_public_event_destinations",
                 "m20261201_000048_enterprise_audit_acting_principal",
+                "m20261202_000049_call_kind_upgrade",
+                "m20261202_000050_call_screen_share",
+                "m20261202_000051_call_add_participants",
             ],
             seed: Box::leak(
                 format!(
