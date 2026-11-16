@@ -23,7 +23,7 @@ Statuses are kept separate, as the mission requires:
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
 | **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PRs #76, #82) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-notifications-owners` 43922950325, X1/X2 publicly denied and proven | n/a (no traffic until routing leaves OFF) | §2.4, §4.2 |
 | **N7** producer publications + routing fence | **N7a fence foundation built** (Meeting + Messaging tables, inert guard triggers, decision module, `routingProtocol`, rollback floor); publications not built | — | — | §2.8, §5 |
-| **N8** inbox | service side + U1–U5 built (PR #75); Meeting relay §2.4; web/mobile UI not built | — | — | §2.5 |
+| **N8** inbox | service side + U1–U9 (PR #75), Meeting relay (PR #82); web/mobile UI not built | **relay `PRODUCTION_DEPLOYED_AND_VERIFIED`**: release 43914242156, `activate-notifications-relay` 43926737306; inbox empty (routing OFF) | — | §2.4, §2.5, §4.2 |
 | **N9** push + call fast lane | service side built (U8/U9, dispatcher, I3); Messaging facades, Calling transport, service worker not built | — | — | §2.5, §5 |
 | **N10** preferences authority | U6/U7, change log, Hub copy function built; copy job, facade switch not built | — | — | §2.5, §5 |
 | **N11** standard / invitation email cutover | service rendering and sender profiles built; producer routing not built | — | gate E1/E2 | §5 |
@@ -202,11 +202,12 @@ Until E1, every email `ACTIVE` routing change stays refused by the N14 gate. The
 | Verification | 33/33 checks PASS; violations: none; regression (Meetings health, Messaging/Calling/Platform TLS readiness, LiveKit keys) PASS |
 | Certification | run [43919862343](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43919862343) `certify` on `3c44089`: **`CERTIFIED_READ_ONLY`** (17:41 UTC). This replaces NOT_CERTIFIED 43828926604. |
 | Owner APIs | run [43922950325](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43922950325) `activate-notifications-owners` on `a1069d5`, 17:55 UTC.<br>• `main` had advanced by #85, which is release tooling only. The activation base found the commit equivalent to the deployed `3c44089`: 62 image build inputs checked, none changed.<br>• **Public-host denial proven** (404 + `X-CFMeet-Ingress: denied`) for `/internal/v1/accounts/notification-contacts/resolve` and `/internal/v1/conferences/{id}/notification-recipients/resolve`.<br>• Trust bundles updated: Messaging, Communications, Organizations, Meeting. Meeting gained `NOTIFICATION_OWNER_API_ENABLED=true`. Both replicas gained `NOTIFICATIONS_AUTHORITIES`, the owner base URLs and the first-party scope.<br>• Every owner route answers 401 unsigned afterwards; regression PASS.<br>Run 103 (43922930842) was refused by the gate, before any change, because of a short SHA. |
-| Relay | `activate-notifications-relay` run [43926737306](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43926737306) on `a1069d5`: **in progress** (dispatched 18:14 UTC); the result is recorded here when it completes. Until then U1–U9 answer 503 after the session check. |
+| Relay | run [43926737306](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43926737306) `activate-notifications-relay` on `a1069d5`, 18:26 UTC.<br>• Activation base equivalent to `3c44089` (62 inputs).<br>• Both replicas trust the Meeting Service for `notifications-user.forward` (I2 only); the Meeting Service has `CF_NOTIFICATIONS_BASE_URL`, the private TLS route.<br>• I2 answered 401 unsigned and the relay 401 without a session, before and after.<br>• Regression PASS.<br>U1–U9 now serve the signed-in user's own inbox, preferences and push endpoints. The inbox is empty because every routing row is `OFF`. |
 
 **Production status:**
 - **N2: `PRODUCTION_DEPLOYED_AND_VERIFIED` (dark).** It runs the readiness fix since 13:08 UTC and was certified at 17:41. The 24-hour zero-traffic observation (Document 6 N2 row 14) runs from 13:08 UTC.
 - **N6: `PRODUCTION_DEPLOYED_AND_VERIFIED`.** X1–X5 are granted and reachable only from `cfmeet.notifications`, and are publicly denied.
+- **N8 service side and relay: `PRODUCTION_DEPLOYED_AND_VERIFIED`.** U1–U9 are live through the Meeting relay. The web and mobile inbox UI is not built.
 - **Delivery:** nothing is delivered. Every `notif_routing` row is `OFF`, there is no email or push provider, and Resend stays suspended.
 
 ---
