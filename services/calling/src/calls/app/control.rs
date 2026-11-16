@@ -187,12 +187,14 @@ impl AppCallService {
                 current: call.version,
             });
         }
-        let call = self
+        let applied = self
             .calls
             .transition_in(&txn, cmd, &call, expected_version, CallAction::RequestEnd)
-            .await?
-            .call;
-        let cancelled = self.end_effects_in(&txn, cmd, &call).await?;
+            .await?;
+        let call = applied.call;
+        // Offers closed by the transition itself (same transaction) plus anything END stops.
+        let mut cancelled = applied.cancelled_invitations;
+        cancelled.extend(self.end_effects_in(&txn, cmd, &call).await?);
         let body = control_body(&call, CommandOperation::End);
         if let Some(key) = key {
             self.calls

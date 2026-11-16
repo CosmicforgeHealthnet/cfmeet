@@ -37,6 +37,65 @@ class AcceptResult {
   Map<String, Object?> toJson() => json;
 }
 
+/// Body of POST /v1/calls/{call_id}/acknowledge: the application backend confirms that its endpoint endpointId received ring offer invitationId (e.g. from a push delivery receipt). Referenced by the operation only (not a root alternative: it is a strict subset of InvitationCommandRequest's fields, so a malformed accept body must never validate as an acknowledgement).
+class AcknowledgeRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AcknowledgeRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AcknowledgeRequest.create({required Uuid endpointId, required Uuid invitationId}) =>
+      AcknowledgeRequest.fromJson(<String, Object?>{
+        'endpointId': endpointId,
+        'invitationId': invitationId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get endpointId => json['endpointId']! as String;
+
+  Uuid get invitationId => json['invitationId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Result of POST /v1/calling/invitations/{invitation_id}/acknowledge: the endpoint's device confirmed it received the ring offer and is alerting its user. The offer is RINGING (ringingAt is the server time of the first acknowledgement); the first acknowledged offer of a DIALING application Call moves the Call to RINGING. Repeating the acknowledgement changes nothing.
+class AcknowledgeResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AcknowledgeResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AcknowledgeResult.create({required Uuid callId, required CallState callState, required int callVersion, required String expiresAt, required Uuid invitationId, required String ringingAt, required String status}) =>
+      AcknowledgeResult.fromJson(<String, Object?>{
+        'callId': callId,
+        'callState': callState,
+        'callVersion': callVersion,
+        'expiresAt': expiresAt,
+        'invitationId': invitationId,
+        'ringingAt': ringingAt,
+        'status': status,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get callId => json['callId']! as String;
+
+  CallState get callState => json['callState']! as String;
+
+  int get callVersion => (json['callVersion']! as num).toInt();
+
+  String get expiresAt => json['expiresAt']! as String;
+
+  Uuid get invitationId => json['invitationId']! as String;
+
+  String get ringingAt => json['ringingAt']! as String;
+
+  String get status => json['status']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Body of PUT /v1/enterprise/ivr-flows/{ivr_flow_id}/activation: the published version NEW Calls run (Calls already in the IVR keep theirs). Its destinations are re-validated.
 class ActivateIvrVersionRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -3893,7 +3952,7 @@ typedef RecordingState = String;
 /// One of: EXPLICIT, CALL_ENDED, POLICY_REVOKED, CONSENT_WITHDRAWN, CAPTURE_FAILED, MAX_DURATION, KILL_SWITCH.
 typedef RecordingStopReason = String;
 
-/// An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. actionable is true only for a RINGING, unexpired offer of a Call that can still be answered.
+/// An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. status is PENDING until this device acknowledges receipt (POST /v1/calling/invitations/{invitation_id}/acknowledge), then RINGING. actionable is true only for a live (PENDING or RINGING), unexpired offer of a Call that can still be answered; a live offer of an ending or terminal Call is reported CANCELLED.
 class RecoveredInvitation {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const RecoveredInvitation.fromJson(this.json);

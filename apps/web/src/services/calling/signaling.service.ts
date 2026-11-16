@@ -2,7 +2,7 @@ import axios from "axios";
 import { CALLING_BASE_URL } from "./api";
 import { signalingSocketUrl } from "@/lib/calling/origin.mjs";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
-import type { AcceptResult, CallHistoryFilters, CallHistoryList, CommandRequest, DeclineResult, MediaCredential, RecoveredInvitationList, SignalingCredential } from "@/types/calling";
+import type { AcceptResult, AcknowledgeResult, CallHistoryFilters, CallHistoryList, CommandRequest, DeclineResult, MediaCredential, RecoveredInvitationList, SignalingCredential } from "@/types/calling";
 
 /** Each client owns its endpoint credential; no module-global credential races. */
 export function createSignalingService(credential: SignalingCredential) {
@@ -12,6 +12,9 @@ export function createSignalingService(credential: SignalingCredential) {
     invitations: async () => (await api.get<RecoveredInvitationList>("/v1/calling/invitations")).data,
     history: async (filters: CallHistoryFilters = {}) =>
       (await api.get<CallHistoryList>("/v1/calling/history", { params: filters })).data,
+    /** Receipt acknowledgement: this device received the offer and is ringing (C1). */
+    acknowledge: async (id: string) =>
+      (await api.post<AcknowledgeResult>(`/v1/calling/invitations/${encodeURIComponent(id)}/acknowledge`, {})).data,
     accept: async (id: string, body: CommandRequest, key = newIdempotencyKey()) =>
       (await api.post<AcceptResult>(`/v1/calling/invitations/${encodeURIComponent(id)}/accept`, body, { headers: { "Idempotency-Key": key } })).data,
     decline: async (id: string, body: CommandRequest, key = newIdempotencyKey()) =>

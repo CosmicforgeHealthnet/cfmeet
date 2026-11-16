@@ -230,6 +230,49 @@ async fn admission_fails_closed_when_authoritative_state_is_unreadable() {
     assert_eq!(admit(&a, &claims(call, &id, Some(gen))).await, Ok(()));
 }
 
+/// C3: a transient read failure (a lock, a restart, a blip) that clears within the bounded
+/// retry is admitted instead of refusing the media connection — and the decision is still
+/// taken only from the authoritative state (it is re-read in full on every attempt).
+#[tokio::test]
+async fn a_transient_state_outage_is_retried_before_refusing() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let (call, caller, _) = a.connected_call("VOICE").await;
+    let s = a.session_on(call, caller.endpoint).await.unwrap();
+    let (id, gen) = identity_of(&a, s).await;
+    let conn = a.h().conn().clone();
+    conn.execute(Statement::from_string(
+        DbBackend::Postgres,
+        "ALTER TABLE call_sessions RENAME TO call_sessions_unavailable".to_string(),
+    ))
+    .await
+    .unwrap();
+    let restore = {
+        let conn = conn.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            conn.execute(Statement::from_string(
+                DbBackend::Postgres,
+                "ALTER TABLE call_sessions_unavailable RENAME TO call_sessions".to_string(),
+            ))
+            .await
+            .unwrap();
+        })
+    };
+    assert_eq!(
+        admit(&a, &claims(call, &id, Some(gen))).await,
+        Ok(()),
+        "the outage cleared within the retry window"
+    );
+    restore.await.unwrap();
+    // A revocation is still honoured on the retried path (no stale admission).
+    assert_eq!(
+        admit(&a, &claims(call, &id, Some(gen + 1))).await,
+        Err(ConnectionDenied::StaleGeneration)
+    );
+}
+
 #[tokio::test]
 async fn without_a_configured_gateway_media_routes_do_not_exist() {
     let Some(a) = AppWorld::new().await else {

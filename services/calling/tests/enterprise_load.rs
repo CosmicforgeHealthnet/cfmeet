@@ -271,7 +271,7 @@ async fn queue_burst_keeps_fifo_order() {
                 e.h().conn(),
                 &format!(
                     "SELECT call_id::text FROM call_invitations WHERE endpoint_id = '{}' \
-                       AND status = 'RINGING'",
+                       AND status IN ('PENDING', 'RINGING')",
                     agent.phone.endpoint
                 ),
             )

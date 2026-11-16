@@ -397,8 +397,40 @@ impl AppWorld {
             .as_array()
             .unwrap()
             .iter()
-            .find(|i| i["endpointId"] == endpoint.to_string() && i["status"] == "RINGING")
+            .find(|i| {
+                i["endpointId"] == endpoint.to_string()
+                    && (i["status"] == "RINGING" || i["status"] == "PENDING")
+            })
             .map(|i| i["invitationId"].as_str().unwrap().parse().unwrap())
+    }
+
+    /// The application backend acknowledges receipt of `device`'s ring offer
+    /// (`POST /v1/calls/{call}/acknowledge`, API credential, C1).
+    pub async fn acknowledge_for(
+        &self,
+        call: Uuid,
+        invitation: Uuid,
+        device: &Device,
+    ) -> TestResponse {
+        self.post(
+            &format!("/v1/calls/{call}/acknowledge"),
+            json!({ "invitationId": invitation, "endpointId": device.endpoint }),
+        )
+        .await
+    }
+
+    /// The device acknowledges receipt of its ring offer over its own signaling credential
+    /// (`POST /v1/calling/invitations/{id}/acknowledge`, C1).
+    pub async fn acknowledge(&self, device: &Device, invitation: Uuid) -> TestResponse {
+        let token = self.signaling_token(device).await;
+        self.as_endpoint(
+            &token,
+            Method::POST,
+            &format!("/v1/calling/invitations/{invitation}/acknowledge"),
+            None,
+            &[],
+        )
+        .await
     }
 
     pub async fn accept(
@@ -513,12 +545,15 @@ impl AppWorld {
             )
             .await;
         assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
-        assert_eq!(r.json["call"]["state"], "RINGING", "{}", r.text);
-        (
-            r.json["call"]["callId"].as_str().unwrap().parse().unwrap(),
-            caller,
-            callee,
-        )
+        // Offers are PENDING until a callee device acknowledges receipt (C1).
+        assert_eq!(r.json["call"]["state"], "DIALING", "{}", r.text);
+        let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+        let invitation = self.invitation_for(call, callee.endpoint).await.unwrap();
+        let ack = self.acknowledge_for(call, invitation, &callee).await;
+        assert_eq!(ack.status, StatusCode::OK, "{}", ack.text);
+        assert_eq!(ack.json["status"], "RINGING", "{}", ack.text);
+        assert_eq!(ack.json["callState"], "RINGING", "{}", ack.text);
+        (call, caller, callee)
     }
 
     /// A CONNECTED one-to-one call with both parties admitted in the media resource.

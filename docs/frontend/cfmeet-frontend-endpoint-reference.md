@@ -16,10 +16,10 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 259 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.4.0 | 73 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 129 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 131 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **633** |
+| **Total** | | | **635** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -668,6 +668,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.17.0**; b
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | POST | `/v1/calls/{call_id}/accept` | platform credential (server-side only) | Accept a ring offer on behalf of one endpoint | 200, 400, 401, 403, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acceptCall` |
+| POST | `/v1/calls/{call_id}/acknowledge` | platform credential (server-side only) | Acknowledge receipt of a ring offer on behalf of one endpoint | 200, 400, 401, 403, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acknowledgeCallInvitation` |
 | GET | `/v1/calls/{call_id}/actions` | platform credential (server-side only) | Actions currently available on a call | 200, 401, 403, 404, 429, 503 | AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE, RATE_LIMITED, SERVICE_UNAVAILABLE | `calling/http/v1.openapi.json#getCallActions` |
 | POST | `/v1/calls/{call_id}/cancel` | platform credential (server-side only) | Cancel a call before it is active | 200, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#cancelCall` |
 | POST | `/v1/calls/{call_id}/decline` | platform credential (server-side only) | Decline a ring offer on behalf of one endpoint | 200, 400, 401, 403, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#declineCall` |
@@ -698,6 +699,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.17.0**; b
 |---|---|---|---|---|---|---|
 | GET | `/v1/calling/invitations` | signaling credential | Recover the endpoint's offers | 200, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED | `calling/http/v1.openapi.json#recoverInvitations` |
 | POST | `/v1/calling/invitations/{invitation_id}/accept` | signaling credential | Accept one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acceptInvitation` |
+| POST | `/v1/calling/invitations/{invitation_id}/acknowledge` | signaling credential | Acknowledge receipt of one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#acknowledgeInvitation` |
 | POST | `/v1/calling/invitations/{invitation_id}/decline` | signaling credential | Decline one's own ring offer | 200, 400, 401, 404, 409, 410, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INVITATION_EXPIRED, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#declineInvitation` |
 
 ### Call Management

@@ -566,7 +566,8 @@ async fn provider_failures_never_corrupt_the_call() {
     let call = call_id(&r);
     a.h().clock.advance(chrono::Duration::seconds(5));
     a.h().state.app.reconcile_due(100).await.unwrap();
-    assert_eq!(a.state(call).await.0, CallState::Ringing);
+    // Resumed: the callee is offered (DIALING until its device acknowledges, C1).
+    assert_eq!(a.state(call).await.0, CallState::Dialing);
     assert!(a.invitation_for(call, callee.endpoint).await.is_some());
     assert_eq!(
         a.media().ensure_calls(),

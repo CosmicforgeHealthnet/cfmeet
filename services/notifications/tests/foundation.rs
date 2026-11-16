@@ -201,3 +201,36 @@ async fn dark_mode_holds_events_and_calls_no_provider() {
         .await;
     assert_eq!(dl.expect(200)["items"].as_array().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn running_workers_keep_ready_green_beyond_their_first_minute() {
+    // Regression: an hourly "retention" heartbeat made /ready 503 sixty seconds after start
+    // (production certify 43828926604). Every heartbeat key must belong to a loop that
+    // beats at least every few seconds.
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let mut state = h.state.clone();
+    state.workers_enabled = true;
+    let workers = notifications::workers::spawn(&state);
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let keys: Vec<&str> = state.heartbeats.snapshot().keys().copied().collect();
+    workers.shutdown();
+    assert!(
+        keys.contains(&"ingest") && keys.contains(&"scheduler"),
+        "{keys:?}"
+    );
+    for k in &keys {
+        assert!(
+            [
+                "ingest",
+                "scheduler",
+                "email-critical",
+                "email-standard",
+                "push"
+            ]
+            .contains(k),
+            "heartbeat {k} is not a fast loop"
+        );
+    }
+}

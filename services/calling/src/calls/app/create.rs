@@ -873,13 +873,11 @@ impl AppCallService {
                 .await?
                 .call
         } else {
-            self.calls
-                .move_leg_in(&txn, &cmd, &call, leg, LegState::Ringing, None)
-                .await?;
-            self.calls
-                .transition_in(&txn, &cmd, &call, call.version, CallAction::MarkRinging)
-                .await?
-                .call
+            // The offers are PENDING: the Call stays DIALING ("reaching their devices")
+            // until a callee device acknowledges receipt over signaling, which moves the
+            // Call to RINGING (`acknowledge_invitation`). A callee signed in nowhere never
+            // shows as ringing; its offers expire into NO_ANSWER / a missed call.
+            call
         };
         let body = self.create_response(&txn, &call).await?;
         self.calls

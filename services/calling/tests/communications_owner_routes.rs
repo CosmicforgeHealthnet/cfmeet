@@ -356,7 +356,7 @@ async fn launch_runs_the_canonical_creation_path_and_replays_idempotently() {
     .await;
     assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
 
-    // Created and ringing, exactly like POST /v1/calls.
+    // Created and offered (DIALING until a callee device acknowledges), exactly like POST /v1/calls.
     let r = hub_as(
         &w,
         me_id,
@@ -368,7 +368,7 @@ async fn launch_runs_the_canonical_creation_path_and_replays_idempotently() {
     assert_eq!(r.json["schemaVersion"], 1);
     assert_eq!(r.json["replayed"], false);
     assert_eq!(r.json["kind"], "VOICE");
-    assert_eq!(r.json["state"], "RINGING", "{}", r.text);
+    assert_eq!(r.json["state"], "DIALING", "{}", r.text);
     let call: Uuid = r.json["callId"].as_str().unwrap().parse().unwrap();
     assert!(w.invitation_for(call, theirs.endpoint).await.is_some());
 

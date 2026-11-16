@@ -71,7 +71,8 @@ async fn a_protected_call_is_authorized_by_privacy_relay_and_rings_on_the_app_pa
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
-    assert_eq!(r.json["call"]["state"], "RINGING");
+    // Offered on the app path (DIALING until a callee device acknowledges, C1).
+    assert_eq!(r.json["call"]["state"], "DIALING");
     let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
     // Not APP_DIRECT_V1: the Privacy Relay decision is the authorization evidence.
     assert_eq!(

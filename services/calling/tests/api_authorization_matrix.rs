@@ -74,6 +74,7 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /internal/v1/telephony/inbound-calls", Probe::Body),
     ("POST /internal/v1/telephony/dcn-inbound-calls", Probe::Body),
     ("POST /v1/calls", Probe::Body),
+    ("POST /v1/calls/{call_id}/acknowledge", Probe::Body),
     ("POST /v1/calls/{call_id}/accept", Probe::Body),
     ("POST /v1/calls/{call_id}/decline", Probe::Body),
     ("POST /v1/calls/{call_id}/cancel", Probe::Body),
@@ -95,6 +96,10 @@ const CLASSIFIED: &[(&str, Probe)] = &[
         Probe::HiddenPath,
     ),
     ("POST /v1/calling/signaling-credentials", Probe::Body),
+    (
+        "POST /v1/calling/invitations/{invitation_id}/acknowledge",
+        Probe::Body,
+    ),
     (
         "POST /v1/calling/invitations/{invitation_id}/accept",
         Probe::Body,
@@ -929,7 +934,10 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                 };
                 // (a well-formed body: the resource alone decides)
                 let (_, version) = a.state(p.ids["call_id"]).await;
-                let body = if op.template.contains("invitation") {
+                // (acknowledge takes no version: receipt is not a versioned command)
+                let body = if op.template.contains("invitation")
+                    && !op.template.ends_with("/acknowledge")
+                {
                     json!({ "expectedVersion": version })
                 } else {
                     json!({})

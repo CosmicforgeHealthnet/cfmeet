@@ -41,6 +41,8 @@ pub struct WorkerReport {
     pub recordings_deleted: usize,
     pub captures_stored: usize,
     pub captures_failed: usize,
+    /// Live offers closed on Calls that were already ENDING / terminal (repair, C2).
+    pub finished_call_invitations_closed: usize,
 }
 
 impl AppCallService {
@@ -69,6 +71,26 @@ impl AppCallService {
                 .await?
             {
                 report.invitations_expired += n;
+            }
+        }
+        // Repair: live offers of Calls that are already ENDING or terminal (C2).
+        let finished = self
+            .db()
+            .query_all(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                format!(
+                    "SELECT DISTINCT i.call_id FROM call_invitations i JOIN calls c ON c.id = i.call_id \
+                      WHERE i.status IN ('PENDING', 'RINGING') \
+                        AND (c.current_state IN {} OR c.current_state = 'ENDING') LIMIT $1",
+                    crate::calls::service::TERMINAL_STATES_SQL
+                ),
+                vec![(limit as i64).into()],
+            ))
+            .await?;
+        for row in finished {
+            let call_id: Uuid = row.try_get_by_index(0)?;
+            if let Some(n) = self.close_finished_call_invitations(call_id).await? {
+                report.finished_call_invitations_closed += n;
             }
         }
         let stalled = self
