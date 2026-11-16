@@ -15,7 +15,8 @@ use crate::{
     error::{ApiError, ErrorCode},
     handlers::v2::{
         artifacts, breakouts, calendar, collaboration as collab, compat, conferences, engagement,
-        invitations, members, organizations, participants, quality, realtime, spaces, specialized,
+        invitations, members, notifications, organizations, participants, quality, realtime,
+        spaces, specialized,
     },
     state::AppState,
 };
@@ -723,6 +724,46 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/me/security-events",
             get(crate::handlers::v2::account_devices::list_my_security_events),
+        )
+        // Document 4 §3.1: Notification Service user APIs U1–U9 (Account-verified relay)
+        .route("/notifications", get(notifications::list_my_notifications))
+        .route(
+            "/notifications/unread-count",
+            get(notifications::get_my_notification_unread_count),
+        )
+        .route(
+            "/notifications/read",
+            post(notifications::mark_my_notifications_read).layer(
+                axum::extract::DefaultBodyLimit::max(notifications::MAX_BODY_BYTES),
+            ),
+        )
+        .route(
+            "/notifications/dismiss",
+            post(notifications::dismiss_my_notifications).layer(
+                axum::extract::DefaultBodyLimit::max(notifications::MAX_BODY_BYTES),
+            ),
+        )
+        .route(
+            "/notifications/preferences",
+            get(notifications::get_my_notification_preferences)
+                .put(notifications::update_my_notification_preferences)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    notifications::MAX_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/notifications/devices/:account_device_id/push",
+            put(notifications::register_my_push_endpoint)
+                .delete(notifications::remove_my_push_endpoint)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    notifications::MAX_BODY_BYTES,
+                )),
+        )
+        .route(
+            "/notifications/:notification_id",
+            patch(notifications::update_my_notification).layer(
+                axum::extract::DefaultBodyLimit::max(notifications::MAX_BODY_BYTES),
+            ),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),

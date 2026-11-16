@@ -399,6 +399,22 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/me/device-links/{linkId}/complete"),
         ("post", "/api/v2/me/device-links/{linkId}/cancel"),
         ("get", "/api/v2/me/security-events"),
+        // Document 4 §3.1 — Notification Service user APIs U1–U9 (Account-verified relay)
+        ("get", "/api/v2/notifications"),
+        ("get", "/api/v2/notifications/unread-count"),
+        ("patch", "/api/v2/notifications/{notificationId}"),
+        ("post", "/api/v2/notifications/read"),
+        ("post", "/api/v2/notifications/dismiss"),
+        ("get", "/api/v2/notifications/preferences"),
+        ("put", "/api/v2/notifications/preferences"),
+        (
+            "put",
+            "/api/v2/notifications/devices/{accountDeviceId}/push",
+        ),
+        (
+            "delete",
+            "/api/v2/notifications/devices/{accountDeviceId}/push",
+        ),
     ];
     for (method, path) in expected {
         assert!(
