@@ -181,11 +181,19 @@ async fn metrics(State(state): State<AppState>) -> Response {
     for (name, oldest_name, sql) in queries {
         match db::all::<Gauge, _>(&state.db, sql, vec![]).await {
             Ok(rows) => {
-                out.push_str(&format!("# TYPE {name} gauge\n# TYPE {oldest_name} gauge\n"));
+                out.push_str(&format!(
+                    "# TYPE {name} gauge\n# TYPE {oldest_name} gauge\n"
+                ));
                 for lane in ["CRITICAL", "HIGH", "STANDARD"] {
                     let r = rows.iter().find(|r| r.lane == lane);
-                    out.push_str(&format!("{name}{{lane=\"{lane}\"}} {}\n", r.map(|r| r.pending).unwrap_or(0)));
-                    out.push_str(&format!("{oldest_name}{{lane=\"{lane}\"}} {}\n", r.and_then(|r| r.oldest).unwrap_or(0)));
+                    out.push_str(&format!(
+                        "{name}{{lane=\"{lane}\"}} {}\n",
+                        r.map(|r| r.pending).unwrap_or(0)
+                    ));
+                    out.push_str(&format!(
+                        "{oldest_name}{{lane=\"{lane}\"}} {}\n",
+                        r.and_then(|r| r.oldest).unwrap_or(0)
+                    ));
                 }
             }
             Err(_) => out.push_str("notif_database_up 0\n"),
