@@ -18,10 +18,10 @@ Statuses are kept separate, as the mission requires:
 | Section | Engineering | Production | Accepted | Evidence |
 |---|---|---|---|---|
 | **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **SUSPENDED by owner decision (2026-11-16)**: no activation, no acceptance run; run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) had stopped at the credential check, nothing changed | — | §3 |
-| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | deployed dark (release 43819010350, verification PASS); certify 43828926604 **NOT_CERTIFIED** (readiness), fix in PR #80, re-release and re-certify in §4.2 | 24 h dark observation restarts at the certified release | §2.1, §4 |
+| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | **`PRODUCTION_DEPLOYED_AND_VERIFIED` (dark)**: readiness fix live since release 43870645555 (`c0714ba`); certify 43919862343 `CERTIFIED_READ_ONLY` (the earlier 43828926604 NOT_CERTIFIED is resolved) | 24 h dark observation from 13:08 UTC | §2.1, §4 |
 | **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
-| **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PR #76); Meeting U1–U9 relay (owner-approved) in the relay PR, §2.4 | released with the readiness fix (§4.2); owner activation recorded in §4.2 | n/a | §2.4, §4.2 |
+| **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PRs #76, #82) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-notifications-owners` 43922950325, X1/X2 publicly denied and proven | n/a (no traffic until routing leaves OFF) | §2.4, §4.2 |
 | **N7** producer publications + routing fence | **N7a fence foundation built** (Meeting + Messaging tables, inert guard triggers, decision module, `routingProtocol`, rollback floor); publications not built | — | — | §2.8, §5 |
 | **N8** inbox | service side + U1–U5 built (PR #75); Meeting relay §2.4; web/mobile UI not built | — | — | §2.5 |
 | **N9** push + call fast lane | service side built (U8/U9, dispatcher, I3); Messaging facades, Calling transport, service worker not built | — | — | §2.5, §5 |
@@ -193,7 +193,21 @@ Until E1, every email `ACTIVE` routing change stays refused by the N14 gate. The
 
 ### 4.2 Readiness-fix release, certification and owner activation
 
-*(recorded when the runs complete)*
+| | |
+|---|---|
+| Readiness fix in production | PR #80 merged as `d553e53`. My release run 94 (43856717241) stopped in its gate because `main` advanced. The fix went live with release [43870645555](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43870645555) on `c0714ba` (12:53–13:08 UTC, which contains #80). `notifications` and `notifications-2` have run `c0714ba` since then. |
+| Relay release | run [43914242156](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43914242156) `release` on `3c44089` (PR #82), 17:34 UTC. **Replaced:** `meeting-service`, `calling`, `api-gateway` (base `b8fefc2`). **Kept:** 12 services, `notifications` and `notifications-2` included. Run 100 (43902376581), dispatched by another session on the same SHA, ran the read-only `diagnose` operation; it did not deploy. |
+| Resource gate | MemAvailable 5,008 MiB; required 832 MiB; remaining 4,176 MiB; shortfall 0 |
+| Pre-release backup | 17 databases, `/opt/cfmeet-core/backups/43914242156-1/manifest.json`; restore-tested organizations, platform-access, meeting-service (PASS) |
+| Verification | 33/33 checks PASS; violations: none; regression (Meetings health, Messaging/Calling/Platform TLS readiness, LiveKit keys) PASS |
+| Certification | run [43919862343](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43919862343) `certify` on `3c44089`: **`CERTIFIED_READ_ONLY`** (17:41 UTC). This replaces NOT_CERTIFIED 43828926604. |
+| Owner APIs | run [43922950325](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43922950325) `activate-notifications-owners` on `a1069d5`, 17:55 UTC.<br>• `main` had advanced by #85, which is release tooling only. The activation base found the commit equivalent to the deployed `3c44089`: 62 image build inputs checked, none changed.<br>• **Public-host denial proven** (404 + `X-CFMeet-Ingress: denied`) for `/internal/v1/accounts/notification-contacts/resolve` and `/internal/v1/conferences/{id}/notification-recipients/resolve`.<br>• Trust bundles updated: Messaging, Communications, Organizations, Meeting. Meeting gained `NOTIFICATION_OWNER_API_ENABLED=true`. Both replicas gained `NOTIFICATIONS_AUTHORITIES`, the owner base URLs and the first-party scope.<br>• Every owner route answers 401 unsigned afterwards; regression PASS.<br>Run 103 (43922930842) was refused by the gate, before any change, because of a short SHA. |
+| Relay | `activate-notifications-relay` run [43926737306](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43926737306) on `a1069d5`: **in progress** (dispatched 18:14 UTC); the result is recorded here when it completes. Until then U1–U9 answer 503 after the session check. |
+
+**Production status:**
+- **N2: `PRODUCTION_DEPLOYED_AND_VERIFIED` (dark).** It runs the readiness fix since 13:08 UTC and was certified at 17:41. The 24-hour zero-traffic observation (Document 6 N2 row 14) runs from 13:08 UTC.
+- **N6: `PRODUCTION_DEPLOYED_AND_VERIFIED`.** X1–X5 are granted and reachable only from `cfmeet.notifications`, and are publicly denied.
+- **Delivery:** nothing is delivered. Every `notif_routing` row is `OFF`, there is no email or push provider, and Resend stays suspended.
 
 ---
 
