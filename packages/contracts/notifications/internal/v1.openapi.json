@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Notification Service internal API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Internal signed API of the unified Notification Service (cfmeet.notifications; blueprint Document 4 §3.3): I1–I11 and the optional I12 (approved under D-15). Frozen by roadmap N1 before the service exists (lifecycle experimental). Every route except I12 requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle (x-cfmeet-internal-permission); durable jti nonces; request binding emitted from day one. Never routed by public ingress. Health (/health, /ready with routingProtocol and per-lane heartbeats) is not counted as an API."
   },
   "paths": {
@@ -43,6 +43,11 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Probe only (§9.5): reports whether each eventId was committed (DUPLICATE) or not (UNKNOWN); writes nothing."
+                  },
+                  "shadow": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "1.1.0 (N3): the batch holds producer SHADOW copies of OLD decisions (routing mode SHADOW). They are recorded and evaluated for the shadow comparison and are never delivered, whatever the service-side mode, so a mode disagreement can never turn a shadow copy into a second delivery."
                   }
                 }
               }

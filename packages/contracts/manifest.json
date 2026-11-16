@@ -1,13 +1,6 @@
 {
   "$schema": "./manifest.schema.json",
   "manifest_version": 1,
-  "planned_owners": [
-    {
-      "owner": "notifications",
-      "approval": "owner decision D-13 (2026-11-15) approving docs/audits/notification-service (fa657c8), roadmap N1; decisions D-5, D-10, D-15, D-16 approved, D-W excluded",
-      "until": "N2 (service skeleton creates services/notifications)"
-    }
-  ],
   "contracts": [
     {
       "id": "cfmeet.meeting-service.http-api",
@@ -1164,25 +1157,25 @@
     },
     {
       "id": "cfmeet.notifications.internal-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "notifications/internal/v1.openapi.json",
       "owner": "notifications",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N3–N13). Internal signed API I1–I11 and the optional I12 operator-alert ingest (D-15 approved), each with its x-cfmeet-internal-permission."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N3–N13). Internal signed API I1–I11 and the optional I12 operator-alert ingest (D-15 approved), each with its x-cfmeet-internal-permission. 1.1.0 (N3): optional `shadow` flag on I1 batches (producer shadow copies are recorded, never delivered). Served by services/notifications from N2."
     },
     {
       "id": "cfmeet.meeting-service.notification-owner-api",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "kind": "openapi",
       "path": "meeting-service/notification-owner/v1.openapi.json",
       "owner": "meeting-service",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6: X1, X2; N12: X6, X7). Meeting Service / Account owner APIs for the Notification Service only: resolveAccountContacts (account-contacts.read), resolveConferenceRecipients (meeting-notification-recipients.read), claimCriticalSendLeases and completeCriticalSends (account-route-lease.claim). Not yet served."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6: X1, X2; N12: X6, X7). Meeting Service / Account owner APIs for the Notification Service only: resolveAccountContacts (account-contacts.read), resolveConferenceRecipients (meeting-notification-recipients.read), claimCriticalSendLeases and completeCriticalSends (account-route-lease.claim). Not yet served. 1.1.0 (N6): X2 answers `joinPath` and `endsAt`."
     },
     {
       "id": "cfmeet.messaging.notification-owner-api",

@@ -1,0 +1,20 @@
+# Build-context filter for services/notifications/Dockerfile (context: repository root).
+*
+!packages/service-auth
+!packages/migration-guard
+!packages/notification-client
+!packages/push-transport
+!packages/webhooks
+!packages/communications-policy
+!packages/contracts/notifications
+!services/notifications
+
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.secret
+**/*.log
+services/notifications/Dockerfile
+services/notifications/Dockerfile.dockerignore
