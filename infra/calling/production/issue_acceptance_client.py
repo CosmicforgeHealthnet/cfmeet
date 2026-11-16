@@ -408,6 +408,11 @@ class Journey:
         self.check('C7 the invited person accepts and joins while the call continues',
                    bool(joined) and after['state'] in ('CONNECTED', 'ANSWERED'), after['state'])
 
+    def lacking(self, *needed):
+        """Scopes the verification credential does not hold (the application is not allowed them)."""
+        held = set(self.c.get('scopes') or [])
+        return [s for s in needed if s not in held] if 'scopes' in self.c else []
+
     # -- M1 / M2 / M3 ----------------------------------------------------------------------
     def m1_capability(self, a):
         capability = self.hub(a, '/me/capabilities')['messaging']
@@ -417,6 +422,11 @@ class Journey:
         self.check('M1 clients are told attachments are enabled (25 MiB, five kinds)',
                    attachments.get('enabled') is True and attachments.get('maxBytes') == MAX_BYTES
                    and KINDS <= set(attachments.get('allowedKinds') or []), json.dumps(attachments)[:200])
+        missing = self.lacking('conversations.manage')
+        if missing:
+            self.record('M1 the CF Meet environment runs the CFMEET_FIRST_PARTY attachment baseline', 'NOT_RUN',
+                        'policy read needs ' + ', '.join(missing))
+            return capability
         policy = self.messaging('GET', '/v1/messaging/policy', actor=a['principalId'])
         effective = (policy.get('effective') or {}).get('attachments') or {}
         self.details['policyBaseline'] = policy.get('applicationBaseline')
@@ -427,6 +437,12 @@ class Journey:
 
     def m_group(self, a, b, outsider, contact_id):
         title = 'CF Meet verification ' + self.c['runId']
+        missing = self.lacking('conversations.create', 'conversations.manage', 'messages.send', 'attachments.write')
+        if missing:
+            for name in ('M1 upload, scan, send and member download', 'M2 groups in common carry the group title',
+                         'M3 shared media carries file name and grant operations'):
+                self.record(name, 'NOT_RUN', 'the CF Meet application is not allowed ' + ', '.join(missing))
+            return
         status, created = http('POST', self.c['messaging'] + '/v1/conversations',
                                {'contextClass': 'GROUP', 'securityProfile': 'MANAGED', 'title': title},
                                {'Authorization': 'Bearer ' + self.c['credential'], 'CF-Acting-Principal': a['principalId'],
