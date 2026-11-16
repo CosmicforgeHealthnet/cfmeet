@@ -173,7 +173,6 @@ None of these is reachable on the public host: certify probes 25 internal, opera
 | Speech-to-text and AI summaries | a contracted provider | not contracted |
 | HealthNet appointment authorization | HealthNet endpoint and token, plus DPIA | not configured |
 | Developer production-access reviewers | owner: `CFMEET_PRODUCTION_ACCESS_REVIEWERS` | not set (§5) |
-| Off-host encrypted backup | owner: age key pair (`CFMEET_BACKUP_AGE_RECIPIENTS`, `CFMEET_BACKUP_AGE_IDENTITY`) | the daily job is skipped until the keys exist |
 | Key-transparency witness; independent cryptographic assessment | external parties | not performed (owner release decision records both) |
 
 ## 5. CI, deployment and certification evidence
