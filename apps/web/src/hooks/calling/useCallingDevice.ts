@@ -12,6 +12,12 @@
  * - The signaling WebSocket reconnects with bounded backoff; offers are recovered over HTTP
  *   (GET /v1/calling/invitations) on open, on every signal and every 10 s, so a missed push
  *   never hides a ringing call. A 4401 close (endpoint revoked) re-registers once.
+ * - Every new PENDING offer is acknowledged once (POST …/acknowledge, C1): the server marks
+ *   it RINGING, so the caller sees "Ringing" only when this device really rings.
+ * - A 401 on the signaling credential is never retried with the same token (C4):
+ *   SIGNALING_CREDENTIAL_EXPIRED mints a fresh credential; AUTHENTICATION_FAILED stops
+ *   polling and re-registers the endpoint at most once per window (then stays offline).
+ *   A 401 while minting (account session gone after the shared refresh) stops retrying.
  * - Logout revokes this browser's endpoint while still signed in (S-10,
  *   `lib/calling/signout.ts`); no tab registers it again until the next sign-in.
  */
@@ -21,6 +27,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createSignalingService, endpointsService } from "@/services/calling";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import { renewalDelay } from "@/lib/calling/runtime-guard";
+import { mayReregister, offersToAcknowledge, signalingFailure } from "@/lib/calling/signaling-auth";
 import { forgetEndpointId, isSigningOut, rememberEndpointId, type KeyValueStorage } from "@/lib/calling/endpoint-signout";
 import { callingKeys } from "./useCalls";
 import type { Endpoint, RecoveredInvitation } from "@/types/calling";
@@ -48,6 +55,10 @@ export function useCallingDevice(principalId?: string) {
   const service = useRef<ReturnType<typeof createSignalingService> | null>(null);
   const [generation, setGeneration] = useState(0);
   const registering = useRef(false);
+  /** When this browser last re-registered after a rejected credential (C4). */
+  const lastReregister = useRef<number | null>(null);
+  /** Offers already acknowledged by this browser (C1). */
+  const acknowledged = useRef<Set<string>>(new Set());
 
   const register = useCallback(async () => {
     if (!principalId || registering.current) return;
@@ -117,11 +128,51 @@ export function useCallingDevice(principalId?: string) {
     let renewal: ReturnType<typeof setTimeout> | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let attempts = 0;
+    /** The credential in use was refused (C4): never send it again. */
+    const credentialRefused = (e: unknown): boolean => {
+      const failure = signalingFailure(e);
+      if (failure === "transient" || stopped) return false;
+      service.current = null;
+      if (failure === "expired") {
+        // Lifetime ended (e.g. the device slept through renewal): a fresh credential now.
+        clearTimeout(renewal);
+        if (socket && socket.readyState !== WebSocket.CLOSED) socket.close();
+        else { setStatus("reconnecting"); retry(); }
+        return true;
+      }
+      // Authority gone (endpoint revoked elsewhere, principal or minting chain invalid).
+      stopped = true;
+      clearTimeout(reconnect); clearTimeout(renewal);
+      socket?.close();
+      setStatus("offline");
+      if (mayReregister(lastReregister.current, Date.now())) {
+        lastReregister.current = Date.now();
+        setEndpoint(null);
+      } else {
+        setError("Calling could not verify this browser. Sign in again or turn receiving calls back on.");
+      }
+      return true;
+    };
+    const acknowledge = (offers: RecoveredInvitation[]) => {
+      for (const id of offersToAcknowledge(offers, acknowledged.current)) {
+        acknowledged.current.add(id);
+        void service.current?.acknowledge(id).catch((e) => {
+          // A refused credential is handled once; an offer that just ended needs nothing.
+          if (!credentialRefused(e) && signalingFailure(e) === "transient") acknowledged.current.delete(id);
+        });
+      }
+    };
     const recover = async () => {
+      // No credential (refused, or being re-minted): nothing to poll with.
+      const current = service.current;
+      if (!current) return;
       try {
-        const result = await service.current?.invitations();
-        if (!stopped && result) setInvitations(result.data);
-      } catch (e) { if (!stopped) setError(callingErrorMessage(e)); }
+        const result = await current.invitations();
+        if (!stopped && result) {
+          setInvitations(result.data);
+          acknowledge(result.data);
+        }
+      } catch (e) { if (!stopped && !credentialRefused(e)) setError(callingErrorMessage(e)); }
     };
     const retry = () => { reconnect = setTimeout(() => void connect(), Math.min(30_000, 1000 * 2 ** attempts++)); };
     const connect = async () => {
@@ -164,7 +215,13 @@ export function useCallingDevice(principalId?: string) {
         renewal = setTimeout(() => socket?.close(), delay);
       } catch (e) {
         if (!stopped) {
-          setError(callingErrorMessage(e)); setStatus("reconnecting");
+          setError(callingErrorMessage(e));
+          // Minting refused after the shared session refresh: the account is signed out.
+          // Stop here; the normal sign-in flow takes over (never a retry loop).
+          if ((e as { response?: { status?: number } })?.response?.status === 401) {
+            stopped = true; setStatus("offline"); return;
+          }
+          setStatus("reconnecting");
           retry();
         }
       }
