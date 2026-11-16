@@ -140,18 +140,21 @@ class ClientHelpers(unittest.TestCase):
         journey.group_of('C3', lambda: journey.check('C3 ok', True))
         self.assertEqual(journey.checks, {'C1': 'FAIL', 'C3 ok': 'PASS'})
 
-    def test_screen_grant_sources_are_read_from_the_issued_media_credential(self):
-        import base64
-        claims = {'video': {'canPublishSources': ['MICROPHONE', 'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO']}}
-        token = 'h.' + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=') + '.s'
+    def test_screen_grant_is_read_from_the_effective_livekit_permission(self):
+        class Client:
+            def __init__(self, answers):
+                self.answers = list(answers)
+
+            def cmd(self, name, **_):
+                assert name == 'sources'
+                return {'ok': True, 'sources': self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]}
         journey = client.Journey({'runId': '1'})
-        person = {'endpointId': 'e1', 'signaling': 'sig'}
-        view = {'sessions': [{'endpointId': 'e1', 'state': 'ENDED', 'sessionId': 'old'},
-                             {'endpointId': 'e1', 'state': 'CONNECTED', 'sessionId': 's1'}]}
-        with patch.object(journey, 'view', return_value=view), \
-                patch.object(journey, 'signaling', return_value={'token': token}) as signaling:
-            self.assertEqual(journey.grant_sources('call', person), {'MICROPHONE', 'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO'})
-        self.assertIn('/sessions/s1/', signaling.call_args[0][2])
+        self.assertTrue(client.Journey.screen_granted(Client([[1, 2, 3, 4]])))
+        self.assertFalse(client.Journey.screen_granted(Client([[1, 2, 3]])))
+        # The grant arrives after commit: waited for, then observed.
+        with patch.object(client.time, 'sleep'):
+            self.assertTrue(journey.await_screen(Client([[2], [2], [2, 3, 4]]), True))
+            self.assertFalse(journey.await_screen(Client([[2, 3, 4], [2]]), False))
 
     def test_c7_without_a_delivered_offer_fails_and_stops(self):
         journey = client.Journey({'runId': '1'})
