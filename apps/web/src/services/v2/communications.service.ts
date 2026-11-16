@@ -85,7 +85,15 @@ const call = communicationsRequest;
 export type NotificationPreferences = { version: number; directMessages: boolean; groupMessages: boolean; incomingCalls: boolean; missedCalls: boolean; contactRequests: boolean; groupInvitations: boolean; meetingInvitations: boolean };
 export type ContactList = { listId: string; name: string; position: number | null; memberCount: number; version: number; updatedAt: string };
 export type SavedMessage = { savedId: string; conversationId: string; messageId: string; messageSequence: number; savedAt: string; available: boolean; unavailableReason: string | null };
-export type ChatMediaItem = { attachmentId: string; messageId: string; state: string; sizeBytes: number | null; mediaClass: string; createdAt: string };
+/** Hub 1.4.0: fileName / mediaType / kind only for MANAGED files (null for end-to-end encrypted ones); `download` / `thumbnail` are relay paths of the access-checked grant operations, never URLs. */
+type GrantRef = { method: "POST"; path: string };
+export type ChatMediaItem = {
+  attachmentId: string; messageId: string; state: string; sizeBytes: number | null; mediaClass: string; createdAt: string;
+  securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null; kind?: string | null; fileName?: string | null; mediaType?: string | null;
+  metadataLocation?: "SERVER" | "ENCRYPTED_DESCRIPTOR" | null; download?: GrantRef | null; thumbnail?: (GrantRef & { mediaType: "image/png" }) | null;
+};
+/** Hub 1.4.0: title / avatarRef for MANAGED groups both people currently belong to (null for end-to-end encrypted groups). */
+export type CommonGroup = { conversationId: string; securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null; title?: string | null; avatarRef?: string | null; memberCount?: number | null };
 export type ChatPreferences = { conversationId: string; notifications: "ALL" | "MENTIONS" | "MUTED"; mutedUntil: string | null; effectiveNotifications: string; mediaAutoDownload: "ALWAYS" | "WIFI" | "NEVER"; version: number };
 
 export const communicationsService = {
@@ -148,8 +156,8 @@ export const communicationsService = {
   conversationPreferences: (conversationId: string) => call<ChatPreferences>("GET", `/conversations/${seg(conversationId)}/preferences`),
   setConversationPreferences: (conversationId: string, body: { expectedVersion: number; notifications: "ALL" | "MENTIONS" | "MUTED"; mutedUntil: string | null; mediaAutoDownload: "ALWAYS" | "WIFI" | "NEVER" }) =>
     call<ChatPreferences>("PUT", `/conversations/${seg(conversationId)}/preferences`, body),
-  sharedGroups: (conversationId: string) => call<{ groups: { conversationId: string }[]; available?: boolean }>("GET", `/conversations/${seg(conversationId)}/shared-groups`),
-  commonGroups: (contactId: string) => call<{ groups: { conversationId: string }[] }>("GET", `/contacts/${seg(contactId)}/common-groups`),
+  sharedGroups: (conversationId: string) => call<{ groups: CommonGroup[]; available?: boolean }>("GET", `/conversations/${seg(conversationId)}/shared-groups`),
+  commonGroups: (contactId: string) => call<{ groups: CommonGroup[] }>("GET", `/contacts/${seg(contactId)}/common-groups`),
 
   // ---- contacts (connections)
   contacts: (cursor?: string | null) => call<Page<Contact>>("GET", `/contacts${q({ limit: 100, cursor })}`),
