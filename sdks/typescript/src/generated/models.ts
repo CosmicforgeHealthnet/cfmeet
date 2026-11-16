@@ -14,7 +14,7 @@ export namespace Calling {
     outcome: "ACCEPTED";
     callAnswered: boolean;
   };
-  /** Body of POST /v1/calls/{call_id}/acknowledge: the application backend confirms that its endpoint endpointId received ring offer invitationId (e.g. from a push delivery receipt). */
+  /** Body of POST /v1/calls/{call_id}/acknowledge: the application backend confirms that its endpoint endpointId received ring offer invitationId (e.g. from a push delivery receipt). Referenced by the operation only (not a root alternative: it is a strict subset of InvitationCommandRequest's fields, so a malformed accept body must never validate as an acknowledgement). */
   export type AcknowledgeRequest = {
     invitationId: Uuid;
     endpointId: Uuid;
