@@ -33,6 +33,10 @@ path = "src/bin/messaging-reconcile-references.rs"
 
 [dependencies]
 cf-communications-policy = { path = "../../packages/communications-policy" }
+# Notification Service producer client (roadmap N7): builds and validates the
+# cfmeet.notifications.event envelopes of Messaging's publications. Never the `open`
+# feature (producers seal, never open).
+cf-notification-client = { path = "../../packages/notification-client" }
 messaging-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }

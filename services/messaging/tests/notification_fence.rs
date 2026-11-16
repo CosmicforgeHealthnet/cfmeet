@@ -453,6 +453,8 @@ async fn jobs_of(h: &Harness, event: &OutboxEvent) -> i64 {
 /// M-11: the legacy push path writes jobs without a decision only in LEGACY_ONLY (or
 /// without a state row); otherwise the guard trigger requires an OLD decision for the
 /// outbox event and refuses with ROUTING_DECISION_REQUIRED, writing nothing.
+/// The real fan-out records the decision itself (N7b), in the transaction that writes
+/// the jobs.
 #[tokio::test]
 async fn m11_push_jobs_require_an_old_decision_outside_legacy_only() {
     let Some(h) = Harness::new().await else {
@@ -503,14 +505,10 @@ async fn m11_push_jobs_require_an_old_decision_outside_legacy_only() {
     // The trigger computes the same key as the outbox envelope id.
     assert_eq!(push_key(e1.id), e1.event_id());
 
-    // FENCED_OLD without a decision: refused, nothing written (also on retry).
+    // FENCED_OLD: a writer without a decision (a pre-fence binary's raw insert) is
+    // refused, and the database error itself names the rule; nothing is written.
     set_mode(&h, "FENCED_OLD", 0).await;
     let e2 = send("two").await;
-    for _ in 0..2 {
-        assert!(push::fanout_jobs(&h.state, &e2).await.is_err());
-        assert_eq!(jobs_of(&h, &e2).await, 0);
-    }
-    // The database error itself names the rule (a pre-fence binary's raw insert).
     let copy = |event: Uuid| {
         format!(
             "INSERT INTO messaging_push_jobs (id, event_id, conversation_id, environment_id, device_id, registration_id, \
@@ -521,48 +519,59 @@ async fn m11_push_jobs_require_an_old_decision_outside_legacy_only() {
             e1.id
         )
     };
-    let refused = h.sql(&copy(e2.id)).await;
-    assert!(
-        refused
-            .as_ref()
-            .is_err_and(|e| e.contains("ROUTING_DECISION_REQUIRED")),
-        "{refused:?}"
-    );
+    for _ in 0..2 {
+        let refused = h.sql(&copy(e2.id)).await;
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|e| e.contains("ROUTING_DECISION_REQUIRED")),
+            "{refused:?}"
+        );
+        assert_eq!(jobs_of(&h, &e2).await, 0);
+    }
+    // The real fan-out routes the event first (OLD, one decision for every device).
+    assert_eq!(push::fanout_jobs(&h.state, &e2).await.unwrap(), 2);
+    assert_eq!(decisions(&h, &push_key(e2.id)).await, 1);
 
-    // A NEW decision does not license the legacy path either.
+    // A NEW decision does not license the legacy path: the fan-out writes no jobs and
+    // a raw insert is refused.
     set_mode(&h, "FENCED_NEW", 100).await;
-    let new = route(&h, &push_key(e2.id), MESSAGE_WAKEUPS).await.unwrap();
-    assert_eq!(new.route, Route::New);
-    assert!(push::fanout_jobs(&h.state, &e2).await.is_err());
-    assert_eq!(jobs_of(&h, &e2).await, 0);
+    let e3 = send("three").await;
+    assert_eq!(push::fanout_jobs(&h.state, &e3).await.unwrap(), 0);
+    let new = route(&h, &push_key(e3.id), MESSAGE_WAKEUPS).await.unwrap();
+    assert_eq!((new.route, new.created), (Route::New, false));
+    assert!(h.sql(&copy(e3.id)).await.is_err());
+    assert_eq!(jobs_of(&h, &e3).await, 0);
 
     // An OLD decision for the event covers every device fan-out of it.
     set_mode(&h, "FENCED_NEW", 0).await;
-    let e3 = send("three").await;
-    let old = route(&h, &push_key(e3.id), MESSAGE_WAKEUPS).await.unwrap();
-    assert_eq!(old.route, Route::Old);
-    assert_eq!(push::fanout_jobs(&h.state, &e3).await.unwrap(), 2);
-    // Idempotent re-fan-out: nothing twice.
-    assert_eq!(push::fanout_jobs(&h.state, &e3).await.unwrap(), 0);
-    assert_eq!(jobs_of(&h, &e3).await, 2);
-
-    // SHADOW is not LEGACY_ONLY either.
-    set_mode(&h, "SHADOW", 0).await;
     let e4 = send("four").await;
-    assert!(push::fanout_jobs(&h.state, &e4).await.is_err());
-    assert_eq!(jobs_of(&h, &e4).await, 0);
+    let old = route(&h, &push_key(e4.id), MESSAGE_WAKEUPS).await.unwrap();
+    assert_eq!(old.route, Route::Old);
+    assert_eq!(push::fanout_jobs(&h.state, &e4).await.unwrap(), 2);
+    // Idempotent re-fan-out: nothing twice, the decision is followed.
+    assert_eq!(push::fanout_jobs(&h.state, &e4).await.unwrap(), 0);
+    assert_eq!(jobs_of(&h, &e4).await, 2);
+    assert_eq!(decisions(&h, &push_key(e4.id)).await, 1);
+
+    // SHADOW is not LEGACY_ONLY either: raw inserts are refused.
+    set_mode(&h, "SHADOW", 0).await;
+    let e5 = send("five").await;
+    assert!(h.sql(&copy(e5.id)).await.is_err());
+    assert_eq!(jobs_of(&h, &e5).await, 0);
 
     // Back to LEGACY_ONLY: allowed again without a decision.
     set_mode(&h, "LEGACY_ONLY", 0).await;
-    assert_eq!(push::fanout_jobs(&h.state, &e4).await.unwrap(), 2);
+    assert_eq!(push::fanout_jobs(&h.state, &e5).await.unwrap(), 2);
+    assert_eq!(decisions(&h, &push_key(e5.id)).await, 0);
 
     // No state row for the category: pre-fence behaviour (allowed).
     h.sql("DELETE FROM messaging_notification_routing_state WHERE category = 'MESSAGE_WAKEUPS'")
         .await
         .unwrap();
-    let e5 = send("five").await;
-    assert_eq!(push::fanout_jobs(&h.state, &e5).await.unwrap(), 2);
-    assert_eq!(decisions(&h, &push_key(e5.id)).await, 0);
+    let e6 = send("six").await;
+    assert_eq!(push::fanout_jobs(&h.state, &e6).await.unwrap(), 2);
+    assert_eq!(decisions(&h, &push_key(e6.id)).await, 0);
 }
 
 /// Readiness reports `routingProtocol: 1` once the fence history is applied, and omits

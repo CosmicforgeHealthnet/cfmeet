@@ -371,10 +371,33 @@ pub async fn authorize_wakeups<C: sea_orm::ConnectionTrait>(
     Ok(Some(decision))
 }
 
+/// The legacy push job insert of one event (idempotent per event and device).
+const INSERT_JOBS: &str = "INSERT INTO messaging_push_jobs (id, event_id, conversation_id, environment_id, device_id, registration_id, payload, \
+       next_attempt_at, expires_at, created_at) \
+     SELECT gen_random_uuid(), $1, $2, m.environment_id, r.device_id, r.id, \
+            jsonb_build_object('v', 1, 'type', 'message', 'conversationId', $2::text, 'eventSequence', $3::bigint, \
+                               'sequence', $4::bigint), $5, $6, $5 \
+       FROM messaging_conversation_members m \
+       JOIN messaging_push_registrations r ON r.environment_id = m.environment_id AND r.principal_id = m.principal_id AND r.enabled \
+       JOIN messaging_devices d ON d.id = r.device_id AND d.status = 'ACTIVE' \
+      WHERE m.conversation_id = $2 AND m.state = 'ACTIVE' AND m.principal_id = ANY($7) \
+     ON CONFLICT (event_id, device_id) DO NOTHING";
+
 /// Creates the push jobs of one committed message event (idempotent): one per enabled
 /// registration of an ACTIVE device of each [`WakeupAuthorization::candidates`]
 /// principal. Delivery is authorized again at dispatch.
+///
+/// Routing fence (Document 4 §9.3; [`crate::notification_fence`]): the mode of
+/// `MESSAGE_WAKEUPS` is read first. `LEGACY_ONLY` (or no fence): the jobs are written
+/// exactly as before, without a decision. Otherwise ONE transaction records the event's
+/// routing decision (key [`fence::push_key`], sticky) and writes what it routes to:
+/// * `OLD` — the push jobs; in `SHADOW` a newly made decision also enqueues one shadow
+///   publication ([`crate::notification_publications`]) the service never delivers;
+/// * `NEW` (`FENCED_NEW`, inside the canary) — no push jobs, one publication.
 pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
+    use crate::notification_fence::{self as fence, Mode, Route};
+    use sea_orm::TransactionTrait;
+
     let (Some(conversation), Some(cursor)) =
         (event.conversation_id, event.conversation_event_sequence)
     else {
@@ -392,29 +415,61 @@ pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let now = state.now();
-    Ok(db::exec(
-        &state.db,
-        "INSERT INTO messaging_push_jobs (id, event_id, conversation_id, environment_id, device_id, registration_id, payload, \
-           next_attempt_at, expires_at, created_at) \
-         SELECT gen_random_uuid(), $1, $2, m.environment_id, r.device_id, r.id, \
-                jsonb_build_object('v', 1, 'type', 'message', 'conversationId', $2::text, 'eventSequence', $3::bigint, \
-                                   'sequence', $4::bigint), $5, $6, $5 \
-           FROM messaging_conversation_members m \
-           JOIN messaging_push_registrations r ON r.environment_id = m.environment_id AND r.principal_id = m.principal_id AND r.enabled \
-           JOIN messaging_devices d ON d.id = r.device_id AND d.status = 'ACTIVE' \
-          WHERE m.conversation_id = $2 AND m.state = 'ACTIVE' AND m.principal_id = ANY($7) \
-         ON CONFLICT (event_id, device_id) DO NOTHING",
-        vec![
-            event.id.into(),
-            conversation.into(),
-            cursor.into(),
-            sequence.into(),
-            now.into(),
-            (now + chrono::Duration::hours(24)).into(),
-            decision.candidates.into(),
-        ],
+    let expires_at = now + chrono::Duration::hours(24);
+    let values = vec![
+        event.id.into(),
+        conversation.into(),
+        cursor.into(),
+        sequence.into(),
+        now.into(),
+        expires_at.into(),
+        decision.candidates.into(),
+    ];
+    match fence::current_mode(&state.db, fence::MESSAGE_WAKEUPS).await? {
+        None | Some(Mode::LegacyOnly) => return Ok(db::exec(&state.db, INSERT_JOBS, values).await?),
+        Some(_) => {}
+    }
+    let txn = state.db.begin().await?;
+    let route = fence::route_message(
+        &txn,
+        &fence::push_key(event.id),
+        fence::MESSAGE_WAKEUPS,
+        expires_at,
     )
-    .await?)
+    .await?;
+    let jobs = match route.route {
+        Route::Old => {
+            let jobs = db::exec(&txn, INSERT_JOBS, values).await?;
+            if route.created && route.mode == Some(Mode::Shadow) {
+                crate::notification_publications::enqueue(
+                    &txn,
+                    event,
+                    conversation,
+                    cursor,
+                    &route,
+                    true,
+                    now,
+                )
+                .await?;
+            }
+            jobs
+        }
+        Route::New => {
+            crate::notification_publications::enqueue(
+                &txn,
+                event,
+                conversation,
+                cursor,
+                &route,
+                false,
+                now,
+            )
+            .await?;
+            0
+        }
+    };
+    txn.commit().await?;
+    Ok(jobs)
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

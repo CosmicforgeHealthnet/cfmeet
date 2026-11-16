@@ -185,6 +185,7 @@ pub async fn communications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait
 }
 
 mod notification_fence;
+mod notification_publications;
 
 /// Name of the table recording the routing fence history ([`NotificationFenceMigrator`]).
 pub const NOTIFICATION_FENCE_MIGRATION_TABLE: &str =
@@ -198,7 +199,11 @@ pub struct NotificationFenceMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for NotificationFenceMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(notification_fence::Migration)]
+        vec![
+            Box::new(notification_fence::Migration),
+            // N7b: Messaging's outbox of publications to the Notification Service.
+            Box::new(notification_publications::Migration),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new(NOTIFICATION_FENCE_MIGRATION_TABLE).into_iden()

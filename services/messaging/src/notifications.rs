@@ -150,7 +150,7 @@ pub async fn authorize(state: &AppState, request: AuthorizeWakeups) -> Result<Va
 /// authority, Meeting). Platform Access is asked inside the event's own authenticated
 /// scope (its authority references, as for delayed policy checks). Anything else: `null`.
 /// Platform Access unavailable: 503 (a missing reference would misroute the wake-up).
-async fn account_refs(
+pub(crate) async fn account_refs(
     state: &AppState,
     decision: &WakeupAuthorization,
 ) -> Result<HashMap<Uuid, String>, Error> {
