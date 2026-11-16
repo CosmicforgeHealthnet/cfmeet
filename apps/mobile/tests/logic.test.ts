@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolveApiUrl, insecureApiUrlReason, toV2BaseUrl, parseAbsoluteUrl } from "../lib/config/api-url.ts";
-import { decodeApiError, classify } from "../lib/api/errors.ts";
+import {
+  decodeApiError,
+  classify,
+  ApiRequestError,
+  fieldErrorsOf,
+  stripFieldPrefixes,
+  validationIssuesOf,
+} from "../lib/api/errors.ts";
 import { classifyAccountStatus, routeAfterSignIn } from "../lib/auth/account-status.ts";
 import { zonedToUtc, toIsoUtc, wallTimeAt, scheduleProblem } from "../lib/time/zoned.ts";
 import { effectiveRole, meetingAllows, mayTarget } from "../lib/meeting/authority.ts";
@@ -68,6 +75,40 @@ test("401 without a bearer token is 'auth required', with one 'session expired',
   assert.equal(decodeApiError(axiosError(401, { error: { code: "AUTHENTICATION_REQUIRED" } }, "/x", false)).kind, "auth_required");
   assert.equal(decodeApiError(axiosError(401, { error: { code: "AUTHENTICATION_REQUIRED" } }, "/x", true)).kind, "auth_expired");
   assert.equal(decodeApiError(axiosError(401, { error: { code: "UNAUTHORIZED" } }, "/auth/login", false)).kind, "invalid_credentials");
+});
+
+test("F1: VALIDATION_ERROR details become field errors and a prefix-free message", () => {
+  const e = decodeApiError(
+    axiosError(400, {
+      success: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "confirm_password: Passwords do not match\npassword: Password must contain a digit",
+        details: [
+          { field: "confirm_password", code: "passwords_mismatch", message: "Passwords do not match" },
+          { field: "password", code: "password_strength", message: "Password must contain a digit" },
+          { field: null, code: "whole", message: "Not allowed" },
+          { field: "password", code: "length" }, // no message: ignored
+        ],
+      },
+    }, "/auth/register", false)
+  );
+  assert.equal(e.kind, "validation");
+  assert.equal(e.message, "Passwords do not match Password must contain a digit Not allowed");
+  assert.equal(validationIssuesOf(e).length, 3);
+  const mapped = fieldErrorsOf(e, { password: "password", confirm_password: "confirmPassword" });
+  assert.deepEqual(mapped.fields, { confirmPassword: "Passwords do not match", password: "Password must contain a digit" });
+  assert.deepEqual(mapped.rest, ["Not allowed"]);
+  assert.deepEqual(fieldErrorsOf(new ApiRequestError(e), { password: "pw" }).fields, { pw: "Password must contain a digit" });
+});
+
+test("F1: an older VALIDATION_ERROR without details loses its field prefixes", () => {
+  const e = decodeApiError(axiosError(400, { error: { code: "VALIDATION_ERROR", message: "__all__: Password must contain a digit" } }));
+  assert.equal(e.message, "Password must contain a digit");
+  assert.deepEqual(validationIssuesOf(e), []);
+  assert.equal(stripFieldPrefixes("new_password: Too short\nemail: Invalid"), "Too short Invalid");
+  // Other codes keep their message untouched.
+  assert.equal(decodeApiError(axiosError(409, { error: { code: "CONFLICT", message: "a: b" } })).message, "a: b");
 });
 
 test("verification-required and network errors are classified", () => {

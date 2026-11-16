@@ -72,6 +72,11 @@ jobs:
       - name: Account session tests
         run: node --experimental-strip-types --test tests/account-session.test.mjs
 
+      # F1: structured 400 VALIDATION_ERROR details mapped onto form fields (sign-up,
+      # password reset, password change), with the message-only fallback.
+      - name: Form validation error mapping tests
+        run: node --experimental-strip-types --test tests/validation-errors.test.mjs
+
       # Section 17 account + organization administration: capability gating (default deny),
       # workspace context, stable error envelopes, optimistic-concurrency bodies.
       - name: Account and organization administration tests

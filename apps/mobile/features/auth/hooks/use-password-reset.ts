@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { authApi } from "../api/auth.api";
 import { getApiError } from "@/lib/api/client";
+import { ApiRequestError } from "@/lib/api/errors";
 import type {
   ForgotPasswordRequest,
   VerifyResetTokenRequest,
@@ -40,8 +41,8 @@ export function useResetPassword() {
       try {
         return await authApi.resetPassword(data);
       } catch (error) {
-        const apiError = getApiError(error);
-        throw new Error(apiError.message);
+        // Keeps the decoded failure (incl. VALIDATION_ERROR details) for field errors.
+        throw new ApiRequestError(getApiError(error));
       }
     },
     onSuccess: () => {
