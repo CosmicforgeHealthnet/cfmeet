@@ -17,7 +17,7 @@ Statuses are kept separate, as the mission requires:
 
 | Section | Engineering | Production | Accepted | Evidence |
 |---|---|---|---|---|
-| **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **blocked: owner credentials** — run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) stopped at `CFMEET_RESEND_API_KEY is missing`, nothing changed | — | §3 |
+| **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **SUSPENDED by owner decision (2026-11-16)**: no activation, no acceptance run; run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) had stopped at the credential check, nothing changed | — | §3 |
 | **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | deployed dark (release 43819010350, verification PASS); certify 43828926604 **NOT_CERTIFIED** (readiness), fix in PR #80, re-release and re-certify in §4.2 | 24 h dark observation restarts at the certified release | §2.1, §4 |
 | **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
@@ -119,7 +119,13 @@ Inbox U1–U5 (own items only, 404 for foreign ids, cursor pagination, grouping,
 | `activate-resend-email` | run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) on `4f9e4f2`: gate PASS, activation base PASS (no image input changed since `163be40`), stopped at the credential check; no VPS change |
 | E1 | **not completed** (`PENDING_OWNER_EMAIL_PROVIDER_ACTIVATION`) |
 
-Owner action (docs/operations/resend-email-owner-handoff.md §4–§6): create a sending-only key for `cfmeet.com`, add the webhook endpoint `https://api.cfmeet.com/api/v1/email/provider-events/resend` with the six events, store both secrets and the acceptance-recipient variable in the `production` environment. Then: `activate-resend-email` on the main head, `email-acceptance confirm=otp`, and record E1.
+**Owner decision (2026-11-16): Resend activation is suspended.**
+
+- Credentials will **not** be stored in GitHub. When the work resumes, the owner will place them directly on the VPS as protected secret files.
+- `activate-resend-email` and `email-acceptance` are not run until then.
+- Engineering consequence when resuming: `activate-resend-email` currently reads the key and webhook secret from GitHub `production` secrets. It must first be changed to require pre-placed root-owned 0400 files on the VPS instead, and refuse to proceed otherwise. That change is not made yet; it waits for the resume decision.
+
+Until E1, every email `ACTIVE` routing change stays refused by the N14 gate. The existing Meeting email path stays the only sender.
 
 ---
 
