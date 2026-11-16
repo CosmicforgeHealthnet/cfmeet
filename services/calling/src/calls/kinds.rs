@@ -256,6 +256,10 @@ text_enum!(
         Resume = "RESUME",
         Transfer = "TRANSFER",
         RemoveSession = "REMOVE_SESSION",
+        Upgrade = "UPGRADE",
+        StartScreenShare = "START_SCREEN_SHARE",
+        StopScreenShare = "STOP_SCREEN_SHARE",
+        AddParticipants = "ADD_PARTICIPANTS",
     }
 );
 

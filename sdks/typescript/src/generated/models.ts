@@ -35,6 +35,25 @@ export namespace Calling {
     expectedVersion: number;
     versionNumber: number;
   };
+  /** Body of POST /v1/calls/{call_id}/participants (C7): the active participant who invites, the principals to invite (resolved in the credential's scope, like call creation) and the expected Call version. */
+  export type AddParticipantsRequest = {
+    invitingParticipantId: Uuid;
+    targetPrincipalIds: Array<Uuid>;
+    /** The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION. */
+    expectedVersion: number;
+  };
+  /** Result of inviting participants: the Call (state and version unchanged), the inviter and every new RECIPIENT participant with the number of PENDING ring offers issued to its eligible endpoints. */
+  export type AddParticipantsResult = {
+    call: CommonCallSummary;
+    operation: "ADD_PARTICIPANTS";
+    invitingParticipantId: Uuid;
+    participants: Array<{
+        participantId: Uuid;
+        principalId: Uuid;
+        role: "RECIPIENT";
+        liveInvitationCount: number;
+      }>;
+  };
   /** Organization-level administrative capabilities (second key after the credential's enterprise scopes). MANAGE_PUBLIC_FORWARDING and MANAGE_RECORDING are granted by a CF Meet operator only. */
   export type AdminCapability = "MANAGE_ROUTING" | "MANAGE_PUBLIC_FORWARDING" | "MANAGE_VOICEMAIL" | "MANAGE_RECORDING";
   /** ACTIVE agents receive offers; PAUSED agents stay members but receive none. */
@@ -65,7 +84,7 @@ export namespace Calling {
     nextCursor: string | null;
   };
   export type AvailableAction = {
-    action: "ACCEPT" | "DECLINE" | "CANCEL" | "END" | "HOLD" | "RESUME" | "TRANSFER" | "ISSUE_MEDIA_CREDENTIAL";
+    action: "ACCEPT" | "DECLINE" | "CANCEL" | "END" | "HOLD" | "RESUME" | "TRANSFER" | "ISSUE_MEDIA_CREDENTIAL" | "UPGRADE" | "START_SCREEN_SHARE" | "STOP_SCREEN_SHARE" | "ADD_PARTICIPANTS";
     available: boolean;
     /** Why the action is unavailable: the credential lacks calls.write, the Call's state does not allow it, or the configured media provider cannot enforce it. */
     reason?: "INSUFFICIENT_SCOPE" | "STATE" | "CAPABILITY_UNAVAILABLE";
@@ -135,6 +154,8 @@ export namespace Calling {
     sessions: Array<CallSession>;
     invitations: Array<CallInvitation>;
     transfers: Array<CallTransfer>;
+    /** C6: who is presenting a screen now (null when nobody is). */
+    screenShare: ScreenShare | null;
     /** Whether this caller may read the call's recordings and recording authorizations (GET /v1/calls/{call_id}/recordings, /recording-authorizations): the credential holds enterprise.recording.read. Request recordings only when true; otherwise those routes answer 403. 1.17.0. */
     canViewRecordings: boolean;
   }) & (CallCore);
@@ -241,6 +262,8 @@ export namespace Calling {
     canPublishVideo: boolean;
     canPublishData: boolean;
     canSubscribe: boolean;
+    /** The grant includes the screen sources (screen video and screen audio). True only for the Call's current presenter (POST /v1/calls/{call_id}/screen-share) while the Call is not held. */
+    canShareScreen: boolean;
   };
   /** A logical participant. displayName is presentation metadata only and never identifies anyone. connectedDurationMs is the union of the participant's session connection intervals (concurrent devices are not double counted). */
   export type CallParticipant = {
@@ -375,10 +398,10 @@ export namespace Calling {
   export type ConsentParticipants = "NONE" | "ALL_PARTICIPANTS" | "OTHER_PARTICIPANTS";
   /** Opaque, server-generated ContactReference (UUID) of a protected contact, scoped to one tenant / application / environment. It never encodes a number, country, provider or user; knowing it grants nothing. */
   export type ContactReference = Uuid;
-  /** Result of cancel, end, hold and resume: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. */
+  /** Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged. */
   export type ControlResult = {
     call: CommonCallSummary;
-    operation: "CANCEL" | "END" | "HOLD" | "RESUME";
+    operation: "CANCEL" | "END" | "HOLD" | "RESUME" | "UPGRADE";
   };
   /** ISO 3166-1 alpha-2 country code. */
   export type CountryCode = string;
@@ -1238,6 +1261,21 @@ export namespace Calling {
   export type SafeEventData = { [key: string]: boolean | number | SafeText | Array<SafeText> };
   /** Bounded text without control characters that never looks like a telephone number (+<digit>) or a tel: / sip: URI. */
   export type SafeText = string;
+  /** The Call's current presenter (C6). */
+  export type ScreenShare = {
+    participantId: Uuid;
+    startedAt: string;
+  };
+  /** Body of POST /v1/calls/{call_id}/screen-share and POST /v1/calls/{call_id}/screen-share/stop (C6): the participant that starts or stops presenting. The server decides everything else (policy, one presenter per Call, the provider grant). */
+  export type ScreenShareRequest = {
+    participantId: Uuid;
+  };
+  /** Result of starting or stopping a screen share: the Call and its presenter after the command (null once nobody presents). */
+  export type ScreenShareResult = {
+    call: CommonCallSummary;
+    operation: "START_SCREEN_SHARE" | "STOP_SCREEN_SHARE";
+    screenShare: ScreenShare | null;
+  };
   /** Result of removing one session: its media access is revoked and the provider connection removed (or queued for enforcement). */
   export type SessionRemovalResult = {
     call: CommonCallSummary;
@@ -1397,6 +1435,13 @@ export namespace Calling {
     eventTypes?: Array<WebhookEventType>;
     description?: string | null;
     status?: "ACTIVE" | "DISABLED";
+  };
+  /** Body of POST /v1/calls/{call_id}/upgrade (C5): the kind to move to (VIDEO is the only target; a Call never goes back to VOICE) and the expected Call version. No permission can be sent: every active participant's video publish permission is derived by the server, and no camera is turned on. */
+  export type UpgradeRequest = {
+    /** The target kind. Only VIDEO is accepted (400 for VOICE). */
+    kind: "VIDEO";
+    /** The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION. */
+    expectedVersion: number;
   };
   /** Cost EVIDENCE of a public-network leg, not a price or a charge. KNOWN: reported by the network provider. ESTIMATED: an estimate the provider did not confirm. UNKNOWN: no figure exists — it carries no amount (never zero). */
   export type UsageCost = {
@@ -1589,6 +1634,11 @@ export namespace Calling {
     activateIvrVersion: {
       params: { path: { ivr_flow_id: string }; body: ActivateIvrVersionRequest };
       response: IvrFlow;
+    };
+    /** POST /v1/calls/{call_id}/participants — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    addCallParticipants: {
+      params: { path: { call_id: string }; body: AddParticipantsRequest; idempotencyKey?: string };
+      response: AddParticipantsResult;
     };
     /** POST /v1/enterprise/sip-devices — scope enterprise.config.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     bindSipDevice: {
@@ -2150,10 +2200,20 @@ export namespace Calling {
       params: { path: { call_id: string }; body: RecordingActorRequest };
       response: CallRecordingEnvelope;
     };
+    /** POST /v1/calls/{call_id}/screen-share — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    startScreenShare: {
+      params: { path: { call_id: string }; body: ScreenShareRequest; idempotencyKey?: string };
+      response: ScreenShareResult;
+    };
     /** POST /v1/calls/{call_id}/recordings/{recording_id}/stop — scope enterprise.recording.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     stopRecording: {
       params: { path: { call_id: string; recording_id: string }; body: RecordingActorRequest };
       response: CallRecordingEnvelope;
+    };
+    /** POST /v1/calls/{call_id}/screen-share/stop — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    stopScreenShare: {
+      params: { path: { call_id: string }; body: ScreenShareRequest; idempotencyKey?: string };
+      response: ScreenShareResult;
     };
     /** POST /v1/calls/{call_id}/transfer — scope calls.write; auth PLATFORM_CREDENTIAL; retry NEVER; paid telecom */
     transferCall: {
@@ -2204,6 +2264,11 @@ export namespace Calling {
     updateWebhook: {
       params: { path: { webhook_id: string }; body: UpdateWebhookRequest };
       response: Webhook;
+    };
+    /** POST /v1/calls/{call_id}/upgrade — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    upgradeCall: {
+      params: { path: { call_id: string }; body: UpgradeRequest; idempotencyKey?: string };
+      response: ControlResult;
     };
   }
 }

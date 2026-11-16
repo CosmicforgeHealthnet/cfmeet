@@ -209,6 +209,37 @@ test("any active party may end, hold and resume; only the caller cancels (CAL-00
   assert.equal(JSON.parse(transfer.sent.at(-1).init.body).transferringParticipantId, "participant");
 });
 
+test("upgrade, screen share and invitations act as the user's own active participant (C5-C7)", async () => {
+  const f = fixture({ initiator: "other-party" });
+  assert.equal((await f.request(`v1/calls/${callId}/upgrade`, "POST", { kind: "VIDEO", expectedVersion: 4, canPublishVideo: true }, { "Idempotency-Key": "u-1" })).status, 200);
+  let sent = f.sent.at(-1);
+  assert.ok(sent.url.endsWith(`/v1/calls/${callId}/upgrade`));
+  assert.deepEqual(JSON.parse(sent.init.body), { kind: "VIDEO", expectedVersion: 4 }, "no client-chosen permission is forwarded");
+  for (const path of ["screen-share", "screen-share/stop"]) {
+    assert.equal((await f.request(`v1/calls/${callId}/${path}`, "POST", { participantId: "peer" })).status, 200, path);
+    sent = f.sent.at(-1);
+    assert.ok(sent.url.endsWith(`/v1/calls/${callId}/${path}`));
+    assert.deepEqual(JSON.parse(sent.init.body), { participantId: "participant" }, "always the user's own participant");
+  }
+  const target = "66666666-6666-4666-8666-666666666666";
+  assert.equal((await f.request(`v1/calls/${callId}/participants`, "POST", { invitingParticipantId: "peer", targetPrincipalIds: [target], expectedVersion: 4 })).status, 200);
+  assert.deepEqual(JSON.parse(f.sent.at(-1).init.body), { invitingParticipantId: "participant", targetPrincipalIds: [target], expectedVersion: 4 });
+  assert.equal((await f.request(`v1/calls/${callId}/participants`, "POST", { targetPrincipalIds: ["+15551234567"], expectedVersion: 4 })).status, 400);
+  assert.equal((await f.request(`v1/calls/${callId}/participants`, "POST", { targetPrincipalIds: [], expectedVersion: 4 })).status, 400);
+  assert.equal((await f.request(`v1/calls/${callId}/screen-share/other`, "POST", {})).status, 404);
+  // A stranger, or a party that already left, cannot do any of it.
+  const stranger = fixture({ own: false });
+  for (const [path, body] of [["upgrade", { kind: "VIDEO", expectedVersion: 4 }], ["screen-share", {}], ["participants", { targetPrincipalIds: [target], expectedVersion: 4 }]]) {
+    assert.equal((await stranger.request(`v1/calls/${callId}/${path}`, "POST", body)).status, 404, path);
+  }
+  const left = fixture({ upstream: (url) => url.endsWith(`/calls/${callId}`) ? Response.json({ callId, state: "CONNECTED", initiatorPrincipalId: "other-party",
+    participants: [{ participantId: "participant", principalId, endedAt: "2026-10-23T12:00:00Z" }, { participantId: "a", principalId: "x", endedAt: null }, { participantId: "b", principalId: "y", endedAt: null }],
+    sessions: [], invitations: [] }) : null });
+  for (const [path, body] of [["upgrade", { kind: "VIDEO", expectedVersion: 4 }], ["screen-share", {}], ["participants", { targetPrincipalIds: [target], expectedVersion: 4 }]]) {
+    assert.equal((await left.request(`v1/calls/${callId}/${path}`, "POST", body)).status, 404, path);
+  }
+});
+
 test("a party that left a live group call can no longer control it", async () => {
   const left = fixture({ upstream: (url) => url.endsWith(`/calls/${callId}`) ? Response.json({ callId, state: "CONNECTED", initiatorPrincipalId: "other-party",
     participants: [{ participantId: "participant", principalId, endedAt: "2026-10-23T12:00:00Z" }, { participantId: "a", principalId: "x", endedAt: null }, { participantId: "b", principalId: "y", endedAt: null }],

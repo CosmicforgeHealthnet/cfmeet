@@ -111,6 +111,28 @@ export interface Call extends CallCore {
   sessions: CallSession[];
   invitations: CallInvitation[];
   transfers: CallTransfer[];
+  /** C6: who is presenting a screen now (null when nobody is). */
+  screenShare?: ScreenShare | null;
+}
+
+/** C6: the Call's current presenter. */
+export interface ScreenShare {
+  participantId: Uuid;
+  startedAt: string;
+}
+
+export interface ScreenShareResult {
+  call: CallSummary;
+  operation: "START_SCREEN_SHARE" | "STOP_SCREEN_SHARE";
+  screenShare: ScreenShare | null;
+}
+
+/** C7: result of inviting people into an ongoing call. */
+export interface AddParticipantsResult {
+  call: CallSummary;
+  operation: "ADD_PARTICIPANTS";
+  invitingParticipantId: Uuid;
+  participants: { participantId: Uuid; principalId: Uuid; role: "RECIPIENT"; liveInvitationCount: number }[];
 }
 
 export interface CallList {

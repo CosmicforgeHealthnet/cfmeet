@@ -97,7 +97,7 @@ export type CallTransferFailureReason =
   | "CALL_ENDED"
   | "CANCELLED";
 
-export type CallControlOperation = "CANCEL" | "END" | "HOLD" | "RESUME";
+export type CallControlOperation = "CANCEL" | "END" | "HOLD" | "RESUME" | "UPGRADE";
 
 export type CallActionName =
   | "ACCEPT"
@@ -107,7 +107,11 @@ export type CallActionName =
   | "HOLD"
   | "RESUME"
   | "TRANSFER"
-  | "ISSUE_MEDIA_CREDENTIAL";
+  | "ISSUE_MEDIA_CREDENTIAL"
+  | "UPGRADE"
+  | "START_SCREEN_SHARE"
+  | "STOP_SCREEN_SHARE"
+  | "ADD_PARTICIPANTS";
 
 export type CallActionUnavailableReason =
   | "INSUFFICIENT_SCOPE"

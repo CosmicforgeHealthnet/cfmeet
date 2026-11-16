@@ -1,0 +1,30 @@
+{
+  "call": {
+    "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "kind": "VOICE",
+    "state": "CONNECTED",
+    "version": 8,
+    "initiatorPrincipalId": "11111111-2222-4333-8444-555555555555",
+    "terminalReason": null,
+    "failureCategory": null,
+    "requestedAt": "2026-10-07T09:00:00.000000Z",
+    "authorizedAt": "2026-10-07T09:00:00.010000Z",
+    "ringingAt": "2026-10-07T09:00:00.120000Z",
+    "answeredAt": "2026-10-07T09:00:04.500000Z",
+    "connectedAt": "2026-10-07T09:00:05.900000Z",
+    "endingAt": null,
+    "endedAt": null,
+    "createdAt": "2026-10-07T09:00:00.000000Z",
+    "updatedAt": "2026-10-07T09:01:00.000000Z"
+  },
+  "operation": "ADD_PARTICIPANTS",
+  "invitingParticipantId": "8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d",
+  "participants": [
+    {
+      "participantId": "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+      "principalId": "9b0c1d2e-3f4a-4b5c-9d6e-8f9a0b1c2d3e",
+      "role": "RECIPIENT",
+      "liveInvitationCount": 2
+    }
+  ]
+}

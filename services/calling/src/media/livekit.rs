@@ -589,6 +589,10 @@ impl LiveKitAdapter {
         if admitted.can_publish_video {
             sources.push("camera");
         }
+        if admitted.can_share_screen {
+            sources.push("screen_share");
+            sources.push("screen_share_audio");
+        }
         grant["canSubscribe"] = json!(admitted.can_subscribe);
         grant["canPublish"] = json!(!sources.is_empty());
         grant["canPublishData"] = json!(admitted.can_publish_data);
@@ -756,6 +760,11 @@ fn permission_body(permissions: MediaPermissions) -> Value {
     if permissions.can_publish_video {
         sources.push("CAMERA");
     }
+    if permissions.can_share_screen {
+        // C6: only the Call's current presenter receives the screen sources.
+        sources.push("SCREEN_SHARE");
+        sources.push("SCREEN_SHARE_AUDIO");
+    }
     json!({
         "can_subscribe": permissions.can_subscribe,
         "can_publish": !sources.is_empty(),
@@ -816,6 +825,8 @@ fn participant(v: &Value) -> Option<ProviderParticipant> {
                     Value::Number(n) => Some(match n.as_i64() {
                         Some(1) => "CAMERA".to_string(),
                         Some(2) => "MICROPHONE".to_string(),
+                        Some(3) => "SCREEN_SHARE".to_string(),
+                        Some(4) => "SCREEN_SHARE_AUDIO".to_string(),
                         _ => "OTHER".to_string(),
                     }),
                     _ => None,
@@ -832,6 +843,8 @@ fn participant(v: &Value) -> Option<ProviderParticipant> {
         can_publish_video: publishes("CAMERA"),
         can_publish_data: bool_field(&permission, "can_publish_data", "canPublishData"),
         can_subscribe: bool_field(&permission, "can_subscribe", "canSubscribe"),
+        // Either screen source counts: a partial or stale grant is drift to repair.
+        can_share_screen: publishes("SCREEN_SHARE") || publishes("SCREEN_SHARE_AUDIO"),
     };
     let state = v.get("state");
     let active = match state {
@@ -1515,6 +1528,7 @@ mod tests {
             can_publish_video: false,
             can_publish_data: false,
             can_subscribe: true,
+            can_share_screen: false,
         };
         // Our own key: resealed exactly as before (server grant preserved).
         let ours = adapter
@@ -1736,6 +1750,30 @@ mod tests {
         );
         assert_eq!(held["can_publish"], false);
         assert_eq!(held["can_subscribe"], true);
+        // C6: only a presenter's grant lists the screen sources; parsing them back is exact.
+        let presenting = MediaPermissions {
+            can_share_screen: true,
+            ..MediaPermissions::default_for(crate::calls::kinds::CallKind::Voice)
+        };
+        let body = permission_body(presenting);
+        assert_eq!(
+            body["can_publish_sources"],
+            json!(["MICROPHONE", "SCREEN_SHARE", "SCREEN_SHARE_AUDIO"])
+        );
+        let parsed = participant(&json!({
+            "identity": "cfmid_x", "state": "ACTIVE",
+            "permission": { "canPublish": true, "canSubscribe": true,
+                            "canPublishSources": [2, 3, 4] },
+        }))
+        .unwrap();
+        assert_eq!(parsed.permissions, presenting);
+        let camera_only = participant(&json!({
+            "identity": "cfmid_y", "state": "ACTIVE",
+            "permission": { "canPublish": true, "canSubscribe": true,
+                            "canPublishSources": ["CAMERA", "MICROPHONE"] },
+        }))
+        .unwrap();
+        assert!(!camera_only.permissions.can_share_screen);
     }
 
     #[test]

@@ -875,6 +875,7 @@ impl AppCallService {
         if session.state == SessionState::Ended {
             return Err(CallError::InvalidState("the session has ended"));
         }
+        let presenter = self.calls.presenter_in(&txn, call.id).await?;
         let removed = self
             .calls
             .finish_session(
@@ -900,7 +901,23 @@ impl AppCallService {
                 )
                 .await?;
         }
+        // C6: the presenter's last session left — everybody learns the share stopped.
+        let mut pending = PendingSignals::default();
+        if let Some((presenter, _)) = presenter {
+            if self.calls.presenter_in(&txn, call.id).await?.is_none() {
+                self.screen_share_signal_in(
+                    &txn,
+                    &mut pending,
+                    SignalType::ScreenShareStopped,
+                    &call,
+                    presenter,
+                    cmd.correlation_id().as_str(),
+                )
+                .await?;
+            }
+        }
         txn.commit().await?;
+        self.publish(pending).await;
         self.enforce_removals(&call, vec![removed]).await;
         // CAL-001: the last session of a party gone — a Call left with fewer than two
         // parties ends now (same path as END, system command).
@@ -936,6 +953,7 @@ impl AppCallService {
             active
         };
         let state = call.current_state;
+        let presenter = self.calls.presenter_in(self.db(), call.id).await?;
         let entry =
             |action: &'static str, state_ok: bool, capability_ok: bool| ActionAvailability {
                 action,
@@ -971,6 +989,26 @@ impl AppCallService {
                 app_media,
             ),
             entry("ISSUE_MEDIA_CREDENTIAL", media_state(state), app_media),
+            // C5: a live VOICE Call may become VIDEO (once).
+            entry(
+                "UPGRADE",
+                call.call_kind == crate::calls::kinds::CallKind::Voice
+                    && super::upgrade::upgradable_state(state),
+                permission_update,
+            ),
+            // C6: one presenter per Call, when the screen-sharing policy is on.
+            entry(
+                "START_SCREEN_SHARE",
+                super::screen_share::screen_share_state(state) && presenter.is_none(),
+                permission_update && self.config.screen_share_enabled,
+            ),
+            entry("STOP_SCREEN_SHARE", presenter.is_some(), true),
+            // C7: invite more people into an answered application Call.
+            entry(
+                "ADD_PARTICIPANTS",
+                super::invite::invitable_state(state),
+                app_media,
+            ),
         ];
         Ok(AvailableActions {
             call_id: call.id,

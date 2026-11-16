@@ -17,7 +17,7 @@ use crate::{
         errors::{CallError, CallResult},
         events::CallEventType,
         ids::{CallId, CallMediaSessionId, MediaPermissionsId},
-        kinds::{MediaAccess, MediaFailure, MediaSessionStatus},
+        kinds::{CallKind, MediaAccess, MediaFailure, MediaSessionStatus},
     },
     media::{MediaPermissions, MediaResourceName, MEDIA_POLICY_VERSION},
     models::{
@@ -266,11 +266,179 @@ impl CallService {
             can_publish_data: Set(defaults.can_publish_data),
             can_subscribe: Set(defaults.can_subscribe),
             policy_version: Set(MEDIA_POLICY_VERSION.to_string()),
+            screen_share_started_at: Set(None),
             created_at: Set(at),
             updated_at: Set(at),
         }
         .insert(txn)
         .await?)
+    }
+
+    /// C5: VOICE → VIDEO on a live, answered Call (the Call row must be locked by `txn`).
+    /// The kind cascades to every authorized-permissions row (database foreign key); each
+    /// ACTIVE participant's row additionally gains video publishing (revision + 1). Nothing
+    /// is published by this: the provider grant only ALLOWS a client to publish its camera
+    /// when its user chooses. State and version are unchanged (the version counts state
+    /// transitions); the change is evidenced by CALL_KIND_CHANGED. Returns the Call and how
+    /// many participants were granted video.
+    pub(crate) async fn upgrade_kind_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: calls::Model,
+    ) -> CallResult<(calls::Model, usize)> {
+        if call.call_kind != CallKind::Voice {
+            return Ok((call, 0));
+        }
+        let at = self.now().max(call.updated_at);
+        let mut active: calls::ActiveModel = call.into();
+        active.call_kind = Set(CallKind::Video);
+        active.updated_at = Set(at);
+        let call = active.update(txn).await?;
+        let mut granted = 0usize;
+        for row in call_participant_media_permissions::Entity::find()
+            .filter(call_participant_media_permissions::Column::CallId.eq(call.id))
+            .all(txn)
+            .await?
+        {
+            let participant_active = call_participants::Entity::find_by_id(row.participant_id)
+                .one(txn)
+                .await?
+                .is_some_and(|p| p.ended_at.is_none());
+            if !participant_active || row.can_publish_video {
+                continue;
+            }
+            let revision = row.revision.saturating_add(1);
+            let mut update: call_participant_media_permissions::ActiveModel = row.into();
+            update.can_publish_video = Set(true);
+            update.revision = Set(revision);
+            update.policy_version = Set(MEDIA_POLICY_VERSION.to_string());
+            update.updated_at = Set(at);
+            update.update(txn).await?;
+            granted += 1;
+        }
+        self.append_event(
+            txn,
+            cmd,
+            &call,
+            EventDraft::fact(
+                CallEventType::CallKindChanged,
+                data(vec![
+                    ("from_kind", text(CallKind::Voice)),
+                    ("to_kind", text(CallKind::Video)),
+                    ("participants_granted_video", SafeValue::from(granted)),
+                ])?,
+            ),
+            at,
+        )
+        .await?;
+        Ok((call, granted))
+    }
+
+    /// C6: the Call's current presenter (participant id, since when), if any.
+    pub(crate) async fn presenter_in<C: sea_orm::ConnectionTrait>(
+        &self,
+        db: &C,
+        call_id: Uuid,
+    ) -> CallResult<Option<(Uuid, DateTime<Utc>)>> {
+        Ok(call_participant_media_permissions::Entity::find()
+            .filter(call_participant_media_permissions::Column::CallId.eq(call_id))
+            .filter(call_participant_media_permissions::Column::ScreenShareStartedAt.is_not_null())
+            .one(db)
+            .await?
+            .and_then(|p| p.screen_share_started_at.map(|at| (p.participant_id, at))))
+    }
+
+    /// C6: makes `participant` the Call's presenter (the Call row must be locked by `txn`;
+    /// the caller checked policy, state and the participant's live session). Refused with
+    /// CONFLICT while another participant presents (also guaranteed by the database: one
+    /// presenter per Call). Returns `false` when the participant already presents.
+    pub(crate) async fn start_screen_share_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        participant: &call_participants::Model,
+    ) -> CallResult<bool> {
+        match self.presenter_in(txn, call.id).await? {
+            Some((presenter, _)) if presenter == participant.id => return Ok(false),
+            Some(_) => {
+                return Err(CallError::Conflict(
+                    "another participant is already sharing a screen",
+                ))
+            }
+            None => {}
+        }
+        let row = self
+            .ensure_media_permissions_in(txn, call, participant)
+            .await?;
+        let at = self.now().max(row.updated_at).max(call.updated_at);
+        let revision = row.revision.saturating_add(1);
+        let mut update: call_participant_media_permissions::ActiveModel = row.into();
+        update.screen_share_started_at = Set(Some(at));
+        update.revision = Set(revision);
+        update.updated_at = Set(at);
+        update.update(txn).await?;
+        self.append_event(
+            txn,
+            cmd,
+            call,
+            EventDraft::fact(
+                CallEventType::CallScreenShareStarted,
+                data(vec![("participant_id", text(participant.id))])?,
+            ),
+            at,
+        )
+        .await?;
+        Ok(true)
+    }
+
+    /// C6: clears the Call's presenter state — of `participant` only when given — with a
+    /// CALL_SCREEN_SHARE_STOPPED event carrying `reason` (STOPPED, PRESENTER_LEFT,
+    /// CALL_ENDED). Returns the participant that stopped presenting, if any. The caller
+    /// pushes the revoked grant to the provider (or tears the media down).
+    pub(crate) async fn clear_screen_share_in(
+        &self,
+        txn: &DatabaseTransaction,
+        cmd: &CallCommandContext,
+        call: &calls::Model,
+        participant: Option<Uuid>,
+        reason: &'static str,
+    ) -> CallResult<Option<Uuid>> {
+        let Some(row) = call_participant_media_permissions::Entity::find()
+            .filter(call_participant_media_permissions::Column::CallId.eq(call.id))
+            .filter(call_participant_media_permissions::Column::ScreenShareStartedAt.is_not_null())
+            .one(txn)
+            .await?
+        else {
+            return Ok(None);
+        };
+        if participant.is_some_and(|p| p != row.participant_id) {
+            return Ok(None);
+        }
+        let presenter = row.participant_id;
+        let at = self.now().max(row.updated_at).max(call.updated_at);
+        let revision = row.revision.saturating_add(1);
+        let mut update: call_participant_media_permissions::ActiveModel = row.into();
+        update.screen_share_started_at = Set(None);
+        update.revision = Set(revision);
+        update.updated_at = Set(at);
+        update.update(txn).await?;
+        self.append_event(
+            txn,
+            cmd,
+            call,
+            EventDraft::fact(
+                CallEventType::CallScreenShareStopped,
+                data(vec![
+                    ("participant_id", text(presenter)),
+                    ("stop_reason", text(reason)),
+                ])?,
+            ),
+            at,
+        )
+        .await?;
+        Ok(Some(presenter))
     }
 
     /// The participant's persisted authorized permissions (none if never authorized).
@@ -291,6 +459,7 @@ impl CallService {
                     can_publish_video: p.can_publish_video,
                     can_publish_data: p.can_publish_data,
                     can_subscribe: p.can_subscribe,
+                    can_share_screen: p.screen_share_started_at.is_some(),
                 }
                 .clamp_to(call.call_kind)
             })
