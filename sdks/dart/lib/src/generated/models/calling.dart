@@ -119,6 +119,60 @@ class ActivateIvrVersionRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// Body of POST /v1/calls/{call_id}/participants (C7): the active participant who invites, the principals to invite (resolved in the credential's scope, like call creation) and the expected Call version.
+class AddParticipantsRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddParticipantsRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddParticipantsRequest.create({required int expectedVersion, required Uuid invitingParticipantId, required List<Uuid> targetPrincipalIds}) =>
+      AddParticipantsRequest.fromJson(<String, Object?>{
+        'expectedVersion': expectedVersion,
+        'invitingParticipantId': invitingParticipantId,
+        'targetPrincipalIds': targetPrincipalIds,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.
+  int get expectedVersion => (json['expectedVersion']! as num).toInt();
+
+  Uuid get invitingParticipantId => json['invitingParticipantId']! as String;
+
+  List<Uuid> get targetPrincipalIds => (json['targetPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Result of inviting participants: the Call (state and version unchanged), the inviter and every new RECIPIENT participant with the number of PENDING ring offers issued to its eligible endpoints.
+class AddParticipantsResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddParticipantsResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddParticipantsResult.create({required CommonCallSummary call, required Uuid invitingParticipantId, required String operation, required List<Map<String, Object?>> participants}) =>
+      AddParticipantsResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'invitingParticipantId': invitingParticipantId,
+        'operation': operation,
+        'participants': participants,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  Uuid get invitingParticipantId => json['invitingParticipantId']! as String;
+
+  String get operation => json['operation']! as String;
+
+  List<Map<String, Object?>> get participants => (json['participants']! as List<Object?>).map((e) => e! as Map<String, Object?>).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Organization-level administrative capabilities (second key after the credential's enterprise scopes). MANAGE_PUBLIC_FORWARDING and MANAGE_RECORDING are granted by a CF Meet operator only.
 ///
 /// One of: MANAGE_ROUTING, MANAGE_PUBLIC_FORWARDING, MANAGE_VOICEMAIL, MANAGE_RECORDING.

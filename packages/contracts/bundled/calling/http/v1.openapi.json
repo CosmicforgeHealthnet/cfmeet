@@ -1628,6 +1628,89 @@
         }
       }
     },
+    "/v1/calls/{call_id}/participants": {
+      "post": {
+        "operationId": "addCallParticipants",
+        "tags": [
+          "Call Controls"
+        ],
+        "summary": "Invite participants into an ongoing call",
+        "description": "Requires calls.write (Idempotency-Key honoured). C7: invitingParticipantId (an active participant) invites targetPrincipalIds into an ANSWERED, CONNECTED or HELD application Call; a one-to-one Call becomes a group Call. Targets are resolved in the credential's scope like call creation (principal categories, block rules between every active party and every target, the Communications policy for governed personal scopes). Each target becomes a RECIPIENT participant with PENDING ring offers (purpose CALL, the usual TTL) on its eligible endpoints — call.incoming (and a push-ready offer) to its devices, call.participants_changed to every endpoint of the Call — and answers through the normal accept path. The Call's state and version are unchanged; expectedVersion is checked under the Call row lock, so concurrent invitations never exceed the participant limit (422 PARTICIPANT_LIMIT_EXCEEDED, initiator included). An expired or declined added offer never ends the Call; it is a missed call for that participant. A principal that already participates: 409 CONFLICT; a target with no eligible endpoint: 409 TARGET_UNAVAILABLE (nothing applied); a pre-answer, TRANSFERRING, ENDING or terminal Call: 409 CALL_STATE_CONFLICT; protected (Privacy Relay), public-network and enterprise Calls: 422 CAPABILITY_UNAVAILABLE.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CallId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.control.v1.AddParticipantsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command's result (or the recorded response of an identical earlier command).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.control.v1.AddParticipantsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/v1/calls/{call_id}/sessions/{session_id}/media-credentials": {
       "post": {
         "operationId": "issueSessionMediaCredential",
@@ -13963,6 +14046,86 @@
           }
         }
       },
+      "calling.control.v1.AddParticipantsRequest": {
+        "description": "Body of POST /v1/calls/{call_id}/participants (C7): the active participant who invites, the principals to invite (resolved in the credential's scope, like call creation) and the expected Call version.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "invitingParticipantId",
+          "targetPrincipalIds",
+          "expectedVersion"
+        ],
+        "properties": {
+          "invitingParticipantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "targetPrincipalIds": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 63,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          "expectedVersion": {
+            "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "calling.control.v1.AddParticipantsResult": {
+        "description": "Result of inviting participants: the Call (state and version unchanged), the inviter and every new RECIPIENT participant with the number of PENDING ring offers issued to its eligible endpoints.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call",
+          "operation",
+          "invitingParticipantId",
+          "participants"
+        ],
+        "properties": {
+          "call": {
+            "$ref": "#/components/schemas/calling.common.v1.CallSummary"
+          },
+          "operation": {
+            "const": "ADD_PARTICIPANTS"
+          },
+          "invitingParticipantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "participants": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "participantId",
+                "principalId",
+                "role",
+                "liveInvitationCount"
+              ],
+              "properties": {
+                "participantId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "principalId": {
+                  "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                },
+                "role": {
+                  "const": "RECIPIENT"
+                },
+                "liveInvitationCount": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        }
+      },
       "calling.control.v1.AvailableAction": {
         "type": "object",
         "additionalProperties": false,
@@ -13984,7 +14147,8 @@
               "ISSUE_MEDIA_CREDENTIAL",
               "UPGRADE",
               "START_SCREEN_SHARE",
-              "STOP_SCREEN_SHARE"
+              "STOP_SCREEN_SHARE",
+              "ADD_PARTICIPANTS"
             ]
           },
           "available": {

@@ -259,6 +259,7 @@ text_enum!(
         Upgrade = "UPGRADE",
         StartScreenShare = "START_SCREEN_SHARE",
         StopScreenShare = "STOP_SCREEN_SHARE",
+        AddParticipants = "ADD_PARTICIPANTS",
     }
 );
 

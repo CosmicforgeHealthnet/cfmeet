@@ -561,3 +561,322 @@ async fn the_screen_share_policy_switch_refuses_new_presentations() {
     // Stopping always works (nothing to stop here: an idempotent no-op).
     assert_eq!(share(&a, call, alice, true).await.status, StatusCode::OK);
 }
+
+// ---------------------------------------------------------------------------------------
+// C7 — inviting participants into an ongoing call
+// ---------------------------------------------------------------------------------------
+
+async fn invite(
+    a: &AppWorld,
+    call: Uuid,
+    inviter: Uuid,
+    targets: &[Uuid],
+    version: i64,
+) -> common::TestResponse {
+    a.post(
+        &format!("/v1/calls/{call}/participants"),
+        json!({
+            "invitingParticipantId": inviter,
+            "targetPrincipalIds": targets,
+            "expectedVersion": version,
+        }),
+    )
+    .await
+}
+
+/// The history entry of `principal` for `call` (`GET /v1/calls?principalId=`).
+async fn history_of(a: &AppWorld, principal: Uuid, call: Uuid) -> Value {
+    let r = a.get(&format!("/v1/calls?principalId={principal}")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    r.json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["callId"] == call.to_string())
+        .cloned()
+        .unwrap_or_else(|| panic!("no history entry: {}", r.text))
+}
+
+/// A world whose group limit is `limit` participants (initiator included).
+async fn world_with_limit(limit: usize) -> Option<AppWorld> {
+    use std::sync::Arc;
+    let db = common::TestDb::new().await?;
+    let media = Arc::new(common::fake_media::FakeMediaProvider::default());
+    let bus = Arc::new(calling::signaling::InMemorySignalBus::new());
+    let mut runtime = common::test_runtime(Some(media.clone()), bus.clone());
+    runtime.app_config.max_group_participants = limit;
+    let h = common::Harness::with_runtime(
+        Arc::new(db),
+        calling::domain::ManualClock::new(common::t0()),
+        media,
+        bus,
+        runtime,
+    );
+    Some(AppWorld {
+        w: common::calls::CallWorld::in_harness(h, "invite", EnvironmentKind::Production).await,
+    })
+}
+
+#[tokio::test]
+async fn a_one_to_one_call_gains_a_third_party_and_then_follows_group_rules() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let (call, caller, callee) = a.connected_call("VOICE").await;
+    let carol = a.principal("invite-carol").await;
+    let carol_d = a.device(&carol, "invite-carol").await;
+    let mut carol_signals = a.h().bus.subscribe(carol_d.endpoint);
+    let mut caller_signals = a.h().bus.subscribe(caller.endpoint);
+    let alice = a.participant_of(call, caller.principal).await;
+    let (_, version) = a.state(call).await;
+
+    let r = invite(&a, call, alice, &[carol.id().as_uuid()], version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    common::contracts::check(
+        "calling/control/v1.schema.json#/$defs/AddParticipantsResult",
+        &r.json,
+    );
+    assert_eq!(
+        r.json["participants"][0]["principalId"],
+        carol.id().to_string()
+    );
+    assert_eq!(r.json["participants"][0]["role"], "RECIPIENT");
+    // The Call is unchanged (state and version); the new offer is PENDING until receipt.
+    assert_eq!(a.state(call).await, (CallState::Connected, version));
+    let view = a.call_view(call).await;
+    let offer = view["invitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["endpointId"] == carol_d.endpoint.to_string())
+        .cloned()
+        .unwrap();
+    assert_eq!(offer["status"], "PENDING");
+    assert_eq!(offer["purpose"], "CALL");
+    let incoming: Vec<_> = drain(&mut carol_signals)
+        .into_iter()
+        .filter(|s| s["type"] == "call.incoming")
+        .collect();
+    assert_eq!(incoming.len(), 1);
+    assert!(drain(&mut caller_signals)
+        .iter()
+        .any(|s| s["type"] == "call.participants_changed" && s["data"]["activeParticipants"] == 3));
+
+    // Carol's device acknowledges (RINGING), she accepts and joins the media resource.
+    let invitation: Uuid = offer["invitationId"].as_str().unwrap().parse().unwrap();
+    let ack = a.acknowledge_for(call, invitation, &carol_d).await;
+    assert_eq!(ack.status, StatusCode::OK, "{}", ack.text);
+    assert_eq!(ack.json["status"], "RINGING");
+    assert_eq!(ack.json["callState"], "CONNECTED");
+    let r = a.accept(call, invitation, &carol_d, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["callAnswered"], false);
+    let session = a.session_on(call, carol_d.endpoint).await.unwrap();
+    let joined = a.connect(call, session).await;
+    assert!(joined.permissions.can_publish_audio);
+    assert_eq!(a.media().participants(&AppWorld::room(call)).len(), 3);
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+    assert_eq!(
+        history_of(&a, carol.id().as_uuid(), call).await["participation"]["direction"],
+        "INBOUND"
+    );
+
+    // Group rules now: the original callee leaving does not end the Call.
+    let bob_session = a.session_on(call, callee.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/sessions/{bob_session}/remove"),
+            json!({ "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+    // The last other party leaving ends it (CAL-001 counts the parties now).
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/sessions/{session}/remove"),
+            json!({ "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(a.state(call).await.0, CallState::Ended);
+}
+
+#[tokio::test]
+async fn an_added_participants_expired_offer_leaves_the_call_connected_and_is_missed() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let (call, caller, _callee) = a.connected_call("VIDEO").await;
+    let dave = a.principal("invite-dave").await;
+    let dave_d = a.device(&dave, "invite-dave").await;
+    let alice = a.participant_of(call, caller.principal).await;
+    let (_, version) = a.state(call).await;
+    let r = invite(&a, call, alice, &[dave.id().as_uuid()], version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert!(a.invitation_for(call, dave_d.endpoint).await.is_some());
+    a.h().clock.advance(chrono::Duration::seconds(120));
+    a.h().state.app.expire_due(100).await.unwrap();
+    assert_eq!(a.state(call).await, (CallState::Connected, version));
+    assert!(a.invitation_for(call, dave_d.endpoint).await.is_none());
+    let view = a.call_view(call).await;
+    assert!(view["invitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["endpointId"] == dave_d.endpoint.to_string() && i["status"] == "EXPIRED"));
+    let entry = history_of(&a, dave.id().as_uuid(), call).await;
+    assert_eq!(entry["participation"]["direction"], "INBOUND");
+    assert_eq!(entry["participation"]["outcome"], "MISSED");
+    assert_eq!(entry["participation"]["missed"], true);
+    // The reaper leaves the Call alone: two parties still participate.
+    a.h().state.app.reap_abandoned_calls(100).await.unwrap();
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+}
+
+#[tokio::test]
+async fn invitations_are_authorized_version_checked_and_limited() {
+    let Some(a) = world_with_limit(4).await else {
+        return;
+    };
+    let (call, caller, callee) = a.connected_call("VOICE").await;
+    let alice = a.participant_of(call, caller.principal).await;
+    let erin = a.principal("invite-erin").await;
+    a.device(&erin, "invite-erin").await;
+    let (_, version) = a.state(call).await;
+    // An existing participant is refused; so is a stale version and an unknown inviter.
+    let r = invite(&a, call, alice, &[callee.principal], version).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "CONFLICT");
+    let r = invite(&a, call, alice, &[erin.id().as_uuid()], version - 1).await;
+    assert_eq!(r.json["error"]["code"], "STALE_CALL_VERSION", "{}", r.text);
+    let r = invite(&a, call, Uuid::new_v4(), &[erin.id().as_uuid()], version).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    // A target without an eligible endpoint fails the whole request.
+    let nobody = a.principal("invite-nobody").await;
+    let r = invite(
+        &a,
+        call,
+        alice,
+        &[erin.id().as_uuid(), nobody.id().as_uuid()],
+        version,
+    )
+    .await;
+    assert_eq!(r.json["error"]["code"], "TARGET_UNAVAILABLE", "{}", r.text);
+    assert_eq!(
+        a.call_view(call).await["participants"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    // calls.read cannot invite; another environment cannot see the Call.
+    let read_only = a
+        .h()
+        .issue(
+            a.w.consumer.sa(EnvironmentKind::Production),
+            &[names::CALLS_READ],
+        )
+        .await;
+    let body = json!({
+        "invitingParticipantId": alice,
+        "targetPrincipalIds": [erin.id()],
+        "expectedVersion": version,
+    });
+    let r = a
+        .h()
+        .request(
+            Method::POST,
+            &format!("/v1/calls/{call}/participants"),
+            Some(read_only.secret.expose_once()),
+            Some(body.clone()),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    let foreign = a
+        .h()
+        .issue(
+            a.w.consumer.sa(EnvironmentKind::Sandbox),
+            &[names::CALLS_WRITE],
+        )
+        .await;
+    let r = a
+        .h()
+        .request(
+            Method::POST,
+            &format!("/v1/calls/{call}/participants"),
+            Some(foreign.secret.expose_once()),
+            Some(body),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+
+    // Concurrent invitations serialize on the Call: the limit (4) is never exceeded.
+    let mut groups = Vec::new();
+    for i in 0..4 {
+        let p = a.principal(&format!("invite-race-{i}")).await;
+        a.device(&p, &format!("invite-race-{i}")).await;
+        groups.push(p.id().as_uuid());
+    }
+    let (x, y) = tokio::join!(
+        invite(&a, call, alice, &groups[0..2], version),
+        invite(&a, call, alice, &groups[2..4], version),
+    );
+    let mut codes = [x.status, y.status];
+    codes.sort();
+    assert_eq!(
+        codes,
+        [StatusCode::OK, StatusCode::UNPROCESSABLE_ENTITY],
+        "{} / {}",
+        x.text,
+        y.text
+    );
+    let loser = if x.status == StatusCode::OK { &y } else { &x };
+    assert_eq!(loser.json["error"]["code"], "PARTICIPANT_LIMIT_EXCEEDED");
+    assert_eq!(
+        a.call_view(call).await["participants"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+
+    // An Idempotency-Key replays the recorded answer.
+    let (call, caller, _callee) = a.connected_call("VOICE").await;
+    let alice = a.participant_of(call, caller.principal).await;
+    let (_, version) = a.state(call).await;
+    let key = [("idempotency-key", "invite-erin-once")];
+    let body = json!({
+        "invitingParticipantId": alice,
+        "targetPrincipalIds": [erin.id()],
+        "expectedVersion": version,
+    });
+    let first = a
+        .post_with(
+            &format!("/v1/calls/{call}/participants"),
+            body.clone(),
+            &key,
+        )
+        .await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.text);
+    let again = a
+        .post_with(&format!("/v1/calls/{call}/participants"), body, &key)
+        .await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text);
+    assert_eq!(again.headers.get("idempotent-replayed").unwrap(), "true");
+    assert_eq!(again.json, first.json);
+
+    // Pre-answer and finished Calls are refused.
+    let (_, version) = a.state(call).await;
+    assert_eq!(a.command(call, "end", version).await.status, StatusCode::OK);
+    let (_, version) = a.state(call).await;
+    let r = invite(&a, call, alice, &[groups[3]], version).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    let (call, caller, _callee) = a.ringing_call("VOICE").await;
+    let alice = a.participant_of(call, caller.principal).await;
+    let (_, version) = a.state(call).await;
+    let r = invite(&a, call, alice, &[groups[3]], version).await;
+    assert_eq!(r.json["error"]["code"], "CALL_STATE_CONFLICT", "{}", r.text);
+}

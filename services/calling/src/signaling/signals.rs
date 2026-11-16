@@ -68,6 +68,9 @@ pub enum SignalType {
     ScreenShareStarted,
     /// C6: the presenter stopped, left, or the Call ended (data: participantId).
     ScreenShareStopped,
+    /// C7: participants were invited into the ongoing Call (data: participantsAdded,
+    /// activeParticipants). Clients refresh the Call.
+    ParticipantsChanged,
 }
 
 impl SignalType {
@@ -102,6 +105,7 @@ impl SignalType {
         SignalType::KindChanged,
         SignalType::ScreenShareStarted,
         SignalType::ScreenShareStopped,
+        SignalType::ParticipantsChanged,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -136,6 +140,7 @@ impl SignalType {
             SignalType::KindChanged => "call.kind_changed",
             SignalType::ScreenShareStarted => "call.screen_share_started",
             SignalType::ScreenShareStopped => "call.screen_share_stopped",
+            SignalType::ParticipantsChanged => "call.participants_changed",
         }
     }
 }

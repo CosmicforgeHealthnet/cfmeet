@@ -35,6 +35,25 @@ export namespace Calling {
     expectedVersion: number;
     versionNumber: number;
   };
+  /** Body of POST /v1/calls/{call_id}/participants (C7): the active participant who invites, the principals to invite (resolved in the credential's scope, like call creation) and the expected Call version. */
+  export type AddParticipantsRequest = {
+    invitingParticipantId: Uuid;
+    targetPrincipalIds: Array<Uuid>;
+    /** The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION. */
+    expectedVersion: number;
+  };
+  /** Result of inviting participants: the Call (state and version unchanged), the inviter and every new RECIPIENT participant with the number of PENDING ring offers issued to its eligible endpoints. */
+  export type AddParticipantsResult = {
+    call: CommonCallSummary;
+    operation: "ADD_PARTICIPANTS";
+    invitingParticipantId: Uuid;
+    participants: Array<{
+        participantId: Uuid;
+        principalId: Uuid;
+        role: "RECIPIENT";
+        liveInvitationCount: number;
+      }>;
+  };
   /** Organization-level administrative capabilities (second key after the credential's enterprise scopes). MANAGE_PUBLIC_FORWARDING and MANAGE_RECORDING are granted by a CF Meet operator only. */
   export type AdminCapability = "MANAGE_ROUTING" | "MANAGE_PUBLIC_FORWARDING" | "MANAGE_VOICEMAIL" | "MANAGE_RECORDING";
   /** ACTIVE agents receive offers; PAUSED agents stay members but receive none. */
@@ -65,7 +84,7 @@ export namespace Calling {
     nextCursor: string | null;
   };
   export type AvailableAction = {
-    action: "ACCEPT" | "DECLINE" | "CANCEL" | "END" | "HOLD" | "RESUME" | "TRANSFER" | "ISSUE_MEDIA_CREDENTIAL" | "UPGRADE" | "START_SCREEN_SHARE" | "STOP_SCREEN_SHARE";
+    action: "ACCEPT" | "DECLINE" | "CANCEL" | "END" | "HOLD" | "RESUME" | "TRANSFER" | "ISSUE_MEDIA_CREDENTIAL" | "UPGRADE" | "START_SCREEN_SHARE" | "STOP_SCREEN_SHARE" | "ADD_PARTICIPANTS";
     available: boolean;
     /** Why the action is unavailable: the credential lacks calls.write, the Call's state does not allow it, or the configured media provider cannot enforce it. */
     reason?: "INSUFFICIENT_SCOPE" | "STATE" | "CAPABILITY_UNAVAILABLE";
@@ -1615,6 +1634,11 @@ export namespace Calling {
     activateIvrVersion: {
       params: { path: { ivr_flow_id: string }; body: ActivateIvrVersionRequest };
       response: IvrFlow;
+    };
+    /** POST /v1/calls/{call_id}/participants — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    addCallParticipants: {
+      params: { path: { call_id: string }; body: AddParticipantsRequest; idempotencyKey?: string };
+      response: AddParticipantsResult;
     };
     /** POST /v1/enterprise/sip-devices — scope enterprise.config.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     bindSipDevice: {

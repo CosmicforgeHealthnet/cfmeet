@@ -66,6 +66,7 @@ pub fn routes() -> Router<AppState> {
             "/v1/calls/:call_id/screen-share/stop",
             post(stop_screen_share),
         )
+        .route("/v1/calls/:call_id/participants", post(add_participants))
         .route("/v1/calls/:call_id/ivr/input", post(ivr_input))
         .route(
             "/v1/calls/:call_id/sessions/:session_id/media-credentials",
@@ -624,6 +625,56 @@ async fn upgrade(
             CallId::from_uuid(call_uuid),
             body.kind,
             body.expected_version,
+            key.as_ref(),
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AddParticipantsBody {
+    inviting_participant_id: Uuid,
+    target_principal_ids: Vec<Uuid>,
+    expected_version: i64,
+}
+
+/// `POST /v1/calls/:call_id/participants` (C7): an active participant invites principals
+/// into the ongoing Call (calls.write; Idempotency-Key honoured).
+async fn add_participants(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<AddParticipantsBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    if body.target_principal_ids.len() > 64 {
+        return Err(CallingError::Validation("targetPrincipalIds is too long."));
+    }
+    let key = command_key(
+        &headers,
+        CommandOperation::AddParticipants,
+        Some(call_uuid),
+        &body,
+        false,
+    )?;
+    let outcome = state
+        .app
+        .invite_participants(
+            &ctx,
+            CallId::from_uuid(call_uuid),
+            super::InviteParticipants {
+                inviting_participant: CallParticipantId::from_uuid(body.inviting_participant_id),
+                targets: body
+                    .target_principal_ids
+                    .iter()
+                    .map(|p| PrincipalId::from_uuid(*p))
+                    .collect(),
+                expected_version: body.expected_version,
+            },
             key.as_ref(),
         )
         .await?;

@@ -1649,6 +1649,24 @@ async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts
         assert_eq!(r.status, status, "{}", r.text);
         conforms(&r, &format!("/v1/calls/{{call_id}}/{path}"), "post");
     }
+    // C7: alice invites a fourth person into the answered call; a repeat conflicts.
+    let gina = a.principal("contract-gina").await;
+    a.device(&gina, "contract-gina").await;
+    for status in [StatusCode::OK, StatusCode::CONFLICT] {
+        let (_, version) = a.state(call).await;
+        let r = a
+            .post(
+                &format!("/v1/calls/{call}/participants"),
+                json!({
+                    "invitingParticipantId": alice_participant,
+                    "targetPrincipalIds": [gina.id()],
+                    "expectedVersion": version,
+                }),
+            )
+            .await;
+        assert_eq!(r.status, status, "{}", r.text);
+        conforms(&r, "/v1/calls/{call_id}/participants", "post");
+    }
     let bob_participant = a.participant_of(call, bob.id().as_uuid()).await;
     let (_, version) = a.state(call).await;
     let r = a
@@ -1756,6 +1774,7 @@ async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts
         "call.kind_changed",
         "call.screen_share_started",
         "call.screen_share_stopped",
+        "call.participants_changed",
         "call.transfer_started",
         "call.transferred",
         "call.ended",

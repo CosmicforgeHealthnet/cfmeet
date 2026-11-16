@@ -32,6 +32,12 @@
       "$ref": "#/$defs/ScreenShareResult"
     },
     {
+      "$ref": "#/$defs/AddParticipantsRequest"
+    },
+    {
+      "$ref": "#/$defs/AddParticipantsResult"
+    },
+    {
       "$ref": "#/$defs/AcceptResult"
     },
     {
@@ -958,7 +964,8 @@
             "ISSUE_MEDIA_CREDENTIAL",
             "UPGRADE",
             "START_SCREEN_SHARE",
-            "STOP_SCREEN_SHARE"
+            "STOP_SCREEN_SHARE",
+            "ADD_PARTICIPANTS"
           ]
         },
         "available": {
@@ -1552,6 +1559,86 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "AddParticipantsRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants (C7): the active participant who invites, the principals to invite (resolved in the credential's scope, like call creation) and the expected Call version.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitingParticipantId",
+        "targetPrincipalIds",
+        "expectedVersion"
+      ],
+      "properties": {
+        "invitingParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "targetPrincipalIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 63,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "expectedVersion": {
+          "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "AddParticipantsResult": {
+      "description": "Result of inviting participants: the Call (state and version unchanged), the inviter and every new RECIPIENT participant with the number of PENDING ring offers issued to its eligible endpoints.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation",
+        "invitingParticipantId",
+        "participants"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "const": "ADD_PARTICIPANTS"
+        },
+        "invitingParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participants": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "principalId",
+              "role",
+              "liveInvitationCount"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "role": {
+                "const": "RECIPIENT"
+              },
+              "liveInvitationCount": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
         }
       }
     }

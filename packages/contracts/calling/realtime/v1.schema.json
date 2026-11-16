@@ -54,7 +54,8 @@
         "call.route_changed",
         "call.kind_changed",
         "call.screen_share_started",
-        "call.screen_share_stopped"
+        "call.screen_share_stopped",
+        "call.participants_changed"
       ]
     },
     "SignalInvitation": {

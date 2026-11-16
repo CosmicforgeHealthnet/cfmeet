@@ -1003,6 +1003,12 @@ impl AppCallService {
                 permission_update && self.config.screen_share_enabled,
             ),
             entry("STOP_SCREEN_SHARE", presenter.is_some(), true),
+            // C7: invite more people into an answered application Call.
+            entry(
+                "ADD_PARTICIPANTS",
+                super::invite::invitable_state(state),
+                app_media,
+            ),
         ];
         Ok(AvailableActions {
             call_id: call.id,
