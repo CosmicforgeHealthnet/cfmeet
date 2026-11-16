@@ -22,6 +22,7 @@
 | **D-5, D-10, D-15, D-16** | approved (D-16: AUTO fallback enabled only after real recovery tests prove the old transport works) | 2026-11-15 | X5, event #15, I12 / event #31 in the N1 contracts; D-16 applies in N12 |
 | **D-W** | excluded: customer webhooks stay with the Developer Platform | 2026-11-15 | N16 not planned |
 | **D-12** | security-safe registration responses without exposing account existence | 2026-11-15 | implemented in N0-9 (Document 9) |
+| **Closure** | N0, N1, N4 production closure: PR #71 merged (`386d993`), release 43784033241 on `163be40`, activations 43788212474 / 43788404790, acceptance 43788587332 / 43788769304 / 43788941438, certify 43792702821 `CERTIFIED_READ_ONLY` on `main` `e2ec012` | 2026-11-16 | `CFMEET_NOTIFICATION_N0_N1_N4_PRODUCTION_CLOSED`, caveat `EMAIL_PROVIDER_E1_PENDING_OWNER_ACTIVATION`; N2 ready to begin (Document 9 §7) |
 
 ---
 
@@ -71,18 +72,18 @@
 
 | ID | Issue | Severity | Fix | Status |
 |---|---|---|---|---|
-| S-1 | Missing Hub preference grant (meeting notices fail closed) | High | N0-1; disappears once preferences move (N10) | **fixed in code, pending release** (ffff88d; Document 9) |
-| S-2 | OTP transport not recovered | High | E-track E1 (owner makes the existing Meeting adapters deliver, D-4); later the CRITICAL lane | open |
-| S-3 | `/internal/operations/email/*` public reachability unverified | Medium | N0-6; routes retired in N15 | **fixed in code, pending release** (1bbfefd; Document 9) |
-| S-4 | Caller-controlled `notify:false` | Medium | N0-5 | **fixed in code, pending release** (Document 9 §5) |
-| S-5 | Plaintext OTP in Redis | Medium | N0-8 | **fixed in code, pending release** (ba0af77; Document 9) |
-| S-6 | Enumeration | Medium | N0-9 (+ D-12) | **fixed in code, pending release** (94d759f; Document 9) |
-| S-7 | Erasure leaves push handles | Medium | N0-7; service erasure W5 | **fixed in code, pending release** (Document 9 §5) |
-| S-8 | Lease < batch, so duplicate sends are possible | Medium | N0-4; lease renewal in the service | **fixed in code, pending release** (05bfff0, 869b9d0; Document 9) |
-| S-9 | Security notices best-effort | Medium | N0-10; transactional Account outbox in N7 | **fixed in code, pending release** (c684d8c; Document 9) |
-| S-10 | Calling endpoint survives logout; `voip` without implementation | Medium | N0-11 | **fixed in code, pending release** (567e7f2, 9696dd6; Document 9) |
-| S-11 | Poison recipient | Medium | N0-3 | **fixed in code, pending release** (4246235; Document 9) |
-| S-12 | No bounce suppression | Low/Medium | N0-12; `notif_email_suppressions` | **fixed in code, pending release** (4246235; Document 9) |
+| S-1 | Missing Hub preference grant (meeting notices fail closed) | High | N0-1; disappears once preferences move (N10) | **repaired: released and verified in production** (ffff88d; Document 9 §7) |
+| S-2 | OTP transport not recovered | High | E-track E1 (owner makes the existing Meeting adapters deliver, D-4); later the CRITICAL lane | **open: `PENDING_OWNER_EMAIL_PROVIDER_ACTIVATION`** (Gmail SMTP rejects authentication, 535; Resend not installed; Document 9 §7.7) |
+| S-3 | `/internal/operations/email/*` public reachability unverified | Medium | N0-6; routes retired in N15 | **repaired: released and verified in production** (1bbfefd; Document 9 §7) |
+| S-4 | Caller-controlled `notify:false` | Medium | N0-5 | **repaired: released and verified in production** (Document 9 §7 §5) |
+| S-5 | Plaintext OTP in Redis | Medium | N0-8 | **repaired: released and verified in production** (ba0af77; Document 9 §7) |
+| S-6 | Enumeration | Medium | N0-9 (+ D-12) | **repaired: released and verified in production** (94d759f; Document 9 §7) |
+| S-7 | Erasure leaves push handles | Medium | N0-7; service erasure W5 | **repaired: released and verified in production** (Document 9 §7 §5) |
+| S-8 | Lease < batch, so duplicate sends are possible | Medium | N0-4; lease renewal in the service | **repaired: released and verified in production** (05bfff0, 869b9d0; Document 9 §7) |
+| S-9 | Security notices best-effort | Medium | N0-10; transactional Account outbox in N7 | **repaired: released and verified in production** (c684d8c; Document 9 §7) |
+| S-10 | Calling endpoint survives logout; `voip` without implementation | Medium | N0-11 | **repaired: released and verified in production** (567e7f2, 9696dd6; Document 9 §7) |
+| S-11 | Poison recipient | Medium | N0-3 | **repaired: released and verified in production** (4246235; Document 9 §7) |
+| S-12 | No bounce suppression | Low/Medium | N0-12; `notif_email_suppressions` | **repaired: released and verified in production** (4246235; Document 9 §7) |
 | S-13 | Push handles plaintext and shareable across accounts | Medium | sealed + `UNIQUE handle_digest` (N9) | design |
 | S-14 | APNs/FCM see conversation IDs | Low (residual) | documented; prefer Web Push | accepted residual (owner) |
 | S-15 | Org invitation token returned to the inviter | Low/Medium | Organizations backlog | open |
@@ -97,7 +98,7 @@
 |---|---|---|---|---|
 | K-1 | **Sign-in code email depends on a second service** | M | **H** | CRITICAL lane; 2 replicas; transactional Account outbox; X6/X7 lease protocol; **AUTO failover to the retained old path after 60 s and FORCED mode without restart** (verified for both replicas down and service DB down, Document 4 §10.4); fallback drill; alerting first (D-9); gates E3/E4; moved last |
 | K-2 | Wider blast radius: one service for all notifications | M | H | lanes and per-lane budgets; per-category fences; old pipelines kept until Phase 8 |
-| K-3 | Building on broken transports (S-1, S-2) | **H** | H | N0 first |
+| K-3 | Building on broken transports (S-1, S-2) | **M** (S-1 repaired 2026-11-16; S-2 open until E1) | H | N0 first (done except E1) |
 | K-4 | Producer outbox DEAD during a long outage | M | M | 503 + `Retry-After`; replay runbooks; Account outbox retries CRITICAL until code expiry |
 | K-5 | Owner read APIs overloaded (X1–X4 per recipient) | M | M | batching (≤ 100), versioned caches |
 | K-6 | E2EE metadata leakage | L | H | no content; X3 authorization; 5-key payload; tests ST-06, ST-17 |
@@ -108,26 +109,27 @@
 | K-11 | Preference move loses or overwrites user choices | L | M | versioned copy + catch-up + < 60 s freeze + 7-day write-back log; M-09 |
 | K-12 | Template drift changes what users receive | M | L | template parity test F-19 |
 | K-13 | Scope creep into customer webhooks | M | M | D-W with a separate addendum, not before 90 days |
-| K-14 | Shadow noise before N0 | **H** | M | shadow only after N0-1 |
+| K-14 | Shadow noise before N0 | **L** (N0-1 activated 2026-11-16) | M | shadow only after N0-1 |
 | K-15 | UI changes without design approval | M | L | D-11 |
 | K-16 | Mixed-version deployment writes to the old path after a category moved | L | H | activation preconditions (`routingProtocol` on every replica), guard triggers on old-path tables, release rollback floor (Document 4 §9.4, §9.6); tests M-11 … M-13 |
 | K-17 | Crash or rollback creates a message in both ledgers | L | H | sticky decisions in the producer transaction, acknowledgement boundary, two-phase and lease-fenced reroute, hourly audit with auto-freeze (Document 4 §9); tests M-14 … M-19 |
-| K-18 | Baselines taken while the transport is broken | **H** | M | email baselines start after gate E1; all Q1–Q18 OUTSTANDING until measured |
+| K-18 | Baselines taken while the transport is broken | **H** | M | email baselines start after gate E1; Q11, Q14, Q15 completed, the rest OUTSTANDING (§3a) |
 | K-19 | Fallback silently broken (legacy worker or its credentials removed during migration) | M | H | fallback readiness invariants certified weekly and before every CRITICAL change; drill (R-23, Document 4 §10.4) |
 
-## 3a. Outstanding production baseline measurements
+## 3a. Production baseline measurements
 
-| ID | Measures | Status (2026-11-15) | Blocks |
+| ID | Measures | Status (2026-11-16) | Blocks |
 |---|---|---|---|
-| Q1, Q2, Q17, Q18 | email ledger volume, error classes, p95 latency, drain size | **OUTSTANDING.** Take after E1, because today's SMTP path is reported broken | G-18, G-19, G-20, G-22, G-23; drain planning |
-| Q3, Q4 | meeting notice outcomes | **OUTSTANDING** | confirming S-1 before N0-1 |
+| Q1, Q2, Q17, Q18 | email ledger volume, error classes, p95 latency, drain size | **OUTSTANDING.** Take after E1. Pre-E1 snapshot (diagnose 43789219191, 24 h): FAILED 50, QUEUED 11, `SMTP_AUTHENTICATION` ×42, which confirms S-2 | G-18, G-19, G-20, G-22, G-23; drain planning |
+| Q3, Q4 | meeting notice outcomes | **OUTSTANDING** (N0-1 activated; `SENT` not possible before E1) | proving N0-1 end to end |
 | Q5 | Account → Hub outbox backlog | **OUTSTANDING** | — |
-| Q6, Q7 | push registrations and jobs | **OUTSTANDING** (hypothesis 0; Web Push activation in Messaging attempted) | 4.1 copy-path decision; G-10 |
+| Q6, Q7 | push registrations and jobs | **OUTSTANDING** (Web Push activated in Messaging, run 43706099426; counts not taken) | 4.1 copy-path decision; G-10 |
 | Q8, Q9 | preference and mute rows | **OUTSTANDING** | 4.2 sizing; G-15 |
-| Q10–Q13 | outbox and webhook health | **OUTSTANDING** | G-04 |
-| Q14 | live Hub trust bundle grant | **OUTSTANDING** | S-1 root cause |
-| Q15 | public reachability of `/internal/operations/*` | **OUTSTANDING** | S-3 |
-| Q16 | host capacity (7-day minimum) | **OUTSTANDING** (the 5,076 MiB from certify 43670057279 is a single sample) | G-01, Phase 6 |
+| Q10, Q12, Q13 | Hub, Calling outbox and webhook health | **OUTSTANDING** | G-04 |
+| Q11 | Organizations outbox | **COMPLETED** (certify 43792702821: 76 DELIVERED, 0 failures; 125 reconciliation records PENDING by design) | — |
+| Q14 | live Hub trust bundle grant | **COMPLETED**: granted after N0-1 (43788212474; certify 43792702821) | — |
+| Q15 | public reachability of `/internal/operations/*` | **COMPLETED**: denied with a marked 404 (43788404790; live re-check 2026-11-16) | — |
+| Q16 | host capacity (7-day minimum) | **OUTSTANDING** (single samples: 5,076 MiB certify 43670057279; 5,033 MiB release 43784033241; 5,039 MiB certify 43792702821) | G-01, Phase 6 |
 
 ## 4. Cost
 
@@ -160,7 +162,7 @@ Revision 2 is roughly 1.5–2× the engineering of revision 1, mainly from N5, N
 | D-1b | If push is activated in Messaging before N9 | **either is supported.** The owner has begun `activate-web-push` in Messaging (run 43702218850 failed before change; fix on `main`). If it proceeds, N9 uses the copy path (Document 5 §6, 4.1). Activating in the service instead avoids the copy | N9 |
 | D-2 | Call push path | **resolved by D-0**: the service CALL fast lane | — |
 | D-3 | Activate push providers (VAPID / FCM / APNs incl. VoIP) | Web Push first | N9 acceptance |
-| D-4 | **E-track:** make the existing Meeting adapters deliver (Resend via `activate-resend-email`, or a working SMTP account). Independent of service development | **now** (restores sign-in email today) | gate E1 → E2–E4 → moving email categories (N11, N12). **Does not block N1–N10** |
+| D-4 | **E-track:** make the existing Meeting adapters deliver (Resend via `activate-resend-email`, or a working SMTP account). Independent of service development | **now** (restores sign-in email today). Status 2026-11-16: `PENDING_OWNER_EMAIL_PROVIDER_ACTIVATION`; owner will install Resend separately, sender `no-reply@cfmeet.com` | gate E1 → E2–E4 → moving email categories (N11, N12). **Does not block N1–N10** |
 | D-5 | Organizations `resolveInvitationInvitee` (X5) | build | in-app invitation copy |
 | D-6 | Inbox realtime nudge | polling first | — |
 | D-7 | Organization notification policy | reserve slot | — |
