@@ -9,6 +9,13 @@ import { Button } from "@/components/ui/button";
 import { authService } from "@/services/auth.service";
 import type { ApiErrorResponse } from "@/types/auth";
 import { AxiosError } from "axios";
+import { formErrorsOf } from "@/lib/validation-errors";
+
+/** API field → form input; other problems (email, token) show in the alert. */
+const RESET_FIELDS: Record<string, string> = {
+  new_password: "password",
+  confirm_password: "confirmPassword",
+};
 
 interface PasswordResetModalProps {
   email: string;
@@ -65,6 +72,12 @@ const PasswordResetModal = ({ email, token }: PasswordResetModalProps) => {
       // Success - redirect to login
       router.push("/login?reset=success");
     } catch (err) {
+      // Structured field problems (error.details) land on the matching inputs.
+      const fieldErrors = formErrorsOf(err, RESET_FIELDS);
+      if (Object.keys(fieldErrors).length > 0) {
+        setErrors(fieldErrors);
+        return;
+      }
       const axiosError = err as AxiosError<ApiErrorResponse>;
       setErrors({
         general:

@@ -2,6 +2,7 @@
 //!
 //! HTTP handlers for meeting lifecycle management with LiveKit integration.
 
+use crate::validation::ValidateRequest;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -67,9 +68,7 @@ pub async fn create_instant_meeting(
     Extension(claims): Extension<Claims>,
     Json(payload): Json<crate::dto::InstantMeetingRequest>,
 ) -> ApiResult<(StatusCode, Json<crate::dto::InstantMeetingApiResponse>)> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
@@ -321,9 +320,7 @@ pub async fn create_meeting(
     Json(payload): Json<CreateMeetingRequest>,
 ) -> ApiResult<(StatusCode, Json<ApiResponse<MeetingResponse>>)> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
@@ -507,9 +504,7 @@ pub async fn update_meeting(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<MeetingResponse>>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;
@@ -730,9 +725,7 @@ pub async fn join_meeting(
     Path(id): Path<Uuid>,
     Json(payload): Json<JoinMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     let identity = LegacyJoinIdentity::resolve(&actor, payload.user_id)?;
 
     // Find meeting
@@ -1214,9 +1207,7 @@ pub async fn join_meeting_by_identifier(
     Path(meeting_identifier): Path<String>,
     Json(payload): Json<JoinMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     let identity = LegacyJoinIdentity::resolve(&actor, payload.user_id)?;
 
     // Find meeting by identifier
@@ -1366,9 +1357,7 @@ pub async fn api_create_meeting(
     Json(payload): Json<ApiCreateMeetingRequest>,
 ) -> ApiResult<(StatusCode, Json<ApiResponse<MeetingResponse>>)> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = api_claims.user_id;
 
@@ -1487,9 +1476,7 @@ pub async fn api_join_meeting(
     Path(id): Path<Uuid>,
     Json(payload): Json<ApiJoinMeetingRequest>,
 ) -> ApiResult<Json<ApiResponse<JoinMeetingResponse>>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     // Find meeting
     let meeting = Meetings::find_by_id(id)
