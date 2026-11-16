@@ -18,10 +18,10 @@ Statuses are kept separate, as the mission requires:
 | Section | Engineering | Production | Accepted | Evidence |
 |---|---|---|---|---|
 | **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **blocked: owner credentials** — run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) stopped at `CFMEET_RESEND_API_KEY is missing`, nothing changed | — | §3 |
-| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75) | `PRODUCTION_DEPLOYED_AND_VERIFIED` dark: release 43819010350 | 24 h dark observation from 07:43 UTC | §2.1, §4 |
+| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | deployed dark (release 43819010350, verification PASS); certify 43828926604 **NOT_CERTIFIED** (readiness), fix in PR #80, re-release and re-certify in §4.2 | 24 h dark observation restarts at the certified release | §2.1, §4 |
 | **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
-| **N6** owner APIs X1–X5 | in progress (see §2.4) | — | n/a | §2.4 |
+| **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PR #76); Meeting U1–U9 relay held for public-route approval | released with the readiness fix (§4.2); owner activation recorded in §4.2 | n/a | §2.4, §4.2 |
 | **N7** producer publications + routing fence | **not built** | — | — | §5 |
 | **N8** inbox | service side + U1–U5 built (PR #75); Meeting relay §2.4; web/mobile UI not built | — | — | §2.5 |
 | **N9** push + call fast lane | service side built (U8/U9, dispatcher, I3); Messaging facades, Calling transport, service worker not built | — | — | §2.5, §5 |
@@ -65,7 +65,19 @@ Port of the Meeting ledger: `EmailProvider` with Resend / SMTP / recording / non
 
 ### 2.4 N6 — owner APIs
 
-*(filled in when the owner-API pull request merges)*
+Merged in PR [#76](https://github.com/CosmicforgeHealthnet/cfmeet/pull/76) (`main` `6850660`). Each owner answers from its own data, behind a service token signed by `notifications` and carrying that owner's permission. None of them is reachable from the public gateway.
+
+| API | Owner | Implementation | Tests |
+|---|---|---|---|
+| X1 `resolveAccountContacts` | Meeting Service | `services/meeting-service/src/services/notification_owner.rs` | `tests/notification_owner.rs` |
+| X2 `resolveConferenceRecipients` | Meeting Service | same module; uses the same recipient rules as the existing reminder worker (`notifications.rs` refactor), so the two paths cannot diverge | same |
+| X3 `authorizeWakeups` | Messaging | `src/notifications.rs`, `realtime/push.rs authorize_wakeups`; metadata only, no message content | `tests/notification_wakeups.rs` |
+| X4 `checkCommunicationRestrictions` | Communications | `src/restrictions.rs`; calls must carry the first-party delegated scope (`CFMEET_COMMUNICATION_*`); group wake-ups use action `OTHER` | `tests/notification_restrictions.rs` |
+| X5 `resolveInvitationInvitee` | Organizations | `src/http/invitations.rs resolve_invitee` | `tests/notification_owner.rs` |
+
+The Meeting owner routes stay off until `NOTIFICATION_OWNER_API_ENABLED=true`. They are switched on, with the other owners' grants, only by the coordinated-release operation `activate-notifications-owners`. That operation probes every owner afterwards and expects a 401 without a token.
+
+**Held, not merged:** the Meeting U1–U9 relay (the inbox, preferences and push-registration facade for the web and mobile apps). It needs nine new entries in `infra/api-gateway/public-routes.json`. Changing that public surface is held for owner approval. Open contract question: X3 answers `409` above 1,000 recipients; the batch limit needs a contract decision before N9.
 
 ### 2.5 N8 / N9 / N10 service side
 
@@ -112,9 +124,15 @@ Owner action (docs/operations/resend-email-owner-handoff.md §4–§6): create a
 | Migration | `notifications-migration up`: `notifications_seaql_migrations` applied 1 (`m20261116_000001_notifications_foundation`) |
 | Verification | 33 checks PASS (running ×15 incl. `notifications` and `notifications-2`, migrations ×11 incl. `notifications`, `provider_features_off`, internal-not-public, CORS, swagger, Organizations event delivery); violations: none; regression (Meetings health, Messaging/Calling/Platform TLS readiness, LiveKit keys) PASS |
 | Dark state | every `notif_routing` row `OFF`, `NOTIFICATIONS_EMAIL_PROVIDER=none`, `NOTIFICATIONS_PUSH_PROVIDER=none`, no owner API, no producer grant: nothing can be delivered |
-| Certification | run [43828926604](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43828926604) `certify` (read-only) — result recorded below |
+| Certification | run [43828926604](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43828926604) `certify` (read-only): **NOT_CERTIFIED**. The only failing check was `notifications` readiness. |
 
-**N2 production status: `PRODUCTION_DEPLOYED_AND_VERIFIED` (dark).** The 24-hour zero-traffic observation of Document 6 N2 row 14 starts at the release (2026-11-16 07:43 UTC).
+**Certification failure and fix.** `/ready` treats any worker heartbeat older than 60 s as stale. The worker loop wrote a `retention` heartbeat only when hourly retention ran, so readiness went red one minute after start and stayed red until the next hour. This was a fault in the readiness logic, not in delivery: every route was `OFF` and nothing was sent. Fix in PR [#80](https://github.com/CosmicforgeHealthnet/cfmeet/pull/80): retention runs inside the scheduler loop, whose continuous heartbeat already proves the loop is alive, and has no heartbeat of its own. The regression test `running_workers_keep_ready_green_beyond_their_first_minute` asserts that every heartbeat key belongs to a worker that beats continuously. A release prepared on `6850660` before the fix (run 43829150172) was cancelled in its gate, before deploy.
+
+**N2 production status: deployed dark, release verification PASS, not yet certified.** It does not claim `PRODUCTION_DEPLOYED_AND_VERIFIED` until the post-fix release in §4.2 certifies. The 24-hour zero-traffic observation (Document 6 N2 row 14) restarts at that release.
+
+### 4.2 Readiness-fix release, certification and owner activation
+
+*(recorded when the runs complete)*
 
 ---
 
