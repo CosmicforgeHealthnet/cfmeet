@@ -1,8 +1,8 @@
 # CF Meet Unified Notification Service: Audit and Zero-Disruption Migration Blueprint
 
-**Status:** `BLUEPRINT_APPROVED (D-13) — N0, N1, N4 ENGINEERING_IMPLEMENTED; MERGE, RELEASE AND PRODUCTION VERIFICATION PENDING`
+**Status:** `BLUEPRINT_APPROVED (D-13) — CFMEET_NOTIFICATION_N0_N1_N4_PRODUCTION_CLOSED` (caveat `EMAIL_PROVIDER_E1_PENDING_OWNER_ACTIVATION`). N2 ready to begin
 
-**Engineering report:** [Document 9](09-engineering-report-n0-n1-n4.md) (2026-11-15). Owner decisions D-5, D-10, D-15, D-16 approved; D-W excluded; D-12 decided.
+**Engineering report:** [Document 9](09-engineering-report-n0-n1-n4.md) (2026-11-15; production closure §7, 2026-11-16: PR #71, release 43784033241, certify 43792702821 `CERTIFIED_READ_ONLY`). Owner decisions D-5, D-10, D-15, D-16 approved; D-W excluded; D-12 decided.
 
 **Revision 2, corrected before coding (2026-11-15).** The owner confirmed full consolidation (D-0): one notification system that every service uses, with every current notification delivery pipeline moving into it. This correction pass leaves the target architecture unchanged. It does the following:
 - reconciles every count;
@@ -19,7 +19,7 @@
 | Reconciled against | `main` @ `376339215233a55aae365e3bde9830da51778e0c` (§Reconciliation) |
 | Production evidence | read-only certify [43670057279](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43670057279) (`CERTIFIED_READ_ONLY`); release history up to run 43702218850; `GET https://api.cfmeet.com/health` = 200; dated `docs/operations/*` |
 | Changes made | this folder only (documentation). No production code, schema, secret or deployment change |
-| Outstanding | production baseline queries Q1–Q18, **all OUTSTANDING** (Document 5 §2.2, Document 8 §3a) |
+| Outstanding | E1 email-provider activation (owner, `PENDING_OWNER_EMAIL_PROVIDER_ACTIVATION`); baseline queries: Q11, Q14, Q15 completed 2026-11-16, the other 15 **OUTSTANDING** (current status: Document 8 §3a, Document 9 §7.8) |
 
 ## Deliverables
 
@@ -60,7 +60,7 @@
 | Test cases | **87** | F-01–F-23, R-01–R-23, ST-01–ST-20, M-01–M-21 | Doc 7 |
 | Production acceptance measures | **28** | G-01–G-28 | Doc 7 §5 |
 | Delivery-evidence gates | **4** | E1–E4 | Doc 4 §14.3 |
-| Baseline measurements | **18, all OUTSTANDING** | Q1–Q18 | Doc 5 §2.2 |
+| Baseline measurements | **18** (3 completed, 15 OUTSTANDING; status in Doc 8 §3a) | Q1–Q18 | Doc 5 §2.2 |
 | Roadmap sections | **17 engineering + E-track** | N0–N16; E1–E4 | Doc 6 |
 | Containers | **2** (≤ 256 MiB each) | — | Doc 3 §7.2 |
 
