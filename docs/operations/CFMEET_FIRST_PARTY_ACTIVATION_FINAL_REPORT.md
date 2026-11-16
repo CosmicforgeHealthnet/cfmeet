@@ -1,5 +1,7 @@
 # CF Meet — first-party production activation: final handover and closure report
 
+> **Superseded (2026-11-16).** Current production state, feature activation and the remaining blockers are in [CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md](CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md). This report is kept as history; statements here about switches being off or Organizations not being authoritative may be out of date.
+
 Date: 2026-11-13 · Environment: production (`https://api.cfmeet.com`, Contabo VPS) · Owner directive: "Final production activation: remove backup blockers and activate all first-party features".
 
 ## 0. Verdict

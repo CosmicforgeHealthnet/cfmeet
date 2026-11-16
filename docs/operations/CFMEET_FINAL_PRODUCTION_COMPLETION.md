@@ -1,5 +1,7 @@
 # CF Meet — final production completion
 
+> **Superseded (2026-11-16).** Current production state, feature activation and the remaining blockers are in [CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md](CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md). This report is kept as history; statements here about switches being off or Organizations not being authoritative may be out of date.
+
 Date: 2026-11-12 · Environment: production (`api.cfmeet.com`, Contabo VPS) · Baseline: [CFMEET_ALL_FEATURES_ACTIVATION_CLOSURE.md](CFMEET_ALL_FEATURES_ACTIVATION_CLOSURE.md)
 
 Status vocabulary: `ACTIVE_VERIFIED` (production evidence cited) · `IMPLEMENTED_PENDING_CONFIGURATION` · `PENDING_OWNER_APPROVAL` · `PENDING_EXTERNAL_ASSESSMENT` · `DEFERRED_BY_OWNER` · `FAILED`.
