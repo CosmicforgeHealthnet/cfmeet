@@ -93,8 +93,9 @@ pub fn spawn(state: &AppState) -> Workers {
                 if let Err(e) = expire_overdue(&db).await {
                     tracing::warn!(summary = %db::summarize_db_error(&e), "expiry pass failed");
                 }
+                // Retention runs hourly inside this loop, whose own beat ("scheduler") proves
+                // it alive: an hourly heartbeat would read stale to /ready after 60 s.
                 if Utc::now() - last_retention > chrono::Duration::hours(1) {
-                    hb.beat("retention");
                     match retention(&db).await {
                         Ok(()) => last_retention = Utc::now(),
                         Err(e) => tracing::warn!(summary = %db::summarize_db_error(&e), "retention pass failed"),
