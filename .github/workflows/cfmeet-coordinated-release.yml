@@ -290,35 +290,48 @@ jobs:
           python3 activation_base.py "$GITHUB_WORKSPACE" "$RELEASE_SHA" "$base" activation-base.json
           { echo '### Activation base'; echo '```json'; python3 -c 'import json; d=json.load(open("activation-base.json")); d.pop("inputs"); print(json.dumps(d, indent=1))'; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install the Resend credentials and the acceptance recipient (never printed)
-        # The dedicated CF Meet Resend API key (and optional webhook signing secret) live in
-        # the production environment's secrets; they reach the VPS only through SSH stdin
-        # into 0400 files of the existing secret store. The acceptance recipient (a
-        # controlled inbox; default Resend's test inbox) is a non-secret variable.
+      - name: Verify the Resend credentials on the VPS and install the acceptance recipient (never printed)
+        # Owner decision (2026-11-16): the dedicated CF Meet Resend API key and the webhook
+        # signing secret are stored ONLY on the production VPS, as root-owned files of the
+        # existing secret store. Nothing is read from GitHub secrets and nothing is copied: this
+        # step proves over SSH that each file exists, is a regular file owned by root with no
+        # group/other access, and holds a value of the expected form. Values never leave the
+        # VPS and are never printed (format checks run there with grep -q). email_operations.py
+        # mounts the same files read-only into the Meeting Service. The acceptance recipient (a
+        # controlled inbox; default Resend's test inbox) stays a non-secret variable.
         if: inputs.operation == 'activate-resend-email' || inputs.operation == 'email-acceptance'
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
-          OPERATION: ${{ inputs.operation }}
-          RESEND_API_KEY: ${{ secrets.CFMEET_RESEND_API_KEY }}
-          RESEND_WEBHOOK_SECRET: ${{ secrets.CFMEET_RESEND_WEBHOOK_SECRET }}
           ACCEPTANCE_RECIPIENT: ${{ vars.CFMEET_EMAIL_ACCEPTANCE_RECIPIENT }}
         run: |
           set -euo pipefail
           ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
-          install_secret() {  # name, value
-            ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \
-              "umask 077; mkdir -p /opt/cfmeet-core/secrets; cat > '/opt/cfmeet-core/secrets/$1.new' && chmod 0400 '/opt/cfmeet-core/secrets/$1.new' && mv -f '/opt/cfmeet-core/secrets/$1.new' '/opt/cfmeet-core/secrets/$1'" <<< "$2"
-          }
-          if [[ "$OPERATION" == activate-resend-email ]]; then
-            [[ "$RESEND_API_KEY" =~ ^re_[A-Za-z0-9_]{8,200}$ ]] || { echo "::error::CFMEET_RESEND_API_KEY is missing or not a Resend API key"; exit 1; }
-            install_secret resend-api-key "$RESEND_API_KEY"
-            if [[ -n "$RESEND_WEBHOOK_SECRET" ]]; then
-              [[ "$RESEND_WEBHOOK_SECRET" =~ ^whsec_[A-Za-z0-9+/=]{16,200}$ ]] || { echo "::error::CFMEET_RESEND_WEBHOOK_SECRET is not a whsec_ signing secret"; exit 1; }
-              install_secret resend-webhook-secret "$RESEND_WEBHOOK_SECRET"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          dir=/opt/cfmeet-core/secrets
+          [[ -d "$dir" && ! -L "$dir" ]] || { echo "::error::$dir is missing"; exit 1; }
+          read -r downer dmode < <(stat -c '%u %a' "$dir")
+          [[ "$downer" == 0 ]] || { echo "::error::$dir is not owned by root"; exit 1; }
+          (( (8#$dmode & 8#022) == 0 )) || { echo "::error::$dir is writable by group or others (mode $dmode)"; exit 1; }
+          check() {  # file name, value pattern, required|optional
+            local f="$dir/$1" owner mode
+            if [[ ! -e "$f" && ! -L "$f" ]]; then
+              [[ "$3" == required ]] && { echo "::error::$f is missing on the VPS"; exit 1; }
+              echo "$1: absent"; return 0
             fi
-            echo "Resend credentials installed (webhook secret: $([[ -n "$RESEND_WEBHOOK_SECRET" ]] && echo yes || echo no))"
-          fi
+            [[ -f "$f" && ! -L "$f" ]] || { echo "::error::$f is not a regular file"; exit 1; }
+            read -r owner mode < <(stat -c '%u %a' "$f")
+            [[ "$owner" == 0 ]] || { echo "::error::$f is not owned by root"; exit 1; }
+            (( (8#$mode & 8#077) == 0 )) || { echo "::error::$f is accessible to group or others (mode $mode)"; exit 1; }
+            [[ "$(wc -l < "$f")" -le 1 ]] || { echo "::error::$f must hold a single value"; exit 1; }
+            head -c 512 "$f" | tr -d '\r\n' | grep -Eq "$2" \
+              || { echo "::error::$f does not hold a value of the expected form"; exit 1; }
+            echo "$1: present, root-owned, mode $mode, form valid"
+          }
+          check resend-api-key '^re_[A-Za-z0-9_]{8,200}$' required
+          check resend-webhook-secret '^whsec_[A-Za-z0-9+/=]{16,200}$' optional
+          REMOTE
           if [[ -n "$ACCEPTANCE_RECIPIENT" ]]; then
             [[ "$ACCEPTANCE_RECIPIENT" =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "::error::CFMEET_EMAIL_ACCEPTANCE_RECIPIENT is not an address"; exit 1; }
             ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p /opt/cfmeet-core/coordinated; cat > /opt/cfmeet-core/coordinated/email-acceptance-recipient" <<< "$ACCEPTANCE_RECIPIENT"

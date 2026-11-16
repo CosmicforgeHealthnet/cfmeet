@@ -84,17 +84,27 @@ The webhook gives the backend **delivery evidence** (`DELIVERED`, `BOUNCED`, `CO
 3. Select the events `email.sent`, `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.failed`.
 4. Copy the endpoint's **Signing Secret**, which starts with `whsec_`.
 
-## 6. Secure placement (GitHub, not the VPS shell)
+## 6. Secure placement (on the VPS only)
 
-Go to GitHub → `CosmicforgeHealthnet/cfmeet` → **Settings → Environments → production**:
+**Owner decision (2026-11-16): the credentials are stored only on the production VPS.** They are never stored in GitHub secrets and never copied by a workflow.
 
-| Kind | Name | Value |
+| File on the VPS | Content | Requirements |
 |---|---|---|
-| Secret | `CFMEET_RESEND_API_KEY` | the `re_…` key |
-| Secret | `CFMEET_RESEND_WEBHOOK_SECRET` | the `whsec_…` secret (if you did step 5) |
-| Variable | `CFMEET_EMAIL_ACCEPTANCE_RECIPIENT` | a controlled inbox you can read, e.g. your own address. If unset, Resend's test inbox `delivered@resend.dev` is used, which proves acceptance and delivery but is not a human inbox. |
+| `/opt/cfmeet-core/secrets/resend-api-key` | the `re_…` key, on one line | regular file, owned by `root`, mode `0400` (no group or other access) |
+| `/opt/cfmeet-core/secrets/resend-webhook-secret` | the `whsec_…` secret, on one line (if you did step 5) | same |
 
-The workflow writes the secrets to `/opt/cfmeet-core/secrets/resend-api-key` and `/opt/cfmeet-core/secrets/resend-webhook-secret` (0400, root). It mounts them read-only into the Meeting Service as `RESEND_API_KEY_FILE` and `RESEND_WEBHOOK_SECRET_FILE`. They never appear in environment listings, logs or the release journal.
+The directory `/opt/cfmeet-core/secrets` must be owned by `root` and not writable by group or others.
+
+Before anything changes, `activate-resend-email` and `email-acceptance` check over SSH that:
+- each file exists;
+- it is root-owned with no group or other access;
+- it holds a value of the expected form.
+
+The values are matched on the VPS (`grep -q`) and never printed, transferred or logged. A missing or loosely permissioned file stops the run before any container is touched.
+
+The activation mounts the files read-only into the Meeting Service as `RESEND_API_KEY_FILE` and `RESEND_WEBHOOK_SECRET_FILE`. They never appear in environment listings, logs or the release journal.
+
+The acceptance recipient stays a non-secret GitHub variable: `CFMEET_EMAIL_ACCEPTANCE_RECIPIENT`, a controlled inbox you can read. If unset, Resend's test inbox `delivered@resend.dev` is used. That proves acceptance and delivery to Resend's simulator, but it is not a human inbox.
 
 ## 7. Activation (safe reload with automatic verification)
 
