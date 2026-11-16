@@ -42,6 +42,30 @@ export interface TransferRequest {
   };
 }
 
+/** C5: body of POST /v1/calls/{id}/upgrade (VOICE -> VIDEO, once). */
+export interface UpgradeRequest {
+  kind: "VIDEO";
+  expectedVersion: number;
+}
+
+/**
+ * C6: body of POST /v1/calls/{id}/screen-share and …/screen-share/stop. The adapter replaces
+ * `participantId` with the signed-in user's own active participant.
+ */
+export interface ScreenShareRequest {
+  participantId?: Uuid;
+}
+
+/**
+ * C7: body of POST /v1/calls/{id}/participants. The adapter injects the signed-in user's own
+ * active participant as `invitingParticipantId`.
+ */
+export interface AddParticipantsRequest {
+  invitingParticipantId?: Uuid;
+  targetPrincipalIds: Uuid[];
+  expectedVersion: number;
+}
+
 export interface IvrInputRequest {
   endpointId: Uuid;
   digit: "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "*" | "#";

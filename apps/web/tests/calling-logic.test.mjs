@@ -3,7 +3,7 @@
 // incoming-call presentation (CAL-004). Run: node --experimental-strip-types --test tests/calling-logic.test.mjs
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mayControl, ownSession, visibleControls } from "../src/lib/calling/call-permissions.ts";
+import { isPresenter, mayControl, ownSession, visibleControls } from "../src/lib/calling/call-permissions.ts";
 import { DEFAULT_RECONNECT_POLICY, INITIAL_MEDIA_STATE, backoffDelay, isRetryableCredentialFailure, mediaReducer, mediaStatusLabel } from "../src/lib/calling/media-reconnect.ts";
 import { CallingConfigurationError, callingBaseUrl, callingRuntimeMode, renewalDelay } from "../src/lib/calling/runtime-guard.ts";
 import { callerLabel, offerHeadline, ringingOffers } from "../src/lib/calling/incoming-call.ts";
@@ -62,10 +62,28 @@ test("IVR keypad input belongs to the active caller", () => {
 
 test("the UI shows only controls that are both permitted and available, never on a finished call", () => {
   const actions = (names) => (name) => names.includes(name);
-  assert.deepEqual(visibleControls(call(), me, actions(["END", "HOLD"])), { cancel: false, end: true, hold: true, resume: false, transfer: false });
-  assert.deepEqual(visibleControls(call({ state: "ENDED" }), me, all), { cancel: false, end: false, hold: false, resume: false, transfer: false });
+  const none = { cancel: false, end: false, hold: false, resume: false, transfer: false, upgrade: false, screenShare: false, invite: false };
+  assert.deepEqual(visibleControls(call(), me, actions(["END", "HOLD"])), { ...none, end: true, hold: true });
+  assert.deepEqual(visibleControls(call({ state: "ENDED" }), me, all), none);
   assert.equal(visibleControls(call({ state: "REQUESTED", initiatorPrincipalId: me }), me, all).end, false);
   assert.equal(visibleControls(call({ state: "REQUESTED", initiatorPrincipalId: me }), me, all).cancel, true);
+});
+
+test("upgrade, screen share and add people are for active parties the server offers them to (C5-C7)", () => {
+  const actions = (names) => (name) => names.includes(name);
+  const offered = actions(["UPGRADE", "START_SCREEN_SHARE", "ADD_PARTICIPANTS"]);
+  for (const op of ["upgrade", "screenShare", "invite"]) {
+    assert.equal(mayControl(call(), me, op), true, op);
+    assert.equal(mayControl(call(), "stranger", op), false, op);
+    assert.equal(visibleControls(call(), me, offered)[op], true, op);
+    assert.equal(visibleControls(call(), me, actions([]))[op], false, `${op} needs the server's action`);
+    assert.equal(visibleControls(call({ state: "ENDING" }), me, offered)[op], false, `${op} on a finished call`);
+  }
+  const left = call({ participants: [{ participantId: "p-me", principalId: me, endedAt: "2026-10-23T12:00:00Z" }, { participantId: "p-c", principalId: "caller", endedAt: null }] });
+  assert.equal(mayControl(left, me, "invite"), false, "a party that left cannot invite");
+  assert.equal(isPresenter({ ...call(), screenShare: { participantId: "p-me" } }, me), true);
+  assert.equal(isPresenter({ ...call(), screenShare: { participantId: "p-c" } }, me), false);
+  assert.equal(isPresenter({ ...call(), screenShare: null }, me), false);
 });
 
 test("own session is the live session of my active participant on this endpoint", () => {

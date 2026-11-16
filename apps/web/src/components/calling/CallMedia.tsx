@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LiveKitRoom, RoomAudioRenderer, useAudioPlayback, useLocalParticipant, useRoomContext, useTracks, VideoTrack } from "@livekit/components-react";
-import { DisconnectReason, RoomEvent, Track, type LocalVideoTrack } from "livekit-client";
-import { Mic, MicOff, SwitchCamera, Video, VideoOff, Volume2 } from "lucide-react";
+import { DisconnectReason, RoomEvent, Track, type LocalVideoTrack, type Room } from "livekit-client";
+import { Mic, MicOff, MonitorUp, MonitorX, SwitchCamera, Video, VideoOff, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MediaCredential } from "@/types/calling";
 import { quietExpectedLiveKitTeardown } from "@/lib/calling/livekit-quiet";
@@ -16,12 +16,18 @@ quietExpectedLiveKitTeardown();
  */
 export function CallVideoStage() {
   const tracks = useTracks([Track.Source.Camera]).filter((t) => t.publication?.track && !t.publication.isMuted);
+  // C6: a remote participant's shared screen takes the stage (fitted, never cropped).
+  const screen = useTracks([Track.Source.ScreenShare]).find((t) => t.publication?.track && !t.publication.isMuted && !t.participant.isLocal);
   const remote = tracks.filter((t) => !t.participant.isLocal);
   const local = tracks.find((t) => t.participant.isLocal);
-  if (!tracks.length) return null;
+  if (!tracks.length && !screen) return null;
   return (
     <div className="absolute inset-0">
-      {remote.length > 0 ? (
+      {screen ? (
+        <div className="h-full w-full bg-black">
+          <VideoTrack trackRef={screen} className="h-full w-full object-contain" />
+        </div>
+      ) : remote.length > 0 ? (
         <div className={cn("grid h-full w-full gap-1 bg-black", remote.length > 1 && "grid-cols-2")}>
           {remote.map((t) => <VideoTrack key={`${t.participant.identity}-${t.publication.trackSid}`} trackRef={t} className="h-full w-full object-cover" />)}
         </div>
@@ -37,7 +43,8 @@ export function CallVideoStage() {
 
 /** True once anyone in the call is sending video (so the stage can switch from avatar to video). */
 export function useAnyVideo() {
-  return useTracks([Track.Source.Camera]).some((t) => t.publication?.track && !t.publication.isMuted);
+  return useTracks([Track.Source.Camera, Track.Source.ScreenShare])
+    .some((t) => t.publication?.track && !t.publication.isMuted && (t.source === Track.Source.Camera || !t.participant.isLocal));
 }
 
 /**
@@ -141,6 +148,78 @@ export function CallCameraButton({ allowed }: { allowed: boolean }) {
   if (!allowed || !localParticipant.permissions?.canPublish) return null;
   return <CallButton icon={isCameraEnabled ? <Video /> : <VideoOff />} label={isCameraEnabled ? "Camera" : "Camera off"} off={!isCameraEnabled}
     onClick={() => void localParticipant.setCameraEnabled(!isCameraEnabled)} />;
+}
+
+/** Whether the server's grant (pushed after the screen-share API call) includes the screen. */
+function screenGranted(room: Room): boolean {
+  const permissions = room.localParticipant.permissions;
+  if (!permissions?.canPublish) return false;
+  const sources = (permissions.canPublishSources ?? []) as unknown[];
+  // An empty list with canPublish means every source; 3 = SCREEN_SHARE in the protocol enum.
+  return sources.length === 0 || sources.some((s) => s === 3 || s === "SCREEN_SHARE");
+}
+
+/** Resolves once the screen grant arrived (or after `ms`, whichever is first). */
+function waitForScreenGrant(room: Room, ms: number): Promise<boolean> {
+  if (screenGranted(room)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (value: boolean) => { room.off(RoomEvent.ParticipantPermissionsChanged, check); clearTimeout(timer); resolve(value); };
+    const check = () => { if (screenGranted(room)) done(true); };
+    const timer = setTimeout(() => done(screenGranted(room)), ms);
+    room.on(RoomEvent.ParticipantPermissionsChanged, check);
+  });
+}
+
+/**
+ * Share screen (C6). The server decides: `onStart` asks Calling to make this user the call's
+ * presenter (one per call); only then is the screen published, once the server's grant has
+ * arrived. Stopping (here, the browser's "Stop sharing" bar, or the server — another stop, the
+ * call ending) ends the local share and tells Calling. Must be rendered inside <CallMedia>.
+ */
+export function CallScreenShareButton({ presenting, onStart, onStop, onError }: {
+  presenting: boolean;
+  onStart: () => Promise<unknown>;
+  onStop: () => Promise<unknown>;
+  onError: (error: unknown) => void;
+}) {
+  const room = useRoomContext();
+  const { localParticipant, isScreenShareEnabled } = useLocalParticipant();
+  const [busy, setBusy] = useState(false);
+  const wasSharing = useRef(false);
+  // The server no longer lists us as presenter: stop publishing the screen.
+  useEffect(() => {
+    if (!presenting && isScreenShareEnabled && !busy) void localParticipant.setScreenShareEnabled(false).catch(() => undefined);
+  }, [presenting, isScreenShareEnabled, busy, localParticipant]);
+  // The browser's own "Stop sharing" ended the track: release the presenter role.
+  useEffect(() => {
+    if (wasSharing.current && !isScreenShareEnabled && presenting && !busy) void onStop().catch(() => undefined);
+    wasSharing.current = isScreenShareEnabled;
+  }, [isScreenShareEnabled, presenting, busy, onStop]);
+  if (typeof navigator !== "undefined" && !navigator.mediaDevices?.getDisplayMedia) return null;
+  const start = async () => {
+    setBusy(true);
+    try {
+      await onStart();
+      await waitForScreenGrant(room, 5000);
+      try {
+        await localParticipant.setScreenShareEnabled(true, { audio: true });
+      } catch (e) {
+        // Picker dismissed or refused: give the presenter role back.
+        await onStop().catch(() => undefined);
+        if (!(e instanceof Error && e.name === "NotAllowedError")) throw e;
+      }
+    } catch (e) { onError(e); } finally { setBusy(false); }
+  };
+  const stop = async () => {
+    setBusy(true);
+    try {
+      await localParticipant.setScreenShareEnabled(false).catch(() => undefined);
+      await onStop();
+    } catch (e) { onError(e); } finally { setBusy(false); }
+  };
+  return presenting
+    ? <CallButton icon={<MonitorX />} label="Stop sharing" tone="warn" disabled={busy} onClick={() => void stop()} />
+    : <CallButton icon={<MonitorUp />} label="Share screen" disabled={busy} onClick={() => void start()} />;
 }
 
 /** Switch between front and back camera (phones). Hidden while the camera is off. */

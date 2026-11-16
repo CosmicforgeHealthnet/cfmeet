@@ -20,6 +20,11 @@ import type {
   SessionRemovalResult,
   TransferRequest,
   TransferResult,
+  UpgradeRequest,
+  ScreenShareRequest,
+  ScreenShareResult,
+  AddParticipantsRequest,
+  AddParticipantsResult,
   Uuid,
   CallHistoryFilters,
   CallHistoryList,
@@ -158,6 +163,30 @@ export const callsService = {
       body,
       { headers: idempotencyHeader(idempotencyKey) },
     );
+    return response.data;
+  },
+
+  /** C5: VOICE -> VIDEO (never turns a camera on; the camera button becomes available). */
+  upgrade: async (callId: Uuid, body: UpgradeRequest, idempotencyKey?: string): Promise<ControlResult> => {
+    const response = await callingApi.post<ControlResult>(`/v1/calls/${callId}/upgrade`, body, { headers: idempotencyHeader(idempotencyKey) });
+    return response.data;
+  },
+
+  /** C6: become the call's presenter (one per call). */
+  startScreenShare: async (callId: Uuid, body: ScreenShareRequest, idempotencyKey?: string): Promise<ScreenShareResult> => {
+    const response = await callingApi.post<ScreenShareResult>(`/v1/calls/${callId}/screen-share`, body, { headers: idempotencyHeader(idempotencyKey) });
+    return response.data;
+  },
+
+  /** C6: stop presenting. */
+  stopScreenShare: async (callId: Uuid, body: ScreenShareRequest, idempotencyKey?: string): Promise<ScreenShareResult> => {
+    const response = await callingApi.post<ScreenShareResult>(`/v1/calls/${callId}/screen-share/stop`, body, { headers: idempotencyHeader(idempotencyKey) });
+    return response.data;
+  },
+
+  /** C7: invite people into the ongoing call. */
+  addParticipants: async (callId: Uuid, body: AddParticipantsRequest, idempotencyKey?: string): Promise<AddParticipantsResult> => {
+    const response = await callingApi.post<AddParticipantsResult>(`/v1/calls/${callId}/participants`, body, { headers: idempotencyHeader(idempotencyKey) });
     return response.data;
   },
 
