@@ -14,6 +14,21 @@ export namespace Calling {
     outcome: "ACCEPTED";
     callAnswered: boolean;
   };
+  /** Body of POST /v1/calls/{call_id}/acknowledge: the application backend confirms that its endpoint endpointId received ring offer invitationId (e.g. from a push delivery receipt). */
+  export type AcknowledgeRequest = {
+    invitationId: Uuid;
+    endpointId: Uuid;
+  };
+  /** Result of POST /v1/calling/invitations/{invitation_id}/acknowledge: the endpoint's device confirmed it received the ring offer and is alerting its user. The offer is RINGING (ringingAt is the server time of the first acknowledgement); the first acknowledged offer of a DIALING application Call moves the Call to RINGING. Repeating the acknowledgement changes nothing. */
+  export type AcknowledgeResult = {
+    invitationId: Uuid;
+    callId: Uuid;
+    status: "RINGING";
+    ringingAt: string;
+    expiresAt: string;
+    callState: CallState;
+    callVersion: number;
+  };
   /** Body of PUT /v1/enterprise/ivr-flows/{ivr_flow_id}/activation: the published version NEW Calls run (Calls already in the IVR keep theirs). Its destinations are re-validated. */
   export type ActivateIvrVersionRequest = {
     /** The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing. */
@@ -1109,7 +1124,7 @@ export namespace Calling {
   export type RecordingState = "STARTING" | "RECORDING" | "STOPPING" | "PROCESSING" | "READY" | "FAILED" | "DELETING" | "DELETED";
   /** Why a recording stopped. */
   export type RecordingStopReason = "EXPLICIT" | "CALL_ENDED" | "POLICY_REVOKED" | "CONSENT_WITHDRAWN" | "CAPTURE_FAILED" | "MAX_DURATION" | "KILL_SWITCH";
-  /** An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. actionable is true only for a RINGING, unexpired offer of a Call that can still be answered. */
+  /** An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. status is PENDING until this device acknowledges receipt (POST /v1/calling/invitations/{invitation_id}/acknowledge), then RINGING. actionable is true only for a live (PENDING or RINGING), unexpired offer of a Call that can still be answered; a live offer of an ending or terminal Call is reported CANCELLED. */
   export type RecoveredInvitation = {
     invitationId: Uuid;
     callId: Uuid;
@@ -1559,6 +1574,16 @@ export namespace Calling {
     accessVoicemailMedia: {
       params: { path: { message_id: string }; body: VoicemailMediaAccessRequest };
       response: VoicemailMediaAccess;
+    };
+    /** POST /v1/calls/{call_id}/acknowledge — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    acknowledgeCallInvitation: {
+      params: { path: { call_id: string }; body: AcknowledgeRequest };
+      response: AcknowledgeResult;
+    };
+    /** POST /v1/calling/invitations/{invitation_id}/acknowledge; auth SIGNALING_CREDENTIAL; retry NO_RETRY */
+    acknowledgeInvitation: {
+      params: { path: { invitation_id: string } };
+      response: AcknowledgeResult;
     };
     /** PUT /v1/enterprise/ivr-flows/{ivr_flow_id}/activation — scope enterprise.config.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     activateIvrVersion: {

@@ -242,7 +242,7 @@ impl AppCallService {
             return Ok(false);
         };
         let cmd = system_cmd(&call);
-        let ending = self
+        let applied = self
             .calls
             .transition_with_details_in(
                 &txn,
@@ -252,9 +252,10 @@ impl AppCallService {
                 CallAction::RequestEnd,
                 vec![("end_trigger", SafeValue::Text(reason.as_str().into()))],
             )
-            .await?
-            .call;
-        let cancelled = self.end_effects_in(&txn, &cmd, &ending).await?;
+            .await?;
+        let mut cancelled = applied.cancelled_invitations;
+        let ending = applied.call;
+        cancelled.extend(self.end_effects_in(&txn, &cmd, &ending).await?);
         let pending = self.end_signals_in(&txn, &cmd, &ending, &cancelled).await?;
         txn.commit().await?;
         crate::metrics::inc(

@@ -18,7 +18,9 @@
 //!   3. ANSWERED_ELSEWHERE — its offers were won by ANOTHER participant of the same answer
 //!      group (a ring-group or queue colleague). A losing DEVICE of a participant that
 //!      answered is case 1: the participant answered, nothing is missed twice;
-//!   4. RINGING — an offer is still live;
+//!   4. RINGING — an offer is still live AND the Call is neither ending nor terminal (an
+//!      offer left open on a finished Call — e.g. a row written before the lifecycle closed
+//!      offers on ENDING — never makes a finished Call ring in history);
 //!   5. MISSED — it was offered on at least one device and every offer ended unanswered
 //!      (expired, the caller cancelled, the Call ended, the ring moved on);
 //!   6. NOT_REACHED — never offered and the Call is over; IN_PROGRESS otherwise.
@@ -320,7 +322,8 @@ fn history_statement_for(
            WHEN a.answered_at IS NOT NULL THEN 'ANSWERED' \
            WHEN o.declined > 0 THEN 'DECLINED' \
            WHEN o.elsewhere > 0 THEN 'ANSWERED_ELSEWHERE' \
-           WHEN o.live > 0 THEN 'RINGING' \
+           WHEN o.live > 0 AND c.current_state NOT IN {TERMINAL} \
+             AND c.current_state <> 'ENDING' THEN 'RINGING' \
            WHEN o.offers > 0 THEN 'MISSED' \
            WHEN c.current_state IN {TERMINAL} THEN 'NOT_REACHED' \
            ELSE 'IN_PROGRESS' END AS outcome) h \

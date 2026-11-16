@@ -7,6 +7,9 @@
 //! * `GET  /v1/calling/history` — recovery: the endpoint's principal's canonical call
 //!   history (Part F §62), the same derivation and filters as `GET /v1/calls` — a client
 //!   that missed every push and signal reads the authoritative missed / answered state;
+//! * `POST /v1/calling/invitations/{invitation_id}/acknowledge` — the device confirms it
+//!   received the offer and is ringing (PENDING → RINGING; idempotent, no body). Also
+//!   available on the WebSocket as `{"type":"invitation.acknowledge","invitationId":…}`;
 //! * `POST /v1/calling/invitations/{invitation_id}/accept|decline` — answer one's own offer
 //!   (`expectedVersion` required; Idempotency-Key honoured);
 //! * `POST /v1/calling/sessions/{session_id}/media-credentials` — a join credential for one's
@@ -46,6 +49,10 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/calling/signaling", get(super::ws::signaling))
         .route("/v1/calling/invitations", get(invitations))
         .route("/v1/calling/history", get(history))
+        .route(
+            "/v1/calling/invitations/:invitation_id/acknowledge",
+            post(acknowledge),
+        )
         .route(
             "/v1/calling/invitations/:invitation_id/accept",
             post(accept),
@@ -181,6 +188,25 @@ async fn decline(
         CommandOperation::Decline,
     )
     .await
+}
+
+async fn acknowledge(
+    State(state): State<AppState>,
+    identity: SignalingIdentity,
+    Path(invitation_id): Path<String>,
+    body: Result<Json<EmptyBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    if let Err(rejection) = &body {
+        if !matches!(rejection, JsonRejection::MissingJsonContentType(_)) {
+            return Err(CallingError::Validation("The request body is invalid."));
+        }
+    }
+    let invitation_id = CallInvitationId::from_uuid(uuid_path(&invitation_id)?);
+    let body = state
+        .app
+        .acknowledge_invitation(InvitationActor::Endpoint(identity), None, invitation_id)
+        .await?;
+    Ok(respond(StatusCode::OK, body, false))
 }
 
 async fn media_credentials(

@@ -215,7 +215,8 @@ async fn revocation_cancels_ringing_and_ends_connected_protected_calls_once() {
         .unwrap()
         .parse()
         .unwrap();
-    assert_eq!(w.state(ringing).await.0, CallState::Ringing);
+    // Offered, not yet received by a device (C1): DIALING.
+    assert_eq!(w.state(ringing).await.0, CallState::Dialing);
 
     let body = command(fake.context_id, 2, "CONTEXT_REVOKED");
     let r = enforce(&w, body.clone()).await;
@@ -228,7 +229,7 @@ async fn revocation_cancels_ringing_and_ends_connected_protected_calls_once() {
     // END -> ENDING -> provider cleanup -> ENDED through the ordinary call command.
     assert_eq!(w.state(connected).await.0, CallState::Ended);
     // Ordinary app calls are never touched.
-    assert_eq!(w.state(ordinary).await.0, CallState::Ringing);
+    assert_eq!(w.state(ordinary).await.0, CallState::Dialing);
 
     // Replays: the same answer, no new terminal events, no second provider cleanup.
     let events = scalar_i64(w.h().conn(), "SELECT count(*) FROM call_events").await;

@@ -727,6 +727,83 @@
         }
       }
     },
+    "/v1/calls/{call_id}/acknowledge": {
+      "post": {
+        "operationId": "acknowledgeCallInvitation",
+        "tags": [
+          "Call Controls"
+        ],
+        "summary": "Acknowledge receipt of a ring offer on behalf of one endpoint",
+        "description": "Requires calls.write. The backend form of POST /v1/calling/invitations/{invitation_id}/acknowledge: the application confirms its endpoint received the offer (PENDING → RINGING; the first acknowledged offer of a DIALING application Call moves the Call to RINGING). Idempotent. An expired offer is 410; an offer that is no longer live is 409.",
+        "security": [
+          {
+            "platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CallId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.control.v1.AcknowledgeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The offer is RINGING.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.control.v1.AcknowledgeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "410": {
+            "$ref": "#/components/responses/InvitationExpired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/v1/calls/{call_id}/accept": {
       "post": {
         "operationId": "acceptCall",
@@ -1961,6 +2038,67 @@
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/calling/invitations/{invitation_id}/acknowledge": {
+      "post": {
+        "operationId": "acknowledgeInvitation",
+        "tags": [
+          "Call Invitations"
+        ],
+        "summary": "Acknowledge receipt of one's own ring offer",
+        "description": "Signaling credential: only an offer addressed to the credential's own endpoint (any other offer is 404). The device confirms it received the offer and is alerting its user: the offer moves PENDING → RINGING, and the first acknowledged offer of a DIALING application Call moves the Call to RINGING, so a caller never sees \"Ringing\" for a callee whose devices are signed out or offline (their offers stay PENDING and expire). Idempotent; no body. Accepting or declining a PENDING offer acknowledges it implicitly. Also available on the signaling WebSocket as {\"type\":\"invitation.acknowledge\",\"invitationId\":…}.",
+        "security": [
+          {
+            "signalingCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InvitationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The offer is RINGING.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.control.v1.AcknowledgeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/SignalingAuthenticationFailed"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "410": {
+            "$ref": "#/components/responses/InvitationExpired"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         }
       }
@@ -13502,6 +13640,63 @@
           }
         }
       },
+      "calling.control.v1.AcknowledgeRequest": {
+        "description": "Body of POST /v1/calls/{call_id}/acknowledge: the application backend confirms that its endpoint endpointId received ring offer invitationId (e.g. from a push delivery receipt).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "invitationId",
+          "endpointId"
+        ],
+        "properties": {
+          "invitationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "endpointId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          }
+        }
+      },
+      "calling.control.v1.AcknowledgeResult": {
+        "description": "Result of POST /v1/calling/invitations/{invitation_id}/acknowledge: the endpoint's device confirmed it received the ring offer and is alerting its user. The offer is RINGING (ringingAt is the server time of the first acknowledgement); the first acknowledged offer of a DIALING application Call moves the Call to RINGING. Repeating the acknowledgement changes nothing.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "invitationId",
+          "callId",
+          "status",
+          "ringingAt",
+          "expiresAt",
+          "callState",
+          "callVersion"
+        ],
+        "properties": {
+          "invitationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "callId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "const": "RINGING"
+          },
+          "ringingAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "callState": {
+            "$ref": "#/components/schemas/calling.common.v1.CallState"
+          },
+          "callVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
       "calling.control.v1.AvailableAction": {
         "type": "object",
         "additionalProperties": false,
@@ -14439,7 +14634,7 @@
         }
       },
       "calling.control.v1.RecoveredInvitation": {
-        "description": "An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. actionable is true only for a RINGING, unexpired offer of a Call that can still be answered.",
+        "description": "An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. status is PENDING until this device acknowledges receipt (POST /v1/calling/invitations/{invitation_id}/acknowledge), then RINGING. actionable is true only for a live (PENDING or RINGING), unexpired offer of a Call that can still be answered; a live offer of an ending or terminal Call is reported CANCELLED.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -14535,7 +14730,10 @@
         "then": {
           "properties": {
             "status": {
-              "const": "RINGING"
+              "enum": [
+                "PENDING",
+                "RINGING"
+              ]
             },
             "terminalReason": {
               "type": "null"

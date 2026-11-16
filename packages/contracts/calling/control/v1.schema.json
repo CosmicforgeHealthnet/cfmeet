@@ -65,6 +65,12 @@
       "$ref": "#/$defs/RecoveredInvitationList"
     },
     {
+      "$ref": "#/$defs/AcknowledgeResult"
+    },
+    {
+      "$ref": "#/$defs/AcknowledgeRequest"
+    },
+    {
       "$ref": "#/$defs/ProviderCallbackAck"
     }
   ],
@@ -1255,8 +1261,65 @@
         }
       }
     },
+    "AcknowledgeRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/acknowledge: the application backend confirms that its endpoint endpointId received ring offer invitationId (e.g. from a push delivery receipt).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitationId",
+        "endpointId"
+      ],
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "AcknowledgeResult": {
+      "description": "Result of POST /v1/calling/invitations/{invitation_id}/acknowledge: the endpoint's device confirmed it received the ring offer and is alerting its user. The offer is RINGING (ringingAt is the server time of the first acknowledgement); the first acknowledged offer of a DIALING application Call moves the Call to RINGING. Repeating the acknowledgement changes nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "invitationId",
+        "callId",
+        "status",
+        "ringingAt",
+        "expiresAt",
+        "callState",
+        "callVersion"
+      ],
+      "properties": {
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "const": "RINGING"
+        },
+        "ringingAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "callState": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+        },
+        "callVersion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
     "RecoveredInvitation": {
-      "description": "An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. actionable is true only for a RINGING, unexpired offer of a Call that can still be answered.",
+      "description": "An offer of the endpoint as recovered after a reconnect, with the authoritative Call state. status is PENDING until this device acknowledges receipt (POST /v1/calling/invitations/{invitation_id}/acknowledge), then RINGING. actionable is true only for a live (PENDING or RINGING), unexpired offer of a Call that can still be answered; a live offer of an ending or terminal Call is reported CANCELLED.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1352,7 +1415,10 @@
       "then": {
         "properties": {
           "status": {
-            "const": "RINGING"
+            "enum": [
+              "PENDING",
+              "RINGING"
+            ]
           },
           "terminalReason": {
             "type": "null"

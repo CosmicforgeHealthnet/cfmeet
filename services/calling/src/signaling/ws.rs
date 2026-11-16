@@ -5,7 +5,9 @@
 //!   WebSocket — as the subprotocol pair `cfmeet.signaling.v1, bearer.cfsig_…` (the server
 //!   answers with `cfmeet.signaling.v1`). Platform API credentials are never accepted.
 //! * Delivery only: the channel forwards the endpoint's signals (stamped with the target
-//!   endpoint / principal), answers `{"type":"ping"}` with `signaling.pong`, refreshes the
+//!   endpoint / principal), answers `{"type":"ping"}` with `signaling.pong`, accepts the
+//!   device's receipt acknowledgement `{"type":"invitation.acknowledge","invitationId":…}`
+//!   (answered with `invitation.acknowledged` or `signaling.error`), refreshes the
 //!   endpoint's presence hint, closes (4001) when the credential expires and (4401) when
 //!   its authority is revoked — the endpoint revoked, its principal or minting credential
 //!   chain no longer valid (re-checked every 5 s and before each delivery). Commands go
@@ -112,6 +114,52 @@ async fn authority_revoked(state: &AppState, identity: &SignalingIdentity) -> bo
     )
 }
 
+/// The device's receipt acknowledgement of one of its own ring offers (C1), re-checked
+/// against the persisted authority first (a revoked channel acknowledges nothing).
+async fn acknowledge(
+    state: &AppState,
+    identity: &SignalingIdentity,
+    message: Option<&Value>,
+) -> Value {
+    let invitation_id = message
+        .and_then(|m| m.get("invitationId"))
+        .and_then(Value::as_str)
+        .and_then(|id| uuid::Uuid::parse_str(id).ok());
+    let Some(invitation_id) = invitation_id else {
+        return json!({ "type": "signaling.error", "code": "VALIDATION_ERROR" });
+    };
+    if state.signaling.recheck(identity).await.is_err() {
+        return json!({ "type": "signaling.error", "code": "AUTHENTICATION_FAILED", "invitationId": invitation_id });
+    }
+    match state
+        .app
+        .acknowledge_invitation(
+            crate::calls::app::InvitationActor::Endpoint(identity.clone()),
+            None,
+            crate::calls::ids::CallInvitationId::from_uuid(invitation_id),
+        )
+        .await
+    {
+        Ok(mut body) => {
+            body["type"] = json!("invitation.acknowledged");
+            body
+        }
+        Err(error) => {
+            // The contract's closed set (calling/realtime SignalingError); anything else
+            // is an internal failure the client retries over HTTP recovery.
+            let code = match error.code() {
+                code @ ("NOT_FOUND"
+                | "INVITATION_EXPIRED"
+                | "INVITATION_NOT_ACTIONABLE"
+                | "ANSWERED_ELSEWHERE"
+                | "VALIDATION_ERROR") => code,
+                _ => "SERVICE_UNAVAILABLE",
+            };
+            json!({ "type": "signaling.error", "code": code, "invitationId": invitation_id })
+        }
+    }
+}
+
 async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSocket) {
     if state.require_personal_signaling(&identity).await.is_err() {
         return;
@@ -186,9 +234,15 @@ async fn serve(state: AppState, identity: SignalingIdentity, mut socket: WebSock
                 match message {
                     Some(Ok(Message::Text(text))) => {
                         let parsed: Option<Value> = serde_json::from_str(&text).ok();
-                        if parsed.as_ref().and_then(|v| v.get("type")).and_then(Value::as_str) == Some("ping") {
+                        let kind = parsed.as_ref().and_then(|v| v.get("type")).and_then(Value::as_str);
+                        if kind == Some("ping") {
                             let pong = json!({ "type": "signaling.pong", "at": state.clock.now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true) });
                             if socket.send(Message::Text(pong.to_string())).await.is_err() {
+                                break;
+                            }
+                        } else if kind == Some("invitation.acknowledge") {
+                            let reply = acknowledge(&state, &identity, parsed.as_ref()).await;
+                            if socket.send(Message::Text(reply.to_string())).await.is_err() {
                                 break;
                             }
                         } else {

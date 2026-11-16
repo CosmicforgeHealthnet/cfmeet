@@ -607,6 +607,23 @@ impl CallService {
                 plan.at,
             )
             .await?;
+        if plan.to == CallState::Ending {
+            // A Call that is ending rings nobody: every live offer is closed in the SAME
+            // transaction as the state change, whichever path ends the Call (END, auto-end,
+            // public-network media loss, a reverted transfer), so no history or recovery
+            // read can observe an ENDING Call with an open offer.
+            closed.cancelled_invitations = self
+                .finish_live_invitations_in(
+                    txn,
+                    cmd,
+                    &call,
+                    None,
+                    None,
+                    InvitationStatus::Cancelled,
+                    InvitationTerminalReason::CallTerminated,
+                )
+                .await?;
+        }
         if plan.to.is_terminal() {
             closed = self.close_subordinates_in(txn, cmd, &call).await?;
             // Recipients that were offered the Call and never answered, declined or lost

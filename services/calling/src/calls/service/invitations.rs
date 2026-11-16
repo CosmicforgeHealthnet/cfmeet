@@ -1,10 +1,14 @@
 //! Ring offers and single-winner answer arbitration (Part C §20) — transaction-scoped
 //! primitives composed by the application-call orchestration.
 //!
-//! * One invitation per selected endpoint, created PENDING and moved to RINGING in the
-//!   same transaction, with server-time expiry. Ringing several endpoints of one
-//!   principal never creates a second participant: every invitation points at the one
-//!   participant of that principal.
+//! * One invitation per selected endpoint, created PENDING with server-time expiry. It
+//!   moves to RINGING only when that endpoint acknowledges receipt over its signaling
+//!   credential ([`CallService::mark_invitation_ringing_in`]) — an offer to a device that
+//!   is signed out or offline stays PENDING and expires unanswered, so nobody is shown
+//!   "Ringing" for a device that never received the call. Answering or declining is itself
+//!   proof of receipt (PENDING → RINGING → ACCEPTED / DECLINED in one transaction).
+//!   Ringing several endpoints of one principal never creates a second participant: every
+//!   invitation points at the one participant of that principal.
 //! * Arbitration: [`CallService::claim_answer_in`] inserts the participant's claim with
 //!   `ON CONFLICT ON CONSTRAINT uq_call_answer_claims_participant DO NOTHING`. Exactly one
 //!   claim can exist per (Call, participant) whatever the interleaving; the caller holds
@@ -32,8 +36,8 @@ use crate::{
 };
 
 impl CallService {
-    /// Issues one ring offer per endpoint for `participant` (PENDING → RINGING), with a
-    /// CALL_INVITATION_ISSUED event each. Endpoints must be ACTIVE endpoints of the
+    /// Issues one PENDING ring offer per endpoint for `participant`, with a
+    /// CALL_INVITATION_ISSUED event each (RINGING follows the endpoint's acknowledgement). Endpoints must be ACTIVE endpoints of the
     /// participant's principal (also database-enforced).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn issue_invitations_in(
@@ -91,10 +95,7 @@ impl CallService {
             }
             .insert(txn)
             .await?;
-            let mut active: call_invitations::ActiveModel = pending.into();
-            active.status = Set(InvitationStatus::Ringing);
-            active.ringing_at = Set(Some(at));
-            let invitation = active.update(txn).await?;
+            let invitation = pending;
             let mut details = vec![
                 ("invitation_id", text(invitation.id)),
                 ("participant_id", text(invitation.participant_id)),
@@ -130,6 +131,26 @@ impl CallService {
             out.push(invitation);
         }
         Ok(out)
+    }
+
+    /// The endpoint confirmed receipt of a PENDING offer: PENDING → RINGING (`ringing_at`
+    /// is the server time of the acknowledgement). Any other status is returned unchanged
+    /// (a repeated acknowledgement is a no-op). The caller holds the Call and invitation
+    /// row locks and has checked the offer is still live and unexpired.
+    pub(crate) async fn mark_invitation_ringing_in(
+        &self,
+        txn: &DatabaseTransaction,
+        invitation: call_invitations::Model,
+    ) -> CallResult<call_invitations::Model> {
+        if invitation.status != InvitationStatus::Pending {
+            return Ok(invitation);
+        }
+        let at = self.now().max(invitation.updated_at);
+        let mut active: call_invitations::ActiveModel = invitation.into();
+        active.status = Set(InvitationStatus::Ringing);
+        active.ringing_at = Set(Some(at));
+        active.updated_at = Set(at);
+        Ok(active.update(txn).await?)
     }
 
     /// Locks invitation `id` of `call` (`FOR UPDATE`); else not found.
