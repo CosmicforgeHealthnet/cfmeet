@@ -1,0 +1,74 @@
+name: CF Meet server-bug fixes production verification
+
+# Authenticated, controlled production verification of the fixes from "CF Meet: server bugs"
+# (16 November 2026) that unit and integration tests cannot prove against the live system:
+# offers stay PENDING until a device acknowledges them (C1), cancelled calls leave no ringing
+# offer or history (C2), real LiveKit media admission (C3), signaling 401 (C4), CF Meet
+# attachments with scan, member download and non-member denial (M1), group titles in groups in
+# common (M2) and shared-media metadata (M3). See infra/calling/production/issue_acceptance.py.
+#
+# Uses the existing controlled acceptance accounts only; never registers accounts or sends
+# email; issues one one-day credential restricted to those accounts and revokes it; ends,
+# archives or removes what it creates; changes no container, configuration or grant. It takes
+# the production lock so it never overlaps a release.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-backend-production
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Server-bug fixes verification (calls, media, chats)
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Offline tests of the acceptance tooling
+        working-directory: infra/calling/production
+        run: python3 -m unittest test_issue_acceptance -v
+
+      - name: Configure existing production SSH access
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST" && test -n "$VPS_USER" && test -n "$VPS_SSH_KEY"
+          mkdir -p -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 7 -H "$VPS_HOST" > ~/.ssh/known_hosts
+
+      - name: Run the acceptance journey on the VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=12)
+          remote="/opt/cfmeet-core/production-releases/$GITHUB_SHA"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
+          cp services/calling/tests/rtc/rtc_client.py infra/calling/production/rtc_client.py
+          tar -C infra/calling/production -cf - . | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "cd '$remote' && python3 -u issue_acceptance.py '$GITHUB_RUN_ID'" | tee issue-acceptance.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue-acceptance-${{ github.run_id }}
+          path: issue-acceptance.log
+          if-no-files-found: ignore
