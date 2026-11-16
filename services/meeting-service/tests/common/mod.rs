@@ -168,6 +168,11 @@ async fn template(admin: &str) -> String {
             migration::LifecycleDeliveryMigrator::up(&tmpl, None)
                 .await
                 .expect("lifecycle delivery migrations apply");
+            // Notification Service N7: routing fence v1 (guard triggers inert in LEGACY_ONLY,
+            // so every suite runs with them installed).
+            migration::NotificationFenceMigrator::up(&tmpl, None)
+                .await
+                .expect("notification fence migrations apply");
             tmpl.close().await.ok();
             name
         })
