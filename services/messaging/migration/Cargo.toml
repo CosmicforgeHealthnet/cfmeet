@@ -23,3 +23,9 @@ async-trait = "0.1"
 [[bin]]
 name = "messaging-communications-migration"
 path = "src/communications-main.rs"
+
+# Routing fence protocol v1 (Notification Service, Document 4 §9), with its own history
+# table `messaging_notification_fence_seaql_migrations`.
+[[bin]]
+name = "messaging-notification-fence-migration"
+path = "src/notification-fence-main.rs"

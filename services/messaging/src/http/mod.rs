@@ -1,7 +1,8 @@
 //! HTTP surface (contract `cfmeet.messaging.http-api`, served at `/openapi.json`).
 //!
 //! * `GET /health` — liveness only; `GET /ready` — database reachable and every
-//!   migration applied (503 otherwise), plus non-secret operational facts.
+//!   migration applied (503 otherwise), plus non-secret operational facts (among them
+//!   `routingProtocol` once the routing fence history is applied).
 //! * `/v1/messaging/**` and `/v1/conversations/**` — the customer API: Platform Access authentication, scopes, a
 //!   verified acting principal ([`middleware`]).
 //! * `/internal/v1/**` — service-authenticated; no internal operation exists yet, so
@@ -173,29 +174,36 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     } else {
         (None, None)
     };
+    // Routing fence protocol (Document 4 §9.6): reported only once its history is
+    // applied, so the activation operation can refuse while any replica lacks it.
+    let routing_protocol = crate::notification_fence::fence_protocol(&state.db).await;
+    let mut body = json!({
+        "status": if ok { "ready" } else { "not_ready" },
+        "service": "messaging",
+        "database": database,
+        "migrations": migrations,
+        "e2eeDevices": if state.devices.enabled { "enabled" } else { "disabled" },
+        "authorizationCache": if state.authority.is_caching() { "active" } else { "inactive" },
+        "outboxPending": outbox,
+        "outboxDeadLetter": dead,
+        "realtime": {
+            "draining": state.realtime.hub.is_draining(),
+            "connections": state.realtime.hub.connections(),
+            "broker": state.realtime.broker.backend(),
+            "presence": state.realtime.presence.backend(),
+            "clientTokens": if state.realtime.keys.is_some() { "enabled" } else { "disabled" },
+        },
+    });
+    if let Some(protocol) = routing_protocol {
+        body["routingProtocol"] = json!(protocol);
+    }
     (
         if ok {
             StatusCode::OK
         } else {
             StatusCode::SERVICE_UNAVAILABLE
         },
-        Json(json!({
-            "status": if ok { "ready" } else { "not_ready" },
-            "service": "messaging",
-            "database": database,
-            "migrations": migrations,
-            "e2eeDevices": if state.devices.enabled { "enabled" } else { "disabled" },
-            "authorizationCache": if state.authority.is_caching() { "active" } else { "inactive" },
-            "outboxPending": outbox,
-            "outboxDeadLetter": dead,
-            "realtime": {
-                "draining": state.realtime.hub.is_draining(),
-                "connections": state.realtime.hub.connections(),
-                "broker": state.realtime.broker.backend(),
-                "presence": state.realtime.presence.backend(),
-                "clientTokens": if state.realtime.keys.is_some() { "enabled" } else { "disabled" },
-            },
-        })),
+        Json(body),
     )
 }
 
