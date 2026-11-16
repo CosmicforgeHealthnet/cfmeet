@@ -49,6 +49,7 @@ pub const BINARIES: &[&str] = &[
     "account-hardening-migration",
     "organization-integration-migration",
     "lifecycle-delivery-migration",
+    "notification-fence-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -356,6 +357,9 @@ impl Stack {
             db::migrate(&self.bin("organization-integration-migration"), &url)?;
             // Final completion: durable email delivery and conference presence.
             db::migrate(&self.bin("lifecycle-delivery-migration"), &url)?;
+            // Notification Service N7: routing fence v1 (every category LEGACY_ONLY, so the
+            // legacy-table guard triggers are inert); journeys run with them installed.
+            db::migrate(&self.bin("notification-fence-migration"), &url)?;
         }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under

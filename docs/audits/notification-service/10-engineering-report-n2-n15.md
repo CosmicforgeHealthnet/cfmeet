@@ -18,12 +18,12 @@ Statuses are kept separate, as the mission requires:
 | Section | Engineering | Production | Accepted | Evidence |
 |---|---|---|---|---|
 | **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **SUSPENDED by owner decision (2026-11-16)**: no activation, no acceptance run; run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) had stopped at the credential check, nothing changed | — | §3 |
-| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | deployed dark (release 43819010350, verification PASS); certify 43828926604 **NOT_CERTIFIED** (readiness), fix in PR #80, re-release and re-certify in §4.2 | 24 h dark observation restarts at the certified release | §2.1, §4 |
+| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | **`PRODUCTION_DEPLOYED_AND_VERIFIED` (dark)**: readiness fix live since release 43870645555 (`c0714ba`); certify 43919862343 `CERTIFIED_READ_ONLY` (the earlier 43828926604 NOT_CERTIFIED is resolved) | 24 h dark observation from 13:08 UTC | §2.1, §4 |
 | **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
-| **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PR #76); Meeting U1–U9 relay (owner-approved) in the relay PR, §2.4 | released with the readiness fix (§4.2); owner activation recorded in §4.2 | n/a | §2.4, §4.2 |
-| **N7** producer publications + routing fence | **not built** | — | — | §5 |
-| **N8** inbox | service side + U1–U5 built (PR #75); Meeting relay §2.4; web/mobile UI not built | — | — | §2.5 |
+| **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PRs #76, #82) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-notifications-owners` 43922950325, X1/X2 publicly denied and proven | n/a (no traffic until routing leaves OFF) | §2.4, §4.2 |
+| **N7** producer publications + routing fence | **N7a fence foundation built** (Meeting + Messaging tables, inert guard triggers, decision module, `routingProtocol`, rollback floor); publications not built | — | — | §2.8, §5 |
+| **N8** inbox | service side + U1–U9 (PR #75), Meeting relay (PR #82); web/mobile UI not built | **relay `PRODUCTION_DEPLOYED_AND_VERIFIED`**: release 43914242156, `activate-notifications-relay` 43926737306; inbox empty (routing OFF) | — | §2.4, §2.5, §4.2 |
 | **N9** push + call fast lane | service side built (U8/U9, dispatcher, I3); Messaging facades, Calling transport, service worker not built | — | — | §2.5, §5 |
 | **N10** preferences authority | U6/U7, change log, Hub copy function built; copy job, facade switch not built | — | — | §2.5, §5 |
 | **N11** standard / invitation email cutover | service rendering and sender profiles built; producer routing not built | — | gate E1/E2 | §5 |
@@ -101,6 +101,47 @@ Inbox U1–U5 (own items only, 404 for foreign ids, cursor pagination, grouping,
 
 `infra/monitoring/prometheus/rules/notifications.rules.yml` (8 alerts) with promtool tests; `docs/operations/notification-service-runbook.md`. `NotificationsUnavailable` uses only the scrape (`up`), so it fires when the service itself is down. Not yet evidenced: a fired alert reaching a person — Prometheus / Alertmanager are not deployed with receivers (D-9, owner).
 
+### 2.8 N7a — routing fence v1 foundation (Document 4 §9)
+
+**Meeting database.** Migration binary `notification-fence-migration` with its own history table `notification_fence_migrations`. Previous images neither know nor check it, so they still boot. It creates:
+- `notification_routing_state`, seeded `LEGACY_ONLY` for `AUTH_VERIFICATION`, `AUTH_PASSWORD_RESET`, `SECURITY_DEVICE_STEP_UP`, `SECURITY_PASSWORD_CHANGED`, `SECURITY_DEVICE_LINKED`, `MEETING_INVITATION`, `MEETING_NOTIFICATION` and `ORGANIZATION_INVITATION`;
+- `notification_route_decisions`, with an F3 guard trigger (SQLSTATE `CFN02`): only the audited NEW→OLD reroutes, acknowledgement and completion set once, leases one at a time, a completed decision is terminal;
+- `account_notification_outbox`;
+- `BEFORE INSERT` guard triggers on `email_deliveries` and `meeting_notifications` (`ROUTING_DECISION_REQUIRED`, SQLSTATE `CFN01`). They are inert in `LEGACY_ONLY`.
+
+Category mapping:
+- From `email_deliveries.category`. `NOTIFICATION` counts as `SECURITY_DEVICE_LINKED` only for `device-linked:` keys.
+- From `meeting_notifications.kind`: the three conference kinds map to `MEETING_NOTIFICATION`.
+
+The module is `src/services/notification_fence.rs`:
+- `route_message`: sticky decisions under `FOR UPDATE`; the canary is SHA-256 mod 100, pinned to `cf-notification-client`; CRITICAL categories go OLD under `FORCED`.
+- `reroute_unacked` and the CRITICAL lease helpers (X6 / X7 rules of §9.8).
+
+`GET /health` reports `routingProtocol: 1` once the history is applied.
+
+**Messaging database.** Migration binary `messaging-notification-fence-migration`, history `messaging_notification_fence_seaql_migrations`. The tables are `messaging_notification_routing_state` (seeded with `MESSAGE_WAKEUPS`, `LEGACY_ONLY`) and `messaging_notification_route_decisions`. The repository requires every Messaging table to start with `messaging_`, so these deviate from the unprefixed names of §9.2. There is a guard trigger on `messaging_push_jobs` (key `evt_<event id hex>`, which is the outbox event id) and a `route_message` module. `/ready` reports `routingProtocol: 1`, and the `cfmeet.messaging.common` contract goes to 1.26.0.
+
+**Release tooling (§9.6):**
+- Both fence migrations run with every release. Their histories are optional histories in the backup catalog.
+- `verify` checks `routing_protocol` for both producers.
+- The **rollback floor** (M-13): `deploy` and `rollback` refuse a producer image without the fence binary while any of that producer's categories is outside `LEGACY_ONLY`.
+- `require_fence_protocol` (M-12) is the precondition that future fence-routing operations must call.
+
+**Not built yet:**
+- producer publications (SHADOW events);
+- the Meeting `outbox_events` channel `NOTIFICATION`;
+- deterministic keys for invitations;
+- the PW1 relay and the decision purge;
+- the hourly cross-ledger audit;
+- the fence-routing activation operation;
+- the M-14 crash matrix and M-16 two-phase reroute (I11).
+
+**Tests:**
+- Meeting `tests/notification_fence.rs`: 11 tests, plus 5 unit tests.
+- Messaging `tests/notification_fence.rs`: 6 tests.
+- Fence helpers in `test_notification_operations.py`.
+- Every existing suite runs with the guard triggers installed.
+
 ### 2.7 N14 tooling
 
 `activate-notifications-owners` and `activate-notifications-routing` (one row per run, gated, journaled, reversible) in the coordinated release.
@@ -152,7 +193,22 @@ Until E1, every email `ACTIVE` routing change stays refused by the N14 gate. The
 
 ### 4.2 Readiness-fix release, certification and owner activation
 
-*(recorded when the runs complete)*
+| | |
+|---|---|
+| Readiness fix in production | PR #80 merged as `d553e53`. My release run 94 (43856717241) stopped in its gate because `main` advanced. The fix went live with release [43870645555](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43870645555) on `c0714ba` (12:53–13:08 UTC, which contains #80). `notifications` and `notifications-2` have run `c0714ba` since then. |
+| Relay release | run [43914242156](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43914242156) `release` on `3c44089` (PR #82), 17:34 UTC. **Replaced:** `meeting-service`, `calling`, `api-gateway` (base `b8fefc2`). **Kept:** 12 services, `notifications` and `notifications-2` included. Run 100 (43902376581), dispatched by another session on the same SHA, ran the read-only `diagnose` operation; it did not deploy. |
+| Resource gate | MemAvailable 5,008 MiB; required 832 MiB; remaining 4,176 MiB; shortfall 0 |
+| Pre-release backup | 17 databases, `/opt/cfmeet-core/backups/43914242156-1/manifest.json`; restore-tested organizations, platform-access, meeting-service (PASS) |
+| Verification | 33/33 checks PASS; violations: none; regression (Meetings health, Messaging/Calling/Platform TLS readiness, LiveKit keys) PASS |
+| Certification | run [43919862343](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43919862343) `certify` on `3c44089`: **`CERTIFIED_READ_ONLY`** (17:41 UTC). This replaces NOT_CERTIFIED 43828926604. |
+| Owner APIs | run [43922950325](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43922950325) `activate-notifications-owners` on `a1069d5`, 17:55 UTC.<br>• `main` had advanced by #85, which is release tooling only. The activation base found the commit equivalent to the deployed `3c44089`: 62 image build inputs checked, none changed.<br>• **Public-host denial proven** (404 + `X-CFMeet-Ingress: denied`) for `/internal/v1/accounts/notification-contacts/resolve` and `/internal/v1/conferences/{id}/notification-recipients/resolve`.<br>• Trust bundles updated: Messaging, Communications, Organizations, Meeting. Meeting gained `NOTIFICATION_OWNER_API_ENABLED=true`. Both replicas gained `NOTIFICATIONS_AUTHORITIES`, the owner base URLs and the first-party scope.<br>• Every owner route answers 401 unsigned afterwards; regression PASS.<br>Run 103 (43922930842) was refused by the gate, before any change, because of a short SHA. |
+| Relay | run [43926737306](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43926737306) `activate-notifications-relay` on `a1069d5`, 18:26 UTC.<br>• Activation base equivalent to `3c44089` (62 inputs).<br>• Both replicas trust the Meeting Service for `notifications-user.forward` (I2 only); the Meeting Service has `CF_NOTIFICATIONS_BASE_URL`, the private TLS route.<br>• I2 answered 401 unsigned and the relay 401 without a session, before and after.<br>• Regression PASS.<br>U1–U9 now serve the signed-in user's own inbox, preferences and push endpoints. The inbox is empty because every routing row is `OFF`. |
+
+**Production status:**
+- **N2: `PRODUCTION_DEPLOYED_AND_VERIFIED` (dark).** It runs the readiness fix since 13:08 UTC and was certified at 17:41. The 24-hour zero-traffic observation (Document 6 N2 row 14) runs from 13:08 UTC.
+- **N6: `PRODUCTION_DEPLOYED_AND_VERIFIED`.** X1–X5 are granted and reachable only from `cfmeet.notifications`, and are publicly denied.
+- **N8 service side and relay: `PRODUCTION_DEPLOYED_AND_VERIFIED`.** U1–U9 are live through the Meeting relay. The web and mobile inbox UI is not built.
+- **Delivery:** nothing is delivered. Every `notif_routing` row is `OFF`, there is no email or push provider, and Resend stays suspended.
 
 ---
 
@@ -161,7 +217,7 @@ Until E1, every email `ACTIVE` routing change stays refused by the N14 gate. The
 | Section | What remains |
 |---|---|
 | N6 | X6 / X7 on Account (Meeting) with the decision tables of N7 |
-| N7 | routing fence v1 in the Meeting and Messaging databases (decision tables, routing state, guard triggers) using a separate migration history so previous images still boot; Account notification outbox + PW1 relay; publications from Meeting, Messaging, Calling (destination + `CALL_PARTICIPANT_MISSED`, D-10), Hub (destination `NOTIFICATIONS`), Organizations (subscriber), Developer Platform; fence tests M-10 … M-17 |
+| N7 | (N7a foundation built, §2.8) PW1 relay; publications from Meeting, Messaging, Calling (destination + `CALL_PARTICIPANT_MISSED`, D-10), Hub (destination `NOTIFICATIONS`), Organizations (subscriber), Developer Platform; fence tests M-10 … M-17 |
 | N8 | web / mobile inbox (FE2) on U1–U5 through the Meeting relay; the contact-request canary needs the Hub publication (N7) |
 | N9 | Messaging registration facades and the copy of existing Web Push registrations (D-1b copy path), Calling `NotificationsPushTransport` on I3, the browser service worker for the service's VAPID key, real-device acceptance per platform |
 | N10 | Hub copy + catch-up job, facade switch of the Hub preference endpoints, FE3 |

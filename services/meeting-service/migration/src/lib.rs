@@ -36,6 +36,7 @@ mod m20261109_000001_account_hardening;
 mod m20261110_000001_organization_integration;
 mod m20261112_000001_email_delivery_and_presence;
 mod m20261115_000001_account_devices;
+mod m20261116_000001_notification_fence;
 
 pub mod phase2_backfill;
 
@@ -399,6 +400,32 @@ pub async fn lifecycle_delivery_ready<C: sea_orm_migration::sea_orm::ConnectionT
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<LifecycleDeliveryMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Notification Service roadmap N7: routing fence protocol v1 (blueprint Document 4 §9) —
+/// routing state, route decisions, the CRITICAL outbox and the legacy-table guard triggers
+/// (inert in `LEGACY_ONLY`). A SEPARATE additive history so the previously deployed image
+/// still starts after it is applied (rollback safety); the image does not require it at
+/// startup and reports `routingProtocol` only once it is applied.
+pub struct NotificationFenceMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for NotificationFenceMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261116_000001_notification_fence::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("notification_fence_migrations").into_iden()
+    }
+}
+
+/// The notification-fence history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn notification_fence_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<NotificationFenceMigrator, _>(db)
         .await?
         .is_empty())
 }

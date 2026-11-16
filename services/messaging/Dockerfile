@@ -9,10 +9,11 @@
 # build context (services/messaging/Dockerfile.dockerignore); no other service's source is
 # copied. The image is independent of every other service's image and release.
 #
-# The image contains the service (`messaging`) and its migration runner
-# (`messaging-migration`). Configuration — DATABASE_URL, the service signing key FILE, the
-# trust bundle FILE and the Platform Access URL — is supplied at runtime only; nothing
-# secret is baked in. Docker is never required for local development.
+# The image contains the service (`messaging`) and its migration runners
+# (`messaging-migration`, plus the independently versioned additive histories
+# `messaging-communications-migration` and `messaging-notification-fence-migration`).
+# Configuration — DATABASE_URL, the service signing key FILE, the trust bundle FILE and
+# the Platform Access URL — is supplied at runtime only; nothing secret is baked in. Docker is never required for local development.
 
 FROM rust:1-bookworm AS builder
 WORKDIR /src
@@ -31,7 +32,7 @@ COPY packages/push-transport packages/push-transport
 COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging
-RUN cargo build --release --locked -p messaging-migration --bin messaging-migration --bin messaging-communications-migration \
+RUN cargo build --release --locked -p messaging-migration --bin messaging-migration --bin messaging-communications-migration --bin messaging-notification-fence-migration \
  && cargo build --release --locked -p messaging --bin messaging
 
 FROM debian:bookworm-slim
@@ -45,6 +46,7 @@ WORKDIR /app
 COPY --from=builder /src/services/messaging/target/release/messaging ./messaging
 COPY --from=builder /src/services/messaging/target/release/messaging-migration ./messaging-migration
 COPY --from=builder /src/services/messaging/target/release/messaging-communications-migration ./messaging-communications-migration
+COPY --from=builder /src/services/messaging/target/release/messaging-notification-fence-migration ./messaging-notification-fence-migration
 USER messaging
 ENV MESSAGING_BIND_ADDRESS=0.0.0.0:8097 \
     LOG_FORMAT=json

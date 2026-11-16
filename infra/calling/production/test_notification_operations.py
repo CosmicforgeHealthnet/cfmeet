@@ -236,5 +236,73 @@ class OwnerDenial(unittest.TestCase):
             no.deny_owner_routes_publicly(fake)
 
 
+class FenceCr:
+    """Fake coordinated_release for the routing-fence helpers."""
+    SERVICES = cr.SERVICES
+    PROBE_IMAGE = 'curl'
+
+    def __init__(self, table_exists=True, fenced='', image_has_fence=False, ready='{}'):
+        self.sql_seen, self.docker = [], []
+        outer = self
+
+        def sql(q):
+            outer.sql_seen.append(q)
+            if 'to_regclass' in q:
+                return 't' if table_exists else 'f'
+            return fenced
+        self.meeting_psql = sql
+
+        class Release:
+            @staticmethod
+            def db_sql(db, q):
+                outer.sql_seen.append((db, q))
+                return sql(q)
+        self.release = Release
+
+        class P:
+            @staticmethod
+            def run(*args):
+                outer.docker.append(args)
+                if '/bin/sh' in args:
+                    return 'fence\n' if image_has_fence else 'none\n'
+                return ready
+        self.p = P
+
+
+class Fence(unittest.TestCase):
+    def test_floor_is_inert_while_every_category_is_legacy_only_or_the_table_is_missing(self):
+        for fake in (FenceCr(fenced=''), FenceCr(table_exists=False)):
+            no.rollback_floor(fake, 'meeting-service', 'sha256:old')
+            self.assertEqual(fake.docker, [])
+        no.rollback_floor(FenceCr(fenced='X:FENCED_NEW'), 'calling', 'sha256:old')  # not a fence producer
+
+    def test_floor_refuses_a_pre_fence_image_once_a_category_left_legacy_only(self):
+        fake = FenceCr(fenced='AUTH_VERIFICATION:SHADOW')
+        with self.assertRaisesRegex(RuntimeError, 'Rollback floor'):
+            no.rollback_floor(fake, 'meeting-service', 'sha256:old')
+        self.assertIn('test -x /app/notification-fence-migration', fake.docker[-1][-1])
+        no.rollback_floor(FenceCr(fenced='AUTH_VERIFICATION:SHADOW', image_has_fence=True), 'meeting-service', 'sha256:new')
+
+    def test_messaging_uses_its_prefixed_table_and_database(self):
+        fake = FenceCr(fenced='MESSAGE_WAKEUPS:FENCED_OLD')
+        self.assertEqual(no.fenced_categories(fake, 'messaging'), ['MESSAGE_WAKEUPS:FENCED_OLD'])
+        routed = [q for q in fake.sql_seen if isinstance(q, tuple)]
+        self.assertTrue(routed and all(db == 'cfmeet_messaging' for db, _ in routed))
+        self.assertIn('messaging_notification_routing_state', routed[-1][1])
+
+    def test_protocol_precondition_reads_readiness(self):
+        self.assertEqual(no.require_fence_protocol(FenceCr(ready='{"status":"ok","routingProtocol":1}'), 'messaging'), 1)
+        for ready in ('{"status":"ok"}', 'not json', '{"routingProtocol":"1"}'):
+            with self.assertRaises(RuntimeError):
+                no.require_fence_protocol(FenceCr(ready=ready), 'meeting-service')
+
+    def test_release_tooling_runs_and_verifies_both_fence_histories(self):
+        self.assertIn('notification-fence-migration', cr.SERVICES['meeting-service']['migrations'])
+        self.assertEqual(cr.SERVICES['messaging']['migrations'][-1], 'messaging-notification-fence-migration')
+        catalog = (cr.Path(__file__).resolve().parents[3] / 'infra/deployment/backup/catalog.conf').read_text()
+        self.assertIn('notification_fence_migrations', catalog)
+        self.assertIn('messaging_notification_fence_seaql_migrations', catalog)
+
+
 if __name__ == '__main__':
     unittest.main()

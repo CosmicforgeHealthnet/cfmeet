@@ -114,7 +114,8 @@ SERVICES = {
         role='notifications', image='notifications', identity='notifications', memory=256,
         env=dict(NOTIFICATIONS_DARK_ENV, NOTIFICATIONS_REPLICA_ID='notifications-2')),
     'messaging': _service('cfmeet-messaging', 8097, '/ready', tls=8444, db='cfmeet_messaging',
-        role='messaging', migrations=['messaging-migration', 'messaging-communications-migration'],
+        role='messaging', migrations=['messaging-migration', 'messaging-communications-migration',
+                                      'messaging-notification-fence-migration'],
         history=['messaging_seaql_migrations'], existing=True),
     'calling': _service('cfmeet-calling', 8090, '/health', tls=8445, db='cfmeet_calling', role='calling',
         migrations=['calling-migration', 'calling-communications-migration'],
@@ -144,7 +145,7 @@ SERVICES = {
         migrations=['migration', 'account-security-migration', 'meetings-calendar-migration',
                     'profile-notifications-migration', 'account-hardening-migration',
                     'organization-integration-migration', 'account-communications-migration',
-                    'lifecycle-delivery-migration'],
+                    'lifecycle-delivery-migration', 'notification-fence-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
@@ -1202,6 +1203,7 @@ def create_args(name, image_id, env_path, sha):
 
 def deploy(name, image_id, sha, run_id, entry):
     s = SERVICES[name]
+    notif_ops.rollback_floor(sys.modules[__name__], name, image_id)
     container = s['container']
     if container in container_names():
         c = p.inspect(container)
@@ -1498,6 +1500,12 @@ def verify(sha, run_id):
         state = history_state(sql)
         checks['migrations ' + name] = 'PASS' if all(state.get(t, {}).get('applied', 0) > 0 for t in s['history']) else 'FAIL'
         emit('migrationHistories', {'service': name, 'histories': state})
+    # Notification Service N7: every fence producer runs a fence-capable image (routingProtocol >= 1).
+    for name in notif_ops.FENCE_PRODUCERS:
+        try:
+            checks['routing_protocol ' + name] = 'PASS' if notif_ops.routing_protocol(sys.modules[__name__], name) else 'FAIL'
+        except Exception:
+            checks['routing_protocol ' + name] = 'FAIL'
     violations = safe_default_violations(running_envs())
     checks['provider_features_off'] = 'PASS' if not violations else 'FAIL'
     checks.update(public_smoke())
@@ -1525,6 +1533,11 @@ def rollback(sha, run_id):
     if entry.get('irreversible'):
         raise RuntimeError('%s cannot be rolled back (organizations-cutover-runbook §7: never back to a stale writer)'
                            % entry['operation'])
+    # Routing fence rollback floor (Document 4 §9.6): checked for every producer before anything moves.
+    for component in entry['components']:
+        previous = component.get('previous')
+        if previous and component['status'] not in ('unchanged', 'rolled-back') and previous in container_names():
+            notif_ops.rollback_floor(sys.modules[__name__], component['service'], p.inspect(previous)['Image'])
     if entry.get('routing'):
         undo_gateway_routing(entry['routing'])
     if entry['operation'] == 'activate-gateway-families' and GATEWAY_SNIPPET.exists():

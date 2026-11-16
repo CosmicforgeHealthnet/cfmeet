@@ -183,3 +183,60 @@ pub async fn communications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait
         .collect::<Result<_, _>>()?;
     Ok(known == actual)
 }
+
+mod notification_fence;
+
+/// Name of the table recording the routing fence history ([`NotificationFenceMigrator`]).
+pub const NOTIFICATION_FENCE_MIGRATION_TABLE: &str =
+    "messaging_notification_fence_seaql_migrations";
+
+/// Routing fence protocol v1 (Notification Service specification, Document 4 §9): an
+/// independently versioned, additive history (binary
+/// `messaging-notification-fence-migration`), so a previous Messaging image — whose
+/// [`Migrator`] fails closed on unknown migrations — still boots on a fenced database.
+pub struct NotificationFenceMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for NotificationFenceMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(notification_fence::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(NOTIFICATION_FENCE_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// Read-only: `true` when exactly the routing fence history this binary knows is applied.
+/// Only `SELECT`s, so the least-privilege runtime role can call it.
+pub async fn notification_fence_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let exists = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            format!(
+                "SELECT to_regclass('public.{NOTIFICATION_FENCE_MIGRATION_TABLE}') IS NOT NULL AS present"
+            ),
+        ))
+        .await?
+        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?;
+    if !exists {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            format!("SELECT version FROM {NOTIFICATION_FENCE_MIGRATION_TABLE}"),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = NotificationFenceMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}

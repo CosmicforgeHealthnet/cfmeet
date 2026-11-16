@@ -51,3 +51,7 @@ path = "src/organization-integration-main.rs"
 [[bin]]
 name = "lifecycle-delivery-migration"
 path = "src/lifecycle-delivery-main.rs"
+
+[[bin]]
+name = "notification-fence-migration"
+path = "src/notification-fence-main.rs"

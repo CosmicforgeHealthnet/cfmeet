@@ -1,4 +1,6 @@
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+
+use crate::state::AppState;
 use serde_json::json;
 
 use chrono::Utc;
@@ -89,13 +91,19 @@ pub async fn get_app_info() -> impl IntoResponse {
         (status = 200, description = "Service is healthy", body = serde_json::Value)
     )
 )]
-pub async fn health_check() -> impl IntoResponse {
-    let health = json!({
+pub async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
+    let mut health = json!({
         "status": "healthy",
         "timestamp": Utc::now().to_rfc3339(),
         "service": "CosmicForge RTC",
         "version": env!("CARGO_PKG_VERSION")
     });
+    // Notification Service routing fence (Document 4 §9.6): `routingProtocol` is reported
+    // only once the fence migration history is applied; activation tooling refuses to
+    // leave LEGACY_ONLY unless every replica reports it. Absent on any read error.
+    if let Some(protocol) = crate::services::notification_fence::fence_protocol(&state.db).await {
+        health["routingProtocol"] = json!(protocol);
+    }
 
     (StatusCode::OK, Json(health))
 }
