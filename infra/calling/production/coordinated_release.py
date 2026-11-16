@@ -49,6 +49,7 @@ import communications_release as release
 import email_operations as mail_ops
 import developer_access
 import org_first_activation
+import notification_operations as notif_ops
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -594,7 +595,7 @@ GRANTS = (
     # Hub before sending a meeting notice. The Hub release (communications_release.HUB_INCOMING)
     # carries the same grant; this operation applies it without a Hub release.
     ('activate-meeting-notice-preferences', 'communications', 'meeting-service', ('communications-preferences.read',)),
-)
+) + notif_ops.GRANTS
 
 
 def validate_grants(registry_, grants=GRANTS):
@@ -1517,7 +1518,7 @@ def verify(sha, run_id):
 def rollback(sha, run_id):
     journal = load_journal()
     candidates = [e for e in journal if e['status'] in ('done', 'failed')
-                  and (e['components'] or e.get('routing') or e.get('edge'))]
+                  and (e['components'] or e.get('routing') or e.get('edge') or e.get('notificationRouting'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
@@ -1532,6 +1533,8 @@ def rollback(sha, run_id):
         p.reload_host_nginx()
     if entry.get('edge'):
         undo_gateway_docs(entry['edge'])
+    if entry.get('notificationRouting'):
+        notif_ops.undo_routing(sys.modules[__name__], entry['notificationRouting'], run_id)
     for component in reversed(entry['components']):
         restore(component, run_id)
         commit(entry)
@@ -2520,6 +2523,12 @@ ACTIVATIONS = {
     'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),
     # Notification Service N0-6: public host refuses the Meeting Service operator routes.
     'activate-public-internal-denial': ((), activate_public_internal_denial),
+    # Notification Service N6: owner read APIs (X1-X5) granted to cfmeet.notifications.
+    'activate-notifications-owners': ((), lambda sha, run_id, confirm: notif_ops.activate_owners(
+        sys.modules[__name__], sha, run_id, confirm)),
+    # Notification Service N14: one notif_routing row per run, gated, journaled, reversible.
+    'activate-notifications-routing': ((), lambda sha, run_id, confirm: notif_ops.activate_routing(
+        sys.modules[__name__], sha, run_id, confirm)),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
     + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')
