@@ -52,6 +52,7 @@ GRANTS = tuple(('activate-notifications-owners', owner, 'notifications', permiss
                for owner, permissions, _probe, _names, _var in OWNERS)
 
 REPLICAS = ('notifications', 'notifications-2')
+FLAGGED = {'meeting-service': {'NOTIFICATION_OWNER_API_ENABLED': 'true'}}
 SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID', 'CFMEET_COMMUNICATION_ENVIRONMENT_ID',
               'CFMEET_COMMUNICATION_ENVIRONMENT_KIND', 'CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID')
 
@@ -162,10 +163,13 @@ def activate_owners(cr, sha, run_id, confirm):
     for owner, _permissions, probe, authority_names, var in OWNERS:
         tls = cr.SERVICES[owner]['tls']
         cr.tls_route_present(tls)
-        status = private_status(cr, cr.private_url(tls) + probe)
-        if status != '401':
-            raise RuntimeError('Owner API of %s is not served by the running image (probe answered %s); '
-                               'release the owner first' % (owner, status))
+        # The Meeting owner routes are mounted only with NOTIFICATION_OWNER_API_ENABLED (set
+        # below); the other owners serve them unconditionally once released.
+        if owner not in FLAGGED:
+            status = private_status(cr, cr.private_url(tls) + probe)
+            if status != '401':
+                raise RuntimeError('Owner API of %s is not served by the running image (probe answered %s); '
+                                   'release the owner first' % (owner, status))
         names.extend(authority_names)
         overrides[var] = cr.private_url(tls)
     overrides['NOTIFICATIONS_AUTHORITIES'] = ','.join(names)
@@ -176,6 +180,16 @@ def activate_owners(cr, sha, run_id, confirm):
         if not meeting.get(var):
             raise RuntimeError('Meeting Service lacks %s; the Hub owner API needs the first-party scope' % var)
         overrides[var] = meeting[var]
+    if not meeting.get('CF_SERVICE_TRUST_BUNDLE_FILE'):
+        raise RuntimeError('Meeting Service has no trust bundle; X1/X2 need one')
     cr.has_signing_identity('notifications')
+
+    def post():
+        for owner, _permissions, probe, _names, _var in OWNERS:
+            status = private_status(cr, cr.private_url(cr.SERVICES[owner]['tls']) + probe)
+            if status != '401':
+                raise RuntimeError('Owner API of %s answers %s after activation' % (owner, status))
+
     cr.apply_activation('activate-notifications-owners', sha, run_id,
-                        [(replica, dict(overrides)) for replica in REPLICAS])
+                        [('meeting-service', dict(FLAGGED['meeting-service']))]
+                        + [(replica, dict(overrides)) for replica in REPLICAS], post=post)
