@@ -83,7 +83,7 @@ jobs:
             // that ran on this push must be green; a path-filtered one that did not run must
             // have its latest completed main run green (its inputs did not change).
             const required = [
-              'backend.yml', 'platform-access.yml', 'organizations.yml', 'messaging.yml', 'calling.yml',
+              'backend.yml', 'platform-access.yml', 'organizations.yml', 'notifications.yml', 'messaging.yml', 'calling.yml',
               'communications-hub.yml', 'developer-platform.yml', 'api-gateway.yml', 'security-scan-gateway.yml',
               'contracts.yml', 'service-boundaries.yml', 'dependency-security.yml', 'migration-guard.yml',
               'certification.yml', 'unified-messaging-e2e.yml', 'enterprise-calling-certification.yml'
@@ -222,7 +222,7 @@ jobs:
           [[ "$available" =~ ^[[:space:]]*[0-9]+$ ]] && (( available > 10485760 )) || { echo "::error::Less than 10 GiB free on the VPS"; exit 1; }
           manifest="$RUNNER_TEMP/registry.json"
           printf '{}' > "$manifest"
-          for service in platform-access organizations messaging calling communications numbering privacy-relay sms-gateway telephony meeting-service developer-platform api-gateway security-scan-gateway; do
+          for service in platform-access organizations notifications messaging calling communications numbering privacy-relay sms-gateway telephony meeting-service developer-platform api-gateway security-scan-gateway; do
             image="ghcr.io/$owner/cfmeet-$service:$IMAGE_SHA"
             docker pull -q "$image"
             revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image")

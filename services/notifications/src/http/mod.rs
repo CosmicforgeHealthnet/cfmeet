@@ -174,26 +174,18 @@ async fn metrics(State(state): State<AppState>) -> Response {
         oldest: Option<i64>,
     }
     let queries = [
-        ("notif_event_backlog", "SELECT lane, count(*)::bigint AS pending, EXTRACT(EPOCH FROM now() - min(received_at))::bigint AS oldest FROM notif_event_inbox WHERE state = 'PENDING' AND (lease_until IS NULL OR lease_until < now() + interval '1 day') GROUP BY lane"),
-        ("notif_email_backlog", "SELECT lane, count(*)::bigint AS pending, EXTRACT(EPOCH FROM now() - min(created_at))::bigint AS oldest FROM notif_email_messages WHERE status IN ('QUEUED', 'SENDING') GROUP BY lane"),
-        ("notif_push_backlog", "SELECT lane, count(*)::bigint AS pending, EXTRACT(EPOCH FROM now() - min(created_at))::bigint AS oldest FROM notif_deliveries WHERE channel = 'PUSH' AND status IN ('PENDING', 'DEFERRED', 'DISPATCHING') GROUP BY lane"),
+        ("notif_event_backlog", "notif_event_backlog_oldest_seconds", "SELECT lane, count(*)::bigint AS pending, EXTRACT(EPOCH FROM now() - min(received_at))::bigint AS oldest FROM notif_event_inbox WHERE state = 'PENDING' AND attempts < 30 GROUP BY lane"),
+        ("notif_email_backlog", "notif_email_backlog_oldest_seconds", "SELECT lane, count(*)::bigint AS pending, EXTRACT(EPOCH FROM now() - min(created_at))::bigint AS oldest FROM notif_email_messages WHERE status IN ('QUEUED', 'SENDING') GROUP BY lane"),
+        ("notif_push_backlog", "notif_push_backlog_oldest_seconds", "SELECT lane, count(*)::bigint AS pending, EXTRACT(EPOCH FROM now() - min(created_at))::bigint AS oldest FROM notif_deliveries WHERE channel = 'PUSH' AND status IN ('PENDING', 'DEFERRED', 'DISPATCHING') GROUP BY lane"),
     ];
-    for (name, sql) in queries {
+    for (name, oldest_name, sql) in queries {
         match db::all::<Gauge, _>(&state.db, sql, vec![]).await {
             Ok(rows) => {
-                out.push_str(&format!(
-                    "# TYPE {name} gauge\n# TYPE {name}_oldest_seconds gauge\n"
-                ));
+                out.push_str(&format!("# TYPE {name} gauge\n# TYPE {oldest_name} gauge\n"));
                 for lane in ["CRITICAL", "HIGH", "STANDARD"] {
                     let r = rows.iter().find(|r| r.lane == lane);
-                    out.push_str(&format!(
-                        "{name}{{lane=\"{lane}\"}} {}\n",
-                        r.map(|r| r.pending).unwrap_or(0)
-                    ));
-                    out.push_str(&format!(
-                        "{name}_oldest_seconds{{lane=\"{lane}\"}} {}\n",
-                        r.and_then(|r| r.oldest).unwrap_or(0)
-                    ));
+                    out.push_str(&format!("{name}{{lane=\"{lane}\"}} {}\n", r.map(|r| r.pending).unwrap_or(0)));
+                    out.push_str(&format!("{oldest_name}{{lane=\"{lane}\"}} {}\n", r.and_then(|r| r.oldest).unwrap_or(0)));
                 }
             }
             Err(_) => out.push_str("notif_database_up 0\n"),

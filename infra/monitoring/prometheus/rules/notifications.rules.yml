@@ -1,0 +1,116 @@
+# Prometheus alerting rules for services/notifications (roadmap N13).
+#
+# Source of the policy: docs/operations/notification-service-runbook.md and Document 4 §13 of
+# docs/audits/notification-service. Gauges are rendered by services/notifications/src/http/mod.rs
+# (GET /metrics on the private listener) from PostgreSQL at scrape time; both replicas read the
+# same database, hence max(). NotificationsUnavailable uses only the scrape (`up`), so it fires
+# when the service itself is down: the alert path never depends on the service.
+#
+# Job name: `up{job="notifications"}` assumes the scrape job is named notifications.
+
+groups:
+  - name: notifications.alerts
+    rules:
+      - alert: NotificationsUnavailable
+        expr: |
+          absent(up{job="notifications"} == 1)
+        for: 2m
+        labels:
+          severity: critical
+          approval: documented
+          service: notifications
+        annotations:
+          summary: "No Notification Service replica answers"
+          description: "Independent path (the Prometheus scrape, not the service): both replicas are down or unreachable. Producers keep their outboxes; CRITICAL codes fail over to the retained Meeting path after 60 s."
+          runbook_url: "docs/operations/notification-service-runbook.md#4-outage-and-fallback"
+
+      - alert: NotificationsReplicaDown
+        expr: |
+          count(up{job="notifications"} == 1) < 2
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: notifications
+        annotations:
+          summary: "One Notification Service replica is down"
+          description: "The remaining replica claims every lane (SKIP LOCKED). Restore the second replica."
+          runbook_url: "docs/operations/notification-service-runbook.md#3-alerts"
+
+      - alert: NotificationsCriticalBacklog
+        expr: |
+          max(notif_email_backlog_oldest_seconds{lane="CRITICAL"}) > 60 or max(notif_event_backlog_oldest_seconds{lane="CRITICAL"}) > 60
+        for: 1m
+        labels:
+          severity: critical
+          approval: documented
+          service: notifications
+        annotations:
+          summary: "CRITICAL notification older than 60 seconds"
+          description: "Document 4 §13 threshold: a code or security notice has waited more than 60 s in the service."
+          runbook_url: "docs/operations/notification-service-runbook.md#5-critical-lane"
+
+      - alert: NotificationsCriticalSendWithoutLease
+        expr: |
+          sum(increase(notif_critical_send_without_lease_total[10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          approval: documented
+          service: notifications
+        annotations:
+          summary: "CRITICAL email sent without an Account lease"
+          description: "Routing fence violation (Document 4 §9.10): freeze the category to FENCED_OLD and investigate."
+          runbook_url: "docs/operations/notification-service-runbook.md#5-critical-lane"
+
+      - alert: NotificationsHeldEvents
+        expr: |
+          max(notif_held_events) > 0
+        for: 10m
+        labels:
+          severity: warning
+          approval: documented
+          service: notifications
+        annotations:
+          summary: "Notification events are HELD"
+          description: "A producer routes NEW while the service category is OFF. Fix the mode, then replay the HELD events (I6)."
+          runbook_url: "docs/operations/notification-service-runbook.md#6-held-events"
+
+      - alert: NotificationsDeadLetters
+        expr: |
+          max(notif_dead_letter_events) > 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: notifications
+        annotations:
+          summary: "Notification events parked as dead letters"
+          description: "Events exhausted their retry budget (an owner API kept failing). Inspect with I5, fix the cause, replay with I6."
+          runbook_url: "docs/operations/notification-service-runbook.md#7-dead-letters-and-replay"
+
+      - alert: NotificationsEmailBreakerOpen
+        expr: |
+          max(notif_email_breaker_open) > 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: notifications
+        annotations:
+          summary: "Notification email provider breaker open"
+          description: "Five consecutive temporary provider failures; the breaker re-tries every 60 s."
+          runbook_url: "docs/operations/notification-service-runbook.md#8-email-provider"
+
+      - alert: NotificationsStandardBacklog
+        expr: |
+          max(notif_email_backlog_oldest_seconds{lane="STANDARD"}) > 900
+        for: 10m
+        labels:
+          severity: warning
+          approval: documented
+          service: notifications
+        annotations:
+          summary: "STANDARD email waited more than 15 minutes"
+          description: "Provider throttling or an outage; see the breaker and the ledger error classes."
+          runbook_url: "docs/operations/notification-service-runbook.md#8-email-provider"

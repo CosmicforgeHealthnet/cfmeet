@@ -28,6 +28,7 @@ on:
       - "services/developer-platform/**"
       - "services/api-gateway/**"
       - "services/security-scan-gateway/**"
+      - "services/notifications/**"
       - "certification/**"
       - "scripts/sbom/**"
       - "packages/**"
@@ -49,6 +50,7 @@ on:
       - "services/developer-platform/**"
       - "services/api-gateway/**"
       - "services/security-scan-gateway/**"
+      - "services/notifications/**"
       - "certification/**"
       - "scripts/sbom/**"
       - "packages/**"
@@ -111,6 +113,8 @@ jobs:
           # not widened by a new advisory id.
           - services/developer-platform
           - services/api-gateway
+          # The unified Notification Service (roadmap N2).
+          - services/notifications
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
