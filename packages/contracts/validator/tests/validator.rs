@@ -53,6 +53,7 @@ impl Sandbox {
             "meeting-service",
             "messaging",
             "numbering",
+            "notifications",
             "organizations",
             "platform-access",
             "privacy-relay",
@@ -283,11 +284,42 @@ fn edit_planned_owners(s: &Sandbox, f: impl FnOnce(&mut Vec<Value>)) {
     });
 }
 
+/// The N1 situation, rebuilt synthetically now that N2 created services/notifications: the
+/// Notification Service contracts exist, the service does not, and `notifications` is a
+/// declared planned owner.
+fn planned_notifications_sandbox() -> Sandbox {
+    let s = Sandbox::new();
+    fs::remove_dir_all(s.repo.join("services/notifications")).unwrap();
+    s.edit("manifest.json", |m| {
+        m.as_object_mut().unwrap().insert(
+            "planned_owners".into(),
+            json!([{ "owner": "notifications", "approval": "owner decision D-13", "until": "N2" }]),
+        );
+    });
+    s
+}
+
+#[test]
+fn notification_contracts_require_the_notifications_service() {
+    // Since N2 the Notification Service contracts are valid because services/notifications
+    // exists: without the directory (and without a planned owner) they are rejected.
+    let s = Sandbox::new();
+    fs::remove_dir_all(s.repo.join("services/notifications")).unwrap();
+    assert_rejected(
+        &s.run(),
+        "owner `notifications` is not an existing deployable service",
+    );
+}
+
 #[test]
 fn notification_contracts_are_valid_only_through_their_planned_owner() {
     // Roadmap N1 froze the Notification Service contracts before services/notifications
-    // exists: they are valid only because `notifications` is a declared planned owner.
-    let s = Sandbox::new();
+    // existed: they were valid only because `notifications` was a declared planned owner.
+    let s = planned_notifications_sandbox();
+    assert!(
+        s.run().errors.is_empty(),
+        "the planned owner makes them valid"
+    );
     s.edit("manifest.json", |m| {
         m.as_object_mut().unwrap().remove("planned_owners");
     });
@@ -299,7 +331,7 @@ fn notification_contracts_are_valid_only_through_their_planned_owner() {
 
 #[test]
 fn planned_owner_contracts_must_stay_experimental() {
-    let s = Sandbox::new();
+    let s = planned_notifications_sandbox();
     s.edit_manifest(|c| {
         contract(c, "cfmeet.notifications.internal-api")["lifecycle"] = json!("beta");
     });
@@ -312,7 +344,7 @@ fn planned_owner_contracts_must_stay_experimental() {
 #[test]
 fn planned_owner_entry_must_go_once_the_service_exists() {
     // Once N2 creates services/notifications the exception must be removed.
-    let s = Sandbox::new();
+    let s = planned_notifications_sandbox();
     fs::create_dir_all(s.repo.join("services/notifications")).unwrap();
     assert_rejected(
         &s.run(),
@@ -323,7 +355,7 @@ fn planned_owner_entry_must_go_once_the_service_exists() {
 #[test]
 fn planned_owners_are_narrow() {
     // An unused planned owner, `platform`, and duplicates are refused.
-    let s = Sandbox::new();
+    let s = planned_notifications_sandbox();
     edit_planned_owners(&s, |p| {
         p.push(json!({ "owner": "directory", "approval": "x", "until": "y" }));
         p.push(json!({ "owner": "platform", "approval": "x", "until": "y" }));
@@ -340,7 +372,7 @@ fn planned_owners_are_narrow() {
 
 #[test]
 fn planned_owner_entries_need_an_approval_reference() {
-    let s = Sandbox::new();
+    let s = planned_notifications_sandbox();
     edit_planned_owners(&s, |p| {
         p[0].as_object_mut().unwrap().remove("approval");
     });

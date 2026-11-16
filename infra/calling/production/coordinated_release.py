@@ -84,6 +84,16 @@ def _service(container, port, health, *, tls=None, db=None, role=None, migration
                 env=dict(env or {}))
 
 
+NOTIFICATIONS_DATA_KEY_TARGET = '/run/secrets/notifications-data.key'
+NOTIFICATIONS_DARK_ENV = {
+    'NOTIFICATIONS_BIND_ADDRESS': '0.0.0.0:8102',
+    'NOTIFICATIONS_EMAIL_PROVIDER': 'none',
+    'NOTIFICATIONS_PUSH_PROVIDER': 'none',
+    'NOTIFICATIONS_DATA_KEY_ID': 'notifications-data-1',
+    'NOTIFICATIONS_DATA_KEY_FILE': NOTIFICATIONS_DATA_KEY_TARGET,
+    'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '8',
+}
+
 SERVICES = {
     'platform-access': _service('cfmeet-platform-access', 8094, '/ready', tls=8443,
         db='cfmeet_platform_access', role='platform_access', migrations=['platform-access-migration'],
@@ -92,6 +102,16 @@ SERVICES = {
         db='cfmeet_organizations', role='organizations', migrations=['organizations-migration'],
         history=['organizations_seaql_migrations'], memory=192,
         env={'ORGANIZATIONS_BIND_ADDRESS': '0.0.0.0:8101', 'ORGANIZATIONS_PROVISIONING_ENABLED': 'false'}),
+    # Unified Notification Service (docs/audits/notification-service, roadmap N2): two replicas
+    # of one image, identity and database, coordinating only through the database. Deployed
+    # dark: every route OFF, no email or push provider, no owner API; the data key (sealing at
+    # rest + keyed digests) is generated on the VPS by provision.
+    'notifications': _service('cfmeet-notifications', 8102, '/ready', tls=8456, db='cfmeet_notifications',
+        role='notifications', migrations=['notifications-migration'], history=['notifications_seaql_migrations'],
+        memory=256, env=dict(NOTIFICATIONS_DARK_ENV, NOTIFICATIONS_REPLICA_ID='notifications-1')),
+    'notifications-2': _service('cfmeet-notifications-2', 8102, '/ready', db='cfmeet_notifications',
+        role='notifications', image='notifications', identity='notifications', memory=256,
+        env=dict(NOTIFICATIONS_DARK_ENV, NOTIFICATIONS_REPLICA_ID='notifications-2')),
     'messaging': _service('cfmeet-messaging', 8097, '/ready', tls=8444, db='cfmeet_messaging',
         role='messaging', migrations=['messaging-migration', 'messaging-communications-migration'],
         history=['messaging_seaql_migrations'], existing=True),
@@ -147,11 +167,13 @@ SERVICES = {
 }
 
 # Owners before callers (final-production-activation-runbook §1).
-ORDER = ('platform-access', 'organizations',
+ORDER = ('platform-access', 'organizations', 'notifications', 'notifications-2',
          'messaging', 'calling', 'communications', 'numbering', 'privacy-relay', 'sms-gateway', 'telephony',
          'meeting-service', 'developer-platform', 'developer-platform-worker', 'api-gateway')
 DEPENDS = {
     'organizations': ('platform-access',),
+    'notifications': ('platform-access',),
+    'notifications-2': ('notifications',),
     'messaging': ('platform-access',), 'calling': ('platform-access',),
     'communications': ('platform-access',), 'numbering': ('platform-access',),
     'privacy-relay': ('platform-access',), 'telephony': ('platform-access',),
@@ -161,7 +183,7 @@ DEPENDS = {
     'developer-platform-worker': ('developer-platform',),
     'api-gateway': ('platform-access', 'developer-platform'),
 }
-IMAGES = ('platform-access', 'organizations', 'messaging', 'calling', 'communications', 'numbering',
+IMAGES = ('platform-access', 'organizations', 'notifications', 'messaging', 'calling', 'communications', 'numbering',
           'privacy-relay', 'sms-gateway', 'telephony', 'meeting-service', 'developer-platform',
           'api-gateway', 'security-scan-gateway')
 
@@ -1066,6 +1088,10 @@ def provision_identity(name):
     if name == 'sms-gateway':
         for key_name in ('sms-gateway-content.key', 'sms-gateway-fingerprint.key'):
             secret_file(p.SECRETS / key_name, lambda: base64.b64encode(secrets.token_bytes(32)).decode(), s['uid'])
+    if name == 'notifications':
+        # Master key of the data at rest (sealed columns, keyed digests): one file shared
+        # read-only by both replicas, never rotated by a release.
+        secret_file(p.SECRETS / 'notifications-data.key', lambda: base64.b64encode(secrets.token_bytes(32)).decode(), s['uid'])
 
 
 TLS_MARKER = '  # CFMEET COORDINATED RELEASE PRIVATE ROUTES'
@@ -1153,6 +1179,8 @@ def template_mounts(name):
     if name == 'sms-gateway':
         mounts += [(p.SECRETS / 'sms-gateway-content.key', '/run/secrets/sms-content.key'),
                    (p.SECRETS / 'sms-gateway-fingerprint.key', '/run/secrets/sms-fingerprint.key')]
+    if identity == 'notifications':
+        mounts.append((p.SECRETS / 'notifications-data.key', NOTIFICATIONS_DATA_KEY_TARGET))
     return mounts
 
 
@@ -1222,6 +1250,9 @@ SAFE_DEFAULTS = {
     'calling': {'CALLING_PUBLIC_OUTBOUND_ENABLED': (None, 'false'), 'CALLING_PUBLIC_INBOUND_ENABLED': (None, 'false')},
     'developer-platform': {'DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL': (None, 'false'),
                            'DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE': (None, 'shadow')},
+    # Dark until the Notification Service activation operations (N5 / N9) are recorded.
+    'notifications': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
+    'notifications-2': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
 }
 
 

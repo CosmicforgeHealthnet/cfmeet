@@ -1,0 +1,119 @@
+# promtool unit tests for ../rules/notifications.rules.yml (roadmap N13).
+# Run: promtool test rules infra/monitoring/prometheus/tests/*.test.yml
+
+rule_files:
+  - ../rules/notifications.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: both replicas down fires the independent unavailability alert
+    interval: 1m
+    input_series:
+      - series: 'up{job="notifications", instance="n-1"}'
+        values: '1x5 0x10'
+      - series: 'up{job="notifications", instance="n-2"}'
+        values: '1x5 0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: NotificationsUnavailable
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: NotificationsUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: notifications
+            exp_annotations:
+              summary: "No Notification Service replica answers"
+              description: "Independent path (the Prometheus scrape, not the service): both replicas are down or unreachable. Producers keep their outboxes; CRITICAL codes fail over to the retained Meeting path after 60 s."
+              runbook_url: "docs/operations/notification-service-runbook.md#4-outage-and-fallback"
+
+  - name: one replica down warns, the service is still available
+    interval: 1m
+    input_series:
+      - series: 'up{job="notifications", instance="n-1"}'
+        values: '1x20'
+      - series: 'up{job="notifications", instance="n-2"}'
+        values: '1x5 0x15'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NotificationsUnavailable
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: NotificationsReplicaDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: documented
+              service: notifications
+            exp_annotations:
+              summary: "One Notification Service replica is down"
+              description: "The remaining replica claims every lane (SKIP LOCKED). Restore the second replica."
+              runbook_url: "docs/operations/notification-service-runbook.md#3-alerts"
+
+  - name: a CRITICAL email older than 60 seconds pages; 30 seconds does not
+    interval: 1m
+    input_series:
+      - series: 'notif_email_backlog_oldest_seconds{job="notifications", instance="n-1", lane="CRITICAL"}'
+        values: '30x5 120x10'
+      - series: 'notif_event_backlog_oldest_seconds{job="notifications", instance="n-1", lane="CRITICAL"}'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: NotificationsCriticalBacklog
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: NotificationsCriticalBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: notifications
+            exp_annotations:
+              summary: "CRITICAL notification older than 60 seconds"
+              description: "Document 4 §13 threshold: a code or security notice has waited more than 60 s in the service."
+              runbook_url: "docs/operations/notification-service-runbook.md#5-critical-lane"
+
+  - name: any CRITICAL send without a lease pages at once
+    interval: 1m
+    input_series:
+      - series: 'notif_critical_send_without_lease_total{job="notifications", instance="n-1"}'
+        values: '0x5 1x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: NotificationsCriticalSendWithoutLease
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: NotificationsCriticalSendWithoutLease
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: notifications
+            exp_annotations:
+              summary: "CRITICAL email sent without an Account lease"
+              description: "Routing fence violation (Document 4 §9.10): freeze the category to FENCED_OLD and investigate."
+              runbook_url: "docs/operations/notification-service-runbook.md#5-critical-lane"
+
+  - name: held events warn after 10 minutes
+    interval: 1m
+    input_series:
+      - series: 'notif_held_events{job="notifications", instance="n-1"}'
+        values: '0x5 3x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NotificationsHeldEvents
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: NotificationsHeldEvents
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: documented
+              service: notifications
+            exp_annotations:
+              summary: "Notification events are HELD"
+              description: "A producer routes NEW while the service category is OFF. Fix the mode, then replay the HELD events (I6)."
+              runbook_url: "docs/operations/notification-service-runbook.md#6-held-events"

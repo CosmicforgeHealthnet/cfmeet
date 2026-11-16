@@ -47,7 +47,8 @@ READ_ONLY_SQL = 'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;\n'
 # certification document). The meeting service's /health is liveness only; its database
 # is proven separately by the service-credential query below.
 READINESS_PROVES_DB = {
-    'platform-access': True, 'organizations': True, 'messaging': True, 'calling': True,
+    'platform-access': True, 'organizations': True, 'notifications': True, 'notifications-2': True,
+    'messaging': True, 'calling': True,
     'communications': True, 'numbering': True, 'privacy-relay': True, 'sms-gateway': True,
     'telephony': True, 'meeting-service': False, 'developer-platform': True,
     'developer-platform-worker': False, 'api-gateway': False,
@@ -59,6 +60,8 @@ NIL = '00000000-0000-0000-0000-000000000000'
 AUTH_PROBES = {
     'platform-access': '/internal/v1/scopes',
     'organizations': '/internal/v1/admin/event-delivery',
+    'notifications': '/internal/v1/admin/routing',
+    'notifications-2': '/internal/v1/admin/routing',
     'messaging': '/v1/messaging/sms-bridge/disclosure',
     'calling': '/internal/v1/webhook-migration/inventory',
     'communications': '/internal/v1/communications/metrics',
@@ -102,6 +105,8 @@ INTEGRATIONS = (
     ('api-gateway', 'API_GATEWAY_PUBLIC_ROUTING_ENABLED', 'API gateway public routing', (None, 'false')),
     ('api-gateway', 'API_GATEWAY_WEBSOCKETS_ENABLED', 'API gateway WebSockets', (None, 'false')),
     ('organizations', 'ORGANIZATIONS_PROVISIONING_ENABLED', 'Organization provisioning', (None, 'false')),
+    ('notifications', 'NOTIFICATIONS_EMAIL_PROVIDER', 'Notification Service email provider', (None, '', 'none')),
+    ('notifications', 'NOTIFICATIONS_PUSH_PROVIDER', 'Notification Service push provider', (None, '', 'none')),
     ('organizations', 'ORGANIZATIONS_SERVICE_BINDINGS_ENABLED', 'Automatic organization service bindings', (None, 'false')),
 )
 

@@ -1,0 +1,55 @@
+[workspace]
+members = [".", "migration"]
+
+[package]
+name = "notifications"
+version = "0.1.0"
+edition = "2021"
+publish = false
+default-run = "notifications"
+description = "CF Meet Unified Notification Service (docs/audits/notification-service, roadmap N2-N13): the single notification delivery authority. Owns event ingest (I1), routing state, the preference engine, templates, the email ledger (Resend / SMTP / none), push endpoints and delivery, the in-app inbox, scheduling, retries, suppression, retention and delivery history. Owns no account credential, OTP validation, call signaling, message content or customer webhooks."
+
+[lib]
+name = "notifications"
+path = "src/lib.rs"
+
+[[bin]]
+name = "notifications"
+path = "src/main.rs"
+
+[dependencies]
+notifications-migration = { path = "migration" }
+cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Envelope validation, the closed catalogue and HPKE opening (renderer only: `open`).
+cf-notification-client = { path = "../../packages/notification-client", features = ["open"] }
+# AES-256-GCM sealing at rest (addresses, subjects, bodies, push handles).
+cf-webhooks = { path = "../../packages/webhooks" }
+# APNs / FCM / Web Push adapters (roadmap N4), used from N9.
+cf-push-transport = { path = "../../packages/push-transport" }
+cf-communications-policy = { path = "../../packages/communications-policy" }
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
+sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "original-uri", "query", "matched-path"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.11", features = ["v4", "v5", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+chrono-tz = "0.10"
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+secrecy = "0.10"
+async-trait = "0.1"
+base64 = "0.22"
+hex = "0.4"
+hmac = "0.12"
+rand = "0.8"
+sha2 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

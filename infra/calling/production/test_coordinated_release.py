@@ -75,7 +75,7 @@ class ResourceGate(unittest.TestCase):
     def test_required_memory_is_new_container_limits_plus_transient(self):
         new = cr.planned_new(['cfmeet-platform-access'])
         self.assertNotIn('platform-access', new)
-        self.assertEqual(cr.required_mib(new), 192 * 6 + 256 + 128 + cr.TRANSIENT_MIB)
+        self.assertEqual(cr.required_mib(new), 192 * 6 + 256 + 128 + 256 * 2 + cr.TRANSIENT_MIB)
         self.assertEqual(cr.required_mib([]), cr.TRANSIENT_MIB)
         for name in cr.ORDER:
             s = cr.SERVICES[name]

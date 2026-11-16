@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Meeting Service / Account — Notification Service owner API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Owner read and fencing APIs the Meeting Service (Account authority and conferences) exposes to the Notification Service only (blueprint Document 4 §3.4): X1 resolveAccountContacts, X2 resolveConferenceRecipients, X6 claimCriticalSendLeases, X7 completeCriticalSends. Frozen by roadmap N1; implemented in N6 (X1, X2) and N12 (X6, X7). Grantable to cfmeet.notifications only. Batches ≤ 100."
   },
   "paths": {
@@ -313,6 +313,23 @@
                           }
                         }
                       }
+                    },
+                    "joinPath": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 120,
+                      "pattern": "^/[A-Za-z0-9-]{1,100}$",
+                      "description": "1.1.0 (N6): the join path under the app URL (`/<meeting code>`), as Meeting builds join links today; never a full URL."
+                    },
+                    "endsAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time",
+                      "description": "1.1.0 (N6): the scheduled end (reschedule notices show it)."
                     }
                   }
                 }
