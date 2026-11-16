@@ -11,6 +11,17 @@
 //!   `cfmeet.notifications`, which writes them only into email ledger rows. An id Account
 //!   does not know (or a guest identity, which is not an addressable account) answers
 //!   `UNKNOWN` with nulls.
+//! * **X2** `POST /internal/v1/conferences/{conferenceId}/notification-recipients/resolve`
+//!   (`resolveConferenceRecipients`, `meeting-notification-recipients.read`): for a notice
+//!   kind (`SCHEDULED`, `RESCHEDULED`, `CANCELLED`, `REMINDER`) and optionally the start it
+//!   announces, the recipients, the presented title, start, end, space time zone, join path
+//!   and whether the notice is still true. It runs the SAME rules as the Meeting
+//!   notification worker ([`notifications::conference_recipients`],
+//!   [`notifications::presented_title`], [`notifications::notice_still_true`]): accounts are
+//!   `cfmeet-user:<uuid>` (address resolved through X1, so `email` is null), email-only
+//!   participants `meeting-email-principal:<uuid>` with their address; the email-principal
+//!   id is derived from the normalized address, so it is stable across notices. The
+//!   person who made a change is not known here; the producer's event names them.
 //!
 //! Both permissions are registry-grantable to `cfmeet.notifications` only, and the
 //! receiver trust bundle is authoritative: a caller without the permission is 403, a
@@ -27,7 +38,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use axum::{
     body::Body,
-    extract::{OriginalUri, Request, State},
+    extract::{OriginalUri, Path, Request, State},
     http::{request::Parts, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
@@ -37,15 +48,28 @@ use cf_service_auth::{
     InternalPermission, InternalServiceContext, RequestId, RuntimeEnvironment, ServiceId,
     ServiceTokenVerifier, SystemClock, TrustPolicy,
 };
-use sea_orm::{ConnectionTrait, DbBackend, FromQueryResult, Statement};
+use chrono::{DateTime, Utc};
+use sea_orm::{ConnectionTrait, DbBackend, EntityTrait, FromQueryResult, Statement};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::{config::env_bool, error::ApiResult, state::AppState};
+use crate::{
+    config::env_bool,
+    error::ApiResult,
+    models::{conference_sessions, meeting_spaces},
+    services::notifications::{self, NoticeKind},
+    state::AppState,
+};
 
 /// X1 `resolveAccountContacts`.
 pub const CONTACTS_PATH: &str = "/internal/v1/accounts/notification-contacts/resolve";
+/// X2 `resolveConferenceRecipients` (axum route syntax).
+pub const RECIPIENTS_ROUTE: &str =
+    "/internal/v1/conferences/:conference_id/notification-recipients/resolve";
+/// Recipients answered by X2 (contract `maxItems`).
+pub const MAX_RECIPIENTS: usize = 500;
 
 /// Batch bound of X1 (contract `maxItems`).
 pub const MAX_ACCOUNT_REFS: usize = 100;
@@ -104,6 +128,7 @@ struct OwnerState {
 pub fn router(app: AppState, verifier: Arc<ServiceTokenVerifier>) -> Router {
     Router::new()
         .route(CONTACTS_PATH, post(resolve_contacts))
+        .route(RECIPIENTS_ROUTE, post(resolve_recipients))
         .with_state(OwnerState { app, verifier })
 }
 
@@ -411,6 +436,200 @@ async fn resolve_contacts(State(s): State<OwnerState>, request: Request) -> Resp
     }
 }
 
+// ---------------------------------------------------------------------------
+// X2 resolveConferenceRecipients
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum RequestedKind {
+    Scheduled,
+    Rescheduled,
+    Cancelled,
+    Reminder,
+}
+
+impl From<RequestedKind> for NoticeKind {
+    fn from(k: RequestedKind) -> Self {
+        match k {
+            RequestedKind::Scheduled => NoticeKind::Scheduled,
+            RequestedKind::Rescheduled => NoticeKind::Rescheduled,
+            RequestedKind::Cancelled => NoticeKind::Cancelled,
+            RequestedKind::Reminder => NoticeKind::Reminder,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RecipientsRequest {
+    kind: RequestedKind,
+    #[serde(default)]
+    starts_at: Option<DateTime<Utc>>,
+}
+
+/// The X2 answer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConferenceRecipients {
+    pub conference_id: Uuid,
+    pub still_true: bool,
+    pub presented_title: String,
+    pub starts_at: DateTime<Utc>,
+    pub time_zone: Option<String>,
+    pub join_path: Option<String>,
+    pub ends_at: Option<DateTime<Utc>>,
+    pub recipients: Vec<RecipientRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RecipientRef {
+    #[serde(rename = "ref")]
+    pub reference: String,
+    pub email: Option<String>,
+}
+
+/// The stable reference of an email-only participant: a UUID (v8 layout) derived from the
+/// normalized address, so every notice to the same address names the same principal.
+pub fn email_principal_ref(email: &str) -> String {
+    let hash = Sha256::new()
+        .chain_update(b"cfmeet.meeting-email-principal.v1:")
+        .chain_update(email.trim().to_ascii_lowercase().as_bytes())
+        .finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&hash[..16]);
+    format!(
+        "meeting-email-principal:{}",
+        uuid::Builder::from_custom_bytes(bytes).into_uuid()
+    )
+}
+
+/// The contract's join-path grammar (`^/[A-Za-z0-9-]{1,100}$`); anything else is null.
+fn contract_join_path(path: String) -> Option<String> {
+    let code = path.strip_prefix('/')?;
+    (!code.is_empty()
+        && code.len() <= 100
+        && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+    .then_some(path)
+}
+
+/// X2 for one conference (`None`: the conference or its space does not exist).
+/// `announced_start` defaults to the conference's current scheduled start.
+pub async fn conference_recipients<C: ConnectionTrait>(
+    db: &C,
+    conference_id: Uuid,
+    kind: NoticeKind,
+    announced_start: Option<DateTime<Utc>>,
+    max_recipients: usize,
+    now: DateTime<Utc>,
+) -> ApiResult<Option<ConferenceRecipients>> {
+    let Some(conference) = conference_sessions::Entity::find_by_id(conference_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let Some(space) = meeting_spaces::Entity::find_by_id(conference.meeting_space_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let announced = announced_start.or(conference.scheduled_start_at);
+    let still_true = (kind == NoticeKind::Cancelled || announced.is_some())
+        && notifications::notice_still_true(kind, &space, &conference, announced, now).is_ok();
+    let (rows, truncated) = notifications::conference_recipients(
+        db,
+        space.id,
+        conference.id,
+        max_recipients.min(MAX_RECIPIENTS),
+        None,
+    )
+    .await?;
+    if truncated {
+        tracing::warn!(%conference_id, "X2 notification recipients truncated");
+    }
+    let recipients = rows
+        .into_iter()
+        .map(|r| match r.user_id {
+            // Account addresses are resolved through X1 (the account's own address).
+            Some(id) => RecipientRef {
+                reference: format!("cfmeet-user:{id}"),
+                email: None,
+            },
+            None => RecipientRef {
+                reference: email_principal_ref(&r.email),
+                email: Some(r.email),
+            },
+        })
+        .collect();
+    Ok(Some(ConferenceRecipients {
+        conference_id: conference.id,
+        still_true,
+        presented_title: notifications::presented_title(&space),
+        starts_at: conference
+            .scheduled_start_at
+            .or(announced_start)
+            .unwrap_or(conference.created_at),
+        time_zone: bounded(Some(space.timezone.clone()), 64),
+        join_path: contract_join_path(notifications::join_path(&space)),
+        ends_at: conference.scheduled_end_at,
+        recipients,
+    }))
+}
+
+async fn resolve_recipients(
+    State(s): State<OwnerState>,
+    Path(raw_id): Path<String>,
+    request: Request,
+) -> Response {
+    let (parts, raw) = request.into_parts();
+    let ctx = match authenticate(
+        &s,
+        &parts,
+        InternalPermission::MeetingNotificationRecipientsRead,
+    )
+    .await
+    {
+        Ok(ctx) => ctx,
+        Err(r) => return r,
+    };
+    let rid = ctx.request_id().as_str().to_string();
+    let Some(conference_id) = Uuid::parse_str(&raw_id)
+        .ok()
+        .filter(|id| id.to_string() == raw_id)
+    else {
+        return validation("conferenceId must be a UUID.", &rid);
+    };
+    let req: RecipientsRequest = match body(raw, &rid).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let max = s.app.meeting.core.config.notifications.max_recipients;
+    match conference_recipients(
+        &s.app.db,
+        conference_id,
+        req.kind.into(),
+        req.starts_at,
+        max,
+        Utc::now(),
+    )
+    .await
+    {
+        Ok(Some(answer)) => reply(StatusCode::OK, json!(answer)),
+        Ok(None) => error(
+            StatusCode::NOT_FOUND,
+            "NOT_FOUND",
+            "The conference does not exist.",
+            &rid,
+        ),
+        Err(e) => {
+            tracing::error!("notification owner API: recipients lookup failed: {e}");
+            unavailable(&rid)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,6 +653,26 @@ mod tests {
             parse_account_ref(&format!("meeting-email-principal:{id}")),
             None
         );
+    }
+
+    #[test]
+    fn email_principals_are_stable_per_normalized_address() {
+        let a = email_principal_ref("Ada@Example.com ");
+        assert_eq!(a, email_principal_ref("ada@example.com"));
+        assert_ne!(a, email_principal_ref("bob@example.com"));
+        let id = a.strip_prefix("meeting-email-principal:").unwrap();
+        assert_eq!(Uuid::parse_str(id).unwrap().to_string(), id);
+    }
+
+    #[test]
+    fn join_paths_follow_the_contract_grammar() {
+        assert_eq!(
+            contract_join_path("/abc-defg-hij".into()).as_deref(),
+            Some("/abc-defg-hij")
+        );
+        assert_eq!(contract_join_path("/".into()), None);
+        assert_eq!(contract_join_path("/a b".into()), None);
+        assert_eq!(contract_join_path("abc".into()), None);
     }
 
     #[test]
