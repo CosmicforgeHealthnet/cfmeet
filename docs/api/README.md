@@ -98,20 +98,20 @@ literals.
 4. **Decide the audience.** Internal, provider, admin and operational
    compliance routes are removed from the public JSON by `public_doc()` in
    `services/meeting-service/src/swagger/mod.rs`; they stay in the private
-   12-document catalog. Add to that filter, not to the UI, when a new route must
+   21-document catalog. Add to that filter, not to the UI, when a new route must
    not be public.
 5. **Run the gates locally** (CI runs the same ones):
 
    ```bash
    python3 scripts/contracts/check_swagger_labels.py   # contracts: tags, summaries, descriptions, source = bundle
    python3 scripts/contracts/bundle_openapi.py --check # bundles current and self-contained
-   python3 scripts/swagger/test_private_docs.py        # private 12-document catalog builds
+   python3 scripts/swagger/test_private_docs.py        # private 21-document catalog builds
    (cd services/meeting-service && cargo test --lib swagger)
    ```
 
    The Meeting Service test `every_served_public_operation_is_labeled_and_documented`
    reads the documents **as the router serves them** (after public filtering) and
-   fails on: a selector that is not exactly the six public services; an operation
+   fails on: a selector that is not exactly the ten public documents; an operation
    without a section, in `default`, or in an undeclared section; a missing or
    truncated summary; a missing description or `operationId`; duplicate
    `operationId`s; and empty sections. Sibling tests fail on internal or
@@ -124,27 +124,40 @@ and then **Deploy Backend** (`production`) on the merged `main` SHA.
 ## Public and private API documentation
 
 **Public:** `https://api.cfmeet.com/swagger-ui/` remains the default read-only
-Swagger explorer. It includes filtered customer/developer contracts for Meetings,
-Calling, Messaging, Numbering / DCNs, Privacy Relay and SMS Gateway. The JSON
-returned by `/api-docs/*.json` is filtered **on the server**: removing entries
-from the dropdown alone is not a security or documentation split.
+Swagger explorer. Its selector lists ten public documents. The JSON returned by
+`/api-docs/*.json` is filtered **on the server**: removing entries from the
+dropdown alone is not a security or documentation split.
 
-| Public selector | Public JSON | Source (unchanged) |
-|---|---|---|
-| Meetings | `/api-docs/openapi.json` | Meeting Service generated OpenAPI |
-| Calling | `/api-docs/calling.json` | `calling/http/v1.openapi.json` |
-| Numbering / DCNs | `/api-docs/numbering.json` | `numbering/internal/v1.openapi.json` (public operations only) |
-| Privacy Relay | `/api-docs/privacy-relay.json` | `privacy-relay/http/v1.openapi.json` |
-| SMS Gateway | `/api-docs/sms-gateway.json` | `sms-gateway/http/v1.openapi.json` |
-| Messaging | `/api-docs/messaging.json` | `messaging/http/v1.openapi.json` |
+| Public selector | Public JSON | Source (unchanged) | Operations |
+|---|---|---|---|
+| Meetings | `/api-docs/openapi.json` | Meeting Service generated OpenAPI, without the Organizations section | 224 |
+| Organizations | `/api-docs/organizations.json` | the `Organizations (v2)` section of the same generated OpenAPI | 44 |
+| Communications | `/api-docs/communications.json` | `bundled/public/communications` | 73 |
+| Calling | `/api-docs/calling.json` | `bundled/public/calling` | 131 |
+| Numbering / DCNs | `/api-docs/numbering.json` | `bundled/public/numbering` | 52 |
+| Privacy Relay | `/api-docs/privacy-relay.json` | `bundled/public/privacy-relay` | 17 |
+| SMS Gateway | `/api-docs/sms-gateway.json` | `bundled/public/sms` | 6 |
+| Messaging | `/api-docs/messaging.json` | `bundled/public/messaging` | 97 |
+| Developer Platform | `/api-docs/developer-platform.json` | `bundled/public/developer-platform` | 73 |
+| API Gateway | `/api-docs/api-gateway.json` | `bundled/public/gateway` | 1 |
 
-At this commit's contract baseline, **476** HTTP operations are intended for
-the public documentation view (193 Meetings, 125 Calling, 52 Numbering,
-20 Privacy Relay, 6 SMS, 80 Messaging). This is **NOT** the frontend team's
-API consumption count, nor a certification that each service is deployed.
-Server-side filtering removes internal-only routes, provider callbacks, privileged
-admin routes, and select operational compliance endpoints. These APIs continue
-to exist and remain described in the canonical contracts.
+**Organizations document.** The first-party organization routes
+(organizations, members, invitations, teams, policies, lifecycle, audit,
+provisioning, workspaces, and the organization Calling and Messaging relays)
+are served at the same `/api/v2` URLs as before. The documentation host moves
+those operations out of the Meetings document into their own document, so each
+operation is documented exactly once; paths, schemas and authentication are
+unchanged. The Organizations Service is authoritative for organization data;
+Calling and Messaging keep ownership of their own data behind the relays.
+Platform administration (`/api/v2/admin/organizations`) and the Organizations
+Service's internal API (`/internal/v1`) are not public: they are in the private
+catalogue below (`Organizations (internal)`).
+
+Counts are for this commit's contracts. They are not the frontend team's API
+consumption count, nor a certification that each service is deployed.
+Server-side filtering removes internal-only routes, provider callbacks,
+privileged admin routes, and select operational compliance endpoints. These
+APIs continue to exist and remain described in the canonical contracts.
 
 **Private engineering catalog:** use the offline generator:
 
@@ -153,7 +166,7 @@ python3 scripts/swagger/test_private_docs.py
 python3 scripts/swagger/build-private-docs.py --out /tmp/cfmeet-private-docs-new
 ```
 
-This produces a separate, **complete 12-document** static catalog from
+This produces a separate, **complete 21-document** static catalog from
 `packages/contracts/openapi` and `packages/contracts/bundled`. It includes
 **661** source-documented HTTP operations, including Platform Access, Messaging
 internal, SMS Gateway internal, Privacy Relay internal, Telephony and Platform
@@ -171,7 +184,7 @@ created automatically** by this code change.
 **Deployment ordering:**
 
 1. Install and validate the private catalog **in its own protected site**,
-   including all 12 documents and access-denied checks from unauthorized hosts.
+   including all 21 documents and access-denied checks from unauthorized hosts.
 2. Verify the private reader's access and audit logs; fail closed if authentication
    or network restrictions are missing.
 3. Only then deploy the updated Meeting Service that filters public documentation.
