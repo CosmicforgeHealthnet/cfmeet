@@ -365,7 +365,9 @@ impl Cert {
             .await;
         assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
         let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
-        assert_eq!(r.json["call"]["state"], "RINGING");
+        // Offered: DIALING until the callee's device acknowledges receipt (C1); the accept
+        // below is itself proof of receipt.
+        assert_eq!(r.json["call"]["state"], "DIALING");
         let invitation = self.a.invitation_for(call, callee.endpoint).await.unwrap();
         let (_, version) = self.a.state(call).await;
         let r = self.a.accept(call, invitation, &callee, version).await;
