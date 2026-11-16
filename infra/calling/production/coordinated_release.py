@@ -2529,6 +2529,9 @@ ACTIVATIONS = {
     # Notification Service N14: one notif_routing row per run, gated, journaled, reversible.
     'activate-notifications-routing': ((), lambda sha, run_id, confirm: notif_ops.activate_routing(
         sys.modules[__name__], sha, run_id, confirm)),
+    # Notification Service N8: Meeting Service user relay U1-U9 (owner-approved 2026-11-16).
+    'activate-notifications-relay': ((), lambda sha, run_id, confirm: notif_ops.activate_relay(
+        sys.modules[__name__], sha, run_id, confirm)),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
     + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')

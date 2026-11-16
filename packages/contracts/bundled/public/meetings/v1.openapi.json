@@ -10,9 +10,9 @@
     "license": {
       "name": ""
     },
-    "version": "1.5.0",
+    "version": "1.6.0",
     "x-cfmeet-source-contract": "cfmeet.meeting-service.http-api",
-    "x-cfmeet-source-version": "1.5.0"
+    "x-cfmeet-source-version": "1.6.0"
   },
   "servers": [
     {

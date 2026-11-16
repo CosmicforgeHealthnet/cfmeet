@@ -22,6 +22,13 @@ Two coordinated-release operations, each journaled and reversible:
 
   The previous mode and version are recorded in the journal entry; ``rollback`` restores
   them (no container restart: the service reads the table on every event).
+
+* ``activate-notifications-relay`` (owner-approved 2026-11-16) turns on the Meeting Service
+  user relay U1-U9 under ``/api/v2/notifications``: both Notification Service replicas trust
+  the Meeting Service for ``notifications-user.forward`` (I2 only), and the Meeting Service
+  gets ``CF_NOTIFICATIONS_BASE_URL`` (the Notification Service private TLS route). The relay
+  answers 401 without an Account session before and after; nothing is delivered by this step
+  (the inbox only shows what ACTIVE routing rows produced).
 """
 
 import json
@@ -50,6 +57,14 @@ OWNERS = (
 
 GRANTS = tuple(('activate-notifications-owners', owner, 'notifications', permissions)
                for owner, permissions, _probe, _names, _var in OWNERS)
+
+# U1-U9 relay: I2 is granted to the Meeting Service on BOTH replicas (each container has its
+# own trust-bundle file; the identity is the same).
+RELAY_PERMISSIONS = ('notifications-user.forward',)
+RELAY_PROBE = '/internal/v1/notifications/dispatch'
+RELAY_PUBLIC_PROBE = '/api/v2/notifications/read'
+GRANTS += tuple(('activate-notifications-relay', replica, 'meeting-service', RELAY_PERMISSIONS)
+                for replica in ('notifications', 'notifications-2'))
 
 REPLICAS = ('notifications', 'notifications-2')
 FLAGGED = {'meeting-service': {'NOTIFICATION_OWNER_API_ENABLED': 'true'}}
@@ -157,6 +172,17 @@ def private_status(cr, url):
     return (out or '').strip()
 
 
+def deny_owner_routes_publicly(cr):
+    """Apply the public-host denials of the Meeting owner routes X1 / X2 and prove each one
+    answers the nginx denial (404 + X-CFMeet-Ingress: denied), never the Meeting Service."""
+    cr.release.secure_public_ingress()
+    cr.p.reload_host_nginx()
+    results = {path: cr.public_denial_probe(path) for path in cr.release.NOTIFICATION_OWNER_DENIAL_PROBES}
+    cr.emit('publicOwnerDenial', results)
+    if not all(results.values()):
+        raise RuntimeError('The public host still reaches a Meeting owner route; nothing was activated')
+
+
 def activate_owners(cr, sha, run_id, confirm):
     cr.require_release(sha)
     names, overrides = [], {}
@@ -183,6 +209,9 @@ def activate_owners(cr, sha, run_id, confirm):
     if not meeting.get('CF_SERVICE_TRUST_BUNDLE_FILE'):
         raise RuntimeError('Meeting Service has no trust bundle; X1/X2 need one')
     cr.has_signing_identity('notifications')
+    # The Meeting owner routes must never be reachable through the public host: the denial is
+    # applied (host nginx, deny-only) and proven before they are mounted.
+    deny_owner_routes_publicly(cr)
 
     def post():
         for owner, _permissions, probe, _names, _var in OWNERS:
@@ -193,3 +222,34 @@ def activate_owners(cr, sha, run_id, confirm):
     cr.apply_activation('activate-notifications-owners', sha, run_id,
                         [('meeting-service', dict(FLAGGED['meeting-service']))]
                         + [(replica, dict(overrides)) for replica in REPLICAS], post=post)
+
+
+def activate_relay(cr, sha, run_id, confirm):
+    cr.require_release(sha)
+    notif_tls = cr.SERVICES['notifications']['tls']
+    meeting_tls = cr.SERVICES['meeting-service']['tls']
+    cr.tls_route_present(notif_tls)
+    cr.tls_route_present(meeting_tls)
+    # I2 exists in the running Notification Service image and refuses an unsigned caller.
+    status = private_status(cr, cr.private_url(notif_tls) + RELAY_PROBE)
+    if status != '401':
+        raise RuntimeError('Notification Service I2 answered %s to an unsigned probe (expected 401); '
+                           'release the Notification Service first' % status)
+    # The running Meeting image serves the relay routes (401 before the session check passes).
+    status = private_status(cr, cr.private_url(meeting_tls) + RELAY_PUBLIC_PROBE)
+    if status != '401':
+        raise RuntimeError('Meeting Service relay answered %s without a session (expected 401); '
+                           'release the Meeting Service first' % status)
+    # The relay signs with the Meeting identity; it refuses to start without one.
+    cr.has_signing_identity('meeting-service')
+    overrides = {'CF_NOTIFICATIONS_BASE_URL': cr.private_url(notif_tls)}
+
+    def post():
+        status = private_status(cr, cr.private_url(meeting_tls) + RELAY_PUBLIC_PROBE)
+        if status != '401':
+            raise RuntimeError('Meeting Service relay answers %s without a session after activation' % status)
+        status = private_status(cr, cr.private_url(notif_tls) + RELAY_PROBE)
+        if status != '401':
+            raise RuntimeError('Notification Service I2 answers %s to an unsigned probe after activation' % status)
+
+    cr.apply_activation('activate-notifications-relay', sha, run_id, [('meeting-service', overrides)], post=post)

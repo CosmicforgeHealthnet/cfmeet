@@ -926,7 +926,7 @@
     },
     {
       "id": "cfmeet.meeting-service.public-api",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "kind": "openapi",
       "path": "bundled/public/meetings/v1.openapi.json",
       "owner": "meeting-service",
@@ -1153,7 +1153,7 @@
       "visibility": "public",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N5, N8–N10). Public user APIs U1–U9 (inbox, preferences, push endpoints; served through the Meeting Service relay) and the Resend provider callback POST /api/v1/notifications/provider-events/resend. Implemented in services/notifications from N2 (deployed dark); not yet publicly routed: the Meeting Service relay and the gateway entries are held for owner approval of the public-route change."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N5, N8–N10). Public user APIs U1–U9 (inbox, preferences, push endpoints; served through the Meeting Service relay) and the Resend provider callback POST /api/v1/notifications/provider-events/resend. Implemented in services/notifications from N2 (deployed dark). U1-U9 are served to the CF Meet apps by the Meeting Service relay under /api/v2/notifications (owner-approved 2026-11-16; gateway class EXCLUDED / FIRST_PARTY_APP_NOTIFICATIONS), on only after activate-notifications-relay; the provider callback is not yet publicly routed."
     },
     {
       "id": "cfmeet.notifications.internal-api",

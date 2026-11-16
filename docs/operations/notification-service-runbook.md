@@ -9,7 +9,7 @@ Operations guide for `services/notifications` (identity `cfmeet.notifications`, 
 | Containers | `cfmeet-notifications` (replica `notifications-1`, private TLS route `https://api.cfmeet.com:8456`) and `cfmeet-notifications-2` (replica `notifications-2`, private network only). 256 MiB each, read-only, no capability, no published port |
 | Database | `cfmeet_notifications` in `cfmeet-core-db`; roles `notifications` (runtime) and `notifications_migrator` |
 | Secrets (0400 files, mounted read-only) | `/opt/cfmeet-core/secrets/notifications-service-auth.pem` (signing key), `notifications-data.key` (master key: sealing at rest and keyed digests), trust bundle `coordinated/trust/notifications.trust.json`; provider files only after an activation |
-| Workers per replica | W1 ingest, W2 email CRITICAL lane, W3 email STANDARD lane + push, W4 scheduler, W5 retention. Replicas coordinate only through `FOR UPDATE SKIP LOCKED` claims and leases |
+| Workers per replica | W1 ingest, W2 email CRITICAL lane, W3 email STANDARD lane + push, W4 scheduler (also runs hourly retention; retention has no heartbeat of its own, so `/ready` stays green between runs). Replicas coordinate only through `FOR UPDATE SKIP LOCKED` claims and leases |
 | Probes | `GET /health` (liveness), `GET /ready` (database, migrations, worker heartbeats, `routingProtocol`, provider kinds), `GET /metrics` (Prometheus text, private network) |
 
 The service is never in a synchronous business path: sign-in, code verification, ringing, message send and webhook delivery keep working with both replicas down.
@@ -75,3 +75,15 @@ The service uses its own provider configuration (`NOTIFICATIONS_EMAIL_PROVIDER`,
 ## 10. Retention and erasure
 
 W5 (hourly): inbox items after `expires_at` (90 days), processed or rejected events after 30 days, notifications without pending work after 30 days, shadow observations after 30 days, the preference change log after 7 days, fired schedules after 7 days, disabled push endpoints after 30 days. Email: addresses erased 30 days after the final state, rows deleted after 60 days, non-final rows expired at `expires_at`. Account erasure removes inbox, endpoints, preferences and notifications, and erases ledger addresses (`workers::erase_account`).
+
+## 11. Activations (coordinated release)
+
+Each is a separate run of `cfmeet-coordinated-release.yml` on the current `main` head, journaled and reversible with `rollback`. None of them delivers anything: delivery is governed only by `notif_routing`.
+
+| Operation | Effect | Checks |
+|---|---|---|
+| `activate-notifications-owners` | grants X1/X2 (Meeting, with `NOTIFICATION_OWNER_API_ENABLED=true`), X3 (Messaging), X4 (Communications), X5 (Organizations) to `cfmeet.notifications`; sets `NOTIFICATIONS_AUTHORITIES`, the owner base URLs and the first-party scope on both replicas | each owner route answers 401 to an unsigned probe before (non-flagged owners) and after |
+| `activate-notifications-relay` | grants I2 `notifications-user.forward` to the Meeting Service on both replicas; sets `CF_NOTIFICATIONS_BASE_URL` on the Meeting Service, which turns on U1-U9 under `/api/v2/notifications` (owner-approved 2026-11-16) | I2 answers 401 unsigned and the Meeting relay answers 401 without a session, before and after |
+| `activate-notifications-routing` | changes one `notif_routing` row (`confirm`: `<category>-<channel>-<mode>`) | the gates of §2 and Document 6 N14: CRITICAL `active` refused; EMAIL `active` needs a provider and E1; social `active` needs the owner APIs |
+
+The U1-U9 routes are classified `EXCLUDED` / `FIRST_PARTY_APP_NOTIFICATIONS` in `infra/api-gateway/public-routes.json`: they are served on the Meeting Service ingress to the CF Meet apps' own signed-in users, never routed as a customer API. Without `CF_NOTIFICATIONS_BASE_URL` every U route answers 503 after the 401 session check.

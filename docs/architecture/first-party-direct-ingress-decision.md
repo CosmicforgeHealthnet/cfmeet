@@ -84,7 +84,7 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 136 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 145 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
@@ -92,13 +92,14 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 136 
 | `CONTACT_VAULT_PRIVATE` | 5 | privacy-relay | Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway. |
 | `FIRST_PARTY_APP_ACCOUNT` | 19 | meetings | The CF Meet app's own account profile. |
 | `FIRST_PARTY_APP_BACKEND` | 16 | meetings | The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly. |
+| `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
 | `FIRST_PARTY_ORGANIZATIONS` | 39 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
 | `LEGACY_DIRECT_INGRESS` | 46 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 2 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **136** | | |
+| **Total** | **145** | | |
 
 #### `CALENDAR_FILE_DIRECT_INGRESS` (2)
 
@@ -161,6 +162,20 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 136 
 | POST | `/api/v2/messaging/relay/{path}` | `v2_messaging_relay_post` | `cfmeet.meeting-service.http-api` |
 | PUT | `/api/v2/messaging/relay/{path}` | `v2_messaging_relay_put` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/messaging/session-tokens` | `v2_messaging_session_token` | `cfmeet.meeting-service.http-api` |
+
+#### `FIRST_PARTY_APP_NOTIFICATIONS` (9)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/api/v2/notifications` | `v2_notifications_list` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/notifications/devices/{accountDeviceId}/push` | `v2_notifications_push_remove` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/notifications/devices/{accountDeviceId}/push` | `v2_notifications_push_register` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/notifications/dismiss` | `v2_notifications_dismiss` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/notifications/preferences` | `v2_notifications_preferences_get` | `cfmeet.meeting-service.http-api` |
+| PUT | `/api/v2/notifications/preferences` | `v2_notifications_preferences_update` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/notifications/read` | `v2_notifications_mark_read` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/notifications/unread-count` | `v2_notifications_unread_count` | `cfmeet.meeting-service.http-api` |
+| PATCH | `/api/v2/notifications/{notificationId}` | `v2_notifications_update` | `cfmeet.meeting-service.http-api` |
 
 #### `FIRST_PARTY_ORGANIZATIONS` (39)
 
