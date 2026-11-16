@@ -823,3 +823,141 @@ async fn a_password_change_and_its_security_notice_commit_together() {
         "the notice is committed with the change"
     );
 }
+
+/// A3 / F1: a weak sign-up password is a field error on `password` (never `__all__`),
+/// and every `400 VALIDATION_ERROR` lists `{field, code, message}` per problem under
+/// `error.details` with the public field names, while `error.message` stays.
+#[tokio::test]
+async fn validation_errors_name_the_public_field_with_structured_details() {
+    let app = app_with_redis!();
+    let issues = |v: &Value| -> Vec<(String, String)> {
+        v["error"]["details"]
+            .as_array()
+            .unwrap_or_else(|| panic!("details missing: {v}"))
+            .iter()
+            .map(|i| {
+                assert!(i["message"].as_str().is_some_and(|m| !m.is_empty()), "{i}");
+                (
+                    i["field"].as_str().unwrap_or("<null>").to_string(),
+                    i["code"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+    let pair = |f: &str, c: &str| (f.to_string(), c.to_string());
+
+    // Weak password (no special character, no upper case): field-level, on `password`.
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/register",
+            Auth::None,
+            json!({
+                "username": "weakling", "email": "weak@example.com",
+                "password": "weakpass1", "confirm_password": "weakpass1",
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["success"], false);
+    assert_eq!(v["error"]["code"], "VALIDATION_ERROR");
+    let message = v["error"]["message"].as_str().unwrap();
+    assert!(
+        message.starts_with("password: Password must contain"),
+        "{v}"
+    );
+    assert!(!v.to_string().contains("__all__"), "{v}");
+    assert!(
+        !v.to_string().contains("weakpass1"),
+        "the password is never echoed"
+    );
+    assert_eq!(issues(&v), vec![pair("password", "password_strength")]);
+
+    // Several problems at once: one issue each, sorted by field.
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/register",
+            Auth::None,
+            json!({
+                "username": "x", "email": "not-an-email",
+                "password": PASSWORD, "confirm_password": "Different!1",
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(
+        issues(&v),
+        vec![
+            pair("confirm_password", "passwords_mismatch"),
+            pair("email", "email"),
+            pair("username", "length"),
+        ]
+    );
+    let message = v["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("confirm_password: Passwords do not match"),
+        "{v}"
+    );
+    assert!(message.contains("email: Invalid email address"), "{v}");
+
+    // A strong password is accepted.
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/register",
+            Auth::None,
+            json!({
+                "username": "strongone", "email": "strong@example.com",
+                "password": PASSWORD, "confirm_password": PASSWORD,
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+
+    // Password reset uses the same field-level rule, on `new_password`.
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/reset-password",
+            Auth::None,
+            json!({
+                "email": "strong@example.com", "token": "123456",
+                "new_password": "ALLUPPER1!", "confirm_password": "ALLUPPER1!",
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(issues(&v), vec![pair("new_password", "password_strength")]);
+
+    // Change password: reusing the current password is a `new_password` problem.
+    let email = "changer@example.com";
+    password_user(&app, email, "active").await;
+    let (access, _) = login(&app, email).await;
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/change-password",
+            Auth::Bearer(&access),
+            json!({
+                "current_password": PASSWORD,
+                "new_password": PASSWORD,
+                "confirm_password": PASSWORD,
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(issues(&v), vec![pair("new_password", "same_password")]);
+
+    // Meeting creation: the title rule names `title`.
+    let (s, v) = app
+        .post(
+            "/api/v1/meetings",
+            Auth::Bearer(&access),
+            json!({
+                "title": "", "start_time": "2030-01-25T14:00:00", "timezone": "UTC",
+            }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(issues(&v), vec![pair("title", "length")]);
+    assert_eq!(
+        v["error"]["message"],
+        "title: Title must be between 1 and 200 characters"
+    );
+}

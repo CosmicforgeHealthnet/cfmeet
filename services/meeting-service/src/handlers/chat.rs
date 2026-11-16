@@ -23,6 +23,7 @@
 //! - Call `GET /chat` to load all previous messages when joining
 //! - Use `?after=<timestamp>` to load only new messages since last fetch
 
+use crate::validation::ValidateRequest;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -30,7 +31,6 @@ use axum::{
 };
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::{
     dto::{
@@ -128,9 +128,7 @@ pub async fn send_message(
     Json(payload): Json<SendChatMessageRequest>,
 ) -> ApiResult<(StatusCode, Json<ApiResponse<ChatMessageResponse>>)> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user_id = Uuid::parse_str(&claims.sub)
         .map_err(|_| ApiError::Unauthorized("Invalid token".to_string()))?;

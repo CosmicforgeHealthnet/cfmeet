@@ -13,6 +13,7 @@
 //! `Link rel="deprecation"`) on every response, errors included. See
 //! `docs/api/legacy-meeting-webhooks-deprecation.md`.
 
+use crate::validation::ValidateRequest;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -21,7 +22,6 @@ use axum::{
 use rand::Rng;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::{
     dto::{
@@ -137,9 +137,7 @@ pub async fn create_webhook(
     Extension(auth_context): Extension<AuthContext>,
     Json(payload): Json<CreateWebhookRequest>,
 ) -> ApiResult<(StatusCode, Json<CreateWebhookApiResponse>)> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let event_type = parse_event_type(&payload.event_type)?;
     let secret = generate_webhook_secret();
@@ -269,9 +267,7 @@ pub async fn update_webhook(
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateWebhookRequest>,
 ) -> ApiResult<Json<WebhookApiResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let webhook = Webhooks::find_by_id(id)
         .filter(webhooks::Column::UserId.eq(auth_context.user_id))

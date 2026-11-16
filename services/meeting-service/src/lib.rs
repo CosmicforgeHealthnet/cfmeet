@@ -12,4 +12,5 @@ pub mod state;
 pub mod swagger;
 pub mod templates;
 pub mod utils;
+pub mod validation;
 pub mod workers;
