@@ -2,7 +2,8 @@
  * API error decoding (FE-019).
  *
  * The meeting service answers every error, v1 and v2, with the envelope
- * `{ success: false, error: { code, message, requestId?, retryAfterSeconds? } }`
+ * `{ success: false, error: { code, message, requestId?, retryAfterSeconds?, details? } }`
+ * (`details`: the `{ field, code, message }` list of a `VALIDATION_ERROR`)
  * (`ErrorEnvelope` in packages/contracts/openapi/meeting-service.json). This module decodes
  * that envelope, keeps the stable `code`, and classifies the failure so screens can tell an
  * expired session from a forbidden action, a validation problem or wrong sign-in details.
@@ -186,6 +187,65 @@ export function decodeErrorBody(data: unknown): {
   };
 }
 
+/**
+ * One problem of a `400 VALIDATION_ERROR` (F1): the meeting service lists them under
+ * `error.details`, naming the public JSON field (`password`, `confirm_password`, …).
+ */
+export interface ValidationIssue {
+  field: string | null;
+  code: string;
+  message: string;
+}
+
+/** The structured issues of a decoded `VALIDATION_ERROR` (empty for anything else). */
+export function validationIssuesOf(error: Pick<ApiError, "code" | "details"> | null | undefined): ValidationIssue[] {
+  if (error?.code !== "VALIDATION_ERROR" || !Array.isArray(error.details)) return [];
+  return error.details.flatMap((d): ValidationIssue[] => {
+    if (!isRecord(d)) return [];
+    const message = str(d.message);
+    if (!message) return [];
+    return [{ field: str(d.field) ?? null, code: str(d.code) ?? "invalid", message }];
+  });
+}
+
+/** `"password: Too short\n__all__: Nope"` → `"Too short Nope"`; other text unchanged. */
+export function stripFieldPrefixes(message: string): string {
+  return message
+    .split("\n")
+    .map((line) => line.replace(/^[A-Za-z_][\w.[\]]*:\s+/, "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+/**
+ * Map the issues onto form fields: `fields` maps API field → form field; the first
+ * message per form field wins. Issues without a mapped field are returned in `rest`.
+ */
+export function fieldErrorsOf<F extends string>(
+  error: Pick<ApiError, "code" | "details"> | null | undefined,
+  fields: Record<string, F>
+): { fields: Partial<Record<F, string>>; rest: string[] } {
+  const out: Partial<Record<F, string>> = {};
+  const rest: string[] = [];
+  for (const issue of validationIssuesOf(error)) {
+    const key = issue.field !== null ? fields[issue.field] : undefined;
+    if (key === undefined) {
+      if (!rest.includes(issue.message)) rest.push(issue.message);
+    } else if (out[key] === undefined) {
+      out[key] = issue.message;
+    }
+  }
+  return { fields: out, rest };
+}
+
+/** A validation answer's readable text: its issue messages, else the prefix-free message. */
+function validationText(body: ReturnType<typeof decodeErrorBody>): string | undefined {
+  if (body.code !== "VALIDATION_ERROR") return body.message;
+  const issues = validationIssuesOf(body);
+  if (issues.length > 0) return [...new Set(issues.map((i) => i.message))].join(" ");
+  return body.message ? stripFieldPrefixes(body.message) || body.message : undefined;
+}
+
 /** Whether the failed request carried an account bearer token (never returns the token). */
 function requestHadBearer(headers: Record<string, unknown> | undefined): boolean {
   if (!headers) return false;
@@ -211,10 +271,11 @@ export function decodeApiError(error: unknown): ApiError {
     const kind = classify(status || 500, body.code, http.config?.url, requestHadBearer(http.config?.headers));
     // A stale/expired session always gets the friendly sign-in-again text; elsewhere the
     // server's message is safe to show (the contract forbids secrets, SQL or paths in it).
+    // Validation answers show their field messages without `field: ` prefixes.
     const message =
       kind === "auth_expired" || kind === "auth_required"
         ? KIND_MESSAGES[kind]
-        : body.message ?? KIND_MESSAGES[kind];
+        : validationText(body) ?? KIND_MESSAGES[kind];
     return {
       message,
       status: status || 500,

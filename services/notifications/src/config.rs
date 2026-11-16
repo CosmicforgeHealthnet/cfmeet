@@ -33,6 +33,7 @@
 //! | `NOTIFICATIONS_AUTHORITIES` | no | comma list of owner APIs to call: `account`, `meeting`, `messaging`, `communications`, `organizations` (default none) |
 //! | `CF_MEETING_SERVICE_BASE_URL`, `CF_MESSAGING_BASE_URL`, `CF_COMMUNICATIONS_BASE_URL`, `CF_ORGANIZATIONS_BASE_URL` | per authority | internal base URLs |
 //! | `CF_SERVICE_AUTH_KEY_ID`, `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | with authorities | outbound signing |
+//! | `CFMEET_COMMUNICATION_TENANT_ID`, `_APPLICATION_ID`, `_ENVIRONMENT_ID`, `_ENVIRONMENT_KIND`, `_SERVICE_ACCOUNT_ID` | with `communications` | the first-party scope X4 requires as delegated context |
 //! | `NOTIFICATIONS_OPERATOR_EMAILS_FILE` | no | operator group addresses (one per line) for operator alerts |
 //! | `NOTIFICATIONS_OPERATOR_ALERT_TOKEN_FILE` | no | static bearer of the I12 Alertmanager receiver; I12 answers 404 without it |
 
@@ -208,6 +209,17 @@ pub struct OutboundSettings {
     pub http_timeout: Duration,
 }
 
+/// The CF Meet first-party scope the Hub's X4 requires as signed delegated context (the
+/// same `CFMEET_COMMUNICATION_*` values the Meeting Service bridge uses).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FirstPartyScope {
+    pub tenant_id: uuid::Uuid,
+    pub application_id: uuid::Uuid,
+    pub environment_id: uuid::Uuid,
+    pub kind: cf_service_auth::ApplicationEnvironmentKind,
+    pub service_account_id: uuid::Uuid,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AuthorityTargets {
     pub account: Option<String>,
@@ -215,6 +227,8 @@ pub struct AuthorityTargets {
     pub messaging: Option<String>,
     pub communications: Option<String>,
     pub organizations: Option<String>,
+    /// Required with `communications`.
+    pub first_party_scope: Option<FirstPartyScope>,
 }
 
 impl AuthorityTargets {
@@ -668,7 +682,29 @@ impl NotificationsConfig {
                 "meeting" => authorities.meeting = Some(required("CF_MEETING_SERVICE_BASE_URL")?),
                 "messaging" => authorities.messaging = Some(required("CF_MESSAGING_BASE_URL")?),
                 "communications" => {
-                    authorities.communications = Some(required("CF_COMMUNICATIONS_BASE_URL")?)
+                    authorities.communications = Some(required("CF_COMMUNICATIONS_BASE_URL")?);
+                    let id = |var: &'static str| -> Result<uuid::Uuid, ConfigError> {
+                        uuid::Uuid::parse_str(&required(var)?)
+                            .map_err(|_| invalid(var, "must be a UUID"))
+                    };
+                    let kind = match required("CFMEET_COMMUNICATION_ENVIRONMENT_KIND")?.as_str() {
+                        "SANDBOX" => cf_service_auth::ApplicationEnvironmentKind::Sandbox,
+                        "TEST" => cf_service_auth::ApplicationEnvironmentKind::Test,
+                        "PRODUCTION" => cf_service_auth::ApplicationEnvironmentKind::Production,
+                        _ => {
+                            return Err(invalid(
+                                "CFMEET_COMMUNICATION_ENVIRONMENT_KIND",
+                                "must be SANDBOX, TEST or PRODUCTION",
+                            ))
+                        }
+                    };
+                    authorities.first_party_scope = Some(FirstPartyScope {
+                        tenant_id: id("CFMEET_COMMUNICATION_TENANT_ID")?,
+                        application_id: id("CFMEET_COMMUNICATION_APPLICATION_ID")?,
+                        environment_id: id("CFMEET_COMMUNICATION_ENVIRONMENT_ID")?,
+                        kind,
+                        service_account_id: id("CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID")?,
+                    });
                 }
                 "organizations" => {
                     authorities.organizations = Some(required("CF_ORGANIZATIONS_BASE_URL")?)

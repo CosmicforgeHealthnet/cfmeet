@@ -74,6 +74,10 @@ pub async fn middleware(
         "/internal/v1/communications/notification-preferences/resolve" => {
             InternalPermission::CommunicationsPreferencesRead
         }
+        // Document 4 X4: the Notification Service's batch restriction check.
+        "/internal/v1/communications/restrictions/check" => {
+            InternalPermission::CommunicationsRestrictionsRead
+        }
         _ => return Error::NotFound.into_response(),
     };
     if ctx.require_permission(permission).is_err() {

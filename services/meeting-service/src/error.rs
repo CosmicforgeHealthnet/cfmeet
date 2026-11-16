@@ -9,6 +9,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::middleware::request_id::current_request_id;
+use crate::validation::ValidationIssue;
 
 /// Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
@@ -458,6 +459,14 @@ pub enum ApiError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
+    /// `400 VALIDATION_ERROR` with one structured issue per invalid field (see
+    /// [`crate::validation`]); `message` keeps the historical `field: message` lines.
+    #[error("Validation error: {message}")]
+    InvalidFields {
+        message: String,
+        details: Vec<ValidationIssue>,
+    },
+
     #[error("Conflict: {0}")]
     Conflict(String),
 
@@ -533,6 +542,18 @@ impl IntoResponse for ApiError {
             )
                 .into_response();
         }
+        if let ApiError::InvalidFields { message, details } = self {
+            let body = Json(json!({
+                "success": false,
+                "error": {
+                    "code": ErrorCode::ValidationError.as_str(),
+                    "message": message,
+                    "requestId": current_request_id(),
+                    "details": details,
+                }
+            }));
+            return (StatusCode::BAD_REQUEST, body).into_response();
+        }
         let (status, error_code, message) = match self {
             ApiError::DatabaseError(e) => {
                 // Never expose SQL text / SeaORM internals / DSNs to clients.
@@ -569,7 +590,9 @@ impl IntoResponse for ApiError {
                 (StatusCode::TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS", msg)
             }
             ApiError::Domain { code, message } => (code.status(), code.as_str(), message),
-            ApiError::RateLimited { .. } => unreachable!("handled above"),
+            ApiError::RateLimited { .. } | ApiError::InvalidFields { .. } => {
+                unreachable!("handled above")
+            }
         };
 
         let body = Json(json!({
@@ -621,6 +644,11 @@ pub struct ErrorBody {
     /// Present on `RATE_LIMITED` only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after_seconds: Option<u64>,
+    /// Present on `VALIDATION_ERROR` when the request body failed field validation: one
+    /// entry per problem, naming the public JSON field (`message` still summarises them
+    /// as `field: message` lines for older clients).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Vec<ValidationIssue>>,
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
@@ -656,6 +684,34 @@ mod tests {
             assert!(v["error"].as_object().unwrap().contains_key("requestId"));
             assert_eq!(v["error"].as_object().unwrap().len(), 3, "{v}");
         }
+    }
+
+    #[tokio::test]
+    async fn field_validation_errors_list_details_and_keep_the_message() {
+        let (status, _, v) = render(ApiError::InvalidFields {
+            message: "password: Too weak".into(),
+            details: vec![ValidationIssue {
+                field: Some("password".into()),
+                code: "password_strength".into(),
+                message: "Too weak".into(),
+            }],
+        })
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(v["success"], false);
+        assert_eq!(v["error"]["code"], "VALIDATION_ERROR");
+        assert_eq!(v["error"]["message"], "password: Too weak");
+        assert!(v["error"].as_object().unwrap().contains_key("requestId"));
+        assert_eq!(
+            v["error"]["details"],
+            serde_json::json!([{"field": "password", "code": "password_strength", "message": "Too weak"}])
+        );
+
+        // Plain validation errors keep the historical three-key body.
+        let (status, _, v) = render(ApiError::ValidationError("bad".into())).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(v["error"]["code"], "VALIDATION_ERROR");
+        assert_eq!(v["error"].as_object().unwrap().len(), 3, "{v}");
     }
 
     #[tokio::test]

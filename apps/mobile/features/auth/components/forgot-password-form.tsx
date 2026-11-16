@@ -19,8 +19,15 @@ import {
   type ForgotPasswordFormData,
   type ResetPasswordFormData,
 } from "../schemas/auth.schema";
+import { ApiRequestError, fieldErrorsOf } from "@/lib/api/errors";
 
 type Step = "email" | "code" | "password";
+
+/** API field → new-password form field; other problems (email, token) use the banner. */
+const RESET_FIELDS: Record<string, keyof ResetPasswordFormData> = {
+  new_password: "password",
+  confirm_password: "confirmPassword",
+};
 
 function maskEmail(email: string) {
   const [local, domain] = email.split("@");
@@ -146,7 +153,13 @@ export function ForgotPasswordForm() {
           router.replace("/login");
         },
         onError: (err) => {
-          setError(err.message);
+          // Structured field problems (error.details) land on the matching inputs.
+          const { fields, rest } = fieldErrorsOf(err instanceof ApiRequestError ? err : null, RESET_FIELDS);
+          const mapped = Object.entries(fields) as [keyof ResetPasswordFormData, string][];
+          for (const [name, message] of mapped) passwordForm.setError(name, { type: "server", message });
+          if (mapped.length === 0 || rest.length > 0) {
+            setError(mapped.length === 0 ? err.message : rest.join(" "));
+          }
           toast(err.message, "destructive");
         },
       }

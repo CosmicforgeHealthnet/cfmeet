@@ -70559,6 +70559,16 @@
           "code": {
             "$ref": "#/components/schemas/meetings.ErrorCode"
           },
+          "details": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/meetings.ValidationIssue"
+            },
+            "description": "Present on `VALIDATION_ERROR` when the request body failed field validation: one\nentry per problem, naming the public JSON field (`message` still summarises them\nas `field: message` lines for older clients)."
+          },
           "message": {
             "type": "string",
             "description": "Safe, human-readable message (never SQL, provider bodies, secrets or paths)."
@@ -75244,6 +75254,35 @@
           }
         },
         "additionalProperties": false
+      },
+      "meetings.ValidationIssue": {
+        "type": "object",
+        "description": "One request-validation problem.",
+        "required": [
+          "field",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,\n`password_strength`, `passwords_mismatch`.",
+            "example": "password_strength"
+          },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Public JSON path of the offending field, as sent by the client (honours the\nrequest's serde naming), e.g. `password`, `displayName`, `items[0].email`.\n`null` when the problem concerns the request as a whole.",
+            "example": "password"
+          },
+          "message": {
+            "type": "string",
+            "description": "Safe, human-readable message for this field.",
+            "example": "Password must be between 8 and 72 characters"
+          }
+        }
       },
       "meetings.VersionedRequest": {
         "type": "object",

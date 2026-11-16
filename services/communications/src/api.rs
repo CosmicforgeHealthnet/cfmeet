@@ -41,6 +41,11 @@ pub fn app(state: State) -> Router {
             "/internal/v1/communications/notification-preferences/resolve",
             post(crate::preferences::resolve),
         )
+        // X4 (contract `communications/notification-owner/v1`, Notification Service only).
+        .route(
+            "/internal/v1/communications/restrictions/check",
+            post(crate::restrictions::check),
+        )
         .route(
             "/internal/v1/communications/account-events",
             post(crate::events::account_event),

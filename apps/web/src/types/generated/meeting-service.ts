@@ -1267,6 +1267,12 @@ export interface EndMeetingResponse {
 
 export interface ErrorBody {
   code: ErrorCode;
+  /**
+   * Present on `VALIDATION_ERROR` when the request body failed field validation: one
+   * entry per problem, naming the public JSON field (`message` still summarises them
+   * as `field: message` lines for older clients).
+   */
+  details?: Array<ValidationIssue> | null;
   /** Safe, human-readable message (never SQL, provider bodies, secrets or paths). */
   message: string;
   /** Server-generated correlation ID (also in the `x-request-id` response header). */
@@ -3496,6 +3502,23 @@ export interface UserMeResponse {
    */
   status: string;
   username: string;
+}
+
+/** One request-validation problem. */
+export interface ValidationIssue {
+  /**
+   * Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,
+   * `password_strength`, `passwords_mismatch`.
+   */
+  code: string;
+  /**
+   * Public JSON path of the offending field, as sent by the client (honours the
+   * request's serde naming), e.g. `password`, `displayName`, `items[0].email`.
+   * `null` when the problem concerns the request as a whole.
+   */
+  field: string | null;
+  /** Safe, human-readable message for this field. */
+  message: string;
 }
 
 

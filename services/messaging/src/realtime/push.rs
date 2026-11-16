@@ -16,6 +16,10 @@
 //!   delivered. The APNs, FCM and Web Push adapters live in
 //!   [`super::push_adapters`] (each enabled only with its credentials);
 //!   [`LocalTestPush`] is an explicitly local adapter for tests and development.
+//! * Who may be woken is decided in ONE place, [`authorize_wakeups`]: job creation takes
+//!   its candidates, dispatch rechecks its entitlement for the job's recipient, and the
+//!   Notification Service asks the same question through
+//!   `POST /internal/v1/notifications/wakeups/authorize` ([`crate::notifications`]).
 //! * A push is never proof of message delivery.
 
 use chrono::{DateTime, Utc};
@@ -182,21 +186,206 @@ pub async fn disable_device<C: sea_orm::ConnectionTrait>(
     Ok(())
 }
 
-/// Creates the push jobs of one committed message event (idempotent).
+/// One principal [`authorize_wakeups`] entitles to a wake-up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntitledRecipient {
+    pub principal_id: Uuid,
+    /// MANAGED only: the event's message mentions this principal
+    /// (`messaging_message_mentions`). Always `false` for PRIVATE_E2EE (mentions stay
+    /// inside the ciphertext).
+    pub mentions_recipient: bool,
+}
+
+/// The wake-up decision for one committed conversation event: the single place the push
+/// entitlement rules live (Notification Service X3, Document 4 §3.4). Push job creation
+/// ([`fanout_jobs`]), dispatch-time authorization (`authorized`) and the owner API
+/// `POST /internal/v1/notifications/wakeups/authorize` ([`crate::notifications`]) all
+/// read it. Ids, classes and states only: never content, ciphertext or keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WakeupAuthorization {
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    /// `lifecycle_state = 'ACTIVE'`.
+    pub conversation_active: bool,
+    /// `PRIVATE_E2EE` or `MANAGED`.
+    pub security_profile: String,
+    /// The conversation's context class (`DIRECT`, `GROUP`, ...).
+    pub context_class: String,
+    /// The sender the committed event records (`sender_principal_id`).
+    pub sender: Option<Uuid>,
+    /// The event's non-secret authority references (as for delayed policy checks).
+    pub initiating_service_account_id: Option<Uuid>,
+    pub environment_kind: Option<String>,
+    /// Push job candidates: ACTIVE members other than the sender (empty when the event
+    /// wakes nobody). Jobs are created for these at commit; delivery is gated by
+    /// `entitled` again at dispatch, so a later departure or block still suppresses it.
+    pub candidates: Vec<Uuid>,
+    /// The principals entitled to a wake-up now: candidates whose history window covers
+    /// the event, in an ACTIVE conversation, with a recorded sender and, for DIRECT, no
+    /// block between sender and recipient. Ordered by principal id.
+    pub entitled: Vec<EntitledRecipient>,
+}
+
+impl WakeupAuthorization {
+    pub fn entitles(&self, principal: Uuid) -> bool {
+        self.entitled.iter().any(|e| e.principal_id == principal)
+    }
+}
+
+/// Whether a committed event wakes recipients at all: a created APPLICATION message not
+/// marked `notify: false` (mirrored, migrated and imported messages).
+pub fn wakes(event_type: &str, payload: &Value) -> bool {
+    event_type == "messaging.message.created"
+        && payload.get("message_kind").and_then(Value::as_str) == Some("APPLICATION")
+        && payload.get("notify").and_then(Value::as_bool) != Some(false)
+}
+
+#[derive(FromQueryResult)]
+struct WakeupEventRow {
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    security_profile: String,
+    context_class: String,
+    lifecycle_state: String,
+    event_type: Option<String>,
+    payload: Option<Value>,
+}
+
+#[derive(FromQueryResult)]
+struct CandidateRow {
+    principal_id: Uuid,
+    in_window: bool,
+}
+
+#[derive(FromQueryResult)]
+struct MentionRow {
+    principal_id: Uuid,
+}
+
+/// The wake-up decision of the event at `(conversation_id, event_sequence)` (the
+/// conversation event cursor: `eventSequence` of the push payload). `None`: no such
+/// conversation, or no such event in it. `only` restricts the answer to those principals
+/// (dispatch-time recheck). Read-only.
+pub async fn authorize_wakeups<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    conversation_id: Uuid,
+    event_sequence: i64,
+    only: Option<&[Uuid]>,
+) -> Result<Option<WakeupAuthorization>> {
+    let Some(row) = db::one::<WakeupEventRow, _>(
+        db,
+        "SELECT c.tenant_id, c.application_id, c.environment_id, c.security_profile, c.context_class, \
+                c.lifecycle_state, e.event_type, e.payload \
+           FROM messaging_conversations c \
+           LEFT JOIN messaging_outbox_events e ON e.conversation_id = c.id AND e.conversation_event_sequence = $2 \
+          WHERE c.id = $1",
+        vec![conversation_id.into(), event_sequence.into()],
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let (Some(event_type), Some(payload)) = (row.event_type, row.payload) else {
+        return Ok(None);
+    };
+    let uuid_of = |key: &str| {
+        payload
+            .get(key)
+            .and_then(Value::as_str)
+            .and_then(|s| Uuid::parse_str(s).ok())
+    };
+    let sender = uuid_of("sender_principal_id");
+    let mut decision = WakeupAuthorization {
+        tenant_id: row.tenant_id,
+        application_id: row.application_id,
+        environment_id: row.environment_id,
+        conversation_active: row.lifecycle_state == "ACTIVE",
+        security_profile: row.security_profile,
+        context_class: row.context_class,
+        sender,
+        initiating_service_account_id: uuid_of("initiating_service_account_id"),
+        environment_kind: payload
+            .get("environment_kind")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        candidates: Vec::new(),
+        entitled: Vec::new(),
+    };
+    if !wakes(&event_type, &payload) || only.is_some_and(<[Uuid]>::is_empty) {
+        return Ok(Some(decision));
+    }
+    let mut values = vec![conversation_id.into(), event_sequence.into(), sender.into()];
+    let restriction = match only {
+        Some(principals) => {
+            values.push(principals.to_vec().into());
+            " AND m.principal_id = ANY($4)"
+        }
+        None => "",
+    };
+    let candidates: Vec<CandidateRow> = db::all(
+        db,
+        &format!(
+            "SELECT m.principal_id, ($2 >= m.visible_from_event) AS in_window \
+               FROM messaging_conversation_members m \
+              WHERE m.conversation_id = $1 AND m.state = 'ACTIVE' AND m.principal_id IS DISTINCT FROM $3{restriction} \
+              ORDER BY m.principal_id"
+        ),
+        values,
+    )
+    .await?;
+    decision.candidates = candidates.iter().map(|c| c.principal_id).collect();
+    let Some(sender) = sender.filter(|_| decision.conversation_active) else {
+        return Ok(Some(decision));
+    };
+    let mentioned: Vec<Uuid> = match uuid_of("message_id") {
+        Some(message) if decision.security_profile == "MANAGED" => db::all::<MentionRow, _>(
+            db,
+            "SELECT principal_id FROM messaging_message_mentions WHERE message_id = $1",
+            vec![message.into()],
+        )
+        .await?
+        .into_iter()
+        .map(|m| m.principal_id)
+        .collect(),
+        _ => Vec::new(),
+    };
+    for candidate in candidates.into_iter().filter(|c| c.in_window) {
+        if decision.context_class == "DIRECT"
+            && crate::safety::blocks::blocked_between(
+                db,
+                decision.environment_id,
+                sender,
+                candidate.principal_id,
+            )
+            .await?
+        {
+            continue;
+        }
+        decision.entitled.push(EntitledRecipient {
+            principal_id: candidate.principal_id,
+            mentions_recipient: mentioned.contains(&candidate.principal_id),
+        });
+    }
+    Ok(Some(decision))
+}
+
+/// Creates the push jobs of one committed message event (idempotent): one per enabled
+/// registration of an ACTIVE device of each [`WakeupAuthorization::candidates`]
+/// principal. Delivery is authorized again at dispatch.
 pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
     let (Some(conversation), Some(cursor)) =
         (event.conversation_id, event.conversation_event_sequence)
     else {
         return Ok(0);
     };
-    if event.payload.get("notify").and_then(Value::as_bool) == Some(false) {
+    let Some(decision) = authorize_wakeups(&state.db, conversation, cursor, None).await? else {
+        return Ok(0);
+    };
+    if decision.candidates.is_empty() {
         return Ok(0);
     }
-    let sender = event
-        .payload
-        .get("sender_principal_id")
-        .and_then(Value::as_str)
-        .and_then(|s| Uuid::parse_str(s).ok());
     let sequence = event
         .payload
         .get("sequence")
@@ -213,7 +402,7 @@ pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
            FROM messaging_conversation_members m \
            JOIN messaging_push_registrations r ON r.environment_id = m.environment_id AND r.principal_id = m.principal_id AND r.enabled \
            JOIN messaging_devices d ON d.id = r.device_id AND d.status = 'ACTIVE' \
-          WHERE m.conversation_id = $2 AND m.state = 'ACTIVE' AND m.principal_id IS DISTINCT FROM $7 \
+          WHERE m.conversation_id = $2 AND m.state = 'ACTIVE' AND m.principal_id = ANY($7) \
          ON CONFLICT (event_id, device_id) DO NOTHING",
         vec![
             event.id.into(),
@@ -222,7 +411,7 @@ pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
             sequence.into(),
             now.into(),
             (now + chrono::Duration::hours(24)).into(),
-            sender.into(),
+            decision.candidates.into(),
         ],
     )
     .await?)
@@ -276,7 +465,7 @@ struct Job {
     enabled: bool,
     device_status: String,
     recipient_principal_id: Uuid,
-    member_active: bool,
+    event_sequence: Option<i64>,
     tenant_id: Uuid,
     application_id: Uuid,
     environment_id: Uuid,
@@ -289,26 +478,20 @@ struct Job {
 /// never a push registration or consumer request. Legacy jobs without authority refs
 /// are suppressed in the governed personal scope, rather than guessed.
 async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
-    if !job.member_active {
-        return Ok(false);
-    }
-    let sender = job.event_payload["sender_principal_id"]
-        .as_str()
-        .and_then(|s| Uuid::parse_str(s).ok());
-    let Some(sender) = sender else {
+    // The shared wake-up decision (ACTIVE member, history window, conversation ACTIVE,
+    // a recorded sender, DIRECT block check), rechecked now for this recipient.
+    let Some(sequence) = job.event_sequence else {
         return Ok(false);
     };
-    if job.context_class == "DIRECT"
-        && crate::safety::blocks::blocked_between(
-            &state.db,
-            job.environment_id,
-            sender,
-            job.recipient_principal_id,
-        )
-        .await?
-    {
+    let recipient = [job.recipient_principal_id];
+    let decision =
+        authorize_wakeups(&state.db, job.conversation_id, sequence, Some(&recipient)).await?;
+    let Some(sender) = decision
+        .filter(|d| d.entitles(job.recipient_principal_id))
+        .and_then(|d| d.sender)
+    else {
         return Ok(false);
-    }
+    };
     let Some(client) = state.communications.as_ref() else {
         return Ok(true);
     };
@@ -386,10 +569,7 @@ pub async fn dispatch_due(state: &AppState, batch: i64, max_attempts: i32) -> Re
            (SELECT application_id FROM messaging_outbox_events e WHERE e.id=j.event_id) AS application_id, \
            (SELECT payload FROM messaging_outbox_events e WHERE e.id=j.event_id) AS event_payload, \
            (SELECT context_class FROM messaging_conversations c WHERE c.id=j.conversation_id) AS context_class, \
-           EXISTS(SELECT 1 FROM messaging_conversation_members m JOIN messaging_devices d ON d.principal_id=m.principal_id AND d.environment_id=m.environment_id \
-             JOIN messaging_outbox_events e ON e.id=j.event_id JOIN messaging_conversations c ON c.id=m.conversation_id \
-             WHERE m.conversation_id=j.conversation_id AND d.id=j.device_id AND m.state='ACTIVE' \
-             AND c.lifecycle_state='ACTIVE' AND e.conversation_event_sequence>=m.visible_from_event) AS member_active",
+           (SELECT conversation_event_sequence FROM messaging_outbox_events e WHERE e.id=j.event_id) AS event_sequence",
         vec![now.into(), batch.into(), token.into(), (now + LEASE).into()],
     )
     .await?;

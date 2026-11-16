@@ -231,6 +231,7 @@ pub struct HttpAuthorities {
     messaging: bool,
     communications: bool,
     organizations: bool,
+    scope: Option<cf_service_auth::DelegatedPlatformContext>,
 }
 
 impl HttpAuthorities {
@@ -282,6 +283,15 @@ impl HttpAuthorities {
             messaging: a.messaging.is_some(),
             communications: a.communications.is_some(),
             organizations: a.organizations.is_some(),
+            scope: a.first_party_scope.map(|s| {
+                cf_service_auth::DelegatedPlatformContext::new(
+                    s.tenant_id,
+                    s.application_id,
+                    s.environment_id,
+                    s.kind,
+                    s.service_account_id,
+                )
+            }),
         }))
     }
 
@@ -291,7 +301,15 @@ impl HttpAuthorities {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<T, AuthorityError> {
-        let request = OutboundServiceRequest::new_operation(target);
+        let mut request = OutboundServiceRequest::new_operation(target.clone());
+        // The Hub scopes every profile to the first-party application: X4 requires the
+        // signed delegated context (validated by Platform Access).
+        if target == ServiceId::communications() {
+            let Some(scope) = &self.scope else {
+                return Err(AuthorityError::NotConfigured);
+            };
+            request = request.with_delegated_context(scope.clone());
+        }
         let response = self
             .client
             .post_json(&request, path, body)
