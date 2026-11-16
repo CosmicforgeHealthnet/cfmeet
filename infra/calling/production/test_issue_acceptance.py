@@ -20,6 +20,7 @@ class Context(unittest.TestCase):
         value = ia.context('42', accounts, 'cfk_secret', [A, B])
         self.assertEqual(value, {'base': 'https://api.cfmeet.com', 'messaging': 'https://api.cfmeet.com:8444',
                                  'runId': '42', 'credential': 'cfk_secret', 'principals': [A, B],
+                                 'scopes': list(ia.SCOPES),
                                  'accounts': [{'email': 'a@example.invalid', 'password': 'pw'},
                                               {'email': 'b@example.invalid', 'password': 'pw2'}]})
 
@@ -68,24 +69,51 @@ class Refusals(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'two controlled'):
                 ia.run('7')
 
-    def test_restriction_failure_revokes_the_new_credential(self):
+    def fake_platform(self, allowed, refuse=None):
         calls = []
 
         def admin(*args):
-            calls.append(args[:2])
+            calls.append(args)
+            if args[:2] == refuse:
+                raise ia.AdminRefused('refused')
             if args[:2] == ('credential', 'create'):
                 return {'credential': {'id': 'cred-1'}, 'secret': 's'}
-            if args[:2] == ('credential', 'restrict-principals'):
-                raise RuntimeError('refused')
             return {}
-        fake_api = type('M', (), {'admin': staticmethod(admin),
-                                  'sql': staticmethod(lambda q: json.dumps({'tenant': 't', 'application': 'a', 'account': 's'}))})
+
+        def sql(query):
+            if 'platform_application_scopes' in query:
+                return json.dumps(allowed)
+            return json.dumps({'tenant': 't', 'application': 'a', 'account': 's'})
+        fake_api = type('M', (), {'sql': staticmethod(sql)})
         fake_release = type('R', (), {'prod_scope': staticmethod(lambda: {'serviceAccountId': A})})
-        with patch.dict('sys.modules', {'api_acceptance': fake_api, 'communications_release': fake_release}):
-            with self.assertRaises(RuntimeError):
+        return calls, admin, {'api_acceptance': fake_api, 'communications_release': fake_release}
+
+    def test_restriction_failure_revokes_the_new_credential(self):
+        calls, admin, modules = self.fake_platform(list(ia.SCOPES), refuse=('credential', 'restrict-principals'))
+        with patch.dict('sys.modules', modules), patch.object(ia, 'admin', admin):
+            with self.assertRaises(ia.AdminRefused):
                 ia.issue_credential([A, B])
-        self.assertEqual(calls, [('credential', 'create'), ('credential', 'restrict-principals'),
-                                 ('credential', 'revoke')])
+        self.assertEqual([c[:2] for c in calls], [('credential', 'create'), ('credential', 'restrict-principals'),
+                                                  ('credential', 'revoke')])
+
+    def test_only_scopes_the_application_is_allowed_are_requested_and_no_grant_is_added(self):
+        calls, admin, modules = self.fake_platform(['calls.read', 'calls.write', 'messages.read', 'meetings.admin'])
+        with patch.dict('sys.modules', modules), patch.object(ia, 'admin', admin):
+            secret, credential_id, scopes = ia.issue_credential([A, B])
+        self.assertEqual((secret, credential_id, scopes), ('s', 'cred-1', ['calls.read', 'calls.write', 'messages.read']))
+        create = calls[0]
+        requested = [create[i + 1] for i, v in enumerate(create) if v == '--scope']
+        self.assertEqual(requested, ['calls.read', 'calls.write', 'messages.read'])
+        self.assertFalse([c for c in calls if c[:2] == ('scope', 'grant')])
+
+    def test_calling_scopes_are_required(self):
+        with self.assertRaisesRegex(RuntimeError, 'calls.write'):
+            ia.usable_scopes(['calls.read', 'messages.send'])
+
+    def test_admin_refusals_are_reduced_to_a_fixed_category(self):
+        self.assertEqual(ia.refusal_category('Error: scope `attachments.write` is not allowed for this application'),
+                         'SCOPE_NOT_ALLOWED')
+        self.assertEqual(ia.refusal_category('connection refused postgres://u:secret@db'), 'ADMIN_TOOL_FAILED')
 
 
 class ClientHelpers(unittest.TestCase):
@@ -134,6 +162,14 @@ class ClientHelpers(unittest.TestCase):
             journey.c7('call', {'principalId': A}, {'principalId': B})
         self.assertEqual(journey.checks['C7 the added offer is delivered PENDING'], 'FAIL')
         signaling.assert_not_called()
+
+    def test_checks_needing_a_scope_the_application_lacks_are_not_run(self):
+        journey = client.Journey({'runId': '1', 'scopes': ['calls.read', 'calls.write', 'messages.read']})
+        with patch.object(client, 'http') as http:
+            journey.m_group({'principalId': A}, {'principalId': B}, None, 'contact')
+        http.assert_not_called()
+        self.assertEqual(set(journey.checks.values()), {'NOT_RUN'})
+        self.assertIn('attachments.write', journey.details['notes']['M2 groups in common carry the group title'])
 
     def test_missing_managed_groups_are_reported_not_run(self):
         journey = client.Journey({'runId': '1', 'messaging': 'https://m', 'credential': 'c'})

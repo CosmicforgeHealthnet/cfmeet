@@ -46,11 +46,11 @@ METRIC_PREFIXES = ('calling_media_admission_retries_total', 'calling_media_admis
                    'calling_finished_call_invitations_closed_total')
 
 
-def context(run_id, accounts, credential, principals):
+def context(run_id, accounts, credential, principals, scopes=SCOPES):
     """The only data the client receives: public URLs, the controlled accounts and one
-    restricted, short-lived credential."""
+    restricted, short-lived credential (with the scopes it actually holds)."""
     return {'base': PUBLIC, 'messaging': MESSAGING, 'runId': run_id, 'credential': credential,
-            'principals': list(principals),
+            'principals': list(principals), 'scopes': list(scopes),
             'accounts': [{'email': a['email'], 'password': a['password']} for a in accounts]}
 
 
@@ -99,6 +99,46 @@ def principal_of(account):
             pass
 
 
+REQUIRED_SCOPES = ('calls.read', 'calls.write')
+
+
+class AdminRefused(RuntimeError):
+    """The Platform Access admin tool refused; carries only a fixed category, never output."""
+
+
+def refusal_category(text):
+    """A fixed label for an admin-tool error. The text itself never leaves the VPS."""
+    text = (text or '').lower()
+    if 'not allowed' in text:
+        return 'SCOPE_NOT_ALLOWED'
+    if 'not found' in text or 'unknown' in text:
+        return 'NOT_FOUND'
+    if 'principal' in text:
+        return 'PRINCIPAL_RESTRICTION_REFUSED'
+    return 'ADMIN_TOOL_FAILED'
+
+
+def admin(*args):
+    """api_acceptance.admin with the same command line, but a failure is classified."""
+    image = p.inspect('cfmeet-platform-access')['Image']
+    proc = subprocess.run(['docker', 'run', '--rm', '--network', p.NET, '--env-file', str(p.ROOT / 'platform-access.runtime.env'),
+                           '--mount', f'type=bind,src={p.SECRETS}/platform-access-pepper,dst=/run/secrets/platform-pepper,readonly',
+                           '--entrypoint', '/app/platform-access-admin', image, '--operator', 'cfmeet-production-acceptance', *args],
+                          capture_output=True, text=True)
+    if proc.returncode:
+        raise AdminRefused(args[0] + ' ' + args[1] + ': ' + refusal_category(proc.stderr + proc.stdout))
+    return json.loads(proc.stdout)
+
+
+def usable_scopes(allowed):
+    """The verification scopes the application may hold in production (no grant is ever added)."""
+    scopes = [s for s in SCOPES if s in set(allowed)]
+    missing = [s for s in REQUIRED_SCOPES if s not in scopes]
+    if missing:
+        raise RuntimeError('CF Meet production identity lacks required scopes: ' + ', '.join(missing))
+    return scopes
+
+
 def issue_credential(principals):
     import api_acceptance
     import communications_release as release
@@ -109,22 +149,27 @@ def issue_credential(principals):
         "SELECT json_build_object('tenant',t.slug,'application',a.slug,'account',s.name) "
         "FROM platform_service_accounts s JOIN platform_tenants t ON t.id=s.tenant_id "
         "JOIN platform_applications a ON a.id=s.application_id WHERE s.id='" + account + "'"))
-    issued = api_acceptance.admin('credential', 'create', '--tenant', refs['tenant'], '--application', refs['application'],
-                                  '--environment', 'production', '--service-account', refs['account'],
-                                  '--expires-in-days', '1', *[v for s in SCOPES for v in ('--scope', s)], '--label', LABEL)
+    allowed = json.loads(api_acceptance.sql(
+        "SELECT coalesce(json_agg(x.scope ORDER BY x.scope),'[]') FROM platform_application_scopes x "
+        "JOIN platform_service_accounts s ON s.application_id=x.application_id WHERE s.id='" + account + "' "
+        "AND (x.allowed_environment_kinds IS NULL OR EXISTS "
+        "(SELECT 1 FROM unnest(x.allowed_environment_kinds) k WHERE lower(k)='production'))"))
+    scopes = usable_scopes(allowed)
+    issued = admin('credential', 'create', '--tenant', refs['tenant'], '--application', refs['application'],
+                   '--environment', 'production', '--service-account', refs['account'],
+                   '--expires-in-days', '1', *[v for s in scopes for v in ('--scope', s)], '--label', LABEL)
     credential_id = issued['credential']['id']
     try:
-        api_acceptance.admin('credential', 'restrict-principals', '--credential', credential_id,
-                             *[v for pid in principals for v in ('--principal', str(uuid.UUID(pid)))])
+        admin('credential', 'restrict-principals', '--credential', credential_id,
+              *[v for pid in principals for v in ('--principal', str(uuid.UUID(pid)))])
     except BaseException:
         revoke_credential(credential_id)
         raise
-    return issued['secret'], credential_id
+    return issued['secret'], credential_id, scopes
 
 
 def revoke_credential(credential_id):
-    import api_acceptance
-    api_acceptance.admin('credential', 'revoke', '--credential', credential_id)
+    admin('credential', 'revoke', '--credential', credential_id)
 
 
 def read_metrics():
@@ -170,9 +215,9 @@ def run(run_id):
     os.chown(root, UID, UID)
     private = root / 'context.private.json'
     name = 'cfmeet-issue-acceptance-' + run_id
-    secret, credential_id = issue_credential(principals)
+    secret, credential_id, scopes = issue_credential(principals)
     try:
-        p.write_private(private, json.dumps(context(run_id, accounts, secret, principals)))
+        p.write_private(private, json.dumps(context(run_id, accounts, secret, principals, scopes)))
         os.chown(private, UID, UID)
         tag = probe_image(source)
         command = ['docker', 'run', '--rm', '--name', name, '--network', 'host', '--memory', '768m', '--cpus', '1',
@@ -208,6 +253,8 @@ def run(run_id):
     result['admissionMetrics'] = {'before': before, 'after': read_metrics()}
     result['images'] = {n: p.inspect(n)['Image'] for n in ('cfmeet-calling', 'cfmeet-messaging')}
     result['verificationCredential'] = 'REVOKED'
+    result['credentialScopes'] = scopes
+    result['scopesNotAllowedForApplication'] = [s for s in SCOPES if s not in scopes]
     print(json.dumps(result, indent=2), flush=True)
     if result['verdict'] == 'FAIL':
         raise SystemExit('ISSUE_ACCEPTANCE_FAILED')
