@@ -304,5 +304,142 @@ class Fence(unittest.TestCase):
         self.assertIn('messaging_notification_fence_seaql_migrations', catalog)
 
 
+
+class FakeProducerCr(FakeCr):
+    """FakeCr whose Messaging database answers the fence row / outbox queries and whose
+    readiness and probes are scripted."""
+
+    def __init__(self, rows, protocol=1, done=(), statuses=(), outbox=True):
+        super().__init__(rows)
+        self.done_ops, self.statuses = set(done), list(statuses)
+        self.activations, self.checked, self.probed = [], [], []
+        outer = self
+        ready = json.dumps({'status': 'ok', 'routingProtocol': protocol} if protocol else {'status': 'ok'})
+
+        class Release(FakeRelease):
+            def db_sql(self, db, sql):
+                if 'to_regclass' in sql:
+                    self.sql.append((db, sql))
+                    return 't' if outbox else 'f'
+                return FakeRelease.db_sql(self, db, sql)
+        self.release = Release(rows)
+
+        class P:
+            NET = 'net'
+
+            @staticmethod
+            def run(*args):
+                if args[-1].startswith('http://127.0.0.1'):
+                    return ready
+                outer.probed.append(args[-1])
+                return outer.statuses.pop(0)
+        self.p = P()
+        self.PROBE_IMAGE = 'curl'
+
+    def done(self, op):
+        return op in self.done_ops
+
+    def tls_route_present(self, port):
+        self.checked.append(('tls', port))
+
+    def private_url(self, port):
+        return 'https://api.cfmeet.com:%d' % port
+
+    def has_signing_identity(self, name):
+        self.checked.append(('signing', name))
+
+    def apply_activation(self, operation, sha, run_id, changes, post=None):
+        self.activations.append((operation, changes))
+        post()
+
+
+class MessagingPublications(unittest.TestCase):
+    def test_publish_is_granted_to_messaging_on_both_replicas_only(self):
+        granted = [(r, i, p) for op, r, i, p in cr.GRANTS if op == 'activate-messaging-publications']
+        self.assertEqual(sorted(granted), [('notifications', 'messaging', ('notifications-event.publish',)),
+                                           ('notifications-2', 'messaging', ('notifications-event.publish',))])
+        workflow = (cr.Path(__file__).resolve().parents[3] / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        for op in ('activate-messaging-publications', 'activate-notification-fence'):
+            self.assertIn(op, cr.OPERATIONS)
+            self.assertIn(op, workflow)
+
+    def test_messaging_gets_the_private_route_after_i1_and_its_outbox_are_proven(self):
+        fake = FakeProducerCr([], statuses=['401', '401'])
+        no.activate_messaging_publications(fake, 'a' * 40, '42-1', '')
+        [(operation, changes)] = fake.activations
+        self.assertEqual(operation, 'activate-messaging-publications')
+        self.assertEqual(changes, [('messaging', {'CF_NOTIFICATIONS_BASE_URL': 'https://api.cfmeet.com:8456'})])
+        self.assertEqual(fake.probed, ['https://api.cfmeet.com:8456/internal/v1/notification-events'] * 2)
+        self.assertIn(('signing', 'messaging'), fake.checked)
+        self.assertEqual(fake.release.sql[-1][0], 'cfmeet_messaging')
+
+    def test_publications_are_refused_without_i1_the_fence_or_the_outbox(self):
+        for kwargs in (dict(statuses=['404']), dict(statuses=['401'], protocol=None),
+                       dict(statuses=['401'], outbox=False)):
+            fake = FakeProducerCr([], **kwargs)
+            with self.assertRaises(RuntimeError):
+                no.activate_messaging_publications(fake, 'a' * 40, '42-1', '')
+            self.assertEqual(fake.activations, [])
+
+
+class ProducerFence(unittest.TestCase):
+    DONE = ('activate-messaging-publications',)
+
+    def test_confirm_names_one_producer_row(self):
+        self.assertEqual(no.parse_fence('messaging-message-wakeups-shadow'), ('messaging', 'MESSAGE_WAKEUPS', 'SHADOW'))
+        self.assertEqual(no.parse_fence('meeting-service-auth-verification-legacy-only'),
+                         ('meeting-service', 'AUTH_VERIFICATION', 'LEGACY_ONLY'))
+        for bad in ('', 'messaging-message-wakeups-fenced-new', 'messaging-message-wakeups-fenced-old',
+                    'calling-x-shadow', 'messaging-shadow', 'messaging_message-wakeups-shadow'):
+            with self.assertRaises(RuntimeError):
+                no.parse_fence(bad)
+        self.assertRegex('messaging-message-wakeups-legacy-only', r'^[a-z,-]{0,120}$')
+
+    def test_shadow_is_journaled_on_the_messaging_database_and_undone(self):
+        fake = FakeProducerCr([{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE)
+        no.activate_fence(fake, 'a' * 40, '42-1', 'messaging-message-wakeups-shadow')
+        entry = fake.journal[-1]
+        self.assertEqual(entry['status'], 'done')
+        self.assertEqual(entry['notificationFence'], dict(service='messaging', category='MESSAGE_WAKEUPS',
+                                                          before='LEGACY_ONLY', after='SHADOW', version=2))
+        db, update = fake.release.sql[-1]
+        self.assertEqual(db, 'cfmeet_messaging')
+        self.assertIn("UPDATE messaging_notification_routing_state SET mode = 'SHADOW', canary_percent = 0", update)
+        self.assertIn('AND routing_version = 1', update)
+        no.undo_fence(fake, entry['notificationFence'], '43-1')
+        self.assertIn("mode = 'LEGACY_ONLY'", fake.release.sql[-1][1])
+        self.assertEqual(fake.emitted[-1][0], 'notificationFenceRestored')
+
+    def test_gates_refuse_and_change_nothing(self):
+        cases = [
+            # Meeting has no producer code recording decisions: SHADOW would block its legacy emails.
+            (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE), 'meeting-service-auth-verification-shadow'),
+            # The publication activation must come first.
+            (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}]), 'messaging-message-wakeups-shadow'),
+            # A pre-fence image.
+            (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE, protocol=None),
+             'messaging-message-wakeups-shadow'),
+            # This version never leaves a FENCED_* mode.
+            (dict(rows=[{'mode': 'FENCED_NEW', 'version': 4}], done=self.DONE), 'messaging-message-wakeups-legacy-only'),
+        ]
+        for kwargs, confirm in cases:
+            rows = kwargs.pop('rows')
+            fake = FakeProducerCr(rows, **kwargs)
+            with self.assertRaisesRegex(RuntimeError, 'Routing fence gate'):
+                no.activate_fence(fake, 'a' * 40, '42-1', confirm)
+            self.assertFalse([q for _, q in fake.release.sql if q.startswith('WITH u AS (UPDATE')], confirm)
+            self.assertEqual(fake.journal, [])
+
+    def test_back_to_legacy_only_needs_no_prerequisite(self):
+        fake = FakeProducerCr([{'mode': 'SHADOW', 'version': 2}], protocol=None)
+        no.activate_fence(fake, 'a' * 40, '42-1', 'messaging-message-wakeups-legacy-only')
+        self.assertEqual(fake.journal[-1]['notificationFence']['after'], 'LEGACY_ONLY')
+
+    def test_rollback_restores_a_fence_entry(self):
+        src = (cr.Path(__file__).resolve().parent / 'coordinated_release.py').read_text()
+        self.assertIn("e.get('notificationFence')", src)
+        self.assertIn("notif_ops.undo_fence(", src)
+
+
 if __name__ == '__main__':
     unittest.main()

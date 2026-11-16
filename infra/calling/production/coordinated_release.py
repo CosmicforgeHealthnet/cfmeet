@@ -1526,7 +1526,8 @@ def verify(sha, run_id):
 def rollback(sha, run_id):
     journal = load_journal()
     candidates = [e for e in journal if e['status'] in ('done', 'failed')
-                  and (e['components'] or e.get('routing') or e.get('edge') or e.get('notificationRouting'))]
+                  and (e['components'] or e.get('routing') or e.get('edge') or e.get('notificationRouting')
+                       or e.get('notificationFence'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
@@ -1548,6 +1549,8 @@ def rollback(sha, run_id):
         undo_gateway_docs(entry['edge'])
     if entry.get('notificationRouting'):
         notif_ops.undo_routing(sys.modules[__name__], entry['notificationRouting'], run_id)
+    if entry.get('notificationFence'):
+        notif_ops.undo_fence(sys.modules[__name__], entry['notificationFence'], run_id)
     for component in reversed(entry['components']):
         restore(component, run_id)
         commit(entry)
@@ -2544,6 +2547,12 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, confirm)),
     # Notification Service N8: Meeting Service user relay U1-U9 (owner-approved 2026-11-16).
     'activate-notifications-relay': ((), lambda sha, run_id, confirm: notif_ops.activate_relay(
+        sys.modules[__name__], sha, run_id, confirm)),
+    # Notification Service N7b: Messaging publishes message wake-ups to I1 (shadow first).
+    'activate-messaging-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_messaging_publications(
+        sys.modules[__name__], sha, run_id, confirm)),
+    # Document 4 §9.6: one producer fence row per run, LEGACY_ONLY <-> SHADOW only, reversible.
+    'activate-notification-fence': ((), lambda sha, run_id, confirm: notif_ops.activate_fence(
         sys.modules[__name__], sha, run_id, confirm)),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \

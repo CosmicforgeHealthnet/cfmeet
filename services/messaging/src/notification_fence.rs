@@ -215,6 +215,8 @@ const SELECT_DECISION: &str =
 ///   `OLD` in every other mode (`LEGACY_ONLY`, `SHADOW`, `FENCED_OLD`); a CRITICAL
 ///   category with `critical_fallback = FORCED` is always `OLD`. The decision is recorded
 ///   with reason `ROUTED` and the state's `routing_version`.
+/// * `new_capable = false` (the event's audience does not fit one Notification Service
+///   envelope) turns a `NEW` route into `OLD` with reason `RECIPIENT_LIMIT`.
 ///
 /// Concurrent first decisions for one key converge: the loser's insert waits for the
 /// winner's commit, inserts nothing and follows the winner's decision.
@@ -223,6 +225,7 @@ pub async fn route_message(
     key: &str,
     category: &str,
     expires_at: DateTime<Utc>,
+    new_capable: bool,
 ) -> Result<Decision, FenceError> {
     if !valid_key(key) {
         return Err(FenceError::InvalidKey);
@@ -248,11 +251,18 @@ pub async fn route_message(
     if CRITICAL_CATEGORIES.contains(&category) && state.critical_fallback == "FORCED" {
         route = Route::Old;
     }
+    // An event the Notification Service cannot be told about in one envelope stays on the
+    // legacy path, whatever the canary says.
+    let mut reason = "ROUTED";
+    if route == Route::New && !new_capable {
+        route = Route::Old;
+        reason = "RECIPIENT_LIMIT";
+    }
     let inserted = db::one::<DecisionRow, _>(
         txn,
         "INSERT INTO messaging_notification_route_decisions \
            (idempotency_key, decision_id, category, route, routing_version, reason, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, 'ROUTED', $6) \
+         VALUES ($1, $2, $3, $4, $5, $7, $6) \
          ON CONFLICT (idempotency_key) DO NOTHING \
          RETURNING decision_id, category, route, decision_version, routing_version",
         vec![
@@ -262,6 +272,7 @@ pub async fn route_message(
             route.as_str().into(),
             state.routing_version.into(),
             expires_at.into(),
+            reason.into(),
         ],
     )
     .await?;

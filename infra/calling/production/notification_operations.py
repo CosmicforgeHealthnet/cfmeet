@@ -29,6 +29,19 @@ Two coordinated-release operations, each journaled and reversible:
   gets ``CF_NOTIFICATIONS_BASE_URL`` (the Notification Service private TLS route). The relay
   answers 401 without an Account session before and after; nothing is delivered by this step
   (the inbox only shows what ACTIVE routing rows produced).
+
+* ``activate-messaging-publications`` (roadmap N7b) lets Messaging publish to
+  I1: both replicas trust ``cfmeet.messaging`` for ``notifications-event.publish``, and
+  Messaging gets ``CF_NOTIFICATIONS_BASE_URL``, which starts its publication relay. Nothing
+  is published while ``MESSAGE_WAKEUPS`` is ``LEGACY_ONLY``; nothing is delivered by the
+  service while its own routing rows are OFF.
+
+* ``activate-notification-fence`` changes ONE producer routing-fence row per run (Document 4
+  §9.6). ``confirm`` is ``<service>-<category>-<mode>`` in lower case with hyphens, e.g.
+  ``messaging-message-wakeups-shadow``. This version moves only between ``LEGACY_ONLY`` and
+  ``SHADOW`` (no route can become NEW, so the legacy path keeps delivering everything), only
+  for categories whose producer code records decisions (``FENCE_ROUTABLE``), only while the
+  producer image reports ``routingProtocol`` (M-12). Journaled; ``rollback`` restores it.
 """
 
 import json
@@ -67,6 +80,13 @@ GRANTS += tuple(('activate-notifications-relay', replica, 'meeting-service', REL
                 for replica in ('notifications', 'notifications-2'))
 
 REPLICAS = ('notifications', 'notifications-2')
+
+# N7b: Messaging publishes message wake-ups (shadow copies, later NEW decisions) to I1.
+PUBLICATION_PERMISSIONS = ('notifications-event.publish',)
+PUBLICATION_PROBE = '/internal/v1/notification-events'
+GRANTS += tuple(('activate-messaging-publications', replica, 'messaging', PUBLICATION_PERMISSIONS)
+                for replica in REPLICAS)
+
 FLAGGED = {'meeting-service': {'NOTIFICATION_OWNER_API_ENABLED': 'true'}}
 SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID', 'CFMEET_COMMUNICATION_ENVIRONMENT_ID',
               'CFMEET_COMMUNICATION_ENVIRONMENT_KIND', 'CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID')
@@ -255,6 +275,34 @@ def activate_relay(cr, sha, run_id, confirm):
     cr.apply_activation('activate-notifications-relay', sha, run_id, [('meeting-service', overrides)], post=post)
 
 
+def activate_messaging_publications(cr, sha, run_id, confirm):
+    cr.require_release(sha)
+    notif_tls = cr.SERVICES['notifications']['tls']
+    cr.tls_route_present(notif_tls)
+    # I1 exists in the running Notification Service image and refuses an unsigned caller.
+    status = private_status(cr, cr.private_url(notif_tls) + PUBLICATION_PROBE)
+    if status != '401':
+        raise RuntimeError('Notification Service I1 answered %s to an unsigned probe (expected 401); '
+                           'release the Notification Service first' % status)
+    # The running Messaging image has the publication outbox (fence history 2) and the fence.
+    require_fence_protocol(cr, 'messaging')
+    present = (_producer_sql(cr, 'messaging')(
+        "SELECT to_regclass('public.messaging_notification_publications') IS NOT NULL;") or '').strip()
+    if present not in ('t', 'true'):
+        raise RuntimeError('Messaging has no notification publication outbox; release a Messaging image with N7b first')
+    cr.has_signing_identity('messaging')
+    overrides = {'CF_NOTIFICATIONS_BASE_URL': cr.private_url(notif_tls)}
+
+    def post():
+        require_fence_protocol(cr, 'messaging')
+        status = private_status(cr, cr.private_url(notif_tls) + PUBLICATION_PROBE)
+        if status != '401':
+            raise RuntimeError('Notification Service I1 answers %s to an unsigned probe after activation' % status)
+
+    cr.apply_activation('activate-messaging-publications', sha, run_id,
+                        [('messaging', overrides)], post=post)
+
+
 # --- Routing fence v1 (Document 4 §9.6): producers' protocol and the rollback floor ---------
 # Producers with an old delivery path keep their routing decisions in their own database.
 FENCE_PRODUCERS = {
@@ -319,3 +367,107 @@ def require_fence_protocol(cr, service, minimum=1):
         raise RuntimeError('%s reports routingProtocol %s (need >= %d); release a fence-capable image first'
                            % (service, value, minimum))
     return value
+
+
+# --- Producer routing-fence mode (Document 4 §9.6) ------------------------------------------
+# Categories whose producer code records a routing decision before writing legacy rows. A
+# category outside this set must stay LEGACY_ONLY: its guard trigger would refuse the legacy
+# rows its producer still writes without a decision.
+FENCE_ROUTABLE = {('messaging', 'MESSAGE_WAKEUPS'): 'activate-messaging-publications'}
+FENCE_MODES = {'legacy-only': 'LEGACY_ONLY', 'shadow': 'SHADOW'}
+
+
+def parse_fence(confirm):
+    """``messaging-message-wakeups-shadow`` -> ('messaging', 'MESSAGE_WAKEUPS', 'SHADOW')."""
+    text = (confirm or '').strip()
+    if re.fullmatch(r'[a-z-]{3,120}', text):
+        for suffix, mode in FENCE_MODES.items():
+            if not text.endswith('-' + suffix):
+                continue
+            rest = text[:-len(suffix) - 1]
+            for service in FENCE_PRODUCERS:
+                if rest.startswith(service + '-'):
+                    category = rest[len(service) + 1:].replace('-', '_').upper()
+                    if CATEGORY_RE.fullmatch(category):
+                        return service, category, mode
+    raise RuntimeError('confirm must be <service>-<category>-<mode>, e.g. messaging-message-wakeups-shadow '
+                       '(services: %s; modes: %s)' % (', '.join(FENCE_PRODUCERS), ', '.join(FENCE_MODES)))
+
+
+def fence_row(cr, service, category):
+    table = FENCE_PRODUCERS[service]['table']
+    out = _producer_sql(cr, service)(
+        "SELECT coalesce(json_agg(json_build_object('mode', mode, 'version', routing_version)), '[]') "
+        "FROM %s WHERE category = '%s';" % (table, category))
+    rows = json.loads(out or '[]')
+    if len(rows) != 1:
+        raise RuntimeError('No routing fence row %s/%s' % (service, category))
+    return rows[0]
+
+
+def set_fence_mode(cr, service, category, mode, run_id, expected_version=None):
+    assert service in FENCE_PRODUCERS and CATEGORY_RE.fullmatch(category) and mode in FENCE_MODES.values()
+    assert re.fullmatch(r'[0-9-]{1,32}', run_id)
+    table = FENCE_PRODUCERS[service]['table']
+    guard = '' if expected_version is None else ' AND routing_version = %d' % int(expected_version)
+    out = _producer_sql(cr, service)(
+        "WITH u AS (UPDATE %s SET mode = '%s', canary_percent = 0, routing_version = routing_version + 1, "
+        "changed_by_run = '%s', changed_at = now() WHERE category = '%s'%s RETURNING routing_version) "
+        "SELECT count(*) || ':' || coalesce(max(routing_version), 0) FROM u;"
+        % (table, mode, run_id, category, guard))
+    count, version = (out or '0:0').strip().split(':')
+    if count != '1':
+        raise RuntimeError('Routing fence row %s/%s changed concurrently; nothing applied' % (service, category))
+    return int(version)
+
+
+def fence_gate(service, category, mode, before, facts):
+    """Refusal reason, or None. ``facts``: protocol (routingProtocol of the running image),
+    publications_done (the producer's publication activation is recorded)."""
+    if before not in FENCE_MODES.values():
+        return ('%s/%s is %s; this version only moves between LEGACY_ONLY and SHADOW'
+                % (service, category, before))
+    if mode == 'LEGACY_ONLY':
+        return None
+    if (service, category) not in FENCE_ROUTABLE:
+        return ('%s/%s has no producer code that records routing decisions; it must stay LEGACY_ONLY'
+                % (service, category))
+    if not isinstance(facts.get('protocol'), int) or facts['protocol'] < 1:
+        return '%s reports no routingProtocol; release a fence-capable image first' % service
+    if not facts.get('publications_done'):
+        return 'SHADOW needs %s first' % FENCE_ROUTABLE[(service, category)]
+    return None
+
+
+def activate_fence(cr, sha, run_id, confirm):
+    service, category, mode = parse_fence(confirm)
+    cr.require_release(sha)
+    if mode != 'LEGACY_ONLY' and (service, category) not in FENCE_ROUTABLE:
+        raise RuntimeError('Routing fence gate: ' + fence_gate(service, category, mode, 'LEGACY_ONLY', {})
+                           + '; nothing changed')
+    before = fence_row(cr, service, category)
+    prerequisite = FENCE_ROUTABLE.get((service, category))
+    facts = dict(protocol=routing_protocol(cr, service),
+                 publications_done=bool(prerequisite) and cr.done(prerequisite))
+    refusal = fence_gate(service, category, mode, before['mode'], facts)
+    if refusal:
+        raise RuntimeError('Routing fence gate: ' + refusal + '; nothing changed')
+    entry = cr.begin('activate-notification-fence', sha, run_id)
+    entry['notificationFence'] = dict(service=service, category=category, before=before['mode'], after=mode)
+    cr.commit(entry)
+    try:
+        version = set_fence_mode(cr, service, category, mode, run_id, before['version'])
+    except Exception:
+        entry['status'] = 'failed'
+        cr.commit(entry)
+        raise
+    entry['notificationFence']['version'] = version
+    entry['status'] = 'done'
+    cr.commit(entry)
+    cr.emit('notificationFence', entry['notificationFence'])
+
+
+def undo_fence(cr, record, run_id):
+    """Rollback of one fence change: back to the recorded previous mode."""
+    version = set_fence_mode(cr, record['service'], record['category'], record['before'], run_id)
+    cr.emit('notificationFenceRestored', dict(record, restoredVersion=version))

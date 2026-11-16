@@ -19,6 +19,11 @@
 //!   it (`DEAD`), an envelope that cannot be built (no CF Meet account recipient, too many
 //!   recipients) is `SKIPPED`, and a row past its expiry is `EXPIRED`.
 //!
+//! * The route decision `reason` CHECK gains `RECIPIENT_LIMIT`: an event whose entitled
+//!   audience is larger than one envelope may carry (200 recipients, the I1 contract's
+//!   `maxItems`) is decided `OLD` even when the canary would pick `NEW`, so the legacy push
+//!   path keeps delivering it; the reason records why.
+//!
 //! Additive and forward-only; inert while every category is `LEGACY_ONLY`.
 
 use sea_orm_migration::prelude::*;
@@ -96,6 +101,10 @@ CREATE TABLE messaging_notification_publications (
         AND (envelope -> 'data') - ARRAY['conversationId', 'conversationKind', 'eventSequence', 'securityProfile'] = '{}'::jsonb
         AND envelope ->> 'eventId' = event_id))
 );
+ALTER TABLE messaging_notification_route_decisions
+    DROP CONSTRAINT ck_messaging_notification_route_decisions_reason,
+    ADD CONSTRAINT ck_messaging_notification_route_decisions_reason CHECK (reason IN ('ROUTED', 'REROUTED_UNACKED',
+        'REROUTED_CANCELLED', 'REROUTED_CRITICAL_LEASE', 'AUTO_FAILOVER', 'REROUTED_POSSIBLE_DUPLICATE', 'RECIPIENT_LIMIT'));
 CREATE INDEX ix_messaging_notification_publications_due ON messaging_notification_publications (next_attempt_at)
     WHERE state = 'PENDING';
 "#;

@@ -1,6 +1,6 @@
 # Document 10 — Engineering Report: N2–N15 and the Resend E-track
 
-**Status (2026-11-16):** `CFMEET_NOTIFICATION_SERVICE_N2_DEPLOYED_DARK` — see §1 for the per-section status. The final engineering goal `CFMEET_UNIFIED_NOTIFICATION_SERVICE_ENGINEERING_COMPLETE` is **not** claimed: producer publications (N7), the client integrations (FE2–FE5) and the cutovers (N9 Messaging facades, N10 preference switch, N11, N12) are not built, and gate E1 waits on the owner's Resend credentials.
+**Status (2026-11-16):** `CFMEET_NOTIFICATION_SERVICE_N2_DEPLOYED_DARK` — see §1 for the per-section status. The final engineering goal `CFMEET_UNIFIED_NOTIFICATION_SERVICE_ENGINEERING_COMPLETE` is **not** claimed: producer publications (N7), the client integrations (FE2–FE5) and the cutovers (N9 Messaging facades, N10 preference switch, N11, N12) are not built. Gate E1 is complete (§3).
 
 Statuses are kept separate, as the mission requires:
 
@@ -22,7 +22,7 @@ Statuses are kept separate, as the mission requires:
 | **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
 | **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PRs #76, #82) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-notifications-owners` 43922950325, X1/X2 publicly denied and proven | n/a (no traffic until routing leaves OFF) | §2.4, §4.2 |
-| **N7** producer publications + routing fence | **N7a fence foundation built** (Meeting + Messaging tables, inert guard triggers, decision module, `routingProtocol`, rollback floor); publications not built | — | — | §2.8, §5 |
+| **N7** producer publications + routing fence | **N7a fence foundation built** (Meeting + Messaging tables, inert guard triggers, decision module, `routingProtocol`, rollback floor); **N7b Messaging shadow publication built** (`MESSAGE_WAKEUPS`, outbox + I1 relay, `activate-messaging-publications`, `activate-notification-fence` LEGACY_ONLY ↔ SHADOW only); other producers not built | — | — | §2.8, §2.9, §5 |
 | **N8** inbox | service side + U1–U9 (PR #75), Meeting relay (PR #82); web/mobile UI not built | **relay `PRODUCTION_DEPLOYED_AND_VERIFIED`**: release 43914242156, `activate-notifications-relay` 43926737306; inbox empty (routing OFF) | — | §2.4, §2.5, §4.2 |
 | **N9** push + call fast lane | service side built (U8/U9, dispatcher, I3); Messaging facades, Calling transport, service worker not built | — | — | §2.5, §5 |
 | **N10** preferences authority | U6/U7, change log, Hub copy function built; copy job, facade switch not built | — | — | §2.5, §5 |
@@ -142,6 +142,33 @@ The module is `src/services/notification_fence.rs`:
 - Fence helpers in `test_notification_operations.py`.
 - Every existing suite runs with the guard triggers installed.
 
+### 2.9 N7b — Messaging shadow publication (`MESSAGE_WAKEUPS`)
+
+**Fan-out.** `fanout_jobs` reads the `MESSAGE_WAKEUPS` mode first.
+- In `LEGACY_ONLY` (or with no fence history) it runs exactly the pre-fence insert, with no decision.
+- Otherwise one transaction records the sticky decision (key `evt_<hex>`) and writes the push jobs (`OLD`). In `SHADOW` it also writes one shadow publication. A `NEW` decision writes only the publication.
+
+**Outbox.** Fence history migration 2 (`m20261205_000002_notification_publications_v1`) adds `messaging_notification_publications`, one row per decision. A CHECK makes the envelope ids-only: the four catalogue data keys, no sealed part, at most 8 KiB. The same migration adds `RECIPIENT_LIMIT` to the decision `reason` CHECK.
+
+**Relay to I1.** `POST /internal/v1/notification-events`, permission `notifications-event.publish`.
+- The envelope is built once with `cf-notification-client`. Recipients are the X3 account refs.
+- The envelope is re-posted byte for byte. `ACCEPTED`, `DUPLICATE` and `HELD` acknowledge the row. Refusals dead-letter it. 5xx, 401, 403, 408, 429 and transport errors retry with backoff until expiry.
+- The relay runs only with `CF_NOTIFICATIONS_BASE_URL`.
+
+**Category names.** The routing key is `MESSAGE_WAKEUPS`, which is the service's own route category for `messaging.message.created` (`catalogue::route_category`). The envelope category `MESSAGES` is the catalogue placeholder that resolves to `DIRECT_MESSAGES` or `GROUP_MESSAGES`. No change was needed.
+
+**Large groups.** A group may have up to 10,000 members, but one envelope is limited to 4,096 bytes, which is about 50 account refs. So only an event with at most `NEW_ROUTE_MAX_CANDIDATES` = 40 push candidates may be routed `NEW`. A unit test builds the worst-case envelope for that many refs. A larger audience is decided `OLD` with reason `RECIPIENT_LIMIT` even inside the canary, so the legacy push still reaches every member. A shadow copy that does not fit is `SKIPPED`. Splitting one event across several envelopes is a contract question for the owner (D-x) before `FENCED_NEW`.
+
+**Operations.**
+- `activate-messaging-publications`: probes I1 for 401, requires the Messaging `routingProtocol` and the publication outbox, grants `notifications-event.publish` to `cfmeet.messaging` on both replicas, and sets `CF_NOTIFICATIONS_BASE_URL` on Messaging. I1 must answer 401 again after the change.
+- `activate-notification-fence` (`confirm` `<service>-<category>-<mode>`): moves one producer row between `LEGACY_ONLY` and `SHADOW` only. It is refused for any row in a `FENCED_*` mode. SHADOW is allowed only for `FENCE_ROUTABLE` categories (today only `messaging`/`MESSAGE_WAKEUPS`), because Meeting's producers do not record decisions yet and its guard triggers would refuse legacy emails. It also needs `routingProtocol` and `activate-messaging-publications`. Each change is journaled with its previous mode, and `rollback` restores it.
+
+**Tests:**
+- Messaging `tests/notification_shadow.rs`: 8 tests, including a fake I1 that verifies the real token.
+- Messaging `tests/notification_fence.rs`: 6 tests, now including `RECIPIENT_LIMIT`.
+- Envelope capacity unit test.
+- `test_notification_operations.py`: `MessagingPublications` and `ProducerFence`.
+
 ### 2.7 N14 tooling
 
 `activate-notifications-owners` and `activate-notifications-routing` (one row per run, gated, journaled, reversible) in the coordinated release.
@@ -219,7 +246,7 @@ With E1 recorded, the N14 gate no longer refuses email `ACTIVE` for lack of E1. 
 | Section | What remains |
 |---|---|
 | N6 | X6 / X7 on Account (Meeting) with the decision tables of N7 |
-| N7 | (N7a foundation built, §2.8) PW1 relay; publications from Meeting, Messaging, Calling (destination + `CALL_PARTICIPANT_MISSED`, D-10), Hub (destination `NOTIFICATIONS`), Organizations (subscriber), Developer Platform; fence tests M-10 … M-17 |
+| N7 | (N7a foundation built, §2.8; N7b Messaging shadow publication built, §2.9) multi-envelope events for audiences over 40 (contract decision); PW1 relay; publications from Meeting, Calling (destination + `CALL_PARTICIPANT_MISSED`, D-10), Hub (destination `NOTIFICATIONS`), Organizations (subscriber), Developer Platform; fence tests M-10 … M-17 |
 | N8 | web / mobile inbox (FE2) on U1–U5 through the Meeting relay; the contact-request canary needs the Hub publication (N7) |
 | N9 | Messaging registration facades and the copy of existing Web Push registrations (D-1b copy path), Calling `NotificationsPushTransport` on I3, the browser service worker for the service's VAPID key, real-device acceptance per platform |
 | N10 | Hub copy + catch-up job, facade switch of the Hub preference endpoints, FE3 |

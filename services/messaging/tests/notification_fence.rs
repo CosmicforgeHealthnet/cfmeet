@@ -47,7 +47,7 @@ async fn set_mode(h: &Harness, mode: &str, canary_percent: i16) {
 /// One `route_message` call in its own committed transaction.
 async fn route(h: &Harness, key: &str, category: &str) -> Result<Decision, FenceError> {
     let txn = h.conn().begin().await.unwrap();
-    let decision = route_message(&txn, key, category, Utc::now() + Duration::hours(24)).await;
+    let decision = route_message(&txn, key, category, Utc::now() + Duration::hours(24), true).await;
     txn.commit().await.unwrap();
     decision
 }
@@ -194,7 +194,7 @@ async fn m10_decisions_are_sticky_across_retries_and_mode_changes() {
     // A rolled-back decision is no decision.
     let rolled = push_key(Uuid::new_v4());
     let txn = h.conn().begin().await.unwrap();
-    route_message(&txn, &rolled, MESSAGE_WAKEUPS, Utc::now())
+    route_message(&txn, &rolled, MESSAGE_WAKEUPS, Utc::now(), true)
         .await
         .unwrap();
     txn.rollback().await.unwrap();
@@ -209,9 +209,15 @@ async fn m10_decisions_are_sticky_across_retries_and_mode_changes() {
         let key = racing.clone();
         tasks.push(tokio::spawn(async move {
             let txn = conn.begin().await.unwrap();
-            let d = route_message(&txn, &key, MESSAGE_WAKEUPS, Utc::now() + Duration::hours(1))
-                .await
-                .unwrap();
+            let d = route_message(
+                &txn,
+                &key,
+                MESSAGE_WAKEUPS,
+                Utc::now() + Duration::hours(1),
+                true,
+            )
+            .await
+            .unwrap();
             txn.commit().await.unwrap();
             d
         }));
@@ -305,6 +311,29 @@ async fn canary_is_deterministic_and_bounds_new_routes() {
     );
     // A retry that bypassed the ledger would compute the same route.
     assert!(canary(&in_key, 50) && !canary(&out_key, 50));
+
+    // An audience too large for one envelope stays OLD inside the canary, with its reason.
+    let large = key_with_canary(true);
+    let txn = h.conn().begin().await.unwrap();
+    let d = route_message(
+        &txn,
+        &large,
+        MESSAGE_WAKEUPS,
+        Utc::now() + Duration::hours(1),
+        false,
+    )
+    .await
+    .unwrap();
+    txn.commit().await.unwrap();
+    assert_eq!(d.route, Route::Old);
+    assert_eq!(
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_notification_route_decisions \
+              WHERE idempotency_key = '{large}' AND route = 'OLD' AND reason = 'RECIPIENT_LIMIT'"
+        ))
+        .await,
+        1
+    );
 }
 
 /// F3: decisions change only through the audited reroute.

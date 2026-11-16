@@ -416,6 +416,8 @@ pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
         .unwrap_or(0);
     let now = state.now();
     let expires_at = now + chrono::Duration::hours(24);
+    let new_capable =
+        decision.candidates.len() <= crate::notification_publications::NEW_ROUTE_MAX_CANDIDATES;
     let values = vec![
         event.id.into(),
         conversation.into(),
@@ -435,6 +437,7 @@ pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
         &fence::push_key(event.id),
         fence::MESSAGE_WAKEUPS,
         expires_at,
+        new_capable,
     )
     .await?;
     let jobs = match route.route {

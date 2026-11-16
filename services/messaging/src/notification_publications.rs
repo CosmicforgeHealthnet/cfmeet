@@ -54,6 +54,15 @@ use crate::{
     state::AppState,
 };
 
+/// The largest audience (push candidates of one event) the fence may route `NEW`: every
+/// envelope for this many worst-case account refs fits the I1 limits (4096 bytes,
+/// [`MAX_RECIPIENTS`]); a larger audience is decided `OLD` (reason `RECIPIENT_LIMIT`) and
+/// keeps the legacy push path, so no member of a large group loses a wake-up when the
+/// category moves to `FENCED_NEW`. Entitled recipients are a subset of the candidates
+/// and account refs are deduplicated, so the envelope never holds more refs than this.
+pub const NEW_ROUTE_MAX_CANDIDATES: usize = 40;
+const _: () = assert!(NEW_ROUTE_MAX_CANDIDATES <= MAX_RECIPIENTS);
+
 /// The catalogue type of a message wake-up (#13).
 pub const EVENT_TYPE: &str = "messaging.message.created";
 
@@ -278,6 +287,21 @@ async fn build(state: &AppState, row: &Row) -> std::result::Result<Value, Unbuil
     if recipients.is_empty() {
         return Err(Unbuilt::Skip("NO_ACCOUNT_RECIPIENTS"));
     }
+    envelope(
+        row,
+        crate::notifications::conversation_kind(&authorization.context_class),
+        &authorization.security_profile,
+        recipients,
+    )
+}
+
+/// The ids-only envelope of a row for `recipients` (sorted, deduplicated account refs).
+fn envelope(
+    row: &Row,
+    conversation_kind: &str,
+    security_profile: &str,
+    recipients: Vec<String>,
+) -> std::result::Result<Value, Unbuilt> {
     if recipients.len() > MAX_RECIPIENTS {
         return Err(Unbuilt::Skip("RECIPIENT_LIMIT"));
     }
@@ -306,12 +330,9 @@ async fn build(state: &AppState, row: &Row) -> std::result::Result<Value, Unbuil
     .coalesce_key(format!("conversation:{}", row.conversation_id))
     .expires_at(rfc3339(row.expires_at))
     .data("conversationId", row.conversation_id.to_string())
-    .data(
-        "conversationKind",
-        crate::notifications::conversation_kind(&authorization.context_class),
-    )
+    .data("conversationKind", conversation_kind.to_owned())
     .data("eventSequence", row.event_sequence)
-    .data("securityProfile", authorization.security_profile.clone());
+    .data("securityProfile", security_profile.to_owned());
     for r in recipients {
         builder = builder.recipient(r);
     }
@@ -671,6 +692,45 @@ mod tests {
             assert_eq!(reason_code(Some(bad), "REJECTED"), "REJECTED", "{bad:?}");
         }
         assert_eq!(reason_code(None, "REJECTED"), "REJECTED");
+    }
+
+    #[test]
+    fn the_new_route_capacity_always_fits_one_envelope() {
+        let now = Utc::now();
+        let row = Row {
+            id: Uuid::new_v4(),
+            event_id: format!("evt_{}", "f".repeat(32)),
+            outbox_event_id: Uuid::new_v4(),
+            decision_id: Uuid::new_v4(),
+            routing_version: i32::MAX,
+            shadow: true,
+            tenant_id: Uuid::new_v4(),
+            application_id: Uuid::new_v4(),
+            environment_id: Uuid::new_v4(),
+            conversation_id: Uuid::new_v4(),
+            event_sequence: i64::MAX,
+            correlation_id: format!("corr_{}", "f".repeat(32)),
+            envelope: None,
+            attempts: 0,
+            occurred_at: now,
+            expires_at: now + Duration::hours(24),
+        };
+        let refs = |n: usize| -> Vec<String> {
+            (0..n)
+                .map(|_| format!("cfmeet-user:{}", Uuid::new_v4()))
+                .collect()
+        };
+        for kind in ["DIRECT", "GROUP"] {
+            for profile in ["MANAGED", "END_TO_END"] {
+                let built = envelope(&row, kind, profile, refs(NEW_ROUTE_MAX_CANDIDATES));
+                assert!(built.is_ok(), "{kind} {profile}: {built:?}");
+            }
+        }
+        // The size limit, not the count, is what bounds an audience: well under 200.
+        assert_eq!(
+            envelope(&row, "GROUP", "END_TO_END", refs(MAX_RECIPIENTS)),
+            Err(Unbuilt::Skip("RECIPIENT_LIMIT"))
+        );
     }
 
     #[test]
