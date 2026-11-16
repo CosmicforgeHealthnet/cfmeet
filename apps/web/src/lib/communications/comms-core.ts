@@ -184,6 +184,43 @@ export function communicationsAreas(
   };
 }
 
+/** The Hub's `messaging.attachments` capability (contract 1.4.0). */
+export type AttachmentCapability = {
+  enabled: boolean;
+  reason: string;
+  maxBytes: number;
+  maxPerMessage: number;
+  allowedKinds: string[];
+  contexts: { DIRECT: boolean; GROUP: boolean };
+};
+
+export type AttachmentAvailability = { enabled: boolean; maxBytes: number | null; reason: string };
+
+/**
+ * Whether the chat attach control is offered in a personal conversation, from Messaging's
+ * effective attachment policy relayed by the Hub. Explicitly off (policy, storage, kill
+ * switch, inactive account, or the conversation's context) disables the control. While the
+ * capability is unknown (loading, or a Hub without the field) the control stays as it was:
+ * Messaging validates every upload and its refusal is shown.
+ */
+export function attachmentAvailability(
+  capabilities: { messaging?: { attachments?: AttachmentCapability } } | null | undefined,
+  contextClass: string,
+): AttachmentAvailability {
+  const a = capabilities?.messaging?.attachments;
+  if (!a) return { enabled: true, maxBytes: null, reason: "UNKNOWN" };
+  const context = contextClass === "DIRECT" || contextClass === "GROUP" ? a.contexts?.[contextClass] === true : a.enabled;
+  const enabled = a.enabled === true && context;
+  return { enabled, maxBytes: enabled && a.maxBytes > 0 ? a.maxBytes : null, reason: enabled ? "AVAILABLE" : a.enabled ? "CONTEXT_DISABLED" : a.reason };
+}
+
+/** A file the server would refuse for its size, said before uploading (null: send it). */
+export function attachmentSizeRefusal(size: number, availability: AttachmentAvailability): string | null {
+  if (availability.maxBytes === null || size <= availability.maxBytes) return null;
+  const mb = availability.maxBytes / (1024 * 1024);
+  return `Files can be up to ${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB`;
+}
+
 // ------------------------------------------------------------------ workspace awareness
 
 export type ConversationPeople = "contacts" | "colleagues";

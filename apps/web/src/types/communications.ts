@@ -35,6 +35,15 @@ export interface CommunicationsCapabilities {
     securityReady: boolean;
     managed: { available: boolean; reason: string; realtime: "SESSION_DEVICE" | "POLLING" | "NONE" };
     privateE2ee: { available: boolean; reason: string };
+    /** 1.4.0: whether the chat attach control may be offered (absent from an older Hub). */
+    attachments?: {
+      enabled: boolean;
+      reason: string;
+      maxBytes: number;
+      maxPerMessage: number;
+      allowedKinds: Array<"IMAGE" | "DOCUMENT" | "FILE" | "VOICE_NOTE" | "VIDEO">;
+      contexts: { DIRECT: boolean; GROUP: boolean };
+    };
   };
   contacts: { available: boolean };
   meetings: { independent: true; authorization: "EXISTING_MEETING_RULES" };

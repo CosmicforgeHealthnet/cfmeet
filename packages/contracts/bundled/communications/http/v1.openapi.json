@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Communications API",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "description": "Personal communications identity, contacts, privacy and (Sections 9-23) unified Chats, Calls, Contacts, Meetings and Settings facades. Existing Account authentication is authoritative. Calling, Messaging and Meetings remain the owners of calls, messages and meetings; these operations are authorized facades, per-user preferences and read models. No phone OTP or phone-number discovery. Internal policy, principal, lifecycle and operator APIs are private and excluded. 1.3.0 (final closure): phone verification and phone recovery report the canonical PROVIDER_BLOCKED (was DEFERRED), the label the account profile uses."
   },
   "servers": [
@@ -12941,12 +12941,46 @@
             "enum": [
               "GROUP"
             ]
+          },
+          "securityProfile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MANAGED",
+              "PRIVATE_E2EE",
+              null
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "avatarRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "memberCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
           }
         },
         "required": [
           "conversationId",
           "contextClass"
-        ]
+        ],
+        "description": "A group both people are CURRENT members of (1.4.0, CF Meet chat M2): never a group the viewer left or was removed from. title / avatarRef are the server-held display metadata of MANAGED groups; a PRIVATE_E2EE group's name lives in its end-to-end encrypted group state, which the server does not hold, so they are null there (clients show their own decrypted name or a generic label). memberCount is the current number of active members. securityProfile / memberCount are null only with an older Messaging version."
       },
       "CommonGroups": {
         "type": "object",
@@ -14298,12 +14332,125 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "securityProfile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MANAGED",
+              "PRIVATE_E2EE",
+              null
+            ]
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "IMAGE",
+              "DOCUMENT",
+              "FILE",
+              "VOICE_NOTE",
+              "VIDEO",
+              null
+            ]
+          },
+          "fileName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "mediaType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          },
+          "metadataLocation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SERVER",
+              "ENCRYPTED_DESCRIPTOR",
+              null
+            ]
+          },
+          "download": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "POST"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^v1/conversations/[0-9a-f-]{36}/attachments/[0-9a-f-]{36}/download-grants$"
+                  }
+                },
+                "required": [
+                  "method",
+                  "path"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "thumbnail": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "POST"
+                    ]
+                  },
+                  "path": {
+                    "type": "string",
+                    "pattern": "^v1/conversations/[0-9a-f-]{36}/attachments/[0-9a-f-]{36}/thumbnail-grants$"
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "enum": [
+                      "image/png"
+                    ]
+                  }
+                },
+                "required": [
+                  "method",
+                  "path",
+                  "mediaType"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "attachmentId",
           "mediaClass"
-        ]
+        ],
+        "description": "A shared file (1.4.0, CF Meet chat M3). MANAGED: fileName (sanitized), mediaType and kind as the server holds them. PRIVATE_E2EE: those are null and metadataLocation is ENCRYPTED_DESCRIPTOR: name, type and thumbnail travel only inside the end-to-end encrypted message and are shown after the device decrypts it. download / thumbnail are never URLs: path is the Messaging client operation (relative, e.g. v1/conversations/{id}/attachments/{attachmentId}/download-grants) the CF Meet apps call through POST /api/v2/messaging/relay/{path}; it re-checks membership and returns a short-lived signed read. thumbnail is present only when a server-made thumbnail of a MANAGED image is ready."
       },
       "MediaPage": {
         "type": "object",
@@ -14472,7 +14619,7 @@
       "MessagingCapability": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Personal messaging availability (1.2.0). CF Meet personal chats are MANAGED; `available` / `reason` follow MANAGED messaging and `managed.realtime` says whether live delivery comes from a session device (POST /api/v2/messaging/session-tokens, Messaging MESSAGING_SESSION_DEVICES_ENABLED) or the client polls. `securityReady` and `privateE2ee` report E2EE device readiness, which MANAGED never implies. With a Messaging version that does not report MANAGED, `available` keeps the 1.1.0 meaning (E2EE readiness) and `managed.available` is false.",
+        "description": "Personal messaging availability (1.2.0). CF Meet personal chats are MANAGED; `available` / `reason` follow MANAGED messaging and `managed.realtime` says whether live delivery comes from a session device (POST /api/v2/messaging/session-tokens, Messaging MESSAGING_SESSION_DEVICES_ENABLED) or the client polls. `securityReady` and `privateE2ee` report E2EE device readiness, which MANAGED never implies. With a Messaging version that does not report MANAGED, `available` keeps the 1.1.0 meaning (E2EE readiness) and `managed.available` is false. 1.4.0: attachments (effective attachment availability for the attach control).",
         "properties": {
           "available": {
             "type": "boolean"
@@ -14544,6 +14691,74 @@
             "required": [
               "available",
               "reason"
+            ]
+          },
+          "attachments": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "1.4.0 (CF Meet chat M1): whether the chat attach control may be offered, from Messaging's effective attachment policy (CF Meet: enabled, 25 MiB, five kinds), configured private storage and its upload kill switch. contexts says it per personal context (DIRECT / GROUP). When enabled is false clients hide or disable the attach control; an older Messaging, an inactive account or an unavailable backend always read as disabled. Advisory only: Messaging authorizes and validates every upload (size, kind, media type, scanning of MANAGED files).",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "AVAILABLE",
+                  "DISABLED_BY_POLICY",
+                  "STORAGE_NOT_CONFIGURED",
+                  "TEMPORARILY_DISABLED",
+                  "BACKEND_UNAVAILABLE",
+                  "ACCOUNT_INACTIVE"
+                ]
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Largest file in bytes (0 when disabled)."
+              },
+              "maxPerMessage": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "allowedKinds": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "IMAGE",
+                    "DOCUMENT",
+                    "FILE",
+                    "VOICE_NOTE",
+                    "VIDEO"
+                  ]
+                }
+              },
+              "contexts": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "DIRECT": {
+                    "type": "boolean"
+                  },
+                  "GROUP": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "DIRECT",
+                  "GROUP"
+                ]
+              }
+            },
+            "required": [
+              "enabled",
+              "reason",
+              "maxBytes",
+              "maxPerMessage",
+              "allowedKinds",
+              "contexts"
             ]
           }
         },

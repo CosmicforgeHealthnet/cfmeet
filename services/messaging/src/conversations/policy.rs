@@ -803,8 +803,156 @@ pub fn resolve(
 /// privacy, retention, moderation, abuse — follow the current policy; a conversation's
 /// snapshot fixes its security profile and creation rules).
 pub async fn current<C: ConnectionTrait>(db: &C, environment_id: Uuid) -> Result<EffectivePolicy> {
-    let (overrides, version) = load_application_policy(db, environment_id, false).await?;
+    let (overrides, version) = load_layered(db, environment_id).await?;
     resolve(&overrides, version).map_err(|_| Error::code(ErrorCode::InternalError))
+}
+
+/// CF Meet's per-file attachment limit (25 MiB): the first-party baseline below, equal
+/// to the production scan engine's `StreamMaxLength`
+/// (`infra/calling/production/messaging_runtime.py` `MANAGED_SCAN_MAX_BYTES`), so a
+/// MANAGED file the policy admits can always be scanned.
+pub const CFMEET_ATTACHMENT_MAX_BYTES: i64 = 26_214_400;
+
+/// A named, code-defined policy layer between the platform defaults and an
+/// environment's own application policy (`messaging_application_baselines`).
+///
+/// Effective policy = platform defaults ← baseline ← application policy: every setting
+/// the application policy states explicitly wins (an operator can still turn
+/// attachments off with `attachments.enabled: false`), and an environment without a
+/// registered baseline keeps the platform defaults unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplicationBaseline {
+    /// CF Meet's own personal application environment (`CF_COMMUNICATIONS_PERSONAL_*`):
+    /// attachments ON, [`CFMEET_ATTACHMENT_MAX_BYTES`], every attachment kind. MANAGED
+    /// files stay scanned (`managedScanRequired` is untouched); PRIVATE_E2EE files stay
+    /// client-encrypted ciphertext the server never inspects.
+    CfMeetFirstParty,
+}
+
+impl ApplicationBaseline {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CfMeetFirstParty => "CFMEET_FIRST_PARTY",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "CFMEET_FIRST_PARTY" => Some(Self::CfMeetFirstParty),
+            _ => None,
+        }
+    }
+
+    /// The settings this baseline contributes.
+    pub fn attachments(self) -> AttachmentOverride {
+        match self {
+            Self::CfMeetFirstParty => AttachmentOverride {
+                enabled: Some(true),
+                max_bytes: Some(CFMEET_ATTACHMENT_MAX_BYTES),
+                allowed_kinds: Some(ATTACHMENT_KINDS.iter().map(|k| k.to_string()).collect()),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// `application` layered over this baseline: an attachment setting the application
+    /// left unset takes the baseline's value; everything else is the application's.
+    pub fn under(self, application: &ApplicationPolicy) -> ApplicationPolicy {
+        let base = self.attachments();
+        let own = application.attachments.clone().unwrap_or_default();
+        let mut layered = application.clone();
+        layered.attachments = Some(AttachmentOverride {
+            enabled: own.enabled.or(base.enabled),
+            max_bytes: own.max_bytes.or(base.max_bytes),
+            max_per_message: own.max_per_message.or(base.max_per_message),
+            allowed_kinds: own.allowed_kinds.or(base.allowed_kinds),
+            managed_scan_required: own.managed_scan_required.or(base.managed_scan_required),
+            max_voice_note_seconds: own.max_voice_note_seconds.or(base.max_voice_note_seconds),
+            max_video_seconds: own.max_video_seconds.or(base.max_video_seconds),
+            storage_budget_bytes: own.storage_budget_bytes.or(base.storage_budget_bytes),
+            daily_upload_bytes: own.daily_upload_bytes.or(base.daily_upload_bytes),
+            max_concurrent_uploads: own.max_concurrent_uploads.or(base.max_concurrent_uploads),
+        });
+        layered
+    }
+}
+
+/// `application` over the environment's baseline, if it has one.
+pub fn layer(
+    baseline: Option<ApplicationBaseline>,
+    application: &ApplicationPolicy,
+) -> ApplicationPolicy {
+    match baseline {
+        Some(b) => b.under(application),
+        None => application.clone(),
+    }
+}
+
+#[derive(Debug, Clone, FromQueryResult)]
+struct BaselineRow {
+    baseline: String,
+}
+
+/// The baseline registered for an environment (`None` for every other application).
+pub async fn load_baseline<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+) -> Result<Option<ApplicationBaseline>> {
+    let row: Option<BaselineRow> = db::one(
+        db,
+        "SELECT baseline FROM messaging_application_baselines WHERE environment_id = $1",
+        vec![environment_id.into()],
+    )
+    .await?;
+    Ok(row.and_then(|r| ApplicationBaseline::parse(&r.baseline)))
+}
+
+/// The stored application policy layered over the environment's baseline, and the
+/// application policy version.
+pub async fn load_layered<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+) -> Result<(ApplicationPolicy, i64)> {
+    let (overrides, version) = load_application_policy(db, environment_id, false).await?;
+    let baseline = load_baseline(db, environment_id).await?;
+    Ok((layer(baseline, &overrides), version))
+}
+
+/// Registers `baseline` for exactly one application environment (startup, from the
+/// deployment's CF Meet personal scope). The same baseline registered for any OTHER
+/// environment (a previous configuration) is removed, so it never outlives the
+/// configuration that named it. Idempotent; replicas starting together converge.
+pub async fn register_baseline<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    baseline: ApplicationBaseline,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    db::exec(
+        db,
+        "DELETE FROM messaging_application_baselines WHERE baseline = $1 AND environment_id <> $2",
+        vec![baseline.as_str().into(), environment_id.into()],
+    )
+    .await?;
+    db::exec(
+        db,
+        "INSERT INTO messaging_application_baselines (environment_id, tenant_id, application_id, baseline, registered_at) \
+         VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (environment_id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, \
+           application_id = EXCLUDED.application_id, baseline = EXCLUDED.baseline, \
+           registered_at = EXCLUDED.registered_at",
+        vec![
+            environment_id.into(),
+            tenant_id.into(),
+            application_id.into(),
+            baseline.as_str().into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(())
 }
 
 /// JSON with recursively sorted object keys (independent of serde_json feature flags).
@@ -909,7 +1057,7 @@ pub async fn current_snapshot<C: ConnectionTrait>(
     environment_id: Uuid,
     now: DateTime<Utc>,
 ) -> Result<Snapshot> {
-    let (overrides, version) = load_application_policy(db, environment_id, false).await?;
+    let (overrides, version) = load_layered(db, environment_id).await?;
     let policy = resolve(&overrides, version).map_err(|_| Error::code(ErrorCode::InternalError))?;
     let digest = policy.digest();
     db::exec(
@@ -1165,6 +1313,49 @@ mod tests {
         .unwrap();
         let r = resolve(&ok, 2).unwrap();
         assert!(!r.privacy.presence && r.attachments.enabled);
+    }
+
+    /// M1: the CF Meet first-party baseline turns attachments on with its own limits;
+    /// without it the platform default (off) stands, and an explicit application setting
+    /// always wins over the baseline.
+    #[test]
+    fn the_cfmeet_baseline_enables_attachments_and_explicit_settings_win() {
+        let none = ApplicationPolicy::default();
+        assert!(!resolve(&layer(None, &none), 0).unwrap().attachments.enabled);
+
+        let b = ApplicationBaseline::CfMeetFirstParty;
+        assert_eq!(ApplicationBaseline::parse(b.as_str()), Some(b));
+        let r = resolve(&b.under(&none), 0).unwrap();
+        assert!(r.attachments.enabled);
+        assert_eq!(r.attachments.max_bytes, 26_214_400);
+        let mut kinds = r.attachments.allowed_kinds.clone();
+        kinds.sort();
+        assert_eq!(
+            kinds,
+            vec!["DOCUMENT", "FILE", "IMAGE", "VIDEO", "VOICE_NOTE"]
+        );
+        // MANAGED scanning is untouched by the baseline.
+        assert!(r.attachments.managed_scan_required);
+
+        let off: ApplicationPolicy = serde_json::from_value(
+            json!({ "attachments": { "enabled": false }, "privacy": { "presence": false } }),
+        )
+        .unwrap();
+        let r = resolve(&b.under(&off), 3).unwrap();
+        assert!(
+            !r.attachments.enabled,
+            "an explicit application setting wins"
+        );
+        assert_eq!(r.attachments.max_bytes, 26_214_400);
+        assert!(!r.privacy.presence);
+        let narrower: ApplicationPolicy = serde_json::from_value(
+            json!({ "attachments": { "maxBytes": 1024, "allowedKinds": ["IMAGE"] } }),
+        )
+        .unwrap();
+        let r = resolve(&b.under(&narrower), 4).unwrap();
+        assert!(r.attachments.enabled);
+        assert_eq!(r.attachments.max_bytes, 1024);
+        assert_eq!(r.attachments.allowed_kinds, vec!["IMAGE"]);
     }
 
     #[test]

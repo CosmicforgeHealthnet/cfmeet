@@ -3048,3 +3048,186 @@ async fn real_object_storage_thumbnail_accounting() {
         original.size, stored.size
     );
 }
+
+/// CF Meet chat remediation M1: the CF Meet first-party baseline (registered for CF Meet's
+/// own personal application environment only) turns attachments on with a 25 MiB limit
+/// and the five generic kinds. Upload, scan and download work end to end for a member;
+/// an oversize file and a kind outside the policy are refused; a non-member cannot
+/// download; another application environment keeps the platform default (OFF) and is
+/// refused with ATTACHMENTS_DISABLED; the policy view names the baseline; an explicit
+/// application setting still wins; and moving the registration removes it from the
+/// previously configured environment.
+#[tokio::test]
+async fn cfmeet_first_party_baseline_enables_attachments_for_cfmeet_only() {
+    use messaging::conversations::policy::{register_baseline, ApplicationBaseline};
+    let Some(e) = env().await else { return };
+    let cfmeet = e.h.customer(ALL_SCOPES);
+    let other = e.h.customer(ALL_SCOPES);
+    let groups = json!({ "GROUP": { "allowedProfiles": ["MANAGED", "PRIVATE_E2EE"], "defaultProfile": "MANAGED" } });
+    // Both environments allow MANAGED groups; neither application policy mentions
+    // attachments (as in production, where only contexts were configured).
+    for c in [&cfmeet, &other] {
+        e.h.set_policy(c, json!({ "contexts": groups })).await;
+    }
+    let s = cfmeet.context.scope;
+    for _ in 0..2 {
+        // Idempotent.
+        register_baseline(
+            e.h.conn(),
+            s.tenant_id,
+            s.application_id,
+            s.environment_id,
+            ApplicationBaseline::CfMeetFirstParty,
+            e.h.now(),
+        )
+        .await
+        .unwrap();
+    }
+
+    // The policy view reports the baseline and the effective limits.
+    let v = e.h.get(&cfmeet, None, "/v1/messaging/policy").await;
+    assert_eq!(v.status, StatusCode::OK, "{}", v.text);
+    conforms("messaging/common/v1.schema.json#/$defs/PolicyView", &v.json);
+    assert_eq!(v.json["applicationBaseline"], "CFMEET_FIRST_PARTY");
+    assert!(v.json["policy"].get("attachments").is_none(), "{}", v.text);
+    assert_eq!(v.json["effective"]["attachments"]["enabled"], true);
+    assert_eq!(v.json["effective"]["attachments"]["maxBytes"], 26_214_400);
+    assert_eq!(
+        v.json["effective"]["attachments"]["allowedKinds"],
+        json!(["DOCUMENT", "FILE", "IMAGE", "VIDEO", "VOICE_NOTE"])
+    );
+    let o = e.h.get(&other, None, "/v1/messaging/policy").await;
+    conforms("messaging/common/v1.schema.json#/$defs/PolicyView", &o.json);
+    assert!(o.json["applicationBaseline"].is_null(), "{}", o.text);
+    assert_eq!(o.json["effective"]["attachments"]["enabled"], false);
+
+    // Upload + scan + download for a member of a CF Meet conversation.
+    let (conv, people) = e.managed_group(&cfmeet, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let outsider = e.h.principal(&cfmeet);
+    let bytes = png(4096);
+    let up = e
+        .managed_upload(
+            &cfmeet,
+            &conv,
+            alice,
+            "IMAGE",
+            "image/png",
+            "photo.png",
+            &bytes,
+        )
+        .await;
+    assert_eq!(up.status, StatusCode::OK, "{}", up.text);
+    assert_eq!(up.json["state"], "READY", "{}", up.text);
+    assert_eq!(up.json["scan"]["status"], "CLEAN");
+    let aid = up.json["attachmentId"].clone();
+    let sent =
+        e.h.post(
+            &cfmeet,
+            Some(alice),
+            &format!("/v1/conversations/{}/messages", cid(&conv)),
+            json!({ "clientMessageId": Uuid::new_v4(), "text": "a photo", "attachmentIds": [aid] }),
+        )
+        .await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    let g = e.grant(&cfmeet, &conv, bob, &aid).await;
+    assert_eq!(g.status, StatusCode::OK, "{}", g.text);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/AttachmentDownloadGrant",
+        &g.json,
+    );
+    let body = e.content(&cfmeet, &conv, bob, &aid).await;
+    assert_eq!(body.status, StatusCode::OK);
+    assert_eq!(body.bytes, bytes);
+    // A non-member learns nothing and downloads nothing.
+    for r in [
+        e.grant(&cfmeet, &conv, outsider, &aid).await,
+        e.content(&cfmeet, &conv, outsider, &aid).await,
+    ] {
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    }
+
+    // Exactly 25 MiB is admitted; one byte more is refused before anything is stored.
+    let digest = "0".repeat(64);
+    let document = |size: i64| json!({ "kind": "DOCUMENT", "size": size, "sha256": digest, "mediaType": "application/pdf", "fileName": "big.pdf" });
+    let at_limit = e.intent(&cfmeet, &conv, alice, document(26_214_400)).await;
+    assert_eq!(at_limit.status, StatusCode::CREATED, "{}", at_limit.text);
+    let over = e.intent(&cfmeet, &conv, alice, document(26_214_401)).await;
+    assert_eq!(
+        (over.code(), over.reason()),
+        ("QUOTA_EXCEEDED", "ATTACHMENT_TOO_LARGE"),
+        "{}",
+        over.text
+    );
+    // A kind outside the policy is refused.
+    let bad_kind = e
+        .intent(
+            &cfmeet,
+            &conv,
+            alice,
+            json!({ "kind": "EXECUTABLE", "size": 10, "sha256": digest, "mediaType": "application/octet-stream" }),
+        )
+        .await;
+    assert_eq!(bad_kind.reason(), "KIND_NOT_ALLOWED", "{}", bad_kind.text);
+
+    // Another application environment keeps the platform default: attachments OFF.
+    let image = json!({ "kind": "IMAGE", "size": bytes.len(), "sha256": sha256_hex(&bytes), "mediaType": "image/png" });
+    let (foreign, foreigners) = e.managed_group(&other, 2).await;
+    let r = e
+        .intent(&other, &foreign, foreigners[0], image.clone())
+        .await;
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("FEATURE_DISABLED", "ATTACHMENTS_DISABLED"),
+        "{}",
+        r.text
+    );
+
+    // An explicit application setting wins over the baseline (narrowed kinds) ...
+    e.h.set_policy(
+        &cfmeet,
+        json!({ "contexts": groups, "attachments": { "allowedKinds": ["IMAGE"] } }),
+    )
+    .await;
+    let video = e
+        .intent(
+            &cfmeet,
+            &conv,
+            alice,
+            json!({ "kind": "VIDEO", "size": 10, "sha256": digest, "mediaType": "video/mp4", "durationMs": 1000 }),
+        )
+        .await;
+    assert_eq!(video.reason(), "KIND_NOT_ALLOWED", "{}", video.text);
+    // ... including switching attachments off.
+    e.h.set_policy(
+        &cfmeet,
+        json!({ "contexts": groups, "attachments": { "enabled": false } }),
+    )
+    .await;
+    let off = e.intent(&cfmeet, &conv, alice, image.clone()).await;
+    assert_eq!(off.reason(), "ATTACHMENTS_DISABLED", "{}", off.text);
+    e.h.set_policy(&cfmeet, json!({ "contexts": groups })).await;
+
+    // Moving the registration (a changed CF Meet personal scope) removes it from the
+    // previous environment: the baseline never outlives the configuration naming it.
+    let os = other.context.scope;
+    register_baseline(
+        e.h.conn(),
+        os.tenant_id,
+        os.application_id,
+        os.environment_id,
+        ApplicationBaseline::CfMeetFirstParty,
+        e.h.now(),
+    )
+    .await
+    .unwrap();
+    let r = e.intent(&cfmeet, &conv, alice, image.clone()).await;
+    assert_eq!(r.reason(), "ATTACHMENTS_DISABLED", "{}", r.text);
+    let r = e.intent(&other, &foreign, foreigners[0], image).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(
+        e.h.scalar("SELECT count(*) FROM messaging_application_baselines")
+            .await,
+        1
+    );
+}
