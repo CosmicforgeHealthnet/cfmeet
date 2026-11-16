@@ -18,11 +18,16 @@ Checks (issue ids from the server-bug document):
       neither party's history shows RINGING
   C3  a real LiveKit connection is admitted for both parties: CONNECTED, audio both ways
   C4  a forged signaling credential is refused with 401 AUTHENTICATION_FAILED
+  C5  the connected voice call is upgraded to VIDEO and a camera track then flows
+  C6  one presenter at a time; only the presenter's media grant carries SCREEN_SHARE;
+      stopping clears it
+  C7  a third person is invited into the ongoing call, acknowledges, accepts and joins
   M1  attachments enabled for CF Meet (capability and effective policy); a MANAGED image is
       uploaded, scanned CLEAN, sent and downloaded by a member; a non-member gets 404
   M2  groups in common carry the MANAGED group's title for current members only
   M3  shared media carries the sanitized file name, media type and grant operations
 """
+import base64
 import hashlib
 import json
 import os
@@ -101,7 +106,7 @@ class Journey:
         self.people = []
         self.calls = []
         self.endpoints = []
-        self.contact_created = None
+        self.contacts_created = []
         self.group = None
 
     # -- reporting -----------------------------------------------------------------------
@@ -172,7 +177,7 @@ class Journey:
                  {'expectedVersion': request['version']}, expected=(200, 201))
         for item in self.hub(a, '/contacts')['data']:
             if item.get('cfMeetId') == b['cfMeetId']:
-                self.contact_created = item['contactId']
+                self.contacts_created.append((a, item['contactId']))
                 return item['contactId']
         raise Failed('controlled contact relationship not established')
 
@@ -317,6 +322,12 @@ class Journey:
             for client in clients:
                 client.cmd('verify_received', kind='audio', timeout=12)
             self.check('C3 audio is received in both directions', True)
+            self.group_of('C5 voice to video upgrade', lambda: self.c5(call['callId'], clients))
+            self.group_of('C6 screen sharing', lambda: self.c6(call['callId'], a, b))
+            if len(self.people) > 2:
+                self.group_of('C7 invite into an ongoing call', lambda: self.c7(call['callId'], a, self.people[2]))
+            else:
+                self.record('C7 invite into an ongoing call', 'NOT_RUN', 'only two controlled accounts')
         finally:
             for client in clients:
                 try:
@@ -324,6 +335,78 @@ class Journey:
                 except Exception:  # noqa: BLE001
                     pass
             self.finish(call['callId'])
+
+    # -- C5 / C6 / C7 (on the connected C3 call) ---------------------------------------
+    def participant(self, call_id, person):
+        for item in self.view(call_id)['participants']:
+            if item.get('principalId') == person['principalId'] and not item.get('endedAt'):
+                return item['participantId']
+        raise Failed('active participant missing')
+
+    def grant_sources(self, call_id, person):
+        session = next(x for x in self.view(call_id)['sessions']
+                       if x['endpointId'] == person['endpointId'] and x['state'] != 'ENDED')
+        token = self.signaling(person, 'POST', '/v1/calling/sessions/%s/media-credentials' % session['sessionId'], {})['token']
+        payload = token.split('.')[1]
+        video = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4))).get('video') or {}
+        return set(video.get('canPublishSources') or [])
+
+    def c5(self, call_id, clients):
+        current = self.view(call_id)
+        self.scoped('POST', '/v1/calls/%s/upgrade' % call_id, {'kind': 'VIDEO', 'expectedVersion': current['version']})
+        after = self.view(call_id)
+        self.check('C5 the connected voice call becomes VIDEO and stays CONNECTED',
+                   after['kind'] == 'VIDEO' and after['state'] == 'CONNECTED', '%s/%s' % (after['kind'], after['state']))
+        # The new permission reaches LiveKit after commit: publish once it is applied.
+        for _ in range(30):
+            try:
+                clients[0].cmd('publish', kind='video')
+                break
+            except AssertionError:
+                time.sleep(.5)
+        else:
+            raise Failed('camera publish still refused after the upgrade')
+        clients[1].cmd('verify_received', kind='video', timeout=12)
+        self.check('C5 after the upgrade a camera track flows to the other party', True)
+
+    def c6(self, call_id, a, b):
+        pa, pb = self.participant(call_id, a), self.participant(call_id, b)
+        started = self.scoped('POST', '/v1/calls/%s/screen-share' % call_id, {'participantId': pa})
+        self.check('C6 a participant starts presenting',
+                   (started.get('screenShare') or {}).get('participantId') == pa, json.dumps(started.get('screenShare')))
+        self.check('C6 the call view names the presenter',
+                   (self.view(call_id).get('screenShare') or {}).get('participantId') == pa)
+        presenter, other = self.grant_sources(call_id, a), self.grant_sources(call_id, b)
+        self.check('C6 only the presenter\'s media grant carries SCREEN_SHARE and SCREEN_SHARE_AUDIO',
+                   {'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO'} <= presenter and not ({'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO'} & other),
+                   '%s / %s' % (sorted(presenter), sorted(other)))
+        status, value = http('POST', self.c['base'] + '/v1/calls/%s/screen-share' % call_id, {'participantId': pb},
+                             {'Authorization': 'Bearer ' + self.c['credential'], 'Idempotency-Key': str(uuid.uuid4())})
+        self.check('C6 a second presenter is refused with 409', status == 409, '%d %s' % (status, error_code(value)))
+        stopped = self.scoped('POST', '/v1/calls/%s/screen-share/stop' % call_id, {'participantId': pa})
+        self.check('C6 stopping clears the presenter and the screen grant',
+                   stopped.get('screenShare') is None and self.view(call_id).get('screenShare') is None
+                   and not ({'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO'} & self.grant_sources(call_id, a)))
+
+    def c7(self, call_id, a, c):
+        current = self.view(call_id)
+        added = self.scoped('POST', '/v1/calls/%s/participants' % call_id,
+                            {'invitingParticipantId': self.participant(call_id, a),
+                             'targetPrincipalIds': [c['principalId']], 'expectedVersion': current['version']})
+        self.check('C7 the invited person is added as a participant with a live offer',
+                   [x.get('principalId') for x in added.get('participants', [])] == [c['principalId']])
+        offer = self.offer(c, call_id)
+        self.check('C7 the added offer is delivered PENDING', offer is not None and offer['status'] == 'PENDING',
+                   None if offer is None else offer['status'])
+        if offer is None:
+            return
+        acknowledged = self.signaling(c, 'POST', '/v1/calling/invitations/%s/acknowledge' % offer['invitationId'])
+        self.signaling(c, 'POST', '/v1/calling/invitations/%s/accept' % offer['invitationId'],
+                       {'expectedVersion': acknowledged.get('callVersion', offer['callVersion'])})
+        after = self.view(call_id)
+        joined = [x for x in after['participants'] if x.get('principalId') == c['principalId'] and not x.get('endedAt')]
+        self.check('C7 the invited person accepts and joins while the call continues',
+                   bool(joined) and after['state'] in ('CONNECTED', 'ANSWERED'), after['state'])
 
     # -- M1 / M2 / M3 ----------------------------------------------------------------------
     def m1_capability(self, a):
@@ -433,7 +516,6 @@ class Journey:
 
     # -- cleanup ---------------------------------------------------------------------------
     def cleanup(self):
-        a = self.people[0] if self.people else None
         for call_id in self.calls:
             try:
                 self.finish(call_id)
@@ -452,9 +534,9 @@ class Journey:
                                {'expectedVersion': current['version'], 'lifecycleState': 'ARCHIVED'}, actor=owner)
             except Exception:  # noqa: BLE001
                 self.details.setdefault('cleanupFailures', []).append('group')
-        if self.contact_created and a:
+        for owner, contact_id in self.contacts_created:
             try:
-                self.hub(a, '/contacts/' + self.contact_created, 'DELETE', expected=(200, 204))
+                self.hub(owner, '/contacts/' + contact_id, 'DELETE', expected=(200, 204))
             except Exception:  # noqa: BLE001
                 self.details.setdefault('cleanupFailures', []).append('contact')
         for person in self.people:
@@ -473,6 +555,11 @@ class Journey:
             contact_id = self.contact(a, b)
             self.endpoint(a)
             self.endpoint(b)
+            if outsider is not None:
+                # C7 invites the third account into an ongoing call: like any personal call,
+                # that needs a contact relationship (removed again if this run created it).
+                self.contact(a, outsider)
+                self.endpoint(outsider)
             self.group_of('C1/C2 offer delivery and cancellation', lambda: self.c1_c2(a, b))
             self.group_of('C3 media admission', lambda: self.c3(a, b))
             self.group_of('M1 capability and policy', lambda: self.m1_capability(a))

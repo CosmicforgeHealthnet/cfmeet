@@ -112,6 +112,29 @@ class ClientHelpers(unittest.TestCase):
         journey.group_of('C3', lambda: journey.check('C3 ok', True))
         self.assertEqual(journey.checks, {'C1': 'FAIL', 'C3 ok': 'PASS'})
 
+    def test_screen_grant_sources_are_read_from_the_issued_media_credential(self):
+        import base64
+        claims = {'video': {'canPublishSources': ['MICROPHONE', 'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO']}}
+        token = 'h.' + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=') + '.s'
+        journey = client.Journey({'runId': '1'})
+        person = {'endpointId': 'e1', 'signaling': 'sig'}
+        view = {'sessions': [{'endpointId': 'e1', 'state': 'ENDED', 'sessionId': 'old'},
+                             {'endpointId': 'e1', 'state': 'CONNECTED', 'sessionId': 's1'}]}
+        with patch.object(journey, 'view', return_value=view), \
+                patch.object(journey, 'signaling', return_value={'token': token}) as signaling:
+            self.assertEqual(journey.grant_sources('call', person), {'MICROPHONE', 'SCREEN_SHARE', 'SCREEN_SHARE_AUDIO'})
+        self.assertIn('/sessions/s1/', signaling.call_args[0][2])
+
+    def test_c7_without_a_delivered_offer_fails_and_stops(self):
+        journey = client.Journey({'runId': '1'})
+        view = {'version': 4, 'participants': [{'principalId': A, 'participantId': 'pa', 'endedAt': None}]}
+        added = {'participants': [{'principalId': B, 'participantId': 'pc'}]}
+        with patch.object(journey, 'view', return_value=view), patch.object(journey, 'scoped', return_value=added), \
+                patch.object(journey, 'offer', return_value=None), patch.object(journey, 'signaling') as signaling:
+            journey.c7('call', {'principalId': A}, {'principalId': B})
+        self.assertEqual(journey.checks['C7 the added offer is delivered PENDING'], 'FAIL')
+        signaling.assert_not_called()
+
     def test_missing_managed_groups_are_reported_not_run(self):
         journey = client.Journey({'runId': '1', 'messaging': 'https://m', 'credential': 'c'})
         with patch.object(client, 'http', return_value=(422, {'error': {'code': 'MANAGED_NOT_ALLOWED'}})):
