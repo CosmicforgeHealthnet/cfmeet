@@ -222,7 +222,11 @@ async function journey() {
   await pick(alice.page, USERS.bob.name);
   await alice.page.click("[data-testid=create-conversation]");
   await alice.page.waitForSelector("[data-testid=conversation][data-profile=PRIVATE_E2EE]", { timeout: T });
-  assert.equal(await alice.page.locator("[data-testid=profile-badge]").first().getAttribute("data-profile"), "PRIVATE_E2EE");
+  // Presence/typing replaces the header badge. Chat info always exposes the security
+  // profile, so verify it through the same control a user opens.
+  await alice.page.click("[data-testid=conversation-members-toggle]");
+  assert.equal(await alice.page.locator("[data-testid=members] [data-testid=profile-badge]").getAttribute("data-profile"), "PRIVATE_E2EE");
+  await alice.page.click("[data-testid=conversation-members-toggle]");
   step("encrypted conversation created", {});
 
   // ---- 3. Encrypted send and receive, both directions.
