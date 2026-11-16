@@ -17,11 +17,11 @@ Statuses are kept separate, as the mission requires:
 
 | Section | Engineering | Production | Accepted | Evidence |
 |---|---|---|---|---|
-| **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **blocked: owner credentials** — run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) stopped at `CFMEET_RESEND_API_KEY is missing`, nothing changed | — | §3 |
+| **E-track E1** (Resend on the existing Meeting path) | built (N0-era tooling) | **SUSPENDED by owner decision (2026-11-16)**: no activation, no acceptance run; run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) had stopped at the credential check, nothing changed | — | §3 |
 | **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | deployed dark (release 43819010350, verification PASS); certify 43828926604 **NOT_CERTIFIED** (readiness), fix in PR #80, re-release and re-certify in §4.2 | 24 h dark observation restarts at the certified release | §2.1, §4 |
 | **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
-| **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PR #76); Meeting U1–U9 relay held for public-route approval | released with the readiness fix (§4.2); owner activation recorded in §4.2 | n/a | §2.4, §4.2 |
+| **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PR #76); Meeting U1–U9 relay (owner-approved) in the relay PR, §2.4 | released with the readiness fix (§4.2); owner activation recorded in §4.2 | n/a | §2.4, §4.2 |
 | **N7** producer publications + routing fence | **not built** | — | — | §5 |
 | **N8** inbox | service side + U1–U5 built (PR #75); Meeting relay §2.4; web/mobile UI not built | — | — | §2.5 |
 | **N9** push + call fast lane | service side built (U8/U9, dispatcher, I3); Messaging facades, Calling transport, service worker not built | — | — | §2.5, §5 |
@@ -77,7 +77,21 @@ Merged in PR [#76](https://github.com/CosmicforgeHealthnet/cfmeet/pull/76) (`mai
 
 The Meeting owner routes stay off until `NOTIFICATION_OWNER_API_ENABLED=true`. They are switched on, with the other owners' grants, only by the coordinated-release operation `activate-notifications-owners`. That operation probes every owner afterwards and expects a 401 without a token.
 
-**Held, not merged:** the Meeting U1–U9 relay (the inbox, preferences and push-registration facade for the web and mobile apps). It needs nine new entries in `infra/api-gateway/public-routes.json`. Changing that public surface is held for owner approval. Open contract question: X3 answers `409` above 1,000 recipients; the batch limit needs a contract decision before N9.
+**Meeting U1–U9 relay (owner-approved 2026-11-16).** The inbox, preferences and push-endpoint facade for the CF Meet apps: `GET /api/v2/notifications`, `GET …/unread-count`, `PATCH …/{notificationId}`, `POST …/read`, `POST …/dismiss`, `GET`/`PUT …/preferences`, `PUT`/`DELETE …/devices/{accountDeviceId}/push` (`services/meeting-service/src/handlers/v2/notifications.rs`, `src/services/notification_relay.rs`).
+
+- The Account session is verified first: registered account, revocation checked, 401 otherwise.
+- The request is then forwarded to I2 with the server-resolved account (`cfmeet-user:<id>`). The client never names the account.
+- Malformed input is refused with 400 before anything is forwarded.
+- Answers that are off-contract or fail service authentication become 503.
+- Without `CF_NOTIFICATIONS_BASE_URL` every route answers 503 after the session check.
+
+Gateway classification: the nine operations are `EXCLUDED` / `FIRST_PARTY_APP_NOTIFICATIONS` in `infra/api-gateway/public-routes.json`. They are served on the Meeting Service ingress to the apps' own signed-in users and are never routed as a customer API. No Notification Service route is public: it has no published port, and its private TLS route is on the private network only.
+
+Production switch: the new operation `activate-notifications-relay` grants `notifications-user.forward` to the Meeting Service on both replicas and sets `CF_NOTIFICATIONS_BASE_URL`. It probes for 401 before and after.
+
+Public-host hardening: `activate-notifications-owners` now applies and proves public-host denials of the Meeting owner routes X1/X2 (404 with `X-CFMeet-Ingress: denied`) before it mounts them.
+
+Tests: `tests/notification_relay.rs` (4), `test_notification_operations.py` (relay and denial). Open contract question: X3 answers `409` above 1,000 recipients; the batch limit needs a contract decision before N9.
 
 ### 2.5 N8 / N9 / N10 service side
 
@@ -105,7 +119,13 @@ Inbox U1–U5 (own items only, 404 for foreign ids, cursor pagination, grouping,
 | `activate-resend-email` | run [43807428863](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43807428863) on `4f9e4f2`: gate PASS, activation base PASS (no image input changed since `163be40`), stopped at the credential check; no VPS change |
 | E1 | **not completed** (`PENDING_OWNER_EMAIL_PROVIDER_ACTIVATION`) |
 
-Owner action (docs/operations/resend-email-owner-handoff.md §4–§6): create a sending-only key for `cfmeet.com`, add the webhook endpoint `https://api.cfmeet.com/api/v1/email/provider-events/resend` with the six events, store both secrets and the acceptance-recipient variable in the `production` environment. Then: `activate-resend-email` on the main head, `email-acceptance confirm=otp`, and record E1.
+**Owner decision (2026-11-16): Resend activation is suspended.**
+
+- Credentials will **not** be stored in GitHub. When the work resumes, the owner will place them directly on the VPS as protected secret files.
+- `activate-resend-email` and `email-acceptance` are not run until then.
+- Engineering consequence when resuming: `activate-resend-email` currently reads the key and webhook secret from GitHub `production` secrets. It must first be changed to require pre-placed root-owned 0400 files on the VPS instead, and refuse to proceed otherwise. That change is not made yet; it waits for the resume decision.
+
+Until E1, every email `ACTIVE` routing change stays refused by the N14 gate. The existing Meeting email path stays the only sender.
 
 ---
 

@@ -402,6 +402,14 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Part VI: Developer Console session bridge enabled");
     }
 
+    // Document 4 §3.1: Notification Service user relay (CF_NOTIFICATIONS_BASE_URL; unset:
+    // the /api/v2/notifications routes answer 503 and nothing is forwarded).
+    state.notifications = backend::services::notification_relay::NotificationsRelay::from_env()
+        .unwrap_or_else(|e| panic!("notification relay configuration error: {e}"));
+    if state.notifications.is_some() {
+        tracing::info!("Notification Service user relay enabled");
+    }
+
     // Notification Service owner APIs X1 / X2 (NOTIFICATION_OWNER_API_ENABLED, Document 4
     // §3.4). Reads only: no migration of their own.
     let notification_owner =

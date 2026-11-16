@@ -14,16 +14,16 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.5.0 | 259 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 268 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.4.0 | 73 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 135 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **639** |
+| **Total** | | | **648** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
-Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
+Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
 
 ### API Keys
 
@@ -289,6 +289,20 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.5.0**; ba
 | POST | `/api/v2/messaging/relay/{path}` | account session | Relayed create / action (allowlisted path under `v1/`). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_post` |
 | PUT | `/api/v2/messaging/relay/{path}` | account session | Relayed replace (allowlisted path under `v1/`, e.g. a read cursor or sealed history). | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, ENDPOINT_NOT_FOUND | `openapi/meeting-service.json#v2_messaging_relay_put` |
 | POST | `/api/v2/messaging/session-tokens` | account session | Issue a short-lived MANAGED-realtime session-device token (no E2EE device needed). | 201, 400, 401, 503 | AUTHENTICATION_REQUIRED, CHAT_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_messaging_session_token` |
+
+### Notifications (v2)
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| GET | `/api/v2/notifications` | account session | List my notifications (U1). | 200, 400, 401, 429, 503 | AUTHENTICATION_REQUIRED, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_list` |
+| DELETE | `/api/v2/notifications/devices/{accountDeviceId}/push` | account session | Remove my push endpoint for an Account device (U9). | 200, 204, 400, 401, 404, 429, 503 | AUTHENTICATION_REQUIRED, NOT_FOUND, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_push_remove` |
+| PUT | `/api/v2/notifications/devices/{accountDeviceId}/push` | account session | Register my push endpoint for an Account device (U8). | 200, 400, 401, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, NOT_FOUND, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_push_register` |
+| POST | `/api/v2/notifications/dismiss` | account session | Dismiss my notifications (U5). | 200, 400, 401, 409, 429, 503 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_dismiss` |
+| GET | `/api/v2/notifications/preferences` | account session | My notification preferences (U6). | 200, 401, 429, 503 | AUTHENTICATION_REQUIRED, RATE_LIMITED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_notifications_preferences_get` |
+| PUT | `/api/v2/notifications/preferences` | account session | Update my notification preferences (U7). | 200, 400, 401, 409, 429, 503 | AUTHENTICATION_REQUIRED, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_notifications_preferences_update` |
+| POST | `/api/v2/notifications/read` | account session | Mark my notifications read (U4). | 200, 400, 401, 409, 429, 503 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_notifications_mark_read` |
+| GET | `/api/v2/notifications/unread-count` | account session | My unread notification count (U2). | 200, 304, 401, 429, 503 | AUTHENTICATION_REQUIRED, RATE_LIMITED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_notifications_unread_count` |
+| PATCH | `/api/v2/notifications/{notificationId}` | account session | Update one of my notifications (U3). | 200, 400, 401, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, NOT_FOUND, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_notifications_update` |
 
 ### Organizations (v2)
 

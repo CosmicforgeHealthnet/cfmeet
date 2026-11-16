@@ -74,6 +74,16 @@ use utoipa::OpenApi;
         crate::handlers::admin::list_meetings,
         crate::handlers::admin::list_logs,
         // Phase 2 meeting domain (/api/v2)
+        // Document 4 §3.1: Notification Service user APIs (relay)
+        crate::handlers::v2::notifications::list_my_notifications,
+        crate::handlers::v2::notifications::get_my_notification_unread_count,
+        crate::handlers::v2::notifications::update_my_notification,
+        crate::handlers::v2::notifications::mark_my_notifications_read,
+        crate::handlers::v2::notifications::dismiss_my_notifications,
+        crate::handlers::v2::notifications::get_my_notification_preferences,
+        crate::handlers::v2::notifications::update_my_notification_preferences,
+        crate::handlers::v2::notifications::register_my_push_endpoint,
+        crate::handlers::v2::notifications::remove_my_push_endpoint,
         crate::handlers::v2::spaces::create_meeting_space,
         crate::handlers::v2::spaces::list_meeting_spaces,
         crate::handlers::v2::spaces::get_meeting_space,
@@ -728,6 +738,7 @@ use utoipa::OpenApi;
         (name = "Chat", description = "In-meeting chat with hybrid real-time architecture.\n\n## Architecture\n- **LiveKit Data Channels**: Real-time message delivery via `publishData()` and `RoomEvent.DataReceived`\n- **REST API**: Message persistence and history loading for late joiners\n\n## Flow\n1. **Send**: POST /chat (persist) → LiveKit publishData() (broadcast)\n2. **Receive**: Listen to RoomEvent.DataReceived for instant delivery\n3. **Late Join**: GET /chat to load message history\n\n## Notes\n- Messages are **volatile** - automatically deleted when meeting ends\n- Only participants with 'joined' status can send/receive messages"),
         (name = "Users", description = "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete; needs the current password or a recent sign-in)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens\n- Administrators reactivate an account with `PATCH /api/v1/admin/users/{id}` (`status: active`)"),
         (name = "Webhooks", description = "**Deprecated** (Blueprint v1.0 Section 16, PLT-003). Legacy per-user meeting webhook registrations.\n\n## Nothing is delivered\nRegistrations are stored, but no event is ever delivered to a registered endpoint: the Meeting Service has no webhook dispatcher. The event types (`meeting_start`, `meeting_end`, `participant_join`, `participant_leave`) are accepted for compatibility only.\n\n## Deprecation\nEvery response carries `Deprecation` and `Sunset` headers. Removal still requires a measured zero-consumer window (register decision D-9).\n\n## Replacement\nUse Developer Platform webhooks (`/v1/environments/{environmentId}/webhooks`): signed delivery, delivery history, replay and secret rotation. Migration guide: `docs/api/legacy-meeting-webhooks-deprecation.md`."),
+        (name = "Notifications (v2)", description = "Document 4 §3.1: the signed-in user's notification inbox, unread count, notification preferences and push endpoints of the unified Notification Service, relayed like the Communications API: the Account session is verified here and the request is forwarded with the server-resolved account. Answers are the Notification Service's own (schemaVersion 1; Retry-After and ETag relayed; never codes, tokens, addresses, push handles, E2EE text or URLs). Answers 503 SERVICE_UNAVAILABLE until the relay is configured."),
         (name = "Meeting Spaces (v2)", description = "Phase 2 persistent meeting definitions. A MeetingSpace is not a live call. Owner is always the authenticated caller; meeting links/codes identify a meeting but never grant membership or roles."),
         (name = "Scheduling (v2)", description = "RFC 5545 recurrence interpreted in the meeting space timezone; bounded, idempotent occurrence materialization."),
         (name = "Conferences (v2)", description = "ConferenceSession lifecycle: CREATED → PREPARING → WAITING → LIVE → ENDING → ENDED (+ CANCELLED / FAILED). ENDED is reached only after provider termination (Part E)."),
@@ -758,7 +769,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.5.0",
+        version = "1.6.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",

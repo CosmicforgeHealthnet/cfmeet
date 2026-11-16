@@ -50,6 +50,9 @@ pub struct AppState {
     /// Blueprint Section 11: notification transport (the unified email ledger) and the
     /// recipient preference source (Communications Hub when configured).
     pub notifier: Arc<crate::services::notifications::Notifier>,
+    /// Document 4 §3.1: the Notification Service user relay (U1–U9 under
+    /// `/api/v2/notifications`; `None`: not configured, the routes answer 503).
+    pub notifications: Option<Arc<crate::services::notification_relay::NotificationsRelay>>,
 }
 
 impl AppState {
@@ -114,6 +117,7 @@ impl AppState {
             platform: None,
             email_webhook_secret: email_config.resend_webhook_secret.clone(),
             notifier,
+            notifications: None,
         }
     }
 

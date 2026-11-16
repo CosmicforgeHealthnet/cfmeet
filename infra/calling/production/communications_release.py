@@ -404,10 +404,17 @@ PUBLIC_INGRESS_MARKER='    # CFMEET PRIVATE ACCOUNT COMMUNICATIONS'
 PUBLIC_DENIALS=('    location ^~ /internal/v1/accounts/communications/ { return 404; }',
                 '    location ^~ /internal/operations/ { add_header X-CFMeet-Ingress denied always; return 404; }',
                 '    location = /internal/metrics { add_header X-CFMeet-Ingress denied always; return 404; }',
-                '    location = /internal/rtc/metrics { add_header X-CFMeet-Ingress denied always; return 404; }')
+                '    location = /internal/rtc/metrics { add_header X-CFMeet-Ingress denied always; return 404; }',
+                # Notification Service N6: the Meeting owner APIs X1 / X2 (signed service tokens
+                # only) are reached over the private TLS route; the public host refuses them.
+                '    location ^~ /internal/v1/accounts/notification-contacts/ { add_header X-CFMeet-Ingress denied always; return 404; }',
+                '    location ~ ^/internal/v1/conferences/[^/]+/notification-recipients/ { add_header X-CFMeet-Ingress denied always; return 404; }')
 # Paths a probe uses to prove each N0-6 denial (expects 404 + X-CFMeet-Ingress: denied).
+NOTIFICATION_OWNER_DENIAL_PROBES=('/internal/v1/accounts/notification-contacts/resolve',
+                                  '/internal/v1/conferences/00000000-0000-0000-0000-000000000000/notification-recipients/resolve')
 PUBLIC_DENIAL_PROBES=('/internal/operations/email/deliveries/00000000-0000-0000-0000-000000000000',
-                      '/internal/operations/email/acceptance','/internal/metrics','/internal/rtc/metrics')
+                      '/internal/operations/email/acceptance','/internal/metrics','/internal/rtc/metrics') \
+    + NOTIFICATION_OWNER_DENIAL_PROBES
 
 def public_ingress_config(previous):
     marker=PUBLIC_INGRESS_MARKER

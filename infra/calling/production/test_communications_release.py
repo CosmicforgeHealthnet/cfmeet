@@ -1,3 +1,4 @@
+import re
 import copy
 import json
 from pathlib import Path
@@ -204,8 +205,13 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
         for open_path in ('/internal/rtc/livekit/webhook','/internal/transcription/events','location ^~ /internal/ '):
             self.assertNotIn(open_path,candidate)
         self.assertEqual(release.public_ingress_config(candidate),candidate)
-        # Probes cover every new denial.
-        self.assertEqual(len(release.PUBLIC_DENIAL_PROBES),4)
+        # Probes cover every new denial (N0-6 operator routes, N6 Meeting owner routes X1 / X2).
+        self.assertEqual(len(release.PUBLIC_DENIAL_PROBES),6)
+        for probe in release.NOTIFICATION_OWNER_DENIAL_PROBES:self.assertIn(probe,release.PUBLIC_DENIAL_PROBES)
+        # The X2 denial is scoped to the notification-recipients route only.
+        x2=re.compile(r'^/internal/v1/conferences/[^/]+/notification-recipients/')
+        self.assertTrue(x2.match(release.NOTIFICATION_OWNER_DENIAL_PROBES[1]))
+        self.assertFalse(x2.match('/internal/v1/conferences/00000000-0000-0000-0000-000000000000/participants'))
 
     def test_public_ingress_upgrades_an_installed_communications_denial_in_place(self):
         # Production already has the marker with only the Communications rule.

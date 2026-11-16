@@ -16,6 +16,7 @@ pub mod conferences;
 pub mod engagement;
 pub mod invitations;
 pub mod members;
+pub mod notifications;
 pub mod organization_calling;
 pub mod organization_messaging;
 pub mod organizations;

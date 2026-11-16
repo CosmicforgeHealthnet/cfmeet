@@ -127,5 +127,114 @@ class Routing(unittest.TestCase):
         self.assertTrue(all(i == 'notifications' for _, i, _ in granted))
 
 
+class FakeRelayCr(FakeCr):
+    """Records probes, signing checks and the activation request of activate_relay."""
+
+    def __init__(self, statuses):
+        super().__init__([])
+        self.statuses = list(statuses)
+        self.probed, self.activations, self.checked = [], [], []
+        outer = self
+
+        class P:
+            NET = 'net'
+
+            @staticmethod
+            def run(*args):
+                outer.probed.append(args[-1])
+                return outer.statuses.pop(0)
+        self.p = P()
+        self.PROBE_IMAGE = 'curl'
+
+    def tls_route_present(self, port):
+        self.checked.append(('tls', port))
+
+    def private_url(self, port):
+        return 'https://api.cfmeet.com:%d' % port
+
+    def has_signing_identity(self, name):
+        self.checked.append(('signing', name))
+
+    def apply_activation(self, operation, sha, run_id, changes, post=None):
+        self.activations.append((operation, changes))
+        post()
+
+
+class Relay(unittest.TestCase):
+    def test_relay_grants_i2_to_meeting_on_both_replicas_only(self):
+        granted = [(r, i, p) for op, r, i, p in cr.GRANTS if op == 'activate-notifications-relay']
+        self.assertEqual(sorted(granted), [('notifications', 'meeting-service', ('notifications-user.forward',)),
+                                           ('notifications-2', 'meeting-service', ('notifications-user.forward',))])
+        self.assertIn('activate-notifications-relay', cr.OPERATIONS)
+        workflow = (cr.Path(__file__).resolve().parents[3] / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        self.assertIn('activate-notifications-relay', workflow)
+
+    def test_relay_points_meeting_at_the_private_route_and_probes_before_and_after(self):
+        fake = FakeRelayCr(['401', '401', '401', '401'])
+        no.activate_relay(fake, 'a' * 40, '42-1', '')
+        [(operation, changes)] = fake.activations
+        self.assertEqual(operation, 'activate-notifications-relay')
+        self.assertEqual(changes, [('meeting-service', {'CF_NOTIFICATIONS_BASE_URL': 'https://api.cfmeet.com:8456'})])
+        self.assertEqual(fake.probed, ['https://api.cfmeet.com:8456/internal/v1/notifications/dispatch',
+                                       'https://api.cfmeet.com:8448/api/v2/notifications/read',
+                                       'https://api.cfmeet.com:8448/api/v2/notifications/read',
+                                       'https://api.cfmeet.com:8456/internal/v1/notifications/dispatch'])
+        self.assertIn(('signing', 'meeting-service'), fake.checked)
+
+    def test_relay_refuses_when_an_image_does_not_serve_its_side(self):
+        for statuses in (['404'], ['401', '404'], ['401', '200']):
+            fake = FakeRelayCr(statuses)
+            with self.assertRaises(RuntimeError):
+                no.activate_relay(fake, 'a' * 40, '42-1', '')
+            self.assertEqual(fake.activations, [])
+
+    def test_a_relay_answering_after_activation_fails_the_step(self):
+        fake = FakeRelayCr(['401', '401', '503', '401'])
+        with self.assertRaises(RuntimeError):
+            no.activate_relay(fake, 'a' * 40, '42-1', '')
+
+
+class OwnerDenial(unittest.TestCase):
+    def fake(self, answers):
+        calls = []
+
+        class Release:
+            NOTIFICATION_OWNER_DENIAL_PROBES = cr.release.NOTIFICATION_OWNER_DENIAL_PROBES
+
+            @staticmethod
+            def secure_public_ingress():
+                calls.append('secure')
+
+        class P:
+            @staticmethod
+            def reload_host_nginx():
+                calls.append('reload')
+
+        class Fake:
+            release, p = Release, P
+            emitted = []
+
+            @staticmethod
+            def public_denial_probe(path):
+                calls.append(path)
+                return answers.pop(0)
+
+            def emit(self, kind, value):
+                self.emitted.append((kind, value))
+        return Fake(), calls
+
+    def test_owner_routes_are_denied_and_proven_before_activation(self):
+        fake, calls = self.fake([True, True])
+        no.deny_owner_routes_publicly(fake)
+        self.assertEqual(calls[:2], ['secure', 'reload'])
+        self.assertEqual(calls[2:], list(cr.release.NOTIFICATION_OWNER_DENIAL_PROBES))
+        self.assertEqual(fake.emitted[-1][0], 'publicOwnerDenial')
+
+    def test_a_reachable_owner_route_stops_the_activation(self):
+        fake, _ = self.fake([True, False])
+        with self.assertRaises(RuntimeError):
+            no.deny_owner_routes_publicly(fake)
+
+
 if __name__ == '__main__':
     unittest.main()

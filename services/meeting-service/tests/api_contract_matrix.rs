@@ -74,8 +74,9 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // Messaging relay GET / POST / PUT / PATCH / DELETE and its session tokens) + 11
     // Section 17 ORG-006 operations (teams, team members and policies relay) + the
     // organization Messaging member resolution + Q&A restore + 13 multi-device policy
-    // operations (device policy, devices, declaration, revocation, linking, security log).
-    assert_eq!(probed, 220, "all v2 operations probed");
+    // operations (device policy, devices, declaration, revocation, linking, security log) +
+    // 9 Document 4 §3.1 Notification Service user operations (U1–U9 relay).
+    assert_eq!(probed, 229, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.
