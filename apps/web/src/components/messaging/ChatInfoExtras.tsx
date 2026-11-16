@@ -44,7 +44,8 @@ export default function ChatInfoExtras({ conversationId, direct, groupTitle }: {
   const current = !p ? "ALL" : p.effectiveNotifications === "MUTED" && !p.mutedUntil ? "MUTED" : p.effectiveNotifications;
   const items = media.data?.data ?? [];
   const counts = items.reduce<Record<string, number>>((acc, m) => ({ ...acc, [m.mediaClass]: (acc[m.mediaClass] ?? 0) + 1 }), {});
-  const groups = (shared.data?.groups ?? []).map((g) => groupTitle(g.conversationId)).filter((t): t is string => !!t);
+  // The server's title (MANAGED groups both of you are in) first, then this device's own name for it.
+  const groups = (shared.data?.groups ?? []).map((g) => g.title || groupTitle(g.conversationId)).filter((t): t is string => !!t);
 
   return (
     <>
@@ -72,7 +73,7 @@ export default function ChatInfoExtras({ conversationId, direct, groupTitle }: {
                     <li key={m.attachmentId} className="flex items-center gap-3 rounded-xl px-1 py-1.5">
                       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"><Icon className="size-4" /></span>
                       <span className="min-w-0 flex-1 text-sm">
-                        <span className="block truncate">{(CLASS_LABEL[m.mediaClass] ?? ["File"])[0].replace(/^./, (c) => c.toUpperCase())}</span>
+                        <span className="block truncate">{m.fileName || (CLASS_LABEL[m.mediaClass] ?? ["File"])[0].replace(/^./, (c) => c.toUpperCase())}</span>
                         <span className="block text-xs text-muted-foreground">{[size(m.sizeBytes), new Date(m.createdAt).toLocaleDateString([], { day: "numeric", month: "short" })].filter(Boolean).join(" · ")}</span>
                       </span>
                     </li>
