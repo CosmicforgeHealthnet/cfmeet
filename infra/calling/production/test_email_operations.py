@@ -51,6 +51,15 @@ class LogEvidence(unittest.TestCase):
         self.assertEqual(r['providerAccepted']['count'], 1)
         self.assertNotIn('ada@example.com', json.dumps(r))
 
+    def test_ledger_purge_failures_are_counted_with_their_last_time(self):
+        text = ('2026-11-16T12:20:00.1Z WARN email ledger purge failed: Database error: function '
+                'make_interval(days => bigint) does not exist\n'
+                '2026-11-16T13:20:00.1Z WARN email ledger purge failed: Database error: function '
+                'make_interval(days => bigint) does not exist\n'
+                '2026-11-16T14:20:05.0Z INFO email worker started\n')
+        r = mail.scan(text, 24)
+        self.assertEqual(r['ledgerPurgeFailed'], {'count': 2, 'first': '2026-11-16T12:20:00', 'last': '2026-11-16T13:20:00'})
+
 
 class Diagnose(unittest.TestCase):
     def run_diagnose(self, ledger_present):
