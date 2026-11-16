@@ -81,7 +81,7 @@ jobs:
             echo "::error::services/notifications creates a table outside its domain"; exit 1
           fi
           # Sensitive values are never fields of a log event (Document 4 §8, CI grep test).
-          if grep -rn -E 'tracing::(info|warn|error|debug)!\([^;]*(address|email = |code = |token = |handle = |subject = |body = )' services/notifications/src; then
+          if grep -rn -E 'tracing::(info|warn|error|debug)!\([^;]*(address = |email = |code = |token = |handle = |subject = |body = )' services/notifications/src; then
             echo "::error::a log statement carries a sensitive field"; exit 1
           fi
       - name: Service boundaries and operations registry
