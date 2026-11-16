@@ -3044,12 +3044,17 @@ impl VoiceStack {
         .unwrap()
     }
 
-    /// `endpoint`'s RINGING invitation of the call view, if any.
+    /// `endpoint`'s live (PENDING or RINGING) invitation of the call view, if any. An offer is
+    /// PENDING until the endpoint's device acknowledges receipt; the application's accept is
+    /// itself proof of receipt.
     fn invitation(view: &Value, endpoint: Uuid) -> Option<Value> {
         view["invitations"]
             .as_array()?
             .iter()
-            .find(|i| i["endpointId"] == endpoint.to_string() && i["status"] == "RINGING")
+            .find(|i| {
+                i["endpointId"] == endpoint.to_string()
+                    && (i["status"] == "PENDING" || i["status"] == "RINGING")
+            })
             .cloned()
     }
 
