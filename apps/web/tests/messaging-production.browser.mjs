@@ -241,8 +241,8 @@ test("production: sign in, choose a contact, chat — encryption automatic and i
   pass("calling_endpoint_registered_by_web_app");
   await a2.page.locator("[data-testid=profile-menu-toggle]:visible").first().click();
   await a2.page.click("[data-testid=logout-open]");
-  const revoked = a2.page.waitForResponse((r) => new URL(r.url()).origin === "https://api.cfmeet.com"
-    && new URL(r.url()).pathname === `/v1/calling/endpoints/${endpointId}`
+  const revoked = a2.page.waitForResponse((r) => new URL(r.url()).origin === new URL(WEB).origin
+    && new URL(r.url()).pathname === `/api/calling/v1/calling/endpoints/${endpointId}`
     && r.request().method() === "DELETE", { timeout: T });
   await a2.page.click("[data-testid=logout-confirm]");
   const revokeResponse = await revoked;
