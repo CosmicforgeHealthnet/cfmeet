@@ -4,7 +4,7 @@
 **Supersedes** the activation and closure tables of: `CFMEET_ALL_FEATURES_ACTIVATION_CLOSURE.md` (2026-11-12), `CFMEET_FINAL_PRODUCTION_COMPLETION.md` (2026-11-13), `CFMEET_ORGANIZATIONS_AND_MESSAGING_PRODUCTION_COMPLETION.md` (2026-11-13), `CFMEET_FIRST_PARTY_ACTIVATION_FINAL_REPORT.md` (2026-11-14) and `CFMEET_FIRST_PARTY_BACKEND_ENGINEERING_CLOSURE.md` (2026-11-15). Those documents remain as history; where they disagree with this one, this one reflects production today.
 **Notification Service** status is owned by [Document 10](../audits/notification-service/10-engineering-report-n2-n15.md) and is only summarised here.
 
-<!-- EVIDENCE: filled in after the release (see §5) -->
+**Released backend:** `main` `13aed262` (coordinated release [43967106423](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43967106423)). **Final `certify`:** [43978199476](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43978199476), **`CERTIFIED_READ_ONLY`**.
 
 ## 0. Verdict
 
@@ -70,7 +70,7 @@ The evidence column cites the activation run or the acceptance run that proves t
 | Meetings | Conference realtime, waiting room, webinar mode, collaboration, quality telemetry, RTC provider control | `FEATURE_CONFERENCE_REALTIME_ENABLED`, `FEATURE_WEBINAR_MODE_ENABLED`, `FEATURE_QUALITY_TELEMETRY_ENABLED`, `FEATURE_RTC_PROVIDER_CONTROL_V2` = true | first-party features 42730700547; Meetings 22/22 |
 | Meetings | Meeting and organization notification email (ledger, categories, idempotency) | `NOTIFICATIONS_EMAIL_ENABLED=true`, provider SMTP | delivery currently fails at the SMTP provider (§4, A1) |
 | Organizations | Authority, provisioning, event delivery to the Meeting Service, automatic Calling and Messaging bindings | authoritative; `ORGANIZATIONS_PROVISIONING_ENABLED`, `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` = true | `activate-provisioning` 42709421203, `activate-org-events` 42710192324, `org-cutover-first-activation` 43479482331, `activate-organization-bindings` (journaled); certify `organizationsEventDelivery` PASS |
-| Organizations | Organizations, memberships, invitations, teams, policies, lifecycle, audit, workspaces | on | Organization acceptance (§5) |
+| Organizations | Organizations, memberships, invitations, teams, policies, lifecycle, audit, workspaces | on | Organization acceptance 18/18 (43977766389) |
 | Organizations | Organization Enterprise Calling and Messaging | `ENTERPRISE_CALLING_ENABLED=true`, `ORGANIZATION_CALLING_SCOPE=organization` | `activate-enterprise-calling` 43482739979; Enterprise Calling 21/21 (43702221217); Organizations and Messaging 18/18 (43708792961) |
 | Calling | Personal app calling, LiveKit media, offers acknowledged by devices, cancelled-call history, media-admission retry | `CALLING_APP_CALLING_ENABLED`, `CALLING_NEW_CALLS_ENABLED` = true | personal calling 24/24 (43709750585); issue verification 43947118829 |
 | Calling | Voice-to-video upgrade, screen sharing, add participants to a call | on (`CALLING_SCREEN_SHARE_ENABLED` default on) | issue verification 43947118829: C5, C6 and C7 PASS |
@@ -172,12 +172,25 @@ None of these is reachable on the public host: certify probes 25 internal, opera
 | APNs (iOS) and FCM (Android) push | Apple `.p8` key and team/key ids; Firebase service account | not configured; Web Push active |
 | Speech-to-text and AI summaries | a contracted provider | not contracted |
 | HealthNet appointment authorization | HealthNet endpoint and token, plus DPIA | not configured |
-| Developer production-access reviewers | owner: `CFMEET_PRODUCTION_ACCESS_REVIEWERS` | not set (§5) |
+| Developer production-access reviewers | owner: `CFMEET_PRODUCTION_ACCESS_REVIEWERS` (`github-<login>=<CF Meet user id>`), then re-run `activate-production-access-review` | not set: activation attempt 43977552227 refused before the VPS |
 | Key-transparency witness; independent cryptographic assessment | external parties | not performed (owner release decision records both) |
 
 ## 5. CI, deployment and certification evidence
 
-<!-- EVIDENCE TABLE -->
+| Step | Run | Result |
+|---|---|---|
+| Production audit (feature flags of every service) | certify [43919862343](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43919862343) | input to §2 |
+| PR [#89](https://github.com/CosmicforgeHealthnet/cfmeet/pull/89): Organizations Swagger document and backup drill fix | merged `13aed262` | 25 of 25 PR workflow runs succeeded |
+| Backup and restore drill on the PR branch | [43964011191](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43964011191) | success (it had failed on every push to `main` since the Notification Service joined the catalog) |
+| Coordinated release of `13aed262` | [43967106423](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43967106423) | gate passed on green `main` CI; only Calling and the Meeting Service replaced (their build inputs changed); verify passed, violations `[]` |
+| Live Swagger check (public, unauthenticated) | — | selector lists 10 documents including Organizations; `/api-docs/organizations.json` serves 44 operations in 11 sections; Meetings serves 224 with no organization path; `/api-docs/organizations-internal.json` answers 404 |
+| `activate-production-access-review` | [43977552227](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43977552227) | refused before the VPS: `CFMEET_PRODUCTION_ACCESS_REVIEWERS` is not set; nothing changed |
+| `organization-acceptance` (public API only, fresh acceptance accounts, organizations archived afterwards) | [43977766389](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43977766389) | **18/18 PASS**: creation, automatic provisioning, owner workspace, invitation by the invitee only, teams, organization Messaging (members, messages, unread, attachments, realtime), cross-organization isolation, Enterprise Calling permissions and isolation, audit, immediate revocation, suspension fails closed and reactivation restores, archival, personal messaging unaffected, idempotent retry |
+| **Final `certify`** | [43978199476](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43978199476) | **`CERTIFIED_READ_ONLY`**: 15 of 15 services PASS (running revision, readiness, database, migrations, anonymous refusal, service identity, reachability); provider safe defaults PASS, violations `[]`; Organizations event delivery PASS (94 delivered, 0 failures); 10 of 10 public OpenAPI documents including `/api-docs/organizations.json`; 25 internal, operator and callback routes refused publicly; failures: none |
+
+Deployed topology at certification: Calling and Meeting Service `13aed262`; Messaging `44a2e9e2`; Organizations, Notifications (both replicas) and Numbering `c0714bac`; Communications `b8fefc2f`; API Gateway `3c440890`; Platform Access, Developer Platform (and worker), Privacy Relay, SMS Gateway and Telephony `163be40b`. The release replaces only services whose build inputs changed.
+
+Earlier evidence that still applies (code unchanged since): server-bug fixes C1 to C7 verified in [43947118829](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43947118829); E2EE 16/16, real-website Messaging 11/11, Enterprise Calling 21/21, personal Calling 24/24, Meetings 22/22, recording 12/12 and Developer Platform 30/30 (§2.1).
 
 ## 6. Work still under development (not complete)
 
