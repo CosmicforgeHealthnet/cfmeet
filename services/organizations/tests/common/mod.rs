@@ -208,6 +208,8 @@ pub struct Peers {
     pub operator: Arc<ServiceTokenSigner>,
     /// A key nobody trusts, claiming to be the Meeting Service.
     pub rogue_meeting: Arc<ServiceTokenSigner>,
+    /// The Notification Service: `organization-invitations.read` only (X5).
+    pub notifications: Arc<ServiceTokenSigner>,
 }
 
 pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
@@ -215,6 +217,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
     let meeting = key("meeting-test-1");
     let messaging = key("messaging-test-1");
     let operator = key("operator-test-1");
+    let notifications = key("notifications-test-1");
     let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| {
         json!({
             "issuer": id,
@@ -237,6 +240,9 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             issuer(cf_service_auth::services::OPERATOR_CONSOLE, &operator, &[
                 "organization.administer", "organization.migrate",
             ]),
+            issuer(cf_service_auth::services::NOTIFICATIONS, &notifications, &[
+                "organization-invitations.read",
+            ]),
         ],
     })
     .to_string();
@@ -249,6 +255,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             messaging: signer(ServiceId::messaging(), messaging),
             operator: signer(ServiceId::operator_console(), operator),
             rogue_meeting: signer(ServiceId::meeting_service(), key("meeting-test-1")),
+            notifications: signer(ServiceId::notifications(), notifications),
         },
     )
 }

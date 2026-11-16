@@ -476,7 +476,12 @@ impl Processor {
             let action = match job.route.route_category {
                 "CONTACT_REQUESTS" if job.event_type.ends_with("connected") => "CONTACT_CONNECTED",
                 "CONTACT_REQUESTS" => "CONTACT_REQUEST",
-                "MESSAGE_WAKEUPS" => "MESSAGE",
+                // Direct messages use the Hub's direct-message rule; group messages the
+                // group rule (no contact needed; blocks and holds still apply).
+                "MESSAGE_WAKEUPS" if pref_override == Some(PrefCategory::DirectMessages) => {
+                    "MESSAGE"
+                }
+                "MESSAGE_WAKEUPS" => "OTHER",
                 "GROUP_INVITATIONS" => "GROUP_INVITATION",
                 "MISSED_CALLS" | "VOICEMAIL" => "CALL",
                 _ => "OTHER",

@@ -110,6 +110,7 @@ pub fn app(state: AppState) -> Router {
             Router::new()
                 .nest("/delegated", delegated)
                 .merge(crate::communications::routes())
+                .merge(crate::notifications::routes())
                 .merge(crate::integrations::http::internal_routes())
                 .merge(crate::sms_bridge::http::internal_routes())
                 .fallback(not_found)

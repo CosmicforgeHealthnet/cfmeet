@@ -2,6 +2,7 @@
 //!
 //! HTTP handlers for admin-only operations.
 
+use crate::validation::ValidateRequest;
 use axum::{
     extract::{Path, Query, State},
     Extension, Json,
@@ -10,7 +11,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set,
 };
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::{
     dto::{
@@ -237,9 +237,7 @@ pub async fn update_user(
 ) -> ApiResult<Json<AdminUserApiResponse>> {
     require_admin(&auth_context)?;
 
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     let user = Users::find_by_id(id)
         .one(&state.db)

@@ -11,6 +11,7 @@ import { useAccountProfile, useAccountSessions, useRevokeAccountSession } from "
 import { accountService } from "@/services/account.service";
 import { authService } from "@/services/auth.service";
 import { apiErrorOf, passwordProblem } from "@/lib/account/account-core";
+import { validationMessageOf } from "@/lib/validation-errors";
 import type { SessionRecord } from "@/types/generated/meeting-service";
 
 /** Settings → Security: password change (forced re-login) and account sessions (ACC-007). */
@@ -70,7 +71,7 @@ function ChangePassword() {
       await authService.forgetLocalSession();
       router.replace("/login?reason=password_changed");
     } catch (cause) {
-      setError(apiErrorOf(cause).message ?? "Your password could not be changed.");
+      setError(validationMessageOf(cause) ?? apiErrorOf(cause).message ?? "Your password could not be changed.");
       setPending(false);
     } finally {
       setCurrent("");

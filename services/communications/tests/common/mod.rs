@@ -443,6 +443,8 @@ pub struct Harness {
     pub account_signer: Arc<ServiceTokenSigner>,
     pub calling_signer: Arc<ServiceTokenSigner>,
     pub operator: Arc<ServiceTokenSigner>,
+    /// The Notification Service: `communications-restrictions.read` only (X4).
+    pub notifications: Arc<ServiceTokenSigner>,
     admin: DatabaseConnection,
     name: String,
     server: tokio::task::JoinHandle<()>,
@@ -493,6 +495,7 @@ impl Harness {
         let account_signer = signer(ServiceId::meeting_service(), key("account-test"));
         let calling_signer = signer(ServiceId::calling(), key("calling-test"));
         let operator = signer(ServiceId::operator_console(), key("operator-test"));
+        let notifications = signer(ServiceId::notifications(), key("notifications-test"));
         let verifiers = vec![
             verifier(
                 ServiceId::platform_access(),
@@ -586,6 +589,11 @@ impl Harness {
                         "communications-profile.suspend",
                     ],
                 ),
+                (
+                    ServiceId::notifications(),
+                    notifications.public_jwk(),
+                    vec!["communications-restrictions.read"],
+                ),
             ],
         );
         let state = State {
@@ -620,6 +628,7 @@ impl Harness {
             available,
             calling_signer,
             operator,
+            notifications,
             admin,
             name,
             server,

@@ -1822,9 +1822,10 @@ class ErrorBody {
   const ErrorBody.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ErrorBody.create({required ErrorCode code, required String message, String? requestId, int? retryAfterSeconds}) =>
+  factory ErrorBody.create({required ErrorCode code, List<ValidationIssue>? details, required String message, String? requestId, int? retryAfterSeconds}) =>
       ErrorBody.fromJson(<String, Object?>{
         'code': code,
+        if (details != null) 'details': details.map((e) => e.toJson()).toList(),
         'message': message,
         if (requestId != null) 'requestId': requestId,
         if (retryAfterSeconds != null) 'retryAfterSeconds': retryAfterSeconds,
@@ -1834,6 +1835,9 @@ class ErrorBody {
   final Map<String, Object?> json;
 
   ErrorCode get code => json['code']! as String;
+
+  /// Present on `VALIDATION_ERROR` when the request body failed field validation: one entry per problem, naming the public JSON field (`message` still summarises them as `field: message` lines for older clients).
+  List<ValidationIssue>? get details => json['details'] == null ? null : (json['details']! as List<Object?>).map((e) => ValidationIssue.fromJson(e! as Map<String, Object?>)).toList();
 
   /// Safe, human-readable message (never SQL, provider bodies, secrets or paths).
   String get message => json['message']! as String;
@@ -5584,6 +5588,34 @@ class UpdateMemberRequest {
   Role get role => json['role']! as String;
 
   int get version => (json['version']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// One request-validation problem.
+class ValidationIssue {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ValidationIssue.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ValidationIssue.create({required String code, required String? field, required String message}) =>
+      ValidationIssue.fromJson(<String, Object?>{
+        'code': code,
+        'field': field,
+        'message': message,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Stable, machine-readable rule code, e.g. `length`, `email`, `regex`, `password_strength`, `passwords_mismatch`.
+  String get code => json['code']! as String;
+
+  /// Public JSON path of the offending field, as sent by the client (honours the request's serde naming), e.g. `password`, `displayName`, `items(0).email`. `null` when the problem concerns the request as a whole.
+  String? get field => json['field'] as String?;
+
+  /// Safe, human-readable message for this field.
+  String get message => json['message']! as String;
 
   Map<String, Object?> toJson() => json;
 }

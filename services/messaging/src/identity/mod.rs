@@ -475,7 +475,22 @@ pub trait PrincipalDirectory: Send + Sync {
         scope: &OwnerScope,
         principal_id: Uuid,
     ) -> Result<PrincipalStatus, AuthorityUnavailable>;
+
+    /// The external reference of each of `principals` that is an ACTIVE NATIVE_CF_USER of
+    /// `scope` (a CF Meet account principal: `cfmeet-user:<account id>`, set by the
+    /// account authority). Principals of any other kind, inactive or unknown, are absent.
+    /// Callers still validate the reference's shape. Default: none known.
+    async fn native_user_references(
+        &self,
+        _scope: &OwnerScope,
+        _principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>, AuthorityUnavailable> {
+        Ok(std::collections::HashMap::new())
+    }
 }
+
+/// Most principals in one Platform Access resolution request.
+pub const RESOLVE_BATCH: usize = 50;
 
 /// Platform Access (`POST /internal/v1/principals/resolve`, `platform-principal.resolve`,
 /// signed delegated context of the trusted scope).
@@ -541,6 +556,69 @@ impl PrincipalDirectory for PlatformAccessPrincipals {
             _ => Err(AuthorityUnavailable("unknown resolution outcome".into())),
         }
     }
+
+    async fn native_user_references(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>, AuthorityUnavailable> {
+        let mut out = std::collections::HashMap::new();
+        let environment = scope.environment_id.to_string();
+        for batch in principals.chunks(RESOLVE_BATCH) {
+            let request = OutboundServiceRequest::new_operation(platform_access())
+                .with_delegated_context(scope.delegated());
+            let references: Vec<Value> =
+                batch.iter().map(|p| json!({ "principalId": p })).collect();
+            let response = self
+                .client
+                .post_json(
+                    &request,
+                    "/internal/v1/principals/resolve",
+                    &json!({ "references": references }),
+                )
+                .await
+                .map_err(unavailable)?;
+            if response.status() != 200 {
+                return Err(AuthorityUnavailable(format!(
+                    "HTTP {} {}",
+                    response.status(),
+                    response.error_code().unwrap_or_default()
+                )));
+            }
+            let body: Value = response
+                .json()
+                .map_err(|_| AuthorityUnavailable("malformed resolution response".into()))?;
+            let results = body["results"]
+                .as_array()
+                .filter(|r| r.len() == batch.len())
+                .ok_or_else(|| AuthorityUnavailable("malformed resolution response".into()))?;
+            for (asked, result) in batch.iter().zip(results) {
+                match result["outcome"].as_str() {
+                    Some("RESOLVED") => {
+                        // Defence in depth, as in `resolve`.
+                        let p = &result["principal"];
+                        if p["id"].as_str() != Some(asked.to_string().as_str())
+                            || p["environmentId"].as_str() != Some(environment.as_str())
+                        {
+                            return Err(AuthorityUnavailable(
+                                "inconsistent principal resolution".into(),
+                            ));
+                        }
+                        if let (Some("NATIVE_CF_USER"), Some("ACTIVE"), Some(reference)) = (
+                            p["kind"].as_str(),
+                            p["status"].as_str(),
+                            p["externalReference"].as_str(),
+                        ) {
+                            out.insert(*asked, reference.chars().take(255).collect());
+                        }
+                    }
+                    Some("INACTIVE" | "NOT_FOUND" | "INVALID_REFERENCE") => {}
+                    _ => return Err(AuthorityUnavailable("unknown resolution outcome".into())),
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// An authority / directory that is not configured: everything fails closed.
@@ -562,6 +640,16 @@ impl PrincipalDirectory for Unconfigured {
         _scope: &OwnerScope,
         _principal_id: Uuid,
     ) -> Result<PrincipalStatus, AuthorityUnavailable> {
+        Err(AuthorityUnavailable(
+            "no principal directory is configured".into(),
+        ))
+    }
+
+    async fn native_user_references(
+        &self,
+        _scope: &OwnerScope,
+        _principals: &[Uuid],
+    ) -> Result<std::collections::HashMap<Uuid, String>, AuthorityUnavailable> {
         Err(AuthorityUnavailable(
             "no principal directory is configured".into(),
         ))
