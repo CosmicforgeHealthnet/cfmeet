@@ -51,6 +51,9 @@ FAILURE_SIGNATURES = {
     'providerAccepted': re.compile(r'email accepted by provider'),
     'providerTemporary': re.compile(r'email delivery failed temporarily'),
     'providerRejected': re.compile(r'email rejected permanently|email not delivered'),
+    # A2: the hourly email-ledger clean-up (make_interval typing); its last failure must
+    # predate the release that fixed it.
+    'ledgerPurgeFailed': re.compile(r'email ledger purge failed'),
 }
 TIMESTAMP = re.compile(r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)')
 
