@@ -72,6 +72,12 @@
     {
       "domain": "calling",
       "method": "POST",
+      "path": "/v1/calling/invitations/{invitation_id}/acknowledge",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
       "path": "/v1/calling/invitations/{invitation_id}/accept",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -150,6 +156,12 @@
       "domain": "calling",
       "method": "POST",
       "path": "/v1/calls/{call_id}/abuse-reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/acknowledge",
       "class": "PUBLIC_CUSTOMER"
     },
     {

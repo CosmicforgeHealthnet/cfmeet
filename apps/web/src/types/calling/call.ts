@@ -155,6 +155,17 @@ export interface AcceptResult {
   callAnswered: boolean;
 }
 
+/** POST /v1/calling/invitations/{id}/acknowledge: the device received the offer (C1). */
+export interface AcknowledgeResult {
+  invitationId: Uuid;
+  callId: Uuid;
+  status: "PENDING" | "RINGING";
+  ringingAt: string | null;
+  expiresAt: string;
+  callState: CallState;
+  callVersion: number;
+}
+
 export interface DeclineResult {
   call: CallSummary;
   invitationId: Uuid;

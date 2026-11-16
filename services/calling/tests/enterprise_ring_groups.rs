@@ -114,7 +114,7 @@ fn live_endpoints(view: &Value) -> Vec<String> {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|i| i["status"] == "RINGING")
+        .filter(|i| i["status"] == "RINGING" || i["status"] == "PENDING")
         .map(|i| i["endpointId"].as_str().unwrap().to_string())
         .collect()
 }

@@ -134,10 +134,10 @@ async fn call_creation_and_authorization_throughput() {
     assert_eq!(report.error_rate, 0.0);
     assert!(report.max_db_connections <= POOL);
     // Invariants: one Call per request, each authorized exactly once by Privacy Relay
-    // with its decision recorded, every Call ringing.
+    // with its decision recorded, every Call offered (DIALING until a device acknowledges).
     assert!(responses
         .iter()
-        .all(|r| r.json["call"]["state"] == "RINGING"));
+        .all(|r| r.json["call"]["state"] == "DIALING"));
     let total = (n + n2) as i64;
     assert_eq!(
         scalar_i64(a.h().conn(), "SELECT count(*) FROM calls").await,
@@ -199,7 +199,7 @@ async fn concurrent_multi_device_ringing_fanout() {
                 a.h().conn(),
                 &format!(
                     "SELECT count(DISTINCT endpoint_id) FROM call_invitations \
-                      WHERE call_id = '{call}' AND status = 'RINGING'"
+                      WHERE call_id = '{call}' AND status = 'PENDING'"
                 )
             )
             .await,

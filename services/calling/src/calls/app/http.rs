@@ -52,6 +52,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/calls", post(create_call))
         .route("/v1/calls/:call_id/actions", get(available_actions))
+        .route("/v1/calls/:call_id/acknowledge", post(acknowledge))
         .route("/v1/calls/:call_id/accept", post(accept))
         .route("/v1/calls/:call_id/decline", post(decline))
         .route("/v1/calls/:call_id/cancel", post(cancel))
@@ -438,6 +439,39 @@ async fn invitation_command(
         }
     };
     Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AcknowledgeBody {
+    invitation_id: Uuid,
+    endpoint_id: Uuid,
+}
+
+/// The application backend acknowledges receipt of a ring offer for one of its endpoints
+/// (C1; the endpoint itself uses POST /v1/calling/invitations/{id}/acknowledge).
+async fn acknowledge(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    body: Result<Json<AcknowledgeBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_id = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let actor = InvitationActor::Backend {
+        cmd: CallCommandContext::customer(&ctx),
+        endpoint_id: CallEndpointId::from_uuid(body.endpoint_id),
+    };
+    let result = state
+        .app
+        .acknowledge_invitation(
+            actor,
+            Some(CallId::from_uuid(call_id)),
+            CallInvitationId::from_uuid(body.invitation_id),
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, result, false))
 }
 
 async fn accept(

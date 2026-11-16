@@ -294,7 +294,7 @@ async fn terminal_calls_are_minimized_after_the_bound_and_their_evidence_is_kept
     assert!(display_names(&a, live)
         .await
         .contains(&Some("Grace Hopper".to_string())));
-    assert_eq!(a.call_view(live).await["state"], "RINGING");
+    assert_eq!(a.call_view(live).await["state"], "DIALING");
     // Evidence: nothing deleted, the Call's state / version / events / usage unchanged.
     assert_eq!(evidence(&a).await, before);
     assert_eq!(call_facts(&a, ended).await, facts);

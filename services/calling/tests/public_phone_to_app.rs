@@ -213,7 +213,8 @@ async fn a_phone_calls_a_relay_number_and_an_app_user_answers() {
     x.configure_owner().await;
     let (call, leg, t) = x.ringing().await;
     let (state, _) = x.w.state(call).await;
-    assert_eq!(state, CallState::Ringing);
+    // Offered to the app user's device (DIALING until it acknowledges receipt, C1).
+    assert_eq!(state, CallState::Dialing);
     // One canonical Call: the caller is a TELEPHONE_ENDPOINT principal referencing only
     // the opaque ContactReference; the recipient rings on its endpoint.
     let origin = scalar_i64(

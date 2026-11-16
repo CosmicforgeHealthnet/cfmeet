@@ -458,10 +458,14 @@ async fn password_reset_with_a_valid_code_ends_every_earlier_session() {
             .try_get("", "text_body")
             .unwrap()
     };
+    // The code is the line that is exactly six digits. (Not "the first 6-digit run":
+    // the greeting names the user, whose generated username `u_<10 hex>` contains a
+    // 6-digit run in ~7% of runs, which made this test intermittently fail.)
     let code = text
-        .split(|c: char| !c.is_ascii_digit())
-        .find(|w| w.len() == 6)
-        .expect("the reset email carries the code")
+        .lines()
+        .map(str::trim)
+        .find(|l| l.len() == 6 && l.bytes().all(|b| b.is_ascii_digit()))
+        .expect("the reset email carries the code on its own line")
         .to_string();
     let new_password = "Reset!Passw0rd-long";
     let body = |token: &str| {

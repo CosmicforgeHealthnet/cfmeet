@@ -238,7 +238,7 @@ async fn the_public_inbound_switch_refuses_new_inbound_calls_only() {
     let r = inbound(&x).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     let live: Uuid = r.json["callId"].as_str().unwrap().parse().unwrap();
-    assert_eq!(x.w.state(live).await.0, CallState::Ringing);
+    assert_eq!(x.w.state(live).await.0, CallState::Dialing);
     redeploy(&mut x, |rt| rt.public_network.flags.public_inbound = false);
     let calls = x.count("SELECT count(*) FROM calls").await;
     let r = inbound(&x).await;
