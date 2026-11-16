@@ -1499,6 +1499,25 @@ async fn app_calling_responses_signals_and_pushes_validate_against_the_contracts
     assert_eq!(r.status, StatusCode::OK, "{} {bob_token}", r.text);
     conforms(&r, "/v1/calling/invitations", "get");
     let invitation = a.invitation_for(call, bob_1.endpoint).await.unwrap();
+    // Device 1 acknowledges receipt (C1): PENDING → RINGING; repeating it is a no-op.
+    for _ in 0..2 {
+        let r = a
+            .as_endpoint(
+                &bob_token,
+                Method::POST,
+                &format!("/v1/calling/invitations/{invitation}/acknowledge"),
+                None,
+                &[],
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        assert_eq!(r.json["status"], "RINGING", "{}", r.text);
+        conforms(
+            &r,
+            "/v1/calling/invitations/{invitation_id}/acknowledge",
+            "post",
+        );
+    }
     let (_, version) = a.state(call).await;
     let r = a
         .as_endpoint(

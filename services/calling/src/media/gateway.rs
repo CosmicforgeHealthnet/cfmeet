@@ -60,6 +60,9 @@ pub enum ConnectionDenied {
     SessionRevoked,
     /// The credential's generation is not the session's current generation.
     StaleGeneration,
+    /// The Communications policy denies this personal call to the participant now (a
+    /// block, revoked credentials, withdrawn authorization). A decision, not an outage.
+    PolicyDenied,
     /// Authoritative state could not be read: refuse (fail closed).
     Unavailable,
 }
@@ -72,6 +75,7 @@ impl ConnectionDenied {
             ConnectionDenied::ForeignResource => "FOREIGN_RESOURCE",
             ConnectionDenied::SessionRevoked => "SESSION_REVOKED",
             ConnectionDenied::StaleGeneration => "STALE_GENERATION",
+            ConnectionDenied::PolicyDenied => "POLICY_DENIED",
             ConnectionDenied::Unavailable => "UNAVAILABLE",
         }
     }

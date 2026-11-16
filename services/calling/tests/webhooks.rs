@@ -226,7 +226,8 @@ impl World {
         let caller = a
             .device(&a.w.initiator, &format!("c-{}", Uuid::new_v4().simple()))
             .await;
-        a.device(&a.w.recipient, &format!("r-{}", Uuid::new_v4().simple()))
+        let callee = a
+            .device(&a.w.recipient, &format!("r-{}", Uuid::new_v4().simple()))
             .await;
         let r = a
             .create_call(
@@ -238,7 +239,12 @@ impl World {
             )
             .await;
         assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
-        r.json["call"]["callId"].as_str().unwrap().parse().unwrap()
+        // The callee's device receives the offer: it (and the Call) ring (C1).
+        let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+        let offer = a.invitation_for(call, callee.endpoint).await.unwrap();
+        let ack = a.acknowledge_for(call, offer, &callee).await;
+        assert_eq!(ack.status, StatusCode::OK, "{}", ack.text);
+        call
     }
 }
 

@@ -401,7 +401,8 @@ async fn a_dcn_routed_to_a_principal_rings_it_without_a_privacy_relay_session() 
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     assert_eq!(r.json["routeClass"], "PSTN_TO_APP");
     let call: Uuid = r.json["callId"].as_str().unwrap().parse().unwrap();
-    assert_eq!(x.a().state(call).await.0, CallState::Ringing);
+    // Offered to the principal's devices (DIALING until one acknowledges receipt, C1).
+    assert_eq!(x.a().state(call).await.0, CallState::Dialing);
     assert!(x
         .a()
         .invitation_for(call, x.callee.endpoint)
@@ -774,7 +775,8 @@ async fn a_synthetic_dcn_over_the_synthetic_test_interconnect_rings_the_principa
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     assert_eq!(r.json["routeClass"], "PSTN_TO_APP");
     let call: Uuid = r.json["callId"].as_str().unwrap().parse().unwrap();
-    assert_eq!(x.a().state(call).await.0, CallState::Ringing);
+    // Offered to the principal's devices (DIALING until one acknowledges receipt, C1).
+    assert_eq!(x.a().state(call).await.0, CallState::Dialing);
     assert!(x
         .a()
         .invitation_for(call, x.callee.endpoint)

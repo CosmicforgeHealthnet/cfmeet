@@ -746,11 +746,22 @@ impl AppCallService {
             | CallState::Connected
             | CallState::Held
             | CallState::Transferring => {
-                let call = self
+                let applied = self
                     .calls
                     .transition_in(txn, &cmd, &call, call.version, CallAction::RequestEnd)
-                    .await?
-                    .call;
+                    .await?;
+                let call = applied.call;
+                for invitation in &applied.cancelled_invitations {
+                    self.invitation_signal(
+                        txn,
+                        pending,
+                        SignalType::RingCancelled,
+                        &call,
+                        invitation,
+                        &correlation,
+                    )
+                    .await?;
+                }
                 self.call_signal(
                     txn,
                     pending,

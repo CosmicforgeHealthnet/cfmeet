@@ -192,3 +192,36 @@ test("the caller is named from the call view, then from Meeting's principal name
   assert.equal(offerHeadline({ callKind: "VIDEO", purpose: "TRANSFER" }), "Transferred video call");
   assert.equal(offerHeadline({ callKind: "VOICE", purpose: "INITIAL" }), "Incoming voice call");
 });
+
+// ---- C4 signaling credential failures / C1 receipt acknowledgement ----
+
+test("a 401 signaling failure is classified so the same credential is never retried", async () => {
+  const { signalingFailure } = await import("../src/lib/calling/signaling-auth.ts");
+  const failure = (status, code) => ({ response: { status, data: { error: { code } } } });
+  assert.equal(signalingFailure(failure(401, "SIGNALING_CREDENTIAL_EXPIRED")), "expired");
+  assert.equal(signalingFailure(failure(401, "AUTHENTICATION_FAILED")), "rejected");
+  assert.equal(signalingFailure(failure(401, undefined)), "rejected");
+  assert.equal(signalingFailure(failure(503, "SERVICE_UNAVAILABLE")), "transient");
+  assert.equal(signalingFailure(new Error("network")), "transient");
+  assert.equal(signalingFailure(undefined), "transient");
+});
+
+test("a rejected endpoint re-registers at most once per window", async () => {
+  const { mayReregister, REREGISTER_WINDOW_MS } = await import("../src/lib/calling/signaling-auth.ts");
+  const now = Date.parse("2026-11-16T10:00:00Z");
+  assert.equal(mayReregister(null, now), true);
+  assert.equal(mayReregister(now - 1_000, now), false);
+  assert.equal(mayReregister(now - REREGISTER_WINDOW_MS, now), true);
+});
+
+test("only new, actionable PENDING offers are acknowledged", async () => {
+  const { offersToAcknowledge } = await import("../src/lib/calling/signaling-auth.ts");
+  const offers = [
+    { invitationId: "new", status: "PENDING", actionable: true },
+    { invitationId: "done", status: "PENDING", actionable: true },
+    { invitationId: "ringing", status: "RINGING", actionable: true },
+    { invitationId: "over", status: "CANCELLED", actionable: false },
+    { invitationId: "late", status: "PENDING", actionable: false },
+  ];
+  assert.deepEqual(offersToAcknowledge(offers, new Set(["done"])), ["new"]);
+});

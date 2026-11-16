@@ -252,7 +252,11 @@ async fn revoked_endpoints_stop_ringing_and_lose_signaling() {
         .create_call("VOICE", &a.w.initiator, &caller, &[&a.w.recipient], "rev-1")
         .await;
     let call = call_id(&r);
-    assert_eq!(status_of(&a, call, bob_1.endpoint).await, ["RINGING"]);
+    assert_eq!(status_of(&a, call, bob_1.endpoint).await, ["PENDING"]);
+    // bob's second device acknowledges receipt (C1): it rings, and so does the Call.
+    let offer_2 = a.invitation_for(call, bob_2.endpoint).await.unwrap();
+    let r = a.acknowledge_for(call, offer_2, &bob_2).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     let r = a
         .h()
         .request(
@@ -286,7 +290,7 @@ async fn revoked_endpoints_stop_ringing_and_lose_signaling() {
         .await;
     let call = call_id(&r);
     assert!(status_of(&a, call, bob_1.endpoint).await.is_empty());
-    assert_eq!(status_of(&a, call, bob_2.endpoint).await, ["RINGING"]);
+    assert_eq!(status_of(&a, call, bob_2.endpoint).await, ["PENDING"]);
     let r = a
         .create_call("VOICE", &a.w.recipient, &bob_1, &[&a.w.initiator], "rev-3")
         .await;
@@ -320,8 +324,9 @@ async fn presence_is_a_hint_and_only_audio_capable_endpoints_ring() {
         )
         .await;
     let voice = call_id(&r);
-    assert_eq!(status_of(&a, voice, offline.endpoint).await, ["RINGING"]);
-    assert_eq!(status_of(&a, voice, audio_only).await, ["RINGING"]);
+    // Offered (PENDING until each device acknowledges receipt, C1).
+    assert_eq!(status_of(&a, voice, offline.endpoint).await, ["PENDING"]);
+    assert_eq!(status_of(&a, voice, audio_only).await, ["PENDING"]);
     let r = a
         .create_call(
             "VIDEO",
@@ -332,9 +337,9 @@ async fn presence_is_a_hint_and_only_audio_capable_endpoints_ring() {
         )
         .await;
     let video = call_id(&r);
-    assert_eq!(status_of(&a, video, offline.endpoint).await, ["RINGING"]);
+    assert_eq!(status_of(&a, video, offline.endpoint).await, ["PENDING"]);
     // Every application Call needs audio; video is optional per endpoint.
-    assert_eq!(status_of(&a, video, audio_only).await, ["RINGING"]);
+    assert_eq!(status_of(&a, video, audio_only).await, ["PENDING"]);
     let r = a
         .post(
             "/v1/calling/endpoints",
@@ -383,8 +388,10 @@ async fn one_device_decline_declines_only_that_offer() {
     let (_, version) = a.state(call).await;
     let r = a.decline(call, offer, &bob_1, version).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // Declining proves receipt, so the Call rang; the other device is still only offered
+    // (PENDING until it acknowledges, C1).
     assert_eq!(r.json["call"]["state"], "RINGING");
-    assert_eq!(status_of(&a, call, bob_2.endpoint).await, ["RINGING"]);
+    assert_eq!(status_of(&a, call, bob_2.endpoint).await, ["PENDING"]);
     // Declining again is a replay of the same outcome, not an error.
     let (_, version) = a.state(call).await;
     let again = a.decline(call, offer, &bob_1, version).await;
@@ -542,8 +549,8 @@ async fn group_calls_have_one_winning_device_per_participant() {
         .await;
     assert_eq!(r.status, StatusCode::CONFLICT);
     assert_eq!(r.json["error"]["code"], "ANSWERED_ELSEWHERE");
-    // carol's devices still ring: her own arbitration is independent of bob's.
-    assert_eq!(status_of(&a, call, carol_d[0].endpoint).await, ["RINGING"]);
+    // carol's devices are still offered: her own arbitration is independent of bob's.
+    assert_eq!(status_of(&a, call, carol_d[0].endpoint).await, ["PENDING"]);
     let offer = a.invitation_for(call, carol_d[1].endpoint).await.unwrap();
     let (_, version) = a.state(call).await;
     let r = a.accept(call, offer, &carol_d[1], version).await;
@@ -666,5 +673,5 @@ async fn past_the_endpoint_cap_the_newest_registrations_ring() {
         status_of(&a, call, devices[0].endpoint).await.is_empty(),
         "the oldest (never seen) registration is the one left out"
     );
-    assert_eq!(status_of(&a, call, devices[10].endpoint).await, ["RINGING"]);
+    assert_eq!(status_of(&a, call, devices[10].endpoint).await, ["PENDING"]);
 }

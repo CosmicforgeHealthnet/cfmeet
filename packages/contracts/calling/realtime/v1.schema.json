@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/calling/realtime/v1.schema.json",
   "title": "CF Meet calling realtime signal v1",
-  "description": "Frames the server sends on an endpoint's signaling channel (GET /v1/calling/signaling, subprotocol cfmeet.signaling.v1): realtime call signals and channel control frames. Transport-neutral: the same signal objects are fanned out across Calling instances. Provider-independent; no telephone numbers, provider ids, credentials or tokens.",
+  "description": "Frames the server sends on an endpoint's signaling channel (GET /v1/calling/signaling, subprotocol cfmeet.signaling.v1): realtime call signals, channel control frames and the answers to the device's own frames (ping, invitation.acknowledge). Transport-neutral: the same signal objects are fanned out across Calling instances. Provider-independent; no telephone numbers, provider ids, credentials or tokens.",
   "oneOf": [
     {
       "$ref": "#/$defs/RealtimeSignal"
@@ -15,6 +15,9 @@
     },
     {
       "$ref": "#/$defs/SignalingError"
+    },
+    {
+      "$ref": "#/$defs/InvitationAcknowledged"
     }
   ],
   "$defs": {
@@ -238,7 +241,11 @@
               "invitation": {
                 "properties": {
                   "status": {
-                    "const": "RINGING"
+                    "description": "PENDING: offered to this endpoint; it becomes RINGING when the device acknowledges receipt (invitation.acknowledge / POST …/acknowledge).",
+                    "enum": [
+                      "PENDING",
+                      "RINGING"
+                    ]
                   }
                 }
               }
@@ -338,7 +345,7 @@
       }
     },
     "SignalingError": {
-      "description": "The channel accepts only pings; commands use the HTTP API.",
+      "description": "Refusal of a client frame: an unsupported frame (commands use the HTTP API), or an invitation.acknowledge that could not be applied (invitationId echoed; same codes as the HTTP acknowledgement).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -352,13 +359,23 @@
         "code": {
           "type": "string",
           "enum": [
-            "UNSUPPORTED_MESSAGE"
+            "UNSUPPORTED_MESSAGE",
+            "VALIDATION_ERROR",
+            "AUTHENTICATION_FAILED",
+            "NOT_FOUND",
+            "INVITATION_EXPIRED",
+            "INVITATION_NOT_ACTIONABLE",
+            "ANSWERED_ELSEWHERE",
+            "SERVICE_UNAVAILABLE"
           ]
+        },
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       }
     },
     "ClientPing": {
-      "description": "The only client frame: a keep-alive that also refreshes the endpoint's presence hint.",
+      "description": "A client keep-alive that also refreshes the endpoint's presence hint.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -367,6 +384,67 @@
       "properties": {
         "type": {
           "const": "ping"
+        }
+      }
+    },
+    "InvitationAcknowledged": {
+      "description": "Answer to a client invitation.acknowledge: the offer is RINGING (the same body as POST /v1/calling/invitations/{invitation_id}/acknowledge, with type).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "invitationId",
+        "callId",
+        "status",
+        "ringingAt",
+        "expiresAt",
+        "callState",
+        "callVersion"
+      ],
+      "properties": {
+        "type": {
+          "const": "invitation.acknowledged"
+        },
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "status": {
+          "const": "RINGING"
+        },
+        "ringingAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "callState": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallState"
+        },
+        "callVersion": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ClientInvitationAcknowledge": {
+      "description": "Client frame: this device received ring offer invitationId and is alerting its user (the WebSocket form of POST /v1/calling/invitations/{invitation_id}/acknowledge; PENDING → RINGING).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "invitationId"
+      ],
+      "properties": {
+        "type": {
+          "const": "invitation.acknowledge"
+        },
+        "invitationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       }
     }

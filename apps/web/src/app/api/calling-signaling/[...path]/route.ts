@@ -14,7 +14,7 @@ async function handle(request: Request, context: Context) {
     const { path } = await context.params;
     const route = path.join("/");
     const read = request.method === "GET" && /^v1\/calling\/(invitations|history)$/.test(route);
-    const command = request.method === "POST" && new RegExp(`^v1/calling/(invitations/${uuid}/(accept|decline)|sessions/${uuid}/media-credentials)$`).test(route);
+    const command = request.method === "POST" && new RegExp(`^v1/calling/(invitations/${uuid}/(accept|decline|acknowledge)|sessions/${uuid}/media-credentials)$`).test(route);
     if (!read && !command) throw new CallingHttpError(404, "NOT_FOUND", "Signaling operation not found.");
     const authorization = request.headers.get("Authorization");
     if (!authorization || !/^Bearer cfsig_[A-Za-z0-9._-]+$/.test(authorization) || authorization.length > 2060) {
