@@ -64,7 +64,7 @@ pub struct SecurityEventPage {
 }
 
 /// The session id of the bearer token on this request, if it carries one.
-fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Uuid> {
+pub(crate) fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Uuid> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)?
         .to_str()

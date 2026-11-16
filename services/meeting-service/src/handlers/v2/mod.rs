@@ -6,6 +6,7 @@
 
 pub mod account_devices;
 pub mod account_profile;
+pub mod account_identity;
 pub mod account_sessions;
 pub mod artifacts;
 pub mod breakouts;

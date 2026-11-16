@@ -190,50 +190,9 @@ impl JwtService {
     }
 }
 
-/// bcrypt only uses the first 72 bytes of its input (ACC-025). New passwords longer than
-/// that are refused instead of being silently truncated; existing hashes still verify.
-pub const MAX_PASSWORD_BYTES: usize = 72;
-
-// Password hashing utilities
-pub fn hash_password(password: &str) -> ApiResult<String> {
-    if password.len() > MAX_PASSWORD_BYTES {
-        return Err(ApiError::ValidationError(format!(
-            "Password must be at most {MAX_PASSWORD_BYTES} bytes"
-        )));
-    }
-    bcrypt::hash(password, bcrypt::DEFAULT_COST)
-        .map_err(|e| ApiError::InternalError(format!("Failed to hash password: {}", e)))
-}
-
-pub fn verify_password(password: &str, hash: &str) -> ApiResult<bool> {
-    bcrypt::verify(password, hash)
-        .map_err(|e| ApiError::InternalError(format!("Failed to verify password: {}", e)))
-}
-
-// Generate random 6-digit verification code (numeric only for easy entry)
-pub fn generate_verification_code() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let code: u32 = rng.gen_range(100000..1000000);
-    code.to_string()
-}
-
 #[cfg(test)]
 mod communications_authentication_tests {
     use super::*;
-    #[test]
-    fn passwords_beyond_the_bcrypt_input_limit_are_refused_not_truncated() {
-        let long = "é".repeat(37); // 74 bytes, 37 characters
-        assert!(matches!(
-            hash_password(&long),
-            Err(ApiError::ValidationError(_))
-        ));
-        assert!(matches!(
-            hash_password(&"a".repeat(MAX_PASSWORD_BYTES + 1)),
-            Err(ApiError::ValidationError(_))
-        ));
-    }
-
     #[test]
     fn refresh_preserves_credential_authentication_time_and_legacy_absence() {
         let service = JwtService::new("test-only-authentication-time-fixture-0123456789".into());

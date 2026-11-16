@@ -16,7 +16,7 @@ use crate::{
     dto::{
         AdminListLogsQuery, AdminListMeetingsQuery, AdminListUsersQuery, AdminLogListResponse,
         AdminLogResponse, AdminMeetingListResponse, AdminMeetingResponse, AdminPaginationMeta,
-        AdminUpdateUserRequest, AdminUserApiResponse, AdminUserListResponse, AdminUserResponse,
+        AdminChangeEmailRequest, AdminUpdateUserRequest, AdminUserApiResponse, AdminUserListResponse, AdminUserResponse,
     },
     error::{ApiError, ApiResult},
     middleware::AuthContext,
@@ -254,6 +254,14 @@ pub async fn update_user(
 
         // Parse to validate
         let _ = parse_role(new_role)?;
+        // Fixed-code review / acceptance accounts can never administer the platform.
+        if parse_role(new_role)? == users::UserRole::Admin
+            && state.auth_policy.test_accounts.is_test_account(&user.email)
+        {
+            return Err(ApiError::Forbidden(
+                "Test accounts cannot be administrators".to_string(),
+            ));
+        }
     }
 
     let previous_role = user.role.clone();
@@ -547,6 +555,64 @@ pub async fn list_logs(
             limit,
             total,
             total_pages,
+        },
+    }))
+}
+
+/// Change a user's email address (admin only, support-assisted)
+///
+/// For an owner who lost access to the old mailbox and was verified by support outside the product
+/// (the self-service change needs a code from the current address). Sets the new address (to be
+/// proven at the next sign-in), signs out every session and linked device, notifies both the old
+/// and the new address, and records `EMAIL_CHANGED_BY_ADMIN` with the administrator and `reason`.
+/// Returns 409 if the address belongs to another account.
+#[utoipa::path(
+    patch,
+    path = "/api/v1/admin/users/{id}/email",
+    tag = "Admin",
+    params(
+        ("id" = Uuid, Path, description = "User UUID")
+    ),
+    request_body = AdminChangeEmailRequest,
+    responses(
+        (status = 200, description = "Email address changed", body = AdminUserApiResponse),
+        (status = 400, description = "Validation error"),
+        (status = 401, description = "Unauthorized"),
+        (status = 403, description = "Forbidden - Admin access required"),
+        (status = 404, description = "User not found"),
+        (status = 409, description = "The address belongs to another account")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn change_user_email(
+    State(state): State<AppState>,
+    Extension(auth_context): Extension<AuthContext>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<AdminChangeEmailRequest>,
+) -> ApiResult<Json<AdminUserApiResponse>> {
+    require_admin(&auth_context)?;
+    payload.validate_request()?;
+    let user = crate::services::email_change::admin_change(
+        &state,
+        auth_context.user_id,
+        id,
+        &payload.new_email,
+        payload.reason.trim(),
+    )
+    .await?;
+    Ok(Json(AdminUserApiResponse {
+        success: true,
+        data: AdminUserResponse {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: format_role(&user.role),
+            status: format_status(&user.status),
+            auth_type: format_auth_type(&user.auth_type),
+            created_at: format_datetime(user.created_at),
+            last_login: user.last_login.map(format_datetime),
         },
     }))
 }

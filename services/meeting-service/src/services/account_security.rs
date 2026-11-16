@@ -13,7 +13,6 @@
 //!
 //! Every verifier — v1 middleware, v2 actor resolution, the refresh endpoint and the
 //! Developer Platform session bridge — calls [`authorize_user_token`].
-use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
@@ -36,7 +35,10 @@ pub const SESSION_ABSOLUTE_LIFETIME_DAYS: i64 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMethod {
+    /// Historical: email-and-password sign-in (no longer issued; kept for stored rows).
     Password,
+    /// Passwordless sign-in with an emailed one-time code or magic link.
+    EmailOtp,
     Google,
     LegacyRefresh,
 }
@@ -45,6 +47,7 @@ impl AuthMethod {
     fn as_str(self) -> &'static str {
         match self {
             AuthMethod::Password => "PASSWORD",
+            AuthMethod::EmailOtp => "EMAIL_OTP",
             AuthMethod::Google => "GOOGLE",
             AuthMethod::LegacyRefresh => "LEGACY_REFRESH",
         }
@@ -58,6 +61,8 @@ pub enum RevokeReason {
     UserRevoked,
     RefreshReuse,
     AdminRevoked,
+    /// The account's sign-in identity changed (email change or revert).
+    CredentialsChanged,
 }
 
 impl RevokeReason {
@@ -68,6 +73,7 @@ impl RevokeReason {
             RevokeReason::UserRevoked => "USER_REVOKED",
             RevokeReason::RefreshReuse => "REFRESH_REUSE",
             RevokeReason::AdminRevoked => "ADMIN_REVOKED",
+            RevokeReason::CredentialsChanged => "CREDENTIALS_CHANGED",
         }
     }
 }
@@ -89,8 +95,8 @@ pub struct AuthPolicy {
     /// historical `pendingverification` spelling until every deployed client accepts both.
     /// Admin APIs and `/api/v2/me/profile` always use the canonical value.
     pub status_format: AccountStatusFormat,
-    /// ACC-026: self-deactivation needs the current password or a recent sign-in
-    /// (`ACCOUNT_DEACTIVATION_REQUIRE_REAUTH`, default on).
+    /// ACC-026: self-deactivation needs a step-up confirmation (an emailed code, see
+    /// [`crate::services::step_up`]) (`ACCOUNT_DEACTIVATION_REQUIRE_REAUTH`, default on).
     pub deactivation_requires_reauth: bool,
     /// ACC-026: how recent a sign-in counts as re-authentication
     /// (`ACCOUNT_REAUTH_MAX_AGE_SECS`, default 600, bounded 60-3600).
@@ -110,6 +116,9 @@ pub struct AuthPolicy {
     /// Multi-device policy (web device limit, linking window, proof window, email step-up,
     /// E2EE enrollment gate). See [`crate::services::account_devices`].
     pub devices: crate::services::account_devices::DevicePolicy,
+    /// Fixed-code app-review / acceptance accounts (`AUTH_TEST_ACCOUNTS`; see
+    /// [`crate::services::passwordless::TestAccounts`]).
+    pub test_accounts: crate::services::passwordless::TestAccounts,
 }
 
 /// ACC-016: enforcement points for unverified (pending) accounts.
@@ -120,7 +129,9 @@ pub enum EmailVerificationEnforcement {
     /// The Communications Hub relay and the Messaging bridge refuse accounts without a
     /// verified email address (`EMAIL_VERIFICATION_REQUIRED`); meetings stay usable.
     Communications,
-    /// As `Communications`, and password sign-in refuses pending accounts.
+    /// As `Communications`, and sign-in refuses pending accounts. With passwordless
+    /// sign-in a correct code proves the address, so this only matters for Google-less
+    /// legacy flows; kept for configuration compatibility.
     Login,
 }
 
@@ -228,8 +239,13 @@ impl AuthPolicy {
         };
         let mut devices = crate::services::account_devices::DevicePolicy::from_lookup(&get);
         devices.declaration_window_secs = reauth_max_age_secs;
+        // A misconfiguration here is a startup refusal (fail closed), never a silent
+        // production backdoor.
+        let test_accounts = crate::services::passwordless::TestAccounts::from_lookup(&get)
+            .unwrap_or_else(|reason| panic!("{reason}"));
         Self {
             devices,
+            test_accounts,
             email_verification_enforce_from: instant("EMAIL_VERIFICATION_ENFORCE_FROM"),
             email_verification_grace_until: instant("EMAIL_VERIFICATION_GRACE_UNTIL"),
             google_token_delivery,
@@ -349,8 +365,8 @@ pub fn normalize_email(email: &str) -> String {
 
 /// Case-insensitive account lookup. If legacy rows differ only by case, the exact
 /// spelling wins; an ambiguous match is treated as "no account" and logged.
-pub async fn find_user_by_email(
-    db: &DatabaseConnection,
+pub async fn find_user_by_email<C: ConnectionTrait>(
+    db: &C,
     email: &str,
 ) -> ApiResult<Option<users::Model>> {
     let normalized = normalize_email(email);
@@ -377,15 +393,6 @@ pub async fn find_user_by_email(
             }
         }
     }
-}
-
-/// A bcrypt hash used to keep "unknown account" and "wrong password" equally slow.
-pub fn timing_equalizer_hash() -> &'static str {
-    static HASH: OnceLock<String> = OnceLock::new();
-    HASH.get_or_init(|| {
-        bcrypt::hash("cfmeet-timing-equalizer", bcrypt::DEFAULT_COST)
-            .unwrap_or_else(|_| String::new())
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -739,12 +746,36 @@ pub async fn revoke_all<C: ConnectionTrait>(
     Ok(result.rows_affected())
 }
 
+/// End every session of the account except `keep_session_id` (the one making the
+/// request) and return the ended session ids, so the caller can end what each of them
+/// holds (`communications::session_ended`). The account epoch is NOT advanced (that would
+/// also end the kept session).
+pub async fn revoke_others<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    keep_session_id: Uuid,
+    reason: RevokeReason,
+) -> ApiResult<Vec<Uuid>> {
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = $3 \
+             WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL RETURNING id",
+            [user_id.into(), keep_session_id.into(), reason.as_str().into()],
+        ))
+        .await?;
+    rows.into_iter()
+        .map(|r| r.try_get::<Uuid>("", "id").map_err(ApiError::from))
+        .collect()
+}
+
 /// One account session as shown to its owner.
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRecord {
     pub session_id: Uuid,
-    /// PASSWORD, GOOGLE or LEGACY_REFRESH (a pre-session sign-in carried forward).
+    /// EMAIL_OTP, GOOGLE, PASSWORD (historical) or LEGACY_REFRESH (a pre-session sign-in
+    /// carried forward).
     pub auth_method: String,
     pub authenticated_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
