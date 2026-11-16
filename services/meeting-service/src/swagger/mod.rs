@@ -640,6 +640,7 @@ use utoipa::OpenApi;
             crate::domain::RecurrenceStatus,
             crate::error::ErrorEnvelope,
             crate::error::ErrorBody,
+            crate::validation::ValidationIssue,
             crate::error::ErrorCode,
             crate::services::meeting_permissions::RolePolicy,
             crate::services::meeting_permissions::MediaPermissions,

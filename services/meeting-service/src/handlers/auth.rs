@@ -1,7 +1,7 @@
+use crate::validation::ValidateRequest;
 use axum::{extract::State, http::HeaderMap, http::StatusCode, Json};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
-use validator::Validate;
 
 use crate::{
     dto::*,
@@ -83,9 +83,7 @@ pub async fn register(
     Json(payload): Json<RegisterRequest>,
 ) -> ApiResult<(StatusCode, Json<RegisterResponse>)> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "register", 10, 60 * 60).await?;
     let email = security::normalize_email(&payload.email);
 
@@ -214,9 +212,7 @@ pub async fn verify_email(
     Json(payload): Json<VerifyEmailRequest>,
 ) -> ApiResult<Json<MessageResponse>> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "verify-email", 30, 15 * 60).await?;
     let invalid = || ApiError::BadRequest("Invalid or expired verification code".to_string());
 
@@ -285,9 +281,7 @@ pub async fn login(
     Json(payload): Json<LoginRequest>,
 ) -> ApiResult<Json<LoginResponse>> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "login", 30, 15 * 60).await?;
     let email = security::normalize_email(&payload.email);
 
@@ -416,9 +410,7 @@ pub async fn refresh_token(
     Json(payload): Json<RefreshTokenRequest>,
 ) -> ApiResult<Json<RefreshTokenResponse>> {
     // Validate request
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     let invalid = || ApiError::Unauthorized("Invalid refresh token".to_string());
 
     // Verify refresh token (ACC-001: an access token never refreshes)
@@ -703,9 +695,7 @@ pub async fn resend_verification_email(
     headers: HeaderMap,
     Json(payload): Json<ResendVerificationRequest>,
 ) -> ApiResult<Json<MessageResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "resend-verification", 20, 15 * 60).await?;
     let accepted = || {
         Json(MessageResponse {
@@ -773,9 +763,7 @@ pub async fn forgot_password(
     headers: HeaderMap,
     Json(payload): Json<ForgotPasswordRequest>,
 ) -> ApiResult<Json<MessageResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "forgot-password", 20, 15 * 60).await?;
     let accepted = || {
         Json(MessageResponse {
@@ -861,9 +849,7 @@ pub async fn reset_password(
     headers: HeaderMap,
     Json(payload): Json<ResetPasswordRequest>,
 ) -> ApiResult<Json<MessageResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "reset-password", 30, 15 * 60).await?;
     let invalid = || ApiError::BadRequest("Invalid or expired reset code".to_string());
 
@@ -949,9 +935,7 @@ pub async fn verify_reset_token(
     headers: HeaderMap,
     Json(payload): Json<VerifyResetTokenRequest>,
 ) -> ApiResult<Json<VerifyResetTokenResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "verify-reset-token", 30, 15 * 60).await?;
 
     // N0-9 (S-6): one answer for an unknown email, no pending reset and a wrong code. The
@@ -1002,9 +986,7 @@ pub async fn change_password(
     axum::Extension(claims): axum::Extension<crate::services::auth::Claims>,
     Json(payload): Json<ChangePasswordRequest>,
 ) -> ApiResult<Json<MessageResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
 
     // Get current user
     let user_id = Uuid::parse_str(&claims.sub)
@@ -1313,9 +1295,7 @@ pub async fn oauth_google_exchange(
     headers: HeaderMap,
     Json(payload): Json<GoogleExchangeRequest>,
 ) -> ApiResult<Json<LoginResponse>> {
-    payload
-        .validate()
-        .map_err(|e| ApiError::ValidationError(e.to_string()))?;
+    payload.validate_request()?;
     limit_by_client(&state, &headers, "oauth-exchange", 60, 15 * 60).await?;
     let invalid = || ApiError::BadRequest("Invalid or expired exchange code".to_string());
     let raw = state

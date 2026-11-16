@@ -402,6 +402,18 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Part VI: Developer Console session bridge enabled");
     }
 
+    // Notification Service owner APIs X1 / X2 (NOTIFICATION_OWNER_API_ENABLED, Document 4
+    // §3.4). Reads only: no migration of their own.
+    let notification_owner =
+        backend::services::notification_owner::NotificationOwnerConfig::from_env()
+            .and_then(|c| c.map(|c| c.verifier()).transpose())
+            .unwrap_or_else(|e| panic!("notification owner API configuration error: {e}"));
+    let owner_router = notification_owner
+        .map(|verifier| backend::services::notification_owner::router(state.clone(), verifier));
+    if owner_router.is_some() {
+        tracing::info!("Notification Service owner APIs enabled");
+    }
+
     // Final closure: Organizations event ingress (ORGANIZATION_EVENTS_ENABLED). Its tables
     // live in their own additive history (`organization-integration-migration up`).
     let organization_events =
@@ -448,6 +460,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(events) = events_router {
         app = app.merge(events);
+    }
+    if let Some(owner) = owner_router {
+        app = app.merge(owner);
     }
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 

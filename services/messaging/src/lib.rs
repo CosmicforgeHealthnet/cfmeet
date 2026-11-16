@@ -36,6 +36,7 @@ pub mod messages;
 pub mod metrics;
 pub mod mls;
 pub mod moderation;
+pub mod notifications;
 pub mod operations;
 pub mod realtime;
 pub mod reference_reconciliation;

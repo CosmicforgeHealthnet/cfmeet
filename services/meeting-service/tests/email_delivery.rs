@@ -795,3 +795,157 @@ async fn otp_codes_are_stored_as_salted_hashes_under_address_digests() {
         .await
         .unwrap());
 }
+
+/// Insert a ledger row whose `final_at` is `final_days_ago` days in the past (`None`
+/// leaves it unfinished, i.e. still QUEUED).
+async fn insert_ledger_row(app: &TestApp, key: &str, final_days_ago: Option<i32>) -> Uuid {
+    let id = Uuid::new_v4();
+    let (status, final_at) = match final_days_ago {
+        Some(d) => ("DELIVERED", format!("now() - make_interval(days => {d})")),
+        None => ("QUEUED", "NULL".to_string()),
+    };
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "INSERT INTO email_deliveries (id, category, idempotency_key, recipient_hash, \
+               recipient, recipient_name, subject, status, final_at) \
+             VALUES ('{id}', 'NOTIFICATION', '{key}', repeat('a', 64), 'ada@example.com', \
+               'Ada', 'Hello', '{status}', {final_at})"
+        ))
+        .await
+        .unwrap();
+    id
+}
+
+async fn insert_ledger_event(app: &TestApp, event_id: &str, received_days_ago: i32) {
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "INSERT INTO email_delivery_events (provider, event_id, event_type, received_at) \
+             VALUES ('resend', '{event_id}', 'email.delivered', \
+               now() - make_interval(days => {received_days_ago}))"
+        ))
+        .await
+        .unwrap();
+}
+
+/// `(exists, recipient, recipient_name)` of a ledger row.
+async fn ledger_row(app: &TestApp, id: Uuid) -> (bool, Option<String>, Option<String>) {
+    let row = app
+        .db
+        .conn
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!("SELECT recipient, recipient_name FROM email_deliveries WHERE id = '{id}'"),
+        ))
+        .await
+        .unwrap();
+    match row {
+        None => (false, None, None),
+        Some(r) => (
+            true,
+            r.try_get("", "recipient").unwrap(),
+            r.try_get("", "recipient_name").unwrap(),
+        ),
+    }
+}
+
+async fn ledger_event_exists(app: &TestApp, event_id: &str) -> bool {
+    app.db
+        .conn
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!("SELECT 1 AS one FROM email_delivery_events WHERE event_id = '{event_id}'"),
+        ))
+        .await
+        .unwrap()
+        .is_some()
+}
+
+/// A2 regression: the hourly ledger purge failed on every run in production with
+/// `function make_interval(days => bigint) does not exist` (an `i64` retention bound
+/// into an `integer` parameter). Runs the real purge against PostgreSQL with rows on
+/// both sides of the scrub (30 days) and deletion (60 days) windows.
+#[tokio::test]
+async fn ledger_purge_scrubs_and_deletes_only_rows_past_the_retention_window() {
+    let app = app!();
+    let db = app.state.db.clone();
+    let provider = Arc::new(RecordingProvider::default());
+
+    let fresh = insert_ledger_row(&app, "purge-fresh", Some(1)).await;
+    let just_inside = insert_ledger_row(&app, "purge-29d", Some(29)).await;
+    let scrub_only = insert_ledger_row(&app, "purge-40d", Some(40)).await;
+    let expired = insert_ledger_row(&app, "purge-70d", Some(70)).await;
+    let unfinished = insert_ledger_row(&app, "purge-queued", None).await;
+    insert_ledger_event(&app, "evt-fresh", 1).await;
+    insert_ledger_event(&app, "evt-40d", 40).await;
+    insert_ledger_event(&app, "evt-70d", 70).await;
+
+    // (a) the purge succeeds against a real database.
+    let worker = EmailWorker::new(db.clone(), provider.clone(), settings());
+    worker
+        .purge()
+        .await
+        .expect("email ledger purge must succeed on PostgreSQL");
+
+    // (b) expired rows: addresses erased past 30 days, rows/events deleted past 60.
+    assert_eq!(ledger_row(&app, scrub_only).await, (true, None, None));
+    assert_eq!(ledger_row(&app, expired).await, (false, None, None));
+    assert!(!ledger_event_exists(&app, "evt-70d").await);
+
+    // (c) rows inside the window, and unfinished rows, are untouched.
+    let kept = (
+        true,
+        Some("ada@example.com".to_string()),
+        Some("Ada".to_string()),
+    );
+    assert_eq!(ledger_row(&app, fresh).await, kept);
+    assert_eq!(ledger_row(&app, just_inside).await, kept);
+    assert_eq!(ledger_row(&app, unfinished).await, kept);
+    assert!(ledger_event_exists(&app, "evt-fresh").await);
+    assert!(ledger_event_exists(&app, "evt-40d").await);
+
+    // Running it again is a no-op.
+    worker.purge().await.unwrap();
+    assert_eq!(ledger_row(&app, fresh).await, kept);
+    assert!(ledger_event_exists(&app, "evt-40d").await);
+
+    // Out-of-range settings are clamped, never an error or a wider purge: values past
+    // `i32` keep everything that is left (3650-day cap) ...
+    for retention_days in [i64::MAX, i64::from(i32::MAX) + 1] {
+        let w = EmailWorker::new(
+            db.clone(),
+            provider.clone(),
+            WorkerSettings {
+                retention_days,
+                ..settings()
+            },
+        );
+        w.purge().await.unwrap();
+        assert_eq!(ledger_row(&app, fresh).await, kept);
+        assert_eq!(ledger_row(&app, just_inside).await, kept);
+        assert!(ledger_event_exists(&app, "evt-40d").await);
+    }
+    // ... and zero behaves like one day (never "everything up to now").
+    let w = EmailWorker::new(
+        db.clone(),
+        provider.clone(),
+        WorkerSettings {
+            retention_days: 0,
+            ..settings()
+        },
+    );
+    w.purge().await.unwrap();
+    assert_eq!(ledger_row(&app, just_inside).await, (false, None, None));
+    assert!(
+        ledger_row(&app, fresh).await.0,
+        "inside the 2-day deletion window"
+    );
+    assert_eq!(ledger_row(&app, unfinished).await, kept);
+    assert!(ledger_event_exists(&app, "evt-fresh").await);
+
+    assert_eq!(email_delivery::retention_windows(0), (1, 2));
+    assert_eq!(email_delivery::retention_windows(-5), (1, 2));
+    assert_eq!(email_delivery::retention_windows(30), (30, 60));
+    assert_eq!(email_delivery::retention_windows(i64::MAX), (3650, 7300));
+}

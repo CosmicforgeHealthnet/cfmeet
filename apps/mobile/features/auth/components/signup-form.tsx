@@ -10,6 +10,15 @@ import { useToast } from "@/components/ui/toast";
 import { AuthHeader, AuthCard, AuthInput, Divider, AuthBackground } from "@/components/auth";
 import { useRegister } from "../hooks/use-register";
 import { registerSchema, type RegisterFormData } from "../schemas/auth.schema";
+import { ApiRequestError, fieldErrorsOf } from "@/lib/api/errors";
+
+/** API field → form field. */
+const SIGNUP_FIELDS: Record<string, keyof RegisterFormData> = {
+  username: "username",
+  email: "email",
+  password: "password",
+  confirm_password: "confirmPassword",
+};
 
 export function SignupForm() {
   const [agreed, setAgreed] = useState(false);
@@ -21,6 +30,7 @@ export function SignupForm() {
   const {
     control,
     handleSubmit,
+    setError,
     formState: { errors },
   } = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
@@ -49,7 +59,13 @@ export function SignupForm() {
       },
       {
         onError: (error) => {
-          setGeneralError(error.message);
+          // Structured field problems (error.details) land on the matching inputs.
+          const { fields, rest } = fieldErrorsOf(error instanceof ApiRequestError ? error : null, SIGNUP_FIELDS);
+          const mapped = Object.entries(fields) as [keyof RegisterFormData, string][];
+          for (const [name, message] of mapped) setError(name, { type: "server", message });
+          if (mapped.length === 0 || rest.length > 0) {
+            setGeneralError(mapped.length === 0 ? error.message : rest.join(" "));
+          }
           toast(error.message, "destructive");
         },
       }

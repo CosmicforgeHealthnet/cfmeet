@@ -12,6 +12,15 @@ import type { ApiErrorResponse } from "@/types/auth";
 import { AxiosError } from "axios";
 import { authService } from "@/services/auth.service";
 import { Check } from "lucide-react";
+import { formErrorsOf, validationIssuesOf } from "@/lib/validation-errors";
+
+/** API field → form input (the single password input also answers for its confirmation). */
+const SIGNUP_FIELDS: Record<string, string> = {
+  username: "username",
+  email: "email",
+  password: "password",
+  confirm_password: "password",
+};
 
 /** Mirrors the server's password rules (accepted symbols: !@#$%^&*(),.?:{}|<>). */
 const SYMBOLS = /[!@#$%^&*(),.?:{}|<>]/;
@@ -93,6 +102,11 @@ const SignupModal = () => {
         router.push(`/verify?email=${encodeURIComponent(trimmedForm.email)}`);
       },
       onError: (error) => {
+        // Structured field problems (error.details) land on the matching inputs.
+        if (validationIssuesOf(error).length > 0) {
+          setErrors(formErrorsOf(error, SIGNUP_FIELDS));
+          return;
+        }
         const axiosError = error as AxiosError<ApiErrorResponse>;
         const raw = axiosError.response?.data?.error?.message || "Registration failed. Please try again.";
         // Server messages can carry a field prefix like "__all__: " or "password: ".
