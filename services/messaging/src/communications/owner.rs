@@ -296,8 +296,53 @@ struct AttachmentMeta {
     security_profile: String,
     kind: String,
     media_type: String,
+    safe_file_name: Option<String>,
+    thumbnail_ready: bool,
     created_at: DateTime<Utc>,
     uploader_principal_id: Uuid,
+}
+
+/// M3: the presentation metadata the server legitimately holds for one listed
+/// attachment. MANAGED: the sanitized file name (`content::sanitize_file_name`, stored
+/// at intent time), the declared media type and kind, and a server-made thumbnail when
+/// one is READY. PRIVATE_E2EE: none of these — name, media type and thumbnails travel
+/// only inside the MLS-encrypted attachment descriptor, so they are null (never
+/// fabricated) and the listing says the client must decrypt.
+///
+/// Retrieval is never a URL: `download` / `thumbnail` name the normal, access-checked
+/// grant operations (`v1/...`, relative to the Messaging client API — the CF Meet apps
+/// call them through the Meeting relay `/api/v2/messaging/relay/v1/...`), which re-check
+/// membership, the history window, message and attachment state on every call and
+/// return a short-lived signed read. Nothing stored or listed here grants access.
+fn attachment_listing(conversation_id: Uuid, a: &AttachmentMeta) -> Value {
+    let managed = a.security_profile == "MANAGED";
+    let base = format!("v1/conversations/{conversation_id}/attachments/{}", a.id);
+    let ready = a.state == "READY";
+    json!({
+        "attachmentId": a.id,
+        "messageId": a.message_id,
+        "messageSequence": a.message_sequence,
+        "state": a.state,
+        "sizeBytes": a.size_bytes,
+        "mediaClass": media_class(&a.security_profile, &a.kind, &a.media_type),
+        "createdAt": rfc3339(a.created_at),
+        "uploaderPrincipalId": a.uploader_principal_id,
+        "securityProfile": a.security_profile,
+        "kind": if managed { Some(a.kind.as_str()) } else { None },
+        "fileName": if managed { a.safe_file_name.as_deref() } else { None },
+        "mediaType": if managed { Some(a.media_type.as_str()) } else { None },
+        "metadataLocation": if managed { "SERVER" } else { "ENCRYPTED_DESCRIPTOR" },
+        "download": if ready {
+            json!({ "method": "POST", "path": format!("{base}/download-grants") })
+        } else {
+            Value::Null
+        },
+        "thumbnail": if ready && managed && a.thumbnail_ready {
+            json!({ "method": "POST", "path": format!("{base}/thumbnail-grants"), "mediaType": "image/png" })
+        } else {
+            Value::Null
+        },
+    })
 }
 
 pub async fn conversation_attachments(
@@ -333,7 +378,9 @@ pub async fn conversation_attachments(
         &s.db,
         "SELECT a.id, a.message_id, m.sequence AS message_sequence, a.state, \
                 COALESCE(a.verified_size, a.declared_size) AS size_bytes, a.security_profile, a.kind, \
-                a.media_type, a.created_at, a.uploader_principal_id \
+                a.media_type, a.safe_file_name, a.created_at, a.uploader_principal_id, \
+                EXISTS (SELECT 1 FROM messaging_attachment_derivatives d WHERE d.attachment_id = a.id \
+                          AND d.kind = 'THUMBNAIL' AND d.status = 'READY') AS thumbnail_ready \
            FROM messaging_attachments a \
            JOIN messaging_messages m ON m.id = a.message_id AND m.conversation_id = a.conversation_id \
           WHERE a.conversation_id = $1 AND a.tenant_id = $2 AND a.application_id = $3 AND a.environment_id = $4 \
@@ -365,16 +412,7 @@ pub async fn conversation_attachments(
     };
     Ok(Json(json!({
         "schemaVersion": 1,
-        "data": page.iter().map(|a| json!({
-            "attachmentId": a.id,
-            "messageId": a.message_id,
-            "messageSequence": a.message_sequence,
-            "state": a.state,
-            "sizeBytes": a.size_bytes,
-            "mediaClass": media_class(&a.security_profile, &a.kind, &a.media_type),
-            "createdAt": rfc3339(a.created_at),
-            "uploaderPrincipalId": a.uploader_principal_id,
-        })).collect::<Vec<_>>(),
+        "data": page.iter().map(|a| attachment_listing(c.id, a)).collect::<Vec<_>>(),
         "nextCursor": next,
     })))
 }

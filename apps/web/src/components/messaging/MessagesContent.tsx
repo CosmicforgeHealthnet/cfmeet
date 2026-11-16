@@ -38,6 +38,8 @@ import { communicationsService as hub } from "@/services/v2/communications.servi
 import { messagingErrorMessage } from "@/lib/messaging/errors";
 import { communicationsErrorMessage } from "@/lib/communications/errors";
 import {
+  attachmentAvailability,
+  attachmentSizeRefusal,
   callHref,
   colleaguesOfOrganization,
   communicationsAreas,
@@ -805,6 +807,11 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   const e2ee = conversation.securityProfile === "PRIVATE_E2EE";
   const managed = conversation.securityProfile === "MANAGED";
   const canSend = !!s.identity && (!e2ee || (s.phase === "ready" && conversation.groupReady));
+  // Files follow Messaging's effective attachment policy (Hub capabilities): the attach
+  // control is disabled when the server would refuse every file.
+  const hubCapabilities = useHubCapabilities();
+  const attachments = attachmentAvailability(hubCapabilities.data, conversation.contextClass);
+  const canAttach = canSend && attachments.enabled;
   const context = useConversationContext(conversation.id);
   const timeline = useConversationTimeline(conversation.id);
   const cleared = context.data?.clearedThroughSequence ?? timeline.data?.clearedThroughSequence ?? 0;
@@ -1002,13 +1009,14 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) {
-                    setError(null);
-                    void engine.sendFile(conversation.id, f).catch(fail);
+                    const tooLarge = attachmentSizeRefusal(f.size, attachments);
+                    setError(tooLarge);
+                    if (!tooLarge) void engine.sendFile(conversation.id, f).catch(fail);
                   }
                   e.target.value = "";
                 }}
               />
-              <button type="button" className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={!canSend} onClick={() => file.current?.click()} aria-label="Attach a file" title="Attach a file"><Paperclip className="size-5" /></button>
+              <button type="button" className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={!canAttach} onClick={() => file.current?.click()} aria-label="Attach a file" title={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"}><Paperclip className="size-5" /></button>
               <textarea
                 ref={composer}
                 rows={1}

@@ -2404,9 +2404,14 @@ export namespace Communications {
     scope?: string;
     canonicalHistoryUnchanged?: boolean;
   };
+  /** A group both people are CURRENT members of (1.4.0, CF Meet chat M2): never a group the viewer left or was removed from. title / avatarRef are the server-held display metadata of MANAGED groups; a PRIVATE_E2EE group's name lives in its end-to-end encrypted group state, which the server does not hold, so they are null there (clients show their own decrypted name or a generic label). memberCount is … */
   export type CommonGroup = {
     conversationId: string;
     contextClass: "GROUP";
+    securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null;
+    title?: string | null;
+    avatarRef?: string | null;
+    memberCount?: number | null;
   };
   export type CommonGroups = {
     schemaVersion: 1;
@@ -2663,6 +2668,7 @@ export namespace Communications {
     data: Array<InviteMetadata>;
     nextCursor: string | null;
   };
+  /** A shared file (1.4.0, CF Meet chat M3). MANAGED: fileName (sanitized), mediaType and kind as the server holds them. PRIVATE_E2EE: those are null and metadataLocation is ENCRYPTED_DESCRIPTOR: name, type and thumbnail travel only inside the end-to-end encrypted message and are shown after the device decrypts it. download / thumbnail are never URLs: path is the Messaging client operation (relative, … */
   export type MediaItem = {
     attachmentId: string;
     messageId?: string | null;
@@ -2670,6 +2676,20 @@ export namespace Communications {
     sizeBytes?: number;
     mediaClass: "IMAGE" | "VIDEO" | "AUDIO" | "DOCUMENT" | "OTHER" | "ENCRYPTED";
     createdAt?: string;
+    securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null;
+    kind?: "IMAGE" | "DOCUMENT" | "FILE" | "VOICE_NOTE" | "VIDEO" | null;
+    fileName?: string | null;
+    mediaType?: string | null;
+    metadataLocation?: "SERVER" | "ENCRYPTED_DESCRIPTOR" | null;
+    download?: {
+        method: "POST";
+        path: string;
+      } | null;
+    thumbnail?: {
+        method: "POST";
+        path: string;
+        mediaType: "image/png";
+      } | null;
   };
   export type MediaPage = {
     schemaVersion: 1;
@@ -2717,6 +2737,19 @@ export namespace Communications {
     privateE2ee: {
       available: boolean;
       reason: "AVAILABLE" | "DISABLED" | "DEVICE_SECURITY_SETUP_REQUIRED" | "BACKEND_UNAVAILABLE" | "ACCOUNT_INACTIVE";
+    };
+    /** 1.4.0 (CF Meet chat M1): whether the chat attach control may be offered, from Messaging's effective attachment policy (CF Meet: enabled, 25 MiB, five kinds), configured private storage and its upload kill switch. contexts says it per personal context (DIRECT / GROUP). When enabled is false clients hide or disable the attach control; an older Messaging, an inactive account or an unavailable … */
+    attachments?: {
+      enabled: boolean;
+      reason: "AVAILABLE" | "DISABLED_BY_POLICY" | "STORAGE_NOT_CONFIGURED" | "TEMPORARILY_DISABLED" | "BACKEND_UNAVAILABLE" | "ACCOUNT_INACTIVE";
+      /** Largest file in bytes (0 when disabled). */
+      maxBytes: number;
+      maxPerMessage: number;
+      allowedKinds: Array<"IMAGE" | "DOCUMENT" | "FILE" | "VOICE_NOTE" | "VIDEO">;
+      contexts: {
+        DIRECT: boolean;
+        GROUP: boolean;
+      };
     };
   };
   export type NotificationPreferences = {
@@ -7570,6 +7603,8 @@ export namespace Messaging {
           acceptedResidualRisks: Array<string>;
         });
     };
+    /** 1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults <- baseline <- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE … */
+    applicationBaseline?: "CFMEET_FIRST_PARTY" | null;
   };
   export type PresenceSettings = {
     visibility: "CONVERSATION_MEMBERS" | "HIDDEN";

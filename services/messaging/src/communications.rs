@@ -250,12 +250,57 @@ async fn capabilities(
         .await?;
     let available = security && policy.sending_enabled;
     let managed = managed_capability(&policy, &s.realtime);
+    let upload_switch = crate::operations::engaged(
+        &s.db,
+        crate::operations::KillSwitch::AttachmentUpload,
+        Some(ctx.scope.environment_id),
+    )
+    .await?;
+    let attachments = attachment_capability(&policy, s.storage.configured(), upload_switch);
     // `available` / `securityReady` / `reason` keep their PRIVATE_E2EE meaning for older
     // Hub images; `managed` (Blueprint Section 14) reports MANAGED messaging separately.
     Ok(Json(
         json!({"available":available,"securityReady":security,"reason":if !security {"DEVICE_SECURITY_SETUP_REQUIRED"} else if !available {"DISABLED"} else {"AVAILABLE"},
-            "managed":managed}),
+            "managed":managed,"attachments":attachments}),
     ))
+}
+/// M1: whether the client may offer sending files, from the SAME inputs the upload
+/// intent enforces (`attachments::create_intent`): the effective policy (environment
+/// switch, per-context switch, limits, kinds), configured private storage and the
+/// attachment-upload kill switch. Advisory for the UI only; every upload is still
+/// authorized and validated by Messaging.
+pub fn attachment_capability(
+    policy: &crate::conversations::policy::EffectivePolicy,
+    storage_configured: bool,
+    upload_switch_engaged: bool,
+) -> Value {
+    use crate::conversations::ContextClass;
+    let a = &policy.attachments;
+    let reason = if !a.enabled {
+        "DISABLED_BY_POLICY"
+    } else if !storage_configured {
+        "STORAGE_NOT_CONFIGURED"
+    } else if upload_switch_engaged {
+        "TEMPORARILY_DISABLED"
+    } else {
+        "AVAILABLE"
+    };
+    let enabled = reason == "AVAILABLE";
+    let context = |c: ContextClass| {
+        enabled
+            && policy
+                .contexts
+                .get(&c)
+                .is_some_and(|p| p.enabled && p.attachments_enabled != Some(false))
+    };
+    json!({
+        "enabled": enabled,
+        "reason": reason,
+        "maxBytes": a.max_bytes,
+        "maxPerMessage": a.max_per_message,
+        "allowedKinds": a.allowed_kinds,
+        "contexts": {"DIRECT": context(ContextClass::Direct), "GROUP": context(ContextClass::Group)},
+    })
 }
 /// MANAGED (server-readable) personal messaging: allowed when sending is enabled and a
 /// personal context (DIRECT or GROUP) permits MANAGED. Live delivery without an E2EE
@@ -290,11 +335,24 @@ async fn common_groups(
     struct Group {
         id: Uuid,
         context_class: String,
+        security_profile: String,
+        title: Option<String>,
+        avatar_ref: Option<String>,
+        member_count: i64,
     }
-    let groups=crate::db::all::<Group,_>(&s.db,"SELECT c.id,c.context_class FROM messaging_conversations c JOIN messaging_conversation_members a ON a.conversation_id=c.id AND a.principal_id=$4 AND a.state='ACTIVE' JOIN messaging_conversation_members b ON b.conversation_id=c.id AND b.principal_id=$5 AND b.state='ACTIVE' WHERE c.tenant_id=$1 AND c.application_id=$2 AND c.environment_id=$3 AND c.context_class='GROUP' AND c.lifecycle_state IN ('ACTIVE','LOCKED','CLOSED','ARCHIVED') ORDER BY c.id LIMIT 100",vec![ctx.scope.tenant_id.into(),ctx.scope.application_id.into(),ctx.scope.environment_id.into(),p.actor_principal_id.into(),p.target_principal_id.into()]).await?;
-    Ok(Json(
-        json!({"groups":groups.into_iter().map(|g|json!({"conversationId":g.id,"contextClass":g.context_class})).collect::<Vec<_>>() }),
-    ))
+    // M2: display metadata only for groups the ACTOR is a current (ACTIVE) member of —
+    // the join below already requires it, so a group the actor left, was removed from or
+    // was only invited to is never listed. `title` / `avatar_ref` exist only for MANAGED
+    // conversations (schema constraint `ck_messaging_conversations_display_managed`):
+    // a PRIVATE_E2EE group's name lives inside its encrypted group state, which the
+    // server never holds, so it is reported as null (never fabricated).
+    let groups=crate::db::all::<Group,_>(&s.db,"SELECT c.id,c.context_class,c.security_profile,c.title,c.avatar_ref,(SELECT count(*) FROM messaging_conversation_members m WHERE m.conversation_id=c.id AND m.state='ACTIVE') AS member_count FROM messaging_conversations c JOIN messaging_conversation_members a ON a.conversation_id=c.id AND a.principal_id=$4 AND a.state='ACTIVE' JOIN messaging_conversation_members b ON b.conversation_id=c.id AND b.principal_id=$5 AND b.state='ACTIVE' WHERE c.tenant_id=$1 AND c.application_id=$2 AND c.environment_id=$3 AND c.context_class='GROUP' AND c.lifecycle_state IN ('ACTIVE','LOCKED','CLOSED','ARCHIVED') ORDER BY c.id LIMIT 100",vec![ctx.scope.tenant_id.into(),ctx.scope.application_id.into(),ctx.scope.environment_id.into(),p.actor_principal_id.into(),p.target_principal_id.into()]).await?;
+    Ok(Json(json!({"groups":groups.into_iter().map(|g| {
+        let managed = g.security_profile == "MANAGED";
+        json!({"conversationId":g.id,"contextClass":g.context_class,"securityProfile":g.security_profile,
+            "title":if managed {g.title} else {None},"avatarRef":if managed {g.avatar_ref} else {None},
+            "memberCount":g.member_count})
+    }).collect::<Vec<_>>() })))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
