@@ -192,6 +192,29 @@ pub async fn prometheus_metrics(State(state): State<AppState>, headers: HeaderMa
         &crate::services::collaboration::metrics::COLLAB_METRICS.snapshot(),
     );
     prometheus_counters(&mut out, "cfmeet_ops", &OPS_METRICS.snapshot());
+    // Notification Service N12 (D-9): CRITICAL lane gauges from PostgreSQL at scrape time
+    // (both replicas read the same database). Absent without the fence history.
+    if let Ok(s) = crate::services::critical_notifications::lane_status(&state.db).await {
+        use std::fmt::Write;
+        for (name, value) in [
+            (
+                "cfmeet_account_critical_oldest_open_seconds",
+                s.oldest_open_seconds,
+            ),
+            ("cfmeet_account_critical_never_leased", s.never_leased),
+            (
+                "cfmeet_account_critical_leased_uncompleted",
+                s.leased_uncompleted,
+            ),
+            ("cfmeet_account_critical_dead", s.dead),
+            (
+                "cfmeet_account_critical_fallback_key",
+                i64::from(s.fallback_key),
+            ),
+        ] {
+            let _ = writeln!(out, "# TYPE {name} gauge\n{name} {value}");
+        }
+    }
     (
         StatusCode::OK,
         [(

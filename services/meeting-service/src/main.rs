@@ -273,6 +273,19 @@ async fn main() -> anyhow::Result<()> {
     // addresses into published events (unset: invitation emails stay on the legacy path).
     let sealing = backend::services::notification_publications::sealing_key_from_env()
         .unwrap_or_else(|e| panic!("notification sealing key configuration error: {e}"));
+    // Notification Service N12: the CRITICAL lane seals codes to the same service key and
+    // each message's legacy email to the Account fallback key (CF_ACCOUNT_FALLBACK_KEY_FILE,
+    // self-tested here; unset: every CRITICAL message stays on the legacy path).
+    let critical_keys = backend::services::critical_notifications::keys_from_env(sealing.clone())
+        .unwrap_or_else(|e| panic!("CRITICAL notification lane configuration error: {e}"));
+    if critical_keys.fallback.is_some() {
+        tracing::info!("CRITICAL notification lane: Account fallback key loaded and self-tested");
+    } else {
+        tracing::info!(
+            "CF_ACCOUNT_FALLBACK_KEY_FILE is not set: CRITICAL notifications stay on the legacy email path"
+        );
+    }
+    backend::services::critical_notifications::install(critical_keys);
     if sealing.is_some() {
         state.notifier = std::sync::Arc::new(
             backend::services::notifications::Notifier::new(
@@ -301,6 +314,13 @@ async fn main() -> anyhow::Result<()> {
             "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"
         );
     }
+    // N12 PW1: the CRITICAL lane relay (I1 posts, AUTO / FORCED failover to the legacy
+    // email path, expiry). Fails over even without CF_NOTIFICATIONS_BASE_URL.
+    tokio::spawn(backend::services::critical_notifications::run(
+        state.db.clone(),
+        publication_sink.clone(),
+        std::time::Duration::from_secs(2),
+    ));
     tokio::spawn(backend::services::notification_publications::run(
         state.db.clone(),
         publication_sink,

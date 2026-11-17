@@ -19,6 +19,7 @@ pub mod calendar;
 pub mod collaboration;
 pub mod compat;
 pub mod conference;
+pub mod critical_notifications;
 pub mod display_identity;
 pub mod ics;
 pub mod idempotency;

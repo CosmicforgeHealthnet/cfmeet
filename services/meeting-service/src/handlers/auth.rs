@@ -162,7 +162,7 @@ pub async fn register(
     // Queue verification email
     match state
         .email_service
-        .send_verification_email(&user.email, &user.username, &verification_code)
+        .send_verification_email(user.id, &user.email, &user.username, &verification_code)
         .await
     {
         Ok(job_id) => {
@@ -731,7 +731,7 @@ pub async fn resend_verification_email(
     // Send email
     if let Err(e) = state
         .email_service
-        .send_verification_email(&user.email, &user.username, &verification_code)
+        .send_verification_email(user.id, &user.email, &user.username, &verification_code)
         .await
     {
         tracing::error!(user_id = %user.id, "failed to resend verification email: {e}");
@@ -805,7 +805,7 @@ pub async fn forgot_password(
     // Queue reset email
     match state
         .email_service
-        .send_password_reset_email(&user.email, &user.username, &reset_code)
+        .send_password_reset_email(user.id, &user.email, &user.username, &reset_code)
         .await
     {
         Ok(job_id) => {

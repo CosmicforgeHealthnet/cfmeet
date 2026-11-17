@@ -5,12 +5,13 @@
 //! the email worker delivers them through the configured provider (Resend in production).
 
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::{ConnectionTrait, DatabaseConnection};
+use sea_orm::{ConnectionTrait, DatabaseConnection, TransactionTrait};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::config::EmailConfig;
 use crate::error::ApiResult;
+use crate::services::critical_notifications::{self as critical, CriticalEvent};
 use crate::services::email_delivery::{self, category, Enqueued, NewEmail};
 use crate::templates::email::{
     notification_email, password_changed_email, password_reset_email, verification_email,
@@ -73,51 +74,69 @@ impl EmailService {
         .await
     }
 
-    /// Registration / resend verification code.
+    /// Registration / resend verification code. CRITICAL lane (N12): routed by the
+    /// category's fence mode ([`critical::enqueue`]); `LEGACY_ONLY` records exactly the
+    /// ledger row it always did.
     pub async fn send_verification_email(
         &self,
+        user_id: Uuid,
         to_email: &str,
         username: &str,
         verification_code: &str,
     ) -> ApiResult<Uuid> {
         let template = verification_email(username, verification_code, "24 hours");
-        self.enqueue_template(
-            category::AUTH_VERIFICATION,
-            Some(format!(
-                "otp:verify:{}:{}",
-                email_delivery::recipient_hash(to_email),
-                digest(verification_code)
-            )),
-            to_email,
-            Some(username),
-            "Your CF Meet verification code",
-            template,
-            Some(Utc::now() + VERIFICATION_TTL),
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::AUTH_VERIFICATION,
+                format!(
+                    "otp:verify:{}:{}",
+                    email_delivery::recipient_hash(to_email),
+                    digest(verification_code)
+                ),
+                to_email,
+                username,
+                "Your CF Meet verification code",
+                template,
+                Utc::now() + VERIFICATION_TTL,
+            ),
+            CriticalEvent::verification_code(
+                user_id,
+                verification_code,
+                VERIFICATION_TTL.num_minutes(),
+            ),
         )
         .await
         .map(|e| e.id)
     }
 
-    /// Password reset code.
+    /// Password reset code (CRITICAL lane, as [`Self::send_verification_email`]).
     pub async fn send_password_reset_email(
         &self,
+        user_id: Uuid,
         to_email: &str,
         username: &str,
         reset_code: &str,
     ) -> ApiResult<Uuid> {
         let template = password_reset_email(username, reset_code, "1 hour");
-        self.enqueue_template(
-            category::AUTH_PASSWORD_RESET,
-            Some(format!(
-                "otp:reset:{}:{}",
-                email_delivery::recipient_hash(to_email),
-                digest(reset_code)
-            )),
-            to_email,
-            Some(username),
-            "Reset your CF Meet password",
-            template,
-            Some(Utc::now() + RESET_TTL),
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::AUTH_PASSWORD_RESET,
+                format!(
+                    "otp:reset:{}:{}",
+                    email_delivery::recipient_hash(to_email),
+                    digest(reset_code)
+                ),
+                to_email,
+                username,
+                "Reset your CF Meet password",
+                template,
+                Utc::now() + RESET_TTL,
+            ),
+            CriticalEvent::password_reset_code(user_id, reset_code, RESET_TTL.num_minutes()),
         )
         .await
         .map(|e| e.id)
@@ -210,9 +229,32 @@ impl EmailService {
     }
 }
 
+/// One rendered legacy email of the CRITICAL lane (the row `LEGACY_ONLY` records).
+fn rendered(
+    category: &'static str,
+    key: String,
+    to: &str,
+    to_name: &str,
+    subject: &str,
+    template: EmailTemplate,
+    expires_at: DateTime<Utc>,
+) -> NewEmail {
+    NewEmail {
+        category,
+        idempotency_key: Some(key),
+        to: to.to_string(),
+        to_name: Some(to_name.to_string()),
+        subject: subject.to_string(),
+        html: template.html,
+        text: template.text,
+        expires_at: Some(expires_at),
+    }
+}
+
 /// N0-10 (S-9): the password-changed security notice, recorded on the caller's connection
 /// (the transaction that changes the password), so it is committed with the change.
-pub async fn password_changed_notice_on<C: ConnectionTrait>(
+/// CRITICAL lane (N12): routed by the category's fence mode ([`critical::enqueue`]).
+pub async fn password_changed_notice_on<C: ConnectionTrait + TransactionTrait>(
     conn: &C,
     to_email: &str,
     username: &str,
@@ -221,8 +263,9 @@ pub async fn password_changed_notice_on<C: ConnectionTrait>(
 ) -> ApiResult<Uuid> {
     let now = Utc::now();
     let template = password_changed_email(username, how, &now.format("%Y-%m-%d %H:%M").to_string());
-    email_delivery::enqueue(
+    critical::enqueue(
         conn,
+        critical::installed(),
         NewEmail {
             category: category::SECURITY_PASSWORD_CHANGED,
             idempotency_key: Some(format!("password-changed:{user_id}:{}", now.timestamp())),
@@ -233,24 +276,30 @@ pub async fn password_changed_notice_on<C: ConnectionTrait>(
             text: template.text,
             expires_at: Some(now + Duration::days(2)),
         },
+        CriticalEvent::password_changed(user_id, now),
     )
     .await
     .map(|e| e.id)
 }
 
 /// N0-10 (S-9): a device security notice recorded on the caller's transaction, with the
-/// deterministic key `device-linked:<link id>` (one notice per completed link).
-pub async fn device_notice_on<C: ConnectionTrait>(
+/// deterministic key `device-linked:<link id>` (one notice per completed link). CRITICAL
+/// lane (N12): routed by the `SECURITY_DEVICE_LINKED` fence mode ([`critical::enqueue`]).
+#[allow(clippy::too_many_arguments)]
+pub async fn device_notice_on<C: ConnectionTrait + TransactionTrait>(
     conn: &C,
     to_email: &str,
     username: &str,
+    user_id: Uuid,
+    device_id: Uuid,
     link_id: Uuid,
     subject: &str,
     message: &str,
 ) -> ApiResult<Uuid> {
     let template = notification_email(username, subject, message);
-    email_delivery::enqueue(
+    critical::enqueue(
         conn,
+        critical::installed(),
         NewEmail {
             category: category::NOTIFICATION,
             idempotency_key: Some(format!("device-linked:{link_id}")),
@@ -261,9 +310,44 @@ pub async fn device_notice_on<C: ConnectionTrait>(
             text: template.text,
             expires_at: Some(Utc::now() + Duration::days(2)),
         },
+        CriticalEvent::device_linked(user_id, device_id, link_id),
     )
     .await
     .map(|e| e.id)
+}
+
+/// The device step-up code email (`account_devices`), recorded on the caller's
+/// transaction with the key `device-step-up:<link id>:<code digest prefix>`. CRITICAL lane
+/// (N12): routed by the `SECURITY_DEVICE_STEP_UP` fence mode ([`critical::enqueue`]).
+#[allow(clippy::too_many_arguments)]
+pub async fn device_step_up_code_on<C: ConnectionTrait + TransactionTrait>(
+    conn: &C,
+    to_email: &str,
+    username: &str,
+    user_id: Uuid,
+    device_id: Uuid,
+    key: String,
+    code: &str,
+    template: EmailTemplate,
+    expires_at: DateTime<Utc>,
+) -> ApiResult<Enqueued> {
+    let ttl_minutes = (expires_at - Utc::now()).num_minutes().max(1);
+    critical::enqueue(
+        conn,
+        critical::installed(),
+        NewEmail {
+            category: category::SECURITY_DEVICE_STEP_UP,
+            idempotency_key: Some(key),
+            to: to_email.to_string(),
+            to_name: Some(username.to_string()),
+            subject: "Your CF Meet device verification code".into(),
+            html: template.html,
+            text: template.text,
+            expires_at: Some(expires_at),
+        },
+        CriticalEvent::device_step_up_code(user_id, device_id, code, ttl_minutes),
+    )
+    .await
 }
 
 /// A security notice must never block the security change itself because the stored

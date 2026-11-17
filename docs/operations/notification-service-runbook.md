@@ -51,6 +51,27 @@ Recovery: restore the containers with `rollback` (previous images) or release ag
 2. If Account leases are refused (`notif_email_messages.last_error_class = LEASE_UNAVAILABLE`), the Account owner API (X6) is unreachable: nothing is sent, which is safe; Account's AUTO failover takes over after 60 s.
 3. Any `notif_critical_send_without_lease_total` increase is a protocol violation: set the category to `FENCED_OLD` on the producer and `OFF` on the service, then investigate.
 
+### Account CRITICAL lane
+
+The Meeting Service (Account) side of codes and security notices (roadmap N12, `services/meeting-service/src/services/critical_notifications.rs`). In `LEGACY_ONLY` the five CRITICAL categories use the old ledger exactly as before. Outside it, each message gets one sticky decision; a `NEW` one is one `account_notification_outbox` row holding the envelope (code sealed to the service key) and `fallback_sealed` (the legacy email sealed to the Account fallback key, `CF_ACCOUNT_FALLBACK_KEY_FILE`).
+
+| Signal | Meaning | First action |
+|---|---|---|
+| `MeetingCriticalAutoFailover` (warning) | a never-leased code was rerouted to the old path (no `ACCEPTED` / no X6 lease within 60 s, or a refusal) | delivery continues; investigate the service (§4) |
+| `MeetingCriticalCodeStuck` (critical) | an open decision is older than 120 s: leased without X7, `OFF`, or the relay stopped | `GET /internal/operations/notifications/critical` (loopback, `X-Internal-Token`) |
+| `MeetingCriticalFallbackUnavailable` (critical) | a failover could not open `fallback_sealed` | set `critical_fallback = FORCED`, restore the key file, check `/health` `criticalFallbackKey: true` on both replicas |
+| `MeetingCriticalDeadLetters` (critical) | the service refused an event while `critical_fallback = OFF` | restore `AUTO`; the user requests a new code |
+| `MeetingCriticalPossibleDuplicate` (warning) | a break-glass reroute of a leased decision, or an X7 after a reroute | recorded (`REROUTED_POSSIBLE_DUPLICATE`); at most one extra email with the same code |
+
+Rules the relay enforces (Document 4 §9.8, §10.4):
+- **AUTO** (default): a `NEW` decision that was never leased fails over after 60 s, in one row-locked transaction that writes the legacy email (same code, same key). The service can never send it afterwards (X6 answers `REVOKED`).
+- **FORCED** (break-glass, no restart): new CRITICAL messages are decided `OLD`; in-flight never-leased ones fail over at once.
+- **OFF**: no automatic failover (refused events become dead letters and page).
+- A **leased** decision is never failed over automatically. If the lease lapsed without X7 (the service crashed mid-send), first set `critical_fallback = FORCED`, then `POST /internal/operations/notifications/critical/reroute` with `{"decisionIds": [...]}` from the status list; each is recorded `REROUTED_POSSIBLE_DUPLICATE`. A live lease answers `WAIT_FOR_LEASE`, a completed decision `REFUSED`.
+- Codes that expired are sent by neither path.
+
+Fallback drill (readiness invariants 1, 2, 4): `POST /internal/operations/email/fallback-drill` with `{"to": "<acceptance inbox>", "reference": "<run id>"}` queues one `OPERATIONS_ACCEPTANCE` email through the exact failover path (sealed to and opened with the fallback key, sent by the legacy worker with its own credentials); poll `GET /internal/operations/email/deliveries/{id}` for `ACCEPTED`, and `DELIVERED` with the Resend webhook. 503 `FALLBACK_KEY_UNAVAILABLE` means no key is loaded.
+
 ## 6. HELD events
 
 HELD means a producer routed `NEW` while the service mode is `OFF` (operator error or an activation in progress). Fix the mode with the activation operation, then replay the HELD events with I6 (`POST /internal/v1/admin/dead-letters/replay`, ids `event:<producer>:<eventId>`). CRITICAL items are never replayed (a code is re-requested by the user).

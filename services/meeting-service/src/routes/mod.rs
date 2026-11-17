@@ -105,6 +105,20 @@ pub fn create_routes(state: AppState) -> Router {
             "/internal/operations/email/developer-access-decision",
             axum::routing::post(handlers::email::developer_access_decision),
         )
+        // Notification Service N12: the CRITICAL lane's legacy fallback (drill, state,
+        // operator reroute). Internal token; the public host refuses /internal/operations/.
+        .route(
+            "/internal/operations/email/fallback-drill",
+            axum::routing::post(handlers::email::fallback_drill),
+        )
+        .route(
+            "/internal/operations/notifications/critical",
+            get(handlers::email::critical_lane_status),
+        )
+        .route(
+            "/internal/operations/notifications/critical/reroute",
+            axum::routing::post(handlers::email::critical_reroute),
+        )
         // Internal provider routes (signature / internal-token protected; Part E).
         .route(
             "/internal/rtc/livekit/webhook",

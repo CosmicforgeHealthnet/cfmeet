@@ -1175,7 +1175,7 @@
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6: X1, X2; N12: X6, X7). Meeting Service / Account owner APIs for the Notification Service only: resolveAccountContacts (account-contacts.read), resolveConferenceRecipients (meeting-notification-recipients.read), claimCriticalSendLeases and completeCriticalSends (account-route-lease.claim). 1.1.0 (N6): X2 answers `joinPath` and `endsAt`. X1 and X2 are served by services/meeting-service from N6 (PR #76), only while NOTIFICATION_OWNER_API_ENABLED=true; X6 and X7 are not yet served (N12)."
+      "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6: X1, X2; N12: X6, X7). Meeting Service / Account owner APIs for the Notification Service only: resolveAccountContacts (account-contacts.read), resolveConferenceRecipients (meeting-notification-recipients.read), claimCriticalSendLeases and completeCriticalSends (account-route-lease.claim). 1.1.0 (N6): X2 answers `joinPath` and `endsAt`. X1 and X2 are served by services/meeting-service from N6 (PR #76), X6 and X7 from N12, only while NOTIFICATION_OWNER_API_ENABLED=true."
     },
     {
       "id": "cfmeet.messaging.notification-owner-api",
