@@ -159,8 +159,8 @@ pub enum ErrorCode {
     OrganizationCallingDisabled,
     /// Blueprint Section 9: the requested username belongs to another account.
     UsernameTaken,
-    /// Blueprint Sections 2-3 (ACC-026): the action needs the current password or a recent
-    /// sign-in.
+    /// Blueprint Sections 2-3 (ACC-026): the action needs a fresh step-up confirmation (a
+    /// code emailed to the account's address).
     ReauthenticationRequired,
     /// Blueprint Sections 2-3 (ACC-016): the account's email address must be verified first
     /// (only where the deployment enforces verification).

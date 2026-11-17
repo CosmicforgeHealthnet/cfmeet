@@ -14,7 +14,7 @@ class WebJourneyFixtures(unittest.TestCase):
                 wj.accounts_file(bad)
 
     def test_prepare_connects_a_with_b_and_c_and_records_labels_without_printing_secrets(self):
-        people = [dict(email='%s@example.invalid' % x, password='Aa1!secret-' + x) for x in 'abc']
+        people = [dict(email='%s@example.invalid' % x) for x in 'abc']
         cf = {'tok-a': 'AAAA-1111', 'tok-b': 'BBBB-2222', 'tok-c': 'CCCC-3333'}
         calls, written = [], {}
 
@@ -31,7 +31,10 @@ class WebJourneyFixtures(unittest.TestCase):
 
         import app_acceptance
         with patch.object(app_acceptance, 'accounts', return_value=people), \
-                patch.object(app_acceptance, 'api', side_effect=lambda path, body: {'access_token': 'tok-' + body['email'][0]}), \
+                patch.object(app_acceptance, 'sign_in',
+                             side_effect=lambda person: {'access_token': 'tok-' + person['email'][0]}), \
+                patch.object(app_acceptance, 'refresh_token_for',
+                             side_effect=lambda person: 'secret-refresh-' + person['email'][0]), \
                 patch.object(wj, 'request', side_effect=fake_request), \
                 patch.object(wj.p, 'write_private', side_effect=lambda path, text: written.update(path=path, text=text)), \
                 patch('builtins.print') as printed:
@@ -39,7 +42,9 @@ class WebJourneyFixtures(unittest.TestCase):
         fixtures = json.loads(written['text'])
         self.assertEqual([f['cfMeetId'] for f in fixtures], ['AAAA-1111', 'BBBB-2222', 'CCCC-3333'])
         self.assertEqual(fixtures[0]['labels']['BBBB-2222'], 'Name BBBB-2222')
-        self.assertEqual(set(fixtures[0]), {'email', 'password', 'cfMeetId', 'labels'}, 'no token kept')
+        self.assertEqual(set(fixtures[0]), {'email', 'refreshToken', 'cfMeetId', 'labels'},
+                         'no access token or password kept; one fresh browser session')
+        self.assertEqual(fixtures[1]['refreshToken'], 'secret-refresh-b')
         requests = [c for c in calls if c[1].endswith('/contact-requests')]
         self.assertEqual([c[2] for c in requests], ['tok-a', 'tok-a'], 'A asks B and C')
         accepts = [c for c in calls if c[1].endswith('/accept')]

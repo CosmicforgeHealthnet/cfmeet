@@ -695,6 +695,23 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/me/sessions/:session_id/revoke",
             post(crate::handlers::v2::account_sessions::revoke_my_session),
         )
+        // Passwordless sign-in: step-up confirmation and secure email change
+        .route(
+            "/me/step-up/request",
+            post(crate::handlers::v2::account_identity::request_step_up),
+        )
+        .route(
+            "/me/step-up/verify",
+            post(crate::handlers::v2::account_identity::verify_step_up),
+        )
+        .route(
+            "/me/email/change/request",
+            post(crate::handlers::v2::account_identity::request_email_change),
+        )
+        .route(
+            "/me/email/change/verify",
+            post(crate::handlers::v2::account_identity::confirm_email_change),
+        )
         .route(
             "/admin/users/:user_id/sessions/revoke",
             post(crate::handlers::v2::account_sessions::admin_revoke_user_sessions),

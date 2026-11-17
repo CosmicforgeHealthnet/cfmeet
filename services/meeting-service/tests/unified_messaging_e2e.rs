@@ -1582,28 +1582,25 @@ async fn web_messaging_client_in_chromium_across_real_services() {
             .unwrap()
         }
     };
-    // The browser signs in the way the web app does (ACC-019): a real password login with
-    // the account authority, whose refresh token the app keeps in its httpOnly session
-    // cookie. Each browser context makes its own login, so every context holds its own
-    // single-use refresh token (ADR 0057).
-    let password = "Web-e2e-journey-Passw0rd!";
-    let hash = backend::services::auth::hash_password(password).unwrap();
-    for id in [alice.id, bob.id, mallory.id] {
-        app.db
-            .conn
-            .execute(Statement::from_sql_and_values(
-                sea_orm::DbBackend::Postgres,
-                "UPDATE users SET password_hash = $1 WHERE id = $2",
-                vec![hash.clone().into(), id.into()],
-            ))
-            .await
-            .unwrap();
-    }
+    // The browser signs in the way the web app does (ACC-019): a passwordless sign-in
+    // (`POST /api/v1/auth/otp/verify`) with the account authority, whose refresh token the
+    // app keeps in its httpOnly session cookie. Each browser context makes its own sign-in,
+    // so every context holds its own single-use refresh token (ADR 0057). The journey users
+    // are fixed-code test accounts (AUTH_TEST_ACCOUNTS), so every context can sign in
+    // without reading a mailbox.
+    let codes = ["111111", "222222", "333333"];
+    let accounts = [&alice.email, &bob.email, &mallory.email]
+        .iter()
+        .zip(codes)
+        .map(|(email, code)| format!("{email}:{code}"))
+        .collect::<Vec<_>>()
+        .join(",");
     let users = json!({
-        "alice": { "id": alice.id, "email": alice.email, "password": password, "name": name(alice.id).await },
-        "bob": { "id": bob.id, "email": bob.email, "password": password, "name": name(bob.id).await },
-        "mallory": { "id": mallory.id, "email": mallory.email, "password": password, "name": name(mallory.id).await },
+        "alice": { "id": alice.id, "email": alice.email, "code": codes[0], "name": name(alice.id).await },
+        "bob": { "id": bob.id, "email": bob.email, "code": codes[1], "name": name(bob.id).await },
+        "mallory": { "id": mallory.id, "email": mallory.email, "code": codes[2], "name": name(mallory.id).await },
     });
+    let app = app.with_auth_env(&[("APP_ENV", "test"), ("AUTH_TEST_ACCOUNTS", &accounts)]);
     // The Meeting Service as the browser meets it: the real router behind the production
     // CORS policy, on the port the web build targets.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:18080")

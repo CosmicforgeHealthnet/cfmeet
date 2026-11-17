@@ -64,7 +64,7 @@ pub struct SecurityEventPage {
 }
 
 /// The session id of the bearer token on this request, if it carries one.
-fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Uuid> {
+pub(crate) fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Uuid> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)?
         .to_str()
@@ -271,8 +271,16 @@ pub async fn revoke_other_sessions(
             "Signing out other sessions needs a trusted device of this account once it has one",
         ));
     }
-    let revoked =
-        security::revoke_others(&state, user_id, Some(current), RevokeReason::UserRevoked).await?;
+    let ended =
+        security::revoke_others(&state.db, user_id, current, RevokeReason::UserRevoked).await?;
+    for session_id in &ended {
+        if let Err(e) =
+            crate::services::communications::session_ended(&state, user_id, *session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of an ended sign-in failed: {e}");
+        }
+    }
+    let revoked = ended.len() as u64;
     security::record_event(
         &state.db,
         SecurityEvent::new("LOGOUT_OTHERS", Outcome::Success)
@@ -361,7 +369,7 @@ pub struct AdminRevokeSessionsRequest {
 
 /// Read the account security audit (platform administrators)
 ///
-/// Append-only account security events — sign-ins, sign-outs, password changes and resets,
+/// Append-only account security events — sign-ins, sign-outs, email changes,
 /// Google linking, refresh-token reuse — newest first. Requires a platform administrator.
 /// Events never contain passwords, tokens, email addresses or network addresses.
 #[utoipa::path(

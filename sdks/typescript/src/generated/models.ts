@@ -5899,9 +5899,9 @@ export namespace Meetings {
   };
   /** One request-validation problem. */
   export type ValidationIssue = {
-    /** Stable, machine-readable rule code, e.g. `length`, `email`, `regex`, `password_strength`, `passwords_mismatch`. */
+    /** Stable, machine-readable rule code, e.g. `length`, `email`, `regex`, `range`. */
     code: string;
-    /** Public JSON path of the offending field, as sent by the client (honours the request's serde naming), e.g. `password`, `displayName`, `items[0].email`. `null` when the problem concerns the request as a whole. */
+    /** Public JSON path of the offending field, as sent by the client (honours the request's serde naming), e.g. `email`, `displayName`, `items[0].email`. `null` when the problem concerns the request as a whole. */
     field: string | null;
     /** Safe, human-readable message for this field. */
     message: string;

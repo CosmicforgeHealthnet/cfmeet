@@ -31,6 +31,20 @@ pub struct AdminUpdateUserRequest {
     pub status: Option<String>,
 }
 
+/// Support-assisted email change (admin only): the owner lost access to the old address
+/// and was verified by support outside the product.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+pub struct AdminChangeEmailRequest {
+    #[validate(
+        email(message = "Invalid email address"),
+        length(max = 255, message = "Invalid email address")
+    )]
+    pub new_email: String,
+    /// Why and how the owner was verified (recorded in the security audit).
+    #[validate(length(min = 10, max = 500, message = "Reason must be 10-500 characters"))]
+    pub reason: String,
+}
+
 /// Pagination metadata for admin endpoints
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AdminPaginationMeta {

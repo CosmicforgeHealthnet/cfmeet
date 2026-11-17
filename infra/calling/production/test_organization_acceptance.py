@@ -13,8 +13,7 @@ SECRET_WORDS = ('access_token', 'tok-', 'invitation-secret', 'password', 'Aa1!',
 
 
 def accounts():
-    return [dict(username='u' + x, email='u%s@example.invalid' % x, password='Aa1!secret' + x,
-                 userId=str(uuid.uuid4())) for x in 'abc']
+    return [dict(username='u' + x, email='u%s@example.invalid' % x, userId=str(uuid.uuid4())) for x in 'abc']
 
 
 class FakeApi:
@@ -43,7 +42,9 @@ class FakeApi:
             return 500, {'error': {'code': 'INTERNAL_ERROR'}}
         user = self.user(headers)
         a, b, c = list(self.people.values())
-        if path == '/api/v1/auth/login':
+        if path == '/api/v1/auth/otp/request':
+            return 200, {'message': 'sent'}
+        if path == '/api/v1/auth/otp/verify':
             token = 'tok-' + uuid.uuid4().hex
             self.tokens[token] = self.people[body['email']]
             return 200, {'access_token': token}
@@ -181,6 +182,13 @@ FakeSocket.event_conversation = None
 
 
 class OrganizationAcceptanceTest(unittest.TestCase):
+    def setUp(self):
+        # Passwordless sign-in: the controlled code replacement needs the VPS (Redis).
+        import app_acceptance
+        stub = patch.object(app_acceptance, 'controlled_code', lambda key, url=None: '024680')
+        stub.start()
+        self.addCleanup(stub.stop)
+
     def journey(self, api):
         events = []
         FakeSocket.conversation = api.conv

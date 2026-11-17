@@ -3,13 +3,13 @@ use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
 use crate::{
     dto::{DeactivateAccountRequest, MessageResponse, UpdateMeRequest, UserMeResponse},
-    error::{ApiError, ApiResult, ErrorCode},
+    error::{ApiError, ApiResult},
     middleware::AuthContext,
     models::users::{self, Entity as Users},
     services::{
         account_profile::{self as profile, ApplyError, ProfileChange},
         account_security::{self as security, Outcome, SecurityEvent},
-        auth::{verify_password, Claims},
+        auth::Claims,
     },
     state::AppState,
 };
@@ -119,21 +119,21 @@ pub async fn update_current_user(
 /// tokens as the auth middleware checks user status on every request.
 /// This operation is idempotent - calling it multiple times has the same effect.
 ///
-/// Re-authentication (ACC-026): send `current_password`, or call this within 10 minutes of
-/// signing in (a fresh sign-in session). Otherwise the answer is `403
-/// REAUTHENTICATION_REQUIRED` and nothing changes. Accounts without a password (Google sign-in)
-/// sign in again first. Both outcomes are recorded in the account security audit. An
-/// administrator reverses a deactivation with `PATCH /api/v1/admin/users/{id}` (`status:
-/// active`); the user then signs in again.
+/// Confirmation (ACC-026): send a `step_up_token` for purpose `DEACTIVATE_ACCOUNT`, obtained with
+/// `POST /api/v2/me/step-up/request` then `POST /api/v2/me/step-up/verify` (a code emailed to the
+/// account's address). Without a valid token the answer is `403 REAUTHENTICATION_REQUIRED` and
+/// nothing changes; the token is single-use and bound to the current session. Both outcomes are
+/// recorded in the account security audit. An administrator reverses a deactivation with `PATCH
+/// /api/v1/admin/users/{id}` (`status: active`); the user then signs in again.
 #[utoipa::path(
     post,
     path = "/api/v1/users/me/deactivate",
     tag = "Users",
-    request_body(content = Option<DeactivateAccountRequest>, description = "Optional: the current password (required unless the caller signed in recently)"),
+    request_body(content = Option<DeactivateAccountRequest>, description = "The step-up token for DEACTIVATE_ACCOUNT"),
     responses(
         (status = 200, description = "Account deactivated successfully", body = MessageResponse),
         (status = 401, description = "Unauthorized - missing or invalid token"),
-        (status = 403, description = "REAUTHENTICATION_REQUIRED - wrong or missing current password and no recent sign-in"),
+        (status = 403, description = "REAUTHENTICATION_REQUIRED - missing, used or foreign step-up token"),
     ),
     security(
         ("bearer_auth" = [])
@@ -159,20 +159,29 @@ pub async fn deactivate_account(
         }));
     }
 
-    // ACC-026: a stolen or stale token alone cannot deactivate the account.
-    let method = reauthentication(&state, &claims, &user, body.current_password.as_deref()).await?;
-    let Some(method) = method else {
-        security::record_event_best_effort(
-            &state.db,
-            SecurityEvent::new("ACCOUNT_DEACTIVATED", Outcome::Denied)
-                .by_user(user.id)
-                .detail(serde_json::json!({ "reason": "REAUTHENTICATION_REQUIRED" })),
+    // ACC-026: a stolen session token alone cannot deactivate the account.
+    let method = if state.auth_policy.deactivation_requires_reauth {
+        if let Err(e) = crate::services::step_up::consume(
+            &state,
+            user.id,
+            claims.session_id(),
+            crate::services::step_up::StepUpPurpose::DeactivateAccount,
+            body.step_up_token.as_deref(),
         )
-        .await;
-        return Err(ApiError::domain(
-            ErrorCode::ReauthenticationRequired,
-            "Confirm your current password, or sign in again, to deactivate the account",
-        ));
+        .await
+        {
+            security::record_event_best_effort(
+                &state.db,
+                SecurityEvent::new("ACCOUNT_DEACTIVATED", Outcome::Denied)
+                    .by_user(user.id)
+                    .detail(serde_json::json!({ "reason": "REAUTHENTICATION_REQUIRED" })),
+            )
+            .await;
+            return Err(e);
+        }
+        "STEP_UP"
+    } else {
+        "NOT_REQUIRED"
     };
 
     // Update user status to Inactive
@@ -201,39 +210,4 @@ pub async fn deactivate_account(
     Ok(Json(MessageResponse {
         message: "Account deactivated successfully".to_string(),
     }))
-}
-
-/// ACC-026: how the caller proved it is the account holder (`None`: it did not).
-/// A wrong password never falls back to the recent-sign-in rule.
-async fn reauthentication(
-    state: &AppState,
-    claims: &Claims,
-    user: &users::Model,
-    current_password: Option<&str>,
-) -> ApiResult<Option<&'static str>> {
-    let policy = &state.auth_policy;
-    if !policy.deactivation_requires_reauth {
-        return Ok(Some("NOT_REQUIRED"));
-    }
-    if let Some(password) = current_password {
-        // Gap audit A9: bounded guesses (shared with change-password).
-        state
-            .rate_limiter
-            .check_action_rate(
-                "auth:current-password",
-                &user.id.to_string(),
-                crate::handlers::auth::MAX_CURRENT_PASSWORD_GUESSES,
-                15 * 60,
-            )
-            .await?;
-        let ok = match user.password_hash.as_deref() {
-            Some(hash) => verify_password(password, hash)?,
-            None => false,
-        };
-        return Ok(ok.then_some("PASSWORD"));
-    }
-    let now = chrono::Utc::now().timestamp();
-    Ok(policy
-        .recently_authenticated(claims, now)
-        .then_some("RECENT_SIGN_IN"))
 }

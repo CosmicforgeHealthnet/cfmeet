@@ -4,11 +4,14 @@ pub mod account_security;
 pub mod auth;
 pub mod creation_limits;
 pub mod email;
+pub mod email_change;
 pub mod email_delivery;
 pub mod livekit;
 pub mod otp;
+pub mod passwordless;
 pub mod rate_limiter;
 pub mod redis;
+pub mod step_up;
 pub mod token_blacklist;
 
 // Phase 2 meeting domain (spec v1.1 Parts A–D)

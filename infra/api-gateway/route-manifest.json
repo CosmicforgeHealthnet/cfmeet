@@ -4,7 +4,7 @@
   "classes": {
     "EXCLUDED": 149,
     "INTERNAL_SERVICE": 33,
-    "OPERATOR_ADMIN": 40,
+    "OPERATOR_ADMIN": 41,
     "PROVIDER_CALLBACK": 4,
     "PUBLIC_CUSTOMER": 585,
     "PUBLIC_INFRASTRUCTURE": 17
@@ -11165,6 +11165,14 @@
     {
       "domain": "meetings",
       "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "change_user_email",
+      "method": "PATCH",
+      "path": "/api/v1/admin/users/{id}/email",
+      "class": "OPERATOR_ADMIN"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
       "operationId": "list_api_keys",
       "method": "GET",
       "path": "/api/v1/api-keys",
@@ -11219,27 +11227,9 @@
     {
       "domain": "meetings",
       "contract": "cfmeet.meeting-service.http-api",
-      "operationId": "change_password",
+      "operationId": "revert_email_change",
       "method": "POST",
-      "path": "/api/v1/auth/change-password",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "contract": "cfmeet.meeting-service.http-api",
-      "operationId": "forgot_password",
-      "method": "POST",
-      "path": "/api/v1/auth/forgot-password",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "contract": "cfmeet.meeting-service.http-api",
-      "operationId": "login",
-      "method": "POST",
-      "path": "/api/v1/auth/login",
+      "path": "/api/v1/auth/email-change/revert",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
     },
@@ -11282,54 +11272,36 @@
     {
       "domain": "meetings",
       "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "request_otp",
+      "method": "POST",
+      "path": "/api/v1/auth/otp/request",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "verify_otp",
+      "method": "POST",
+      "path": "/api/v1/auth/otp/verify",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "verify_otp_link",
+      "method": "POST",
+      "path": "/api/v1/auth/otp/verify-link",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
       "operationId": "refresh_token",
       "method": "POST",
       "path": "/api/v1/auth/refresh",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "contract": "cfmeet.meeting-service.http-api",
-      "operationId": "register",
-      "method": "POST",
-      "path": "/api/v1/auth/register",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "contract": "cfmeet.meeting-service.http-api",
-      "operationId": "resend_verification_email",
-      "method": "POST",
-      "path": "/api/v1/auth/resend-verification",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "contract": "cfmeet.meeting-service.http-api",
-      "operationId": "reset_password",
-      "method": "POST",
-      "path": "/api/v1/auth/reset-password",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "contract": "cfmeet.meeting-service.http-api",
-      "operationId": "verify_email",
-      "method": "POST",
-      "path": "/api/v1/auth/verify-email",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "contract": "cfmeet.meeting-service.http-api",
-      "operationId": "verify_reset_token",
-      "method": "POST",
-      "path": "/api/v1/auth/verify-reset-token",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
     },
@@ -12617,6 +12589,24 @@
     {
       "domain": "meetings",
       "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_request_email_change",
+      "method": "POST",
+      "path": "/api/v2/me/email/change/request",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_confirm_email_change",
+      "method": "POST",
+      "path": "/api/v2/me/email/change/verify",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
       "operationId": "v2_my_organization_invitations",
       "method": "GET",
       "path": "/api/v2/me/organization-invitations",
@@ -12691,6 +12681,24 @@
       "operationId": "v2_revoke_my_session",
       "method": "POST",
       "path": "/api/v2/me/sessions/{sessionId}/revoke",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_request_step_up",
+      "method": "POST",
+      "path": "/api/v2/me/step-up/request",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_verify_step_up",
+      "method": "POST",
+      "path": "/api/v2/me/step-up/verify",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_ACCOUNT"
     },

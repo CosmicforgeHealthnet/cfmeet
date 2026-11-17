@@ -158,7 +158,9 @@ class Journey:
     # -- setup -----------------------------------------------------------------------------
     def sign_in(self):
         for account in self.c['accounts']:
-            login = self.api('POST', '/api/v1/auth/login', {'email': account['email'], 'password': account['password']})
+            # Passwordless sign-in: the operator opened a session for this run; its refresh
+            # token is exchanged once (rotated) for this client's tokens.
+            login = self.api('POST', '/api/v1/auth/refresh', {'refresh_token': account['refreshToken']})
             person = {'session': login['access_token'], 'refresh': login.get('refresh_token')}
             person['principalId'] = self.api('GET', '/api/v2/messaging/me', token=person['session'])['principalId']
             person['cfMeetId'] = self.hub(person, '/me')['cfMeetId']

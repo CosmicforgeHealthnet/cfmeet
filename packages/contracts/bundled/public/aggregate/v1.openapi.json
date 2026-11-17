@@ -75586,21 +75586,21 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,\n`password_strength`, `passwords_mismatch`.",
-            "example": "password_strength"
+            "description": "Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,\n`range`.",
+            "example": "email"
           },
           "field": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Public JSON path of the offending field, as sent by the client (honours the\nrequest's serde naming), e.g. `password`, `displayName`, `items[0].email`.\n`null` when the problem concerns the request as a whole.",
-            "example": "password"
+            "description": "Public JSON path of the offending field, as sent by the client (honours the\nrequest's serde naming), e.g. `email`, `displayName`, `items[0].email`.\n`null` when the problem concerns the request as a whole.",
+            "example": "email"
           },
           "message": {
             "type": "string",
             "description": "Safe, human-readable message for this field.",
-            "example": "Password must be between 8 and 72 characters"
+            "example": "Invalid email address"
           }
         }
       },

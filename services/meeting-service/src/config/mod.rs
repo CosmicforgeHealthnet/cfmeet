@@ -7,7 +7,7 @@ pub mod notifications;
 pub mod operations;
 mod redis;
 
-pub use app::AppConfig;
+pub use app::{is_development_env, AppConfig};
 pub use email::{EmailConfig, EmailProviderKind};
 pub(crate) use features::{env_bool, env_num};
 pub use features::{FeatureFlags, LegacyMeetingCreateMode, MeetingV2Config};

@@ -77,7 +77,7 @@ def context():
 
 def compatibility():
     users=app_acceptance.accounts()
-    token=app_acceptance.api('login',{'email':users[0]['email'],'password':users[0]['password']})['access_token']
+    token=app_acceptance.sign_in(users[0])['access_token']
     def fetch(path,body=None,authorized=True,expected=200):
         headers={'Content-Type':'application/json'}
         if authorized:headers['Authorization']='Bearer '+token

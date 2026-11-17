@@ -156,8 +156,9 @@ jobs:
           # The fixtures the VPS step just wrote; read once, never printed.
           ssh -o BatchMode=yes -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" \
             "cat '/opt/cfmeet-core/secrets/cfmeet-web-journey-$GITHUB_RUN_ID.json'" > "$accounts"
-          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert len(v)==3 and all(x["email"] and x["password"] for x in v)' "$accounts"
-          for p in $(python3 -c 'import json,sys; print(" ".join(x["password"] for x in json.load(open(sys.argv[1]))))' "$accounts"); do echo "::add-mask::$p"; done
+          # Passwordless sign-in: each fixture carries a fresh session's refresh token.
+          python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert len(v)==3 and all(x["email"] and x["refreshToken"] for x in v)' "$accounts"
+          for p in $(python3 -c 'import json,sys; print(" ".join(x["refreshToken"] for x in json.load(open(sys.argv[1]))))' "$accounts"); do echo "::add-mask::$p"; done
           cd apps/web
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium

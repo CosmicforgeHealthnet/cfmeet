@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import secrets
 import subprocess
 import select
 import sys
@@ -18,12 +17,17 @@ def execute(sha, run_id, scope, stage, verification=False):
     folder=release.WORK/('staging-test-'+run_id if stage else 'production-test-'+run_id)
     folder.mkdir(mode=0o700,exist_ok=True)
     if stage:
-        accounts=[]
+        # The staging candidate's fixed-code test accounts (AUTH_TEST_ACCOUNTS, set by
+        # communications_release for the candidate only).
+        accounts=[dict(a) for a in release.stage_test_accounts()]
     else:
         import app_acceptance
         # Mutation limits belong to real accounts and must survive failed releases.
         # Each run gets isolated actors; never reset their production rate limits.
-        accounts=app_acceptance.accounts('communications-'+run_id,count=2)
+        # Passwordless sign-in: the client cannot reach Redis, so each account carries the
+        # refresh token of a session opened here (exchanged once by the client).
+        accounts=[{'email':a['email'],'refreshToken':a['refreshToken']}
+                  for a in app_acceptance.accounts('communications-'+run_id,count=2,keep_sessions=True)]
     ports=release.STAGE_TLS if stage else release.PROD_TLS
     context=dict(sha=sha,stage=stage,verification=verification,scope=scope,accounts=accounts,
         urls={k:'https://api.cfmeet.com:'+str(v) for k,v in ports.items()})
@@ -146,14 +150,14 @@ class Journey:
 
     def accounts(self):
         values=self.c['accounts']
-        if not values:
-            for _ in range(2):
-                username='comm_'+uuid.uuid4().hex[:16]
-                a=dict(username=username,email=username+'@acceptance.invalid',password='Aa9!'+secrets.token_urlsafe(28))
-                self.request('meeting-service','/api/v1/auth/register','POST',dict(**a,confirm_password=a['password']),expected=(200,201))
-                values.append(a)
+        assert len(values)==2,'Two controlled accounts are required'
         for a in values:
-            login=self.request('meeting-service','/api/v1/auth/login','POST',{'email':a['email'],'password':a['password']})
+            # Passwordless sign-in: a fixed-code test account (staging candidate) or the
+            # refresh token of a session the operator opened for this run (production).
+            if a.get('code'):
+                login=self.request('meeting-service','/api/v1/auth/otp/verify','POST',{'email':a['email'],'code':a['code']})
+            else:
+                login=self.request('meeting-service','/api/v1/auth/refresh','POST',{'refresh_token':a.pop('refreshToken')})
             a['session']=login['access_token'];a['refresh']=login['refresh_token']
             profile=self.hub(a,'/me')
             assert profile['activationState']=='ACTIVE' and profile['phoneVerification']['required'] is False

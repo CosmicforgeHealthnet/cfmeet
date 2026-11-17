@@ -1189,7 +1189,76 @@ impl TestApp {
             .unwrap();
         row.try_get_by_index::<i64>(0).unwrap()
     }
+
+    /// Passwordless sign-in: put a known sign-in code in the store, exactly as
+    /// `POST /api/v1/auth/otp/request` does before mailing it (Redis required).
+    pub async fn seed_sign_in_code(&self, email: &str, code: &str) {
+        self.state
+            .otp_service
+            .store_code(
+                &email.trim().to_lowercase(),
+                code,
+                backend::services::otp::OtpType::SignIn,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Passwordless sign-in through the public API with a seeded code; returns the
+    /// `POST /api/v1/auth/otp/verify` body (tokens, user, `is_new_account`).
+    pub async fn otp_sign_in(&self, email: &str) -> Value {
+        self.seed_sign_in_code(email, TEST_SIGN_IN_CODE).await;
+        let (s, v) = self
+            .post(
+                "/api/v1/auth/otp/verify",
+                Auth::None,
+                serde_json::json!({ "email": email, "code": TEST_SIGN_IN_CODE }),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "otp sign-in: {v}");
+        v
+    }
+
+    /// `(access, refresh)` of a fresh passwordless sign-in.
+    pub async fn otp_tokens(&self, email: &str) -> (String, String) {
+        let v = self.otp_sign_in(email).await;
+        (
+            v["access_token"].as_str().unwrap().to_string(),
+            v["refresh_token"].as_str().unwrap().to_string(),
+        )
+    }
+
+    /// Put a known step-up code in the store for `user_id` and `purpose`
+    /// (`DEACTIVATE_ACCOUNT` / `CHANGE_EMAIL`), as `POST /api/v2/me/step-up/request` does.
+    pub async fn seed_step_up_code(&self, user_id: Uuid, purpose: &str, code: &str) {
+        self.state
+            .otp_service
+            .store_code(
+                &format!("user:{user_id}:{purpose}"),
+                code,
+                backend::services::otp::OtpType::StepUp,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// A step-up token for `purpose`, bound to the session of `access`.
+    pub async fn step_up_token(&self, access: &str, user_id: Uuid, purpose: &str) -> String {
+        self.seed_step_up_code(user_id, purpose, "135790").await;
+        let (s, v) = self
+            .post(
+                "/api/v2/me/step-up/verify",
+                Auth::Bearer(access),
+                serde_json::json!({ "purpose": purpose, "code": "135790" }),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "step-up: {v}");
+        v["stepUpToken"].as_str().unwrap().to_string()
+    }
 }
+
+/// The code [`TestApp::otp_sign_in`] seeds (leading zero on purpose).
+pub const TEST_SIGN_IN_CODE: &str = "024680";
 
 pub fn uuid(v: &Value) -> Uuid {
     Uuid::parse_str(

@@ -61,6 +61,15 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | GET | `/api/v2/me/profile` | account session | Get my profile | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_profile` |
 | PATCH | `/api/v2/me/profile` | account session | Update my profile | 200, 400, 401, 409 | AUTHENTICATION_REQUIRED, USERNAME_TAKEN, VALIDATION_ERROR | `openapi/meeting-service.json#v2_update_my_profile` |
 
+### Account security (v2)
+
+| Method | Path | Auth | Summary | Status | Error codes | Contract |
+|---|---|---|---|---|---|---|
+| POST | `/api/v2/me/email/change/request` | account session | Start an email change | 200, 400, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_email_change` |
+| POST | `/api/v2/me/email/change/verify` | account session | Confirm an email change | 200, 400, 401, 409, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_email_change` |
+| POST | `/api/v2/me/step-up/request` | account session | Request a step-up code | 200, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_step_up` |
+| POST | `/api/v2/me/step-up/verify` | account session | Verify a step-up code | 200, 400, 401, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_verify_step_up` |
+
 ### Account sessions (v2)
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
@@ -85,19 +94,15 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| POST | `/api/v1/auth/change-password` | account session | Change password for authenticated user | 200, 400, 401 | — | `openapi/meeting-service.json#change_password` |
-| POST | `/api/v1/auth/forgot-password` | none (public) | Request password reset | 200, 400, 429 | — | `openapi/meeting-service.json#forgot_password` |
-| POST | `/api/v1/auth/login` | none (public) | Login user | 200, 401, 403, 429 | — | `openapi/meeting-service.json#login` |
+| POST | `/api/v1/auth/email-change/revert` | none (public) | Undo an email change | 200, 400, 409, 429 | — | `openapi/meeting-service.json#revert_email_change` |
 | POST | `/api/v1/auth/logout` | account session | Logout user | 200, 401 | — | `openapi/meeting-service.json#logout` |
 | GET | `/api/v1/auth/oauth/google` | none (public) | Initiate Google OAuth flow | 303, 500 | — | `openapi/meeting-service.json#oauth_google_init` |
 | GET | `/api/v1/auth/oauth/google/callback` | none (public) | Google OAuth callback handler | 303 | — | `openapi/meeting-service.json#oauth_google_callback` |
 | POST | `/api/v1/auth/oauth/google/exchange` | none (public) | Exchange a one-time Google sign-in code for tokens | 200, 400 | — | `openapi/meeting-service.json#oauth_google_exchange` |
+| POST | `/api/v1/auth/otp/request` | none (public) | Request a sign-in code | 200, 400, 429 | — | `openapi/meeting-service.json#request_otp` |
+| POST | `/api/v1/auth/otp/verify` | none (public) | Verify a sign-in code | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp` |
+| POST | `/api/v1/auth/otp/verify-link` | none (public) | Verify a sign-in link | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp_link` |
 | POST | `/api/v1/auth/refresh` | none (public) | Refresh access token | 200, 401 | — | `openapi/meeting-service.json#refresh_token` |
-| POST | `/api/v1/auth/register` | none (public) | Register a new user | 201, 400, 409, 429 | — | `openapi/meeting-service.json#register` |
-| POST | `/api/v1/auth/resend-verification` | none (public) | Resend verification email | 200, 400, 429 | — | `openapi/meeting-service.json#resend_verification_email` |
-| POST | `/api/v1/auth/reset-password` | none (public) | Reset password with token | 200, 400, 429 | — | `openapi/meeting-service.json#reset_password` |
-| POST | `/api/v1/auth/verify-email` | none (public) | Verify email with token | 200, 400, 429 | — | `openapi/meeting-service.json#verify_email` |
-| POST | `/api/v1/auth/verify-reset-token` | none (public) | Verify password reset token | 200, 400, 429 | — | `openapi/meeting-service.json#verify_reset_token` |
 
 ### Backstage (v2)
 

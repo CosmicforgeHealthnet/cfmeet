@@ -20,11 +20,11 @@ PID = '7d6f3c0e-4a8e-4c8b-9a51-6c2f0f1d2b3a'
 
 class Context(unittest.TestCase):
     def test_client_gets_only_base_run_and_one_account(self):
-        accounts = [{'username': 'u', 'email': 'a@example.invalid', 'password': 'pw', 'userId': 'x'},
-                    {'email': 'b@example.invalid', 'password': 'pw2'}]
-        value = ma.context('123', accounts)
+        accounts = [{'username': 'u', 'email': 'a@example.invalid', 'userId': 'x'},
+                    {'email': 'b@example.invalid'}]
+        value = ma.context('123', accounts, session=lambda a: 'rt-' + a['email'][0])
         self.assertEqual(value, {'base': 'https://api.cfmeet.com', 'runId': '123',
-                                 'account': {'email': 'a@example.invalid', 'password': 'pw'}})
+                                 'account': {'email': 'a@example.invalid', 'refreshToken': 'rt-a'}})
 
     def test_printed_report_never_carries_secrets(self):
         report = {'runId': '1', 'checks': {'a': 'PASS'},

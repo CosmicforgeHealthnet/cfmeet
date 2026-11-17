@@ -82,7 +82,7 @@ async fn relay(
 
 /// Multi-device policy: a personal E2EE (MLS) device can be enrolled only from a sign-in
 /// that belongs to a trusted account device (bootstrap, approval by a trusted device or
-/// email step-up), unless the deployment switched the gate off. Knowing the password alone
+/// email step-up), unless the deployment switched the gate off. A sign-in code alone
 /// never yields an E2EE identity that would receive the account's future messages.
 async fn require_trusted_device_for_e2ee(state: &AppState, actor: &ActorContext) -> ApiResult<()> {
     if !state.auth_policy.devices.e2ee_requires_trusted_device {

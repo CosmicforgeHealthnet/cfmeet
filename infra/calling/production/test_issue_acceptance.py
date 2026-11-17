@@ -15,14 +15,14 @@ B = '0b7f2a51-9e0c-4d3c-8f6e-2b1a3c4d5e6f'
 
 class Context(unittest.TestCase):
     def test_client_gets_urls_accounts_and_the_restricted_credential_only(self):
-        accounts = [{'username': 'u', 'email': 'a@example.invalid', 'password': 'pw', 'userId': 'x'},
-                    {'email': 'b@example.invalid', 'password': 'pw2'}]
-        value = ia.context('42', accounts, 'cfk_secret', [A, B])
+        accounts = [{'username': 'u', 'email': 'a@example.invalid', 'userId': 'x'},
+                    {'email': 'b@example.invalid'}]
+        value = ia.context('42', accounts, 'cfk_secret', [A, B], session=lambda a: 'rt-' + a['email'][0])
         self.assertEqual(value, {'base': 'https://api.cfmeet.com', 'messaging': 'https://api.cfmeet.com:8444',
                                  'runId': '42', 'credential': 'cfk_secret', 'principals': [A, B],
                                  'scopes': list(ia.SCOPES),
-                                 'accounts': [{'email': 'a@example.invalid', 'password': 'pw'},
-                                              {'email': 'b@example.invalid', 'password': 'pw2'}]})
+                                 'accounts': [{'email': 'a@example.invalid', 'refreshToken': 'rt-a'},
+                                              {'email': 'b@example.invalid', 'refreshToken': 'rt-b'}]})
 
     def test_scopes_are_personal_calling_and_messaging_only(self):
         self.assertFalse([s for s in ia.SCOPES if s.startswith(('enterprise', 'telephony', 'numbering', 'sms'))])

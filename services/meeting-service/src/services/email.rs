@@ -13,13 +13,28 @@ use crate::config::EmailConfig;
 use crate::error::ApiResult;
 use crate::services::email_delivery::{self, category, Enqueued, NewEmail};
 use crate::templates::email::{
-    notification_email, password_changed_email, password_reset_email, verification_email,
-    welcome_email, EmailTemplate,
+    email_change_code_email, email_changed_new_address_email, email_changed_old_address_email,
+    email_in_use_notice_email, new_sign_in_email, notification_email, sign_in_code_email,
+    step_up_code_email, welcome_email, EmailTemplate, RequestDetails,
 };
 
-/// Verification codes are valid 24 hours (`services::otp`), reset codes 1 hour.
-pub const VERIFICATION_TTL: Duration = Duration::hours(24);
-pub const RESET_TTL: Duration = Duration::hours(1);
+/// Every one-time code is valid 10 minutes (`services::otp::CODE_TTL_SECS`).
+pub const CODE_TTL: Duration = Duration::minutes(10);
+const CODE_TTL_TEXT: &str = "10 minutes";
+
+/// How long the previous address can undo a self-service email change.
+pub const EMAIL_CHANGE_UNDO_WINDOW: Duration = Duration::days(7);
+
+/// `n***@example.com`: enough for the owner to recognise an address, not to harvest it.
+pub fn mask_email(email: &str) -> String {
+    match email.split_once('@') {
+        Some((local, domain)) => {
+            let first: String = local.chars().take(1).collect();
+            format!("{first}***@{domain}")
+        }
+        None => "***".to_string(),
+    }
+}
 
 /// High-level email service for the application.
 #[derive(Clone)]
@@ -73,51 +88,133 @@ impl EmailService {
         .await
     }
 
-    /// Registration / resend verification code.
-    pub async fn send_verification_email(
+    pub fn app_url(&self) -> &str {
+        &self.app_url
+    }
+
+    /// Passwordless sign-in code, with an optional magic link (`link_token`, which the
+    /// web app's `/auth/magic` page POSTs to `/api/v1/auth/otp/verify-link`).
+    pub async fn send_sign_in_code(
         &self,
         to_email: &str,
-        username: &str,
-        verification_code: &str,
+        code: &str,
+        link_token: Option<&str>,
+        details: &RequestDetails,
     ) -> ApiResult<Uuid> {
-        let template = verification_email(username, verification_code, "24 hours");
+        let link = link_token.map(|token| {
+            format!(
+                "{}/auth/magic?email={}&token={token}",
+                self.app_url.trim_end_matches('/'),
+                url_encode(to_email)
+            )
+        });
+        let template = sign_in_code_email(code, CODE_TTL_TEXT, link.as_deref(), details);
         self.enqueue_template(
             category::AUTH_VERIFICATION,
             Some(format!(
-                "otp:verify:{}:{}",
+                "otp:signin:{}:{}",
                 email_delivery::recipient_hash(to_email),
-                digest(verification_code)
+                digest(code)
             )),
             to_email,
-            Some(username),
-            "Your CF Meet verification code",
+            None,
+            "Your CF Meet sign-in code",
             template,
-            Some(Utc::now() + VERIFICATION_TTL),
+            Some(Utc::now() + CODE_TTL),
         )
         .await
         .map(|e| e.id)
     }
 
-    /// Password reset code.
-    pub async fn send_password_reset_email(
+    /// Step-up confirmation code sent to the account's current address.
+    pub async fn send_step_up_code(
         &self,
         to_email: &str,
         username: &str,
-        reset_code: &str,
+        code: &str,
+        action: &str,
     ) -> ApiResult<Uuid> {
-        let template = password_reset_email(username, reset_code, "1 hour");
+        let template = step_up_code_email(username, code, CODE_TTL_TEXT, action);
         self.enqueue_template(
-            category::AUTH_PASSWORD_RESET,
+            category::SECURITY_DEVICE_STEP_UP,
             Some(format!(
-                "otp:reset:{}:{}",
+                "otp:stepup:{}:{}",
                 email_delivery::recipient_hash(to_email),
-                digest(reset_code)
+                digest(code)
             )),
             to_email,
             Some(username),
-            "Reset your CF Meet password",
+            "Confirm it's you",
             template,
-            Some(Utc::now() + RESET_TTL),
+            Some(Utc::now() + CODE_TTL),
+        )
+        .await
+        .map(|e| e.id)
+    }
+
+    /// Code proving ownership of the new address of an email change.
+    pub async fn send_email_change_code(
+        &self,
+        to_new_email: &str,
+        username: &str,
+        code: &str,
+    ) -> ApiResult<Uuid> {
+        let template = email_change_code_email(username, code, CODE_TTL_TEXT);
+        self.enqueue_template(
+            category::AUTH_VERIFICATION,
+            Some(format!(
+                "otp:emailchange:{}:{}",
+                email_delivery::recipient_hash(to_new_email),
+                digest(code)
+            )),
+            to_new_email,
+            Some(username),
+            "Confirm your new CF Meet email address",
+            template,
+            Some(Utc::now() + CODE_TTL),
+        )
+        .await
+        .map(|e| e.id)
+    }
+
+    /// Someone tried to move another account to an address that already has one (at most
+    /// one notice per hour per address; no code is sent, nothing changes).
+    pub async fn send_email_in_use_notice(&self, to_email: &str) -> ApiResult<Uuid> {
+        let now = Utc::now();
+        self.enqueue_template(
+            category::NOTIFICATION,
+            Some(format!(
+                "email-in-use:{}:{}",
+                email_delivery::recipient_hash(to_email),
+                now.format("%Y%m%d%H")
+            )),
+            to_email,
+            None,
+            "Email change attempt on CF Meet",
+            email_in_use_notice_email(),
+            Some(now + Duration::days(1)),
+        )
+        .await
+        .map(|e| e.id)
+    }
+
+    /// Security alert: a sign-in from a device not seen on this account recently.
+    pub async fn send_new_sign_in_alert(
+        &self,
+        to_email: &str,
+        username: &str,
+        session_id: Uuid,
+        details: &RequestDetails,
+    ) -> ApiResult<Uuid> {
+        let sessions_url = format!("{}/settings/sessions", self.app_url.trim_end_matches('/'));
+        self.enqueue_template(
+            category::NOTIFICATION,
+            Some(format!("new-sign-in:{session_id}")),
+            to_email,
+            Some(username),
+            "New sign-in to your CF Meet account",
+            new_sign_in_email(username, details, &sessions_url),
+            Some(Utc::now() + Duration::days(2)),
         )
         .await
         .map(|e| e.id)
@@ -139,49 +236,6 @@ impl EmailService {
             "Welcome to CF Meet",
             template,
             Some(Utc::now() + Duration::days(2)),
-        )
-        .await
-        .map(|e| e.id)
-    }
-
-    /// Security notice after a password change or reset.
-    pub async fn send_password_changed_email(
-        &self,
-        to_email: &str,
-        username: &str,
-        user_id: Uuid,
-        how: &str,
-    ) -> ApiResult<Uuid> {
-        password_changed_notice_on(&self.db, to_email, username, user_id, how).await
-    }
-
-    /// D-12: someone tried to register with an address that already has an account. The
-    /// owner is told (at most once per hour per account); nothing about the account changes.
-    pub async fn send_registration_attempt_notice(
-        &self,
-        to_email: &str,
-        username: &str,
-        user_id: Uuid,
-    ) -> ApiResult<Uuid> {
-        let now = Utc::now();
-        let template = notification_email(
-            username,
-            "Someone tried to create a CF Meet account with your email",
-            "Someone tried to create a new CF Meet account with this email address. You already \
-             have an account: sign in, or use \"Forgot password\" if you no longer know your \
-             password. If this was not you, you can ignore this email; your account was not changed.",
-        );
-        self.enqueue_template(
-            category::NOTIFICATION,
-            Some(format!(
-                "register-existing:{user_id}:{}",
-                now.format("%Y%m%d%H")
-            )),
-            to_email,
-            Some(username),
-            "Someone tried to create a CF Meet account with your email",
-            template,
-            Some(now + Duration::days(1)),
         )
         .await
         .map(|e| e.id)
@@ -210,32 +264,57 @@ impl EmailService {
     }
 }
 
-/// N0-10 (S-9): the password-changed security notice, recorded on the caller's connection
-/// (the transaction that changes the password), so it is committed with the change.
-pub async fn password_changed_notice_on<C: ConnectionTrait>(
+/// Email change notices, recorded on the caller's transaction (the one that changes the
+/// address), so a committed change always has both notices queued: the previous address
+/// learns of it (with the undo link `undo_url`, or a support note when `None`) and the
+/// new address gets a confirmation.
+#[allow(clippy::too_many_arguments)]
+pub async fn email_changed_notices_on<C: ConnectionTrait>(
     conn: &C,
-    to_email: &str,
+    old_email: &str,
+    new_email: &str,
     username: &str,
-    user_id: Uuid,
-    how: &str,
-) -> ApiResult<Uuid> {
+    change_id: Uuid,
+    undo_url: Option<&str>,
+) -> ApiResult<()> {
     let now = Utc::now();
-    let template = password_changed_email(username, how, &now.format("%Y-%m-%d %H:%M").to_string());
+    let old = email_changed_old_address_email(
+        username,
+        &mask_email(new_email),
+        &now.format("%Y-%m-%d %H:%M").to_string(),
+        undo_url,
+        "7 days",
+    );
     email_delivery::enqueue(
         conn,
         NewEmail {
-            category: category::SECURITY_PASSWORD_CHANGED,
-            idempotency_key: Some(format!("password-changed:{user_id}:{}", now.timestamp())),
-            to: to_email.to_string(),
+            category: category::NOTIFICATION,
+            idempotency_key: Some(format!("email-changed:old:{change_id}")),
+            to: old_email.to_string(),
             to_name: Some(username.to_string()),
-            subject: "Your CF Meet password was changed".to_string(),
-            html: template.html,
-            text: template.text,
+            subject: "Your CF Meet email address was changed".to_string(),
+            html: old.html,
+            text: old.text,
+            expires_at: Some(now + EMAIL_CHANGE_UNDO_WINDOW),
+        },
+    )
+    .await?;
+    let new = email_changed_new_address_email(username);
+    email_delivery::enqueue(
+        conn,
+        NewEmail {
+            category: category::NOTIFICATION,
+            idempotency_key: Some(format!("email-changed:new:{change_id}")),
+            to: new_email.to_string(),
+            to_name: Some(username.to_string()),
+            subject: "Your CF Meet email address was updated".to_string(),
+            html: new.html,
+            text: new.text,
             expires_at: Some(now + Duration::days(2)),
         },
     )
-    .await
-    .map(|e| e.id)
+    .await?;
+    Ok(())
 }
 
 /// N0-10 (S-9): a device security notice recorded on the caller's transaction, with the
@@ -277,5 +356,31 @@ pub fn tolerate_unsendable(result: ApiResult<Uuid>, user_id: Uuid, what: &str) -
             Ok(())
         }
         Err(e) => Err(e),
+    }
+}
+
+/// Percent-encode a query value (RFC 3986 unreserved characters pass through).
+fn url_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for b in value.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod passwordless_tests {
+    use super::*;
+
+    #[test]
+    fn addresses_are_masked_and_query_values_encoded() {
+        assert_eq!(mask_email("nadia@example.com"), "n***@example.com");
+        assert_eq!(mask_email("broken"), "***");
+        assert_eq!(url_encode("a+b@x.com"), "a%2Bb%40x.com");
     }
 }

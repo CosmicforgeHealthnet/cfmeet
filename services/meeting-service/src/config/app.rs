@@ -103,18 +103,23 @@ const INSECURE_EXAMPLE_JWT_SECRET: &str = "your-secret-key-change-this-in-produc
 /// HS256 signing material shorter than this is refused outside development.
 pub const MIN_JWT_SECRET_BYTES: usize = 32;
 
-/// SEC-001 / ACC-018: refuse to start with missing, example or short signing material unless
-/// `APP_ENV` explicitly names a development environment. An unset `APP_ENV` is treated as
-/// production-like. The value itself is never logged.
-pub fn validated_jwt_secret(secret: Option<String>, app_env: Option<String>) -> ApiResult<String> {
-    let development = matches!(
+/// `APP_ENV` explicitly names a development environment (unset = production-like).
+pub fn is_development_env(app_env: Option<&str>) -> bool {
+    matches!(
         app_env
             .unwrap_or_default()
             .trim()
             .to_ascii_lowercase()
             .as_str(),
         "dev" | "development" | "local" | "test"
-    );
+    )
+}
+
+/// SEC-001 / ACC-018: refuse to start with missing, example or short signing material unless
+/// `APP_ENV` explicitly names a development environment. An unset `APP_ENV` is treated as
+/// production-like. The value itself is never logged.
+pub fn validated_jwt_secret(secret: Option<String>, app_env: Option<String>) -> ApiResult<String> {
+    let development = is_development_env(app_env.as_deref());
     let secret = secret.filter(|s| !s.is_empty());
     match secret {
         Some(s) if s != INSECURE_EXAMPLE_JWT_SECRET && s.len() >= MIN_JWT_SECRET_BYTES => Ok(s),

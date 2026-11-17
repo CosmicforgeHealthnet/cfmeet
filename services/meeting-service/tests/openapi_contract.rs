@@ -401,6 +401,11 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/me/device-links/{linkId}/complete"),
         ("post", "/api/v2/me/device-links/{linkId}/cancel"),
         ("get", "/api/v2/me/security-events"),
+        // Passwordless sign-in: step-up confirmation and secure email change
+        ("post", "/api/v2/me/step-up/request"),
+        ("post", "/api/v2/me/step-up/verify"),
+        ("post", "/api/v2/me/email/change/request"),
+        ("post", "/api/v2/me/email/change/verify"),
         // Document 4 §3.1 — Notification Service user APIs U1–U9 (Account-verified relay)
         ("get", "/api/v2/notifications"),
         ("get", "/api/v2/notifications/unread-count"),
