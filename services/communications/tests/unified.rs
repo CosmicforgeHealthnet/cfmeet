@@ -2530,3 +2530,78 @@ async fn contacts_are_added_to_a_running_call_without_exposing_principals() {
     assert_eq!(h.world.read().unwrap().invites.len(), 1);
     h.close().await;
 }
+
+/// Gap audit S4: operators list profile reports in their scope and review each once;
+/// ACTIONED with holdTarget holds the reported profile. Others are refused.
+#[tokio::test]
+async fn profile_reports_have_an_operator_review_queue() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    let report = Uuid::new_v4();
+    execute(
+        &h.state.store.db,
+        "INSERT INTO communication_profile_reports(id,reporter_profile_id,target_profile_id,reason) VALUES($1,$2,$3,'HARASSMENT')",
+        vec![report.into(), a.profile.id.into(), b.profile.id.into()],
+    )
+    .await
+    .unwrap();
+    let list = "/internal/v1/communications/admin/reports/list";
+    let review = "/internal/v1/communications/admin/reports/review";
+    let (status, _) = h
+        .http(&h.account_signer, list, json!({}), h.scope.clone())
+        .await;
+    assert_eq!(status.as_u16(), 403);
+    let (status, v) = h.http(&h.operator, list, json!({}), h.scope.clone()).await;
+    assert_eq!(status.as_u16(), 200, "{v}");
+    assert_eq!(v["data"][0]["reportId"], json!(report));
+    assert_eq!(v["data"][0]["reason"], "HARASSMENT");
+    assert_eq!(
+        v["data"][0]["targetCfMeetId"],
+        json!(h.public_id(&b.profile).await)
+    );
+    assert!(v["data"][0].get("targetProfileId").is_none(), "{v}");
+    // A dismissal cannot hold; an unknown decision is refused.
+    let (status, _) = h
+        .http(
+            &h.operator,
+            review,
+            json!({"reportId":report,"decision":"DISMISSED","reason":"NO_VIOLATION","holdTarget":true}),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 400);
+    let (status, v) = h
+        .http(
+            &h.operator,
+            review,
+            json!({"reportId":report,"decision":"ACTIONED","reason":"ABUSE","holdTarget":true}),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 200, "{v}");
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &check(Action::DirectCall, &a.profile, &b.profile))
+            .await
+            .unwrap()
+            .allowed,
+        "the reported profile is held"
+    );
+    // Reviewed once; the open queue is empty, the ALL view shows the review.
+    let (status, _) = h
+        .http(
+            &h.operator,
+            review,
+            json!({"reportId":report,"decision":"DISMISSED","reason":"NO_VIOLATION"}),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status.as_u16(), 409);
+    let (_, open) = h.http(&h.operator, list, json!({}), h.scope.clone()).await;
+    assert_eq!(open["data"], json!([]));
+    let (_, all) = h
+        .http(&h.operator, list, json!({"status":"ALL"}), h.scope.clone())
+        .await;
+    assert_eq!(all["data"][0]["review"]["decision"], "ACTIONED");
+    h.close().await;
+}

@@ -170,13 +170,17 @@ impl MigrationTrait for NotificationPublications {
         ))
     }
 }
-/// Gap audit S9: the separate group-invitation privacy setting. A SIXTH separate history
-/// for the same rollback-safety reason as the others. Never merge them.
+/// Backend gap closure: S9 (separate group-invitation privacy setting) and S4 (operator
+/// review of profile reports). A SIXTH separate history for the same rollback-safety
+/// reason as the others. Never merge them.
 pub struct GroupInvitationPolicyMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for GroupInvitationPolicyMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(GroupInvitationPolicy)]
+        vec![
+            Box::new(GroupInvitationPolicy),
+            Box::new(ProfileReportReviews),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new("communications_group_invitation_policy_seaql_migrations").into_iden()
@@ -203,7 +207,28 @@ impl MigrationTrait for GroupInvitationPolicy {
         ))
     }
 }
-/// Whether the S9 group-invitation history is applied.
+struct ProfileReportReviews;
+impl MigrationName for ProfileReportReviews {
+    fn name(&self) -> &str {
+        "m20261118_000002_profile_report_reviews"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ProfileReportReviews {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/007_profile_report_reviews.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the gap-closure history (S9, S4) is fully applied.
 pub async fn group_invitation_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     let row = db
         .query_one(Statement::from_string(
@@ -226,10 +251,13 @@ pub async fn group_invitation_ready<C: ConnectionTrait>(db: &C) -> Result<bool, 
                 .to_owned(),
         ))
         .await?;
-    Ok(
-        rows.len() == 1
-            && rows[0].try_get::<String>("", "version")? == GroupInvitationPolicy.name(),
-    )
+    let applied: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(applied.len() == 2
+        && applied.contains(&GroupInvitationPolicy.name().to_owned())
+        && applied.contains(&ProfileReportReviews.name().to_owned()))
 }
 /// Apply the foundation history, then the unified, device-session, timeline-realtime,
 /// notification-publications and group-invitation ones.

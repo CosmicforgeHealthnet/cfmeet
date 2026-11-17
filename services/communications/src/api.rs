@@ -84,6 +84,14 @@ pub fn app(state: State) -> Router {
             post(crate::internal::suspend),
         )
         .route(
+            "/internal/v1/communications/admin/reports/list",
+            post(crate::internal::list_reports),
+        )
+        .route(
+            "/internal/v1/communications/admin/reports/review",
+            post(crate::internal::review_report),
+        )
+        .route(
             "/internal/v1/communications/verification/callback",
             post(crate::internal::phone_deferred),
         )

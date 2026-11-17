@@ -67,7 +67,10 @@ pub async fn middleware(
         "/internal/v1/communications/readiness" | "/internal/v1/communications/admin/metrics" => {
             InternalPermission::CommunicationsObservabilityRead
         }
-        "/internal/v1/communications/admin/suspend" => {
+        // Gap audit S4: the report review queue (a review may hold the target).
+        "/internal/v1/communications/admin/suspend"
+        | "/internal/v1/communications/admin/reports/list"
+        | "/internal/v1/communications/admin/reports/review" => {
             InternalPermission::CommunicationsProfileSuspend
         }
         // Blueprint Section 11: the Account's notification preference read.
