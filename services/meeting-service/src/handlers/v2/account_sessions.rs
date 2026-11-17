@@ -64,7 +64,7 @@ pub struct SecurityEventPage {
 }
 
 /// The session id of the bearer token on this request, if it carries one.
-fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Uuid> {
+pub(crate) fn current_session(state: &AppState, headers: &HeaderMap) -> Option<Uuid> {
     let token = headers
         .get(axum::http::header::AUTHORIZATION)?
         .to_str()
@@ -198,7 +198,7 @@ pub async fn revoke_all_my_sessions(
 
 /// Read the account security audit (platform administrators)
 ///
-/// Append-only account security events — sign-ins, sign-outs, password changes and resets,
+/// Append-only account security events — sign-ins, sign-outs, email changes,
 /// Google linking, refresh-token reuse — newest first. Requires a platform administrator.
 /// Events never contain passwords, tokens, email addresses or network addresses.
 #[utoipa::path(

@@ -560,55 +560,44 @@ fn jwt_subject(token: &str) -> anyhow::Result<Uuid> {
     Ok(Uuid::parse_str(v["sub"].as_str().context("sub")?)?)
 }
 
-/// Registers a CF Meet account through the Meeting Service's public account API,
-/// verifies its e-mail with the code the service stored for mailing (read from the
-/// shared Redis — no SMTP in the stack) and signs in.
+/// Creates (or signs in to) a CF Meet account through the Meeting Service's public
+/// passwordless sign-in: requests a code, replaces the issued code with a controlled one
+/// in the shared Redis (codes are stored only as salted hashes; no SMTP in the stack)
+/// and verifies it. The first verification of a new address creates the account.
 pub async fn register_user(
     meeting: &str,
     redis_url: &str,
     http: &reqwest::Client,
     email: &str,
 ) -> anyhow::Result<User> {
-    let password = format!("Cert-{}-Pw9!", Uuid::new_v4().simple());
-    let username = format!("u{}", &Uuid::new_v4().simple().to_string()[..12]);
     let r = Resp::from(
-        http.post(format!("{meeting}/api/v1/auth/register"))
-            .json(&json!({ "username": username, "email": email, "password": password, "confirm_password": password }))
+        http.post(format!("{meeting}/api/v1/auth/otp/request"))
+            .json(&json!({ "email": email }))
             .send()
             .await?,
     )
     .await;
     if !(200..300).contains(&r.status) {
-        bail!("register {email}: {} {}", r.status, r.text);
+        bail!("otp request {email}: {} {}", r.status, r.text);
     }
     let mut code = None;
     for _ in 0..100 {
-        code = crate::redis::controlled_otp(redis_url, "otp:verify", email).await?;
+        code = crate::redis::controlled_otp(redis_url, "otp:signin", email).await?;
         if code.is_some() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let code = code.with_context(|| format!("no verification code stored for {email}"))?;
+    let code = code.with_context(|| format!("no sign-in code stored for {email}"))?;
     let r = Resp::from(
-        http.post(format!("{meeting}/api/v1/auth/verify-email"))
-            .json(&json!({ "email": email, "token": code }))
-            .send()
-            .await?,
-    )
-    .await;
-    if !(200..300).contains(&r.status) {
-        bail!("verify-email {email}: {} {}", r.status, r.text);
-    }
-    let r = Resp::from(
-        http.post(format!("{meeting}/api/v1/auth/login"))
-            .json(&json!({ "email": email, "password": password }))
+        http.post(format!("{meeting}/api/v1/auth/otp/verify"))
+            .json(&json!({ "email": email, "code": code }))
             .send()
             .await?,
     )
     .await;
     if r.status != 200 {
-        bail!("login {email}: {} {}", r.status, r.text);
+        bail!("otp verify {email}: {} {}", r.status, r.text);
     }
     let session = r
         .body

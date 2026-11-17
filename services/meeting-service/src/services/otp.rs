@@ -1,17 +1,22 @@
 //! OTP Service
 //!
-//! Handles OTP storage and verification using Redis.
+//! One-time codes for passwordless sign-in, step-up confirmation and email change, stored
+//! in Redis.
 //!
 //! Notification Service N0-8 (S-5): codes are never stored in clear. Each stored value is
 //! `<salt hex>:<SHA-256(salt || code) hex>` with a fresh random 16-byte salt, compared in
-//! constant time, and every key is derived from the SHA-256 of the lower-cased address,
-//! so Redis holds neither the code nor the address. Account remains the only verifier.
+//! constant time, and every key is derived from the SHA-256 of the lower-cased subject
+//! (an address, or a user-scoped subject such as `user:<id>:CHANGE_EMAIL`), so Redis holds
+//! neither the code nor the address.
 //!
-//! Migration: codes issued by the previous image (plaintext value under
-//! `<prefix>:<email>`) stay valid until they expire (at most 24 h): `verify_code` and
-//! `has_code` fall back to that legacy key once, delete it on success, and never write it.
-//! After a rollback to the previous image, codes issued by this one are unreadable there;
-//! the user requests a new code (the send path is unchanged).
+//! A sign-in challenge can also carry a magic-link token: the stored value then has a
+//! third part, `:<SHA-256(token) hex>`. The code and the link are one challenge: whichever
+//! is used first consumes both, and a new challenge replaces both.
+//!
+//! Brute force: every check (code or link) increments one attempt counter per subject and
+//! type. Past [`MAX_OTP_ATTEMPTS`] in the window the pending challenge is deleted and the
+//! caller gets 429. Issuing a new code does not reset the counter, so requesting codes
+//! never buys more guesses.
 
 use std::sync::Arc;
 
@@ -20,42 +25,49 @@ use sha2::{Digest, Sha256};
 use crate::error::{ApiError, ApiResult};
 use crate::services::RedisService;
 
-/// TTL for verification codes (24 hours)
-const VERIFICATION_CODE_TTL_SECS: u64 = 24 * 60 * 60;
-
-/// TTL for password reset codes (1 hour)
-const RESET_CODE_TTL_SECS: u64 = 60 * 60;
+/// Lifetime of every code (10 minutes).
+pub const CODE_TTL_SECS: u64 = 10 * 60;
 
 /// TTL for rate limiting window (15 minutes)
 const RATE_LIMIT_TTL_SECS: u64 = 15 * 60;
 
-/// Maximum OTP attempts before rate limiting
-const MAX_OTP_ATTEMPTS: i64 = 5;
+/// Maximum checks per subject within the window before the challenge is destroyed.
+pub const MAX_OTP_ATTEMPTS: i64 = 5;
 
-/// Maximum OTP send requests per time window
+/// Maximum codes sent per subject within the window.
 const MAX_OTP_REQUESTS: i64 = 5;
 
 /// OTP types
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OtpType {
-    Verification,
-    PasswordReset,
+    /// Passwordless sign-in / sign-up (subject: the email address).
+    SignIn,
+    /// Confirmation of a sensitive action by the signed-in owner (subject:
+    /// `user:<id>:<purpose>`).
+    StepUp,
+    /// Proof of ownership of a new address (subject: `user:<id>:<new address>`).
+    EmailChange,
 }
 
 impl OtpType {
     fn key_prefix(&self) -> &'static str {
         match self {
-            OtpType::Verification => "otp:verify",
-            OtpType::PasswordReset => "otp:reset",
+            OtpType::SignIn => "otp:signin",
+            OtpType::StepUp => "otp:stepup",
+            OtpType::EmailChange => "otp:emailchange",
         }
     }
+}
 
-    fn ttl_secs(&self) -> u64 {
-        match self {
-            OtpType::Verification => VERIFICATION_CODE_TTL_SECS,
-            OtpType::PasswordReset => RESET_CODE_TTL_SECS,
-        }
-    }
+/// Outcome of a check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OtpCheck {
+    /// The code (or link) matched; the challenge is consumed.
+    Valid,
+    /// No challenge is pending (never issued, expired, used or replaced).
+    Missing,
+    /// A challenge is pending but the value did not match.
+    Wrong,
 }
 
 /// OTP Service
@@ -70,117 +82,139 @@ impl OtpService {
         Self { redis }
     }
 
-    fn otp_key(&self, email: &str, otp_type: OtpType) -> String {
-        format!("{}:h:{}", otp_type.key_prefix(), email_key(email))
+    fn otp_key(&self, subject: &str, otp_type: OtpType) -> String {
+        format!("{}:h:{}", otp_type.key_prefix(), email_key(subject))
     }
 
-    /// The previous image's key (plaintext code under the address); read-only fallback.
-    fn legacy_otp_key(&self, email: &str, otp_type: OtpType) -> String {
-        format!("{}:{}", otp_type.key_prefix(), email.to_lowercase())
+    fn attempts_key(&self, subject: &str, otp_type: OtpType) -> String {
+        format!(
+            "{}:attempts:h:{}",
+            otp_type.key_prefix(),
+            email_key(subject)
+        )
     }
 
-    fn attempts_key(&self, email: &str, otp_type: OtpType) -> String {
-        format!("{}:attempts:h:{}", otp_type.key_prefix(), email_key(email))
+    fn send_rate_key(&self, subject: &str, otp_type: OtpType) -> String {
+        format!(
+            "{}:send_rate:h:{}",
+            otp_type.key_prefix(),
+            email_key(subject)
+        )
     }
 
-    fn send_rate_key(&self, email: &str, otp_type: OtpType) -> String {
-        format!("{}:send_rate:h:{}", otp_type.key_prefix(), email_key(email))
+    /// Store a code (salted hash only), replacing any pending challenge of this type.
+    pub async fn store_code(&self, subject: &str, code: &str, otp_type: OtpType) -> ApiResult<()> {
+        self.store_challenge(subject, code, None, otp_type).await
     }
 
-    /// Store an OTP code (salted hash only). A new code replaces any earlier one, including
-    /// a code issued by the previous image.
-    pub async fn store_code(&self, email: &str, code: &str, otp_type: OtpType) -> ApiResult<()> {
-        let key = self.otp_key(email, otp_type);
+    /// Store a code and, optionally, a magic-link token as one challenge.
+    pub async fn store_challenge(
+        &self,
+        subject: &str,
+        code: &str,
+        link_token: Option<&str>,
+        otp_type: OtpType,
+    ) -> ApiResult<()> {
+        let mut value = seal_code(code);
+        if let Some(token) = link_token {
+            value.push(':');
+            value.push_str(&hex::encode(Sha256::digest(token.as_bytes())));
+        }
         self.redis
-            .set(&key, &seal_code(code), Some(otp_type.ttl_secs()))
-            .await?;
-        self.redis
-            .del(&self.legacy_otp_key(email, otp_type))
-            .await?;
-        Ok(())
+            .set(
+                &self.otp_key(subject, otp_type),
+                &value,
+                Some(CODE_TTL_SECS),
+            )
+            .await
     }
 
-    /// Verify an OTP code
-    pub async fn verify_code(&self, email: &str, code: &str, otp_type: OtpType) -> ApiResult<bool> {
-        // Check rate limiting
-        let attempts_key = self.attempts_key(email, otp_type);
+    /// Count one attempt; past the limit the pending challenge is destroyed (429).
+    async fn count_attempt(&self, subject: &str, otp_type: OtpType) -> ApiResult<String> {
+        let attempts_key = self.attempts_key(subject, otp_type);
         let attempts = self
             .redis
             .incr_with_ttl(&attempts_key, RATE_LIMIT_TTL_SECS)
             .await?;
-
         if attempts > MAX_OTP_ATTEMPTS {
+            self.redis.del(&self.otp_key(subject, otp_type)).await?;
             return Err(ApiError::TooManyRequests(
-                "Too many verification attempts. Please try again later.".to_string(),
+                "Too many attempts. Please request a new code later.".to_string(),
             ));
         }
+        Ok(attempts_key)
+    }
 
-        // Get the stored (salted, hashed) code; fall back to a code issued by the
-        // previous image (plaintext, until it expires).
-        let key = self.otp_key(email, otp_type);
-        let legacy_key = self.legacy_otp_key(email, otp_type);
-        let valid_key = match self.redis.get(&key).await? {
-            Some(stored) => code_matches(&stored, code).then_some(key),
-            None => match self.redis.get(&legacy_key).await? {
-                Some(stored) => {
-                    constant_time_eq(stored.as_bytes(), code.as_bytes()).then_some(legacy_key)
-                }
-                None => None,
-            },
+    /// Atomically take the matched challenge: of two concurrent checks of the same code,
+    /// only the one that removes exactly the value it matched wins.
+    async fn consume(
+        &self,
+        subject: &str,
+        otp_type: OtpType,
+        attempts_key: &str,
+        matched: &str,
+    ) -> ApiResult<OtpCheck> {
+        let taken = self.redis.take(&self.otp_key(subject, otp_type)).await?;
+        if taken.as_deref() != Some(matched) {
+            return Ok(OtpCheck::Missing);
+        }
+        self.redis.del(attempts_key).await?;
+        Ok(OtpCheck::Valid)
+    }
+
+    /// Check a code; a match consumes the whole challenge (code and link).
+    pub async fn check(&self, subject: &str, code: &str, otp_type: OtpType) -> ApiResult<OtpCheck> {
+        let attempts_key = self.count_attempt(subject, otp_type).await?;
+        let Some(stored) = self.redis.get(&self.otp_key(subject, otp_type)).await? else {
+            // Same hashing work as a stored code (timing).
+            let _ = code_matches(&seal_code(code), code);
+            return Ok(OtpCheck::Missing);
         };
-        match valid_key {
-            Some(key) => {
-                // Code valid - delete it
-                self.redis.del(&key).await?;
-                self.redis.del(&attempts_key).await?;
-                Ok(true)
-            }
-            None => Ok(false),
+        if code_matches(&stored, code) {
+            self.consume(subject, otp_type, &attempts_key, &stored)
+                .await
+        } else {
+            Ok(OtpCheck::Wrong)
         }
     }
 
-    /// N0-9: checks a code WITHOUT consuming it, under the same attempt counter as
-    /// [`Self::verify_code`] (so probing shares the brute-force budget). Performs the same
-    /// Redis work whether or not an account or a code exists.
-    pub async fn check_code(&self, email: &str, code: &str, otp_type: OtpType) -> ApiResult<bool> {
-        let attempts_key = self.attempts_key(email, otp_type);
-        let attempts = self
-            .redis
-            .incr_with_ttl(&attempts_key, RATE_LIMIT_TTL_SECS)
-            .await?;
-        if attempts > MAX_OTP_ATTEMPTS {
-            return Err(ApiError::TooManyRequests(
-                "Too many verification attempts. Please try again later.".to_string(),
-            ));
+    /// Check a magic-link token; a match consumes the whole challenge (code and link).
+    pub async fn check_link(
+        &self,
+        subject: &str,
+        token: &str,
+        otp_type: OtpType,
+    ) -> ApiResult<OtpCheck> {
+        let attempts_key = self.count_attempt(subject, otp_type).await?;
+        let Some(stored) = self.redis.get(&self.otp_key(subject, otp_type)).await? else {
+            return Ok(OtpCheck::Missing);
+        };
+        if link_matches(&stored, token) {
+            self.consume(subject, otp_type, &attempts_key, &stored)
+                .await
+        } else {
+            Ok(OtpCheck::Wrong)
         }
-        let hashed = self.redis.get(&self.otp_key(email, otp_type)).await?;
-        let legacy = self
-            .redis
-            .get(&self.legacy_otp_key(email, otp_type))
-            .await?;
-        Ok(match (hashed, legacy) {
-            (Some(stored), _) => code_matches(&stored, code),
-            (None, Some(stored)) => constant_time_eq(stored.as_bytes(), code.as_bytes()),
-            (None, None) => {
-                // Same hashing work as a stored code (timing).
-                let _ = code_matches(&seal_code(code), code);
-                false
-            }
-        })
     }
 
-    /// Check if an OTP exists
-    pub async fn has_code(&self, email: &str, otp_type: OtpType) -> ApiResult<bool> {
-        Ok(self.redis.exists(&self.otp_key(email, otp_type)).await?
-            || self
-                .redis
-                .exists(&self.legacy_otp_key(email, otp_type))
-                .await?)
+    /// Verify a code: `true` only for a match (which consumes the challenge).
+    pub async fn verify_code(
+        &self,
+        subject: &str,
+        code: &str,
+        otp_type: OtpType,
+    ) -> ApiResult<bool> {
+        Ok(self.check(subject, code, otp_type).await? == OtpCheck::Valid)
+    }
+
+    /// Whether a challenge is pending.
+    pub async fn has_code(&self, subject: &str, otp_type: OtpType) -> ApiResult<bool> {
+        self.redis.exists(&self.otp_key(subject, otp_type)).await
     }
 
     /// Check rate limit for sending OTPs
-    pub async fn check_send_rate(&self, email: &str, otp_type: OtpType) -> ApiResult<i64> {
-        let key = self.send_rate_key(email, otp_type);
+    pub async fn check_send_rate(&self, subject: &str, otp_type: OtpType) -> ApiResult<i64> {
+        let key = self.send_rate_key(subject, otp_type);
         let count = self.redis.incr_with_ttl(&key, RATE_LIMIT_TTL_SECS).await?;
 
         if count > MAX_OTP_REQUESTS {
@@ -193,7 +227,19 @@ impl OtpService {
     }
 }
 
-/// Key component for an address: SHA-256 of the trimmed, lower-cased address.
+/// A uniformly random 6-digit code (leading zeros included), from the thread CSPRNG.
+pub fn generate_code() -> String {
+    use rand::Rng;
+    format!("{:06}", rand::thread_rng().gen_range(0..1_000_000u32))
+}
+
+/// A magic-link token: 32 random bytes, hex encoded.
+pub fn generate_link_token() -> String {
+    let bytes: [u8; 32] = rand::random();
+    hex::encode(bytes)
+}
+
+/// Key component for a subject: SHA-256 of the trimmed, lower-cased value.
 pub fn email_key(email: &str) -> String {
     hex::encode(Sha256::digest(email.trim().to_lowercase().as_bytes()))
 }
@@ -215,14 +261,31 @@ pub fn seal_code(code: &str) -> String {
     )
 }
 
-/// Whether `code` matches a value written by [`seal_code`] (constant time over the digest).
+/// Whether `code` matches a value written by [`seal_code`] (with or without a link part),
+/// in constant time over the digest.
 pub fn code_matches(stored: &str, code: &str) -> bool {
-    let Some((salt, digest)) = stored.split_once(':') else {
+    let mut parts = stored.split(':');
+    let (Some(salt), Some(digest)) = (parts.next(), parts.next()) else {
         return false;
     };
     match (hex::decode(salt), hex::decode(digest)) {
         (Ok(salt), Ok(digest)) if salt.len() == 16 && digest.len() == 32 => {
             constant_time_eq(&salted_digest(&salt, code), &digest)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `token` matches the link part of a stored challenge.
+pub fn link_matches(stored: &str, token: &str) -> bool {
+    let Some(link) = stored.split(':').nth(2) else {
+        // Same digest work as a challenge with a link (timing).
+        let _ = Sha256::digest(token.as_bytes());
+        return false;
+    };
+    match hex::decode(link) {
+        Ok(expected) if expected.len() == 32 => {
+            constant_time_eq(&Sha256::digest(token.as_bytes()), &expected)
         }
         _ => false,
     }
@@ -268,6 +331,34 @@ mod tests {
             email_key(" Ada@Example.com "),
             "b5fc85e55755f9e0d030a10ab4429b6b2944855f9a0d60077fe832becbc41d72"
         );
+    }
+
+    #[test]
+    fn a_challenge_with_a_link_verifies_both_the_code_and_the_link() {
+        let token = generate_link_token();
+        let stored = format!(
+            "{}:{}",
+            seal_code("012345"),
+            hex::encode(Sha256::digest(token.as_bytes()))
+        );
+        assert!(code_matches(&stored, "012345"));
+        assert!(!code_matches(&stored, "012346"));
+        assert!(link_matches(&stored, &token));
+        assert!(!link_matches(&stored, &generate_link_token()));
+        assert!(!link_matches(&seal_code("012345"), &token), "no link part");
+    }
+
+    #[test]
+    fn codes_are_six_digits_and_may_start_with_zero() {
+        let mut leading_zero = false;
+        for _ in 0..5000 {
+            let c = generate_code();
+            assert_eq!(c.len(), 6);
+            assert!(c.chars().all(|ch| ch.is_ascii_digit()));
+            leading_zero |= c.starts_with('0');
+        }
+        assert!(leading_zero, "the full 000000-999999 range is used");
+        assert_eq!(generate_link_token().len(), 64);
     }
 
     #[test]

@@ -53,7 +53,6 @@ fn status(r: Resp, expected: u16, operation: &str) -> anyhow::Result<Value> {
 struct Account {
     id: Uuid,
     email: String,
-    password: String,
     session: String,
     refresh: String,
     principal: Uuid,
@@ -64,30 +63,7 @@ async fn account(s: &PersonalStack) -> anyhow::Result<Account> {
         "communications-{}@acceptance.invalid",
         Uuid::new_v4().simple()
     );
-    let password = format!("P9!{}", Uuid::new_v4().simple());
-    let username = format!("member{}", &Uuid::new_v4().simple().to_string()[..10]);
-    let r=request(s,"meeting-service",None,None,Method::POST,"/api/v1/auth/register",Some(json!({"email":email,"username":username,"password":password,"confirm_password":password}))).await?;
-    if !(200..300).contains(&r.status) {
-        bail!(
-            "registered account setup failed: {} {:?}",
-            r.status,
-            r.code()
-        );
-    }
-    let login = status(
-        request(
-            s,
-            "meeting-service",
-            None,
-            None,
-            Method::POST,
-            "/api/v1/auth/login",
-            Some(json!({"email":email,"password":password})),
-        )
-        .await?,
-        200,
-        "account login",
-    )?;
+    let login = otp_sign_in(s, &email).await?;
     let session = login["access_token"]
         .as_str()
         .context("access token")?
@@ -131,7 +107,6 @@ async fn account(s: &PersonalStack) -> anyhow::Result<Account> {
     Ok(Account {
         id,
         email,
-        password,
         session,
         refresh,
         principal,
@@ -1077,20 +1052,7 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         "old native session cannot reactivate after suspension"
     );
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    let login = status(
-        request(
-            s,
-            "meeting-service",
-            None,
-            None,
-            Method::POST,
-            "/api/v1/auth/login",
-            Some(json!({"email":a.email,"password":a.password})),
-        )
-        .await?,
-        200,
-        "fresh authentication after suspension",
-    )?;
+    let login = otp_sign_in(s, &a.email).await?;
     a.session = login["access_token"]
         .as_str()
         .context("new access token")?
@@ -1196,7 +1158,7 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     assert!(row.try_get::<bool>("", "revoked")?);
     db.close().await?;
     // Keep the fixture login values private even on assertion failure.
-    assert!(!a.email.is_empty() && !a.password.is_empty());
+    assert!(!a.email.is_empty());
     println!("PERSONAL_COMMUNICATIONS_REAL_E2E: identity_without_phone, principal_stability, public_swagger, private_internal_api, truthful_security_readiness, invitations, accepted_connections, direct_conversation_reuse, message_send_policy, voice_call_policy, video_call_policy, separate_aliases, common_groups, blocking, revocation, rotation, invitation_invalidation, tenant_isolation, truthful_delivery_status, delivery_status_owner_outage, fail_closed_outage, independent_meetings, durable_logout: PASS");
     Ok(())
 }
@@ -1213,21 +1175,50 @@ fn claims(token: &str) -> anyhow::Result<Value> {
             .decode(token.split('.').nth(1).context("JWT claims")?)?,
     )?)
 }
-async fn login(s: &PersonalStack, email: &str, password: &str) -> anyhow::Result<String> {
-    let login = status(
+/// Passwordless sign-in through the public API: request a code, replace the issued code
+/// with a controlled one in the shared Redis (codes are stored only as salted hashes) and
+/// verify it. The first verification of a new address creates the account.
+async fn otp_sign_in(s: &PersonalStack, email: &str) -> anyhow::Result<Value> {
+    let r = request(
+        s,
+        "meeting-service",
+        None,
+        None,
+        Method::POST,
+        "/api/v1/auth/otp/request",
+        Some(json!({ "email": email })),
+    )
+    .await?;
+    if !(200..300).contains(&r.status) {
+        bail!("sign-in code request failed: {} {:?}", r.status, r.code());
+    }
+    let redis = std::env::var("TEST_REDIS_URL").context("TEST_REDIS_URL required")?;
+    let mut code = None;
+    for _ in 0..100 {
+        code = cfmeet_certification::redis::controlled_otp(&redis, "otp:signin", email).await?;
+        if code.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let code = code.context("no sign-in code stored")?;
+    status(
         request(
             s,
             "meeting-service",
             None,
             None,
             Method::POST,
-            "/api/v1/auth/login",
-            Some(json!({"email":email,"password":password})),
+            "/api/v1/auth/otp/verify",
+            Some(json!({ "email": email, "code": code })),
         )
         .await?,
         200,
-        "additional sign-in",
-    )?;
+        "sign-in",
+    )
+}
+async fn login(s: &PersonalStack, email: &str) -> anyhow::Result<String> {
+    let login = otp_sign_in(s, email).await?;
     Ok(login["access_token"]
         .as_str()
         .context("access token")?
@@ -1480,7 +1471,7 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
 
     // ACC-008: a device is bound to the sign-in that linked it. Ending that sign-in
     // revokes the device at Calling; revoking a device ends the sign-in it was bound to.
-    let second = login(s, &a.email, &a.password).await?;
+    let second = login(s, &a.email).await?;
     let second_session = claims(&second)?["sid"]
         .as_str()
         .context("session id")?
@@ -1531,7 +1522,7 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
     }
     assert_eq!(ended["state"], "REVOKED", "{ended}");
     assert_eq!(ended["revocationReason"], "ACCOUNT_SESSION_ENDED");
-    let third = login(s, &a.email, &a.password).await?;
+    let third = login(s, &a.email).await?;
     let as_third = Account {
         session: third.clone(),
         ..clone_account(&a)
@@ -1601,16 +1592,10 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
     )?;
 
     // ACC-010: an account that uses Messaging through the web bridge but never opened
-    // the Hub. A password change reaches Messaging and Calling by principal, and a
+    // the Hub. Signing out everywhere reaches Messaging and Calling by principal, and a
     // suspension is mirrored onto its Platform Access principal (and back).
     let email = format!("no-hub-{}@acceptance.invalid", Uuid::new_v4().simple());
-    let password = format!("P9!{}", Uuid::new_v4().simple());
-    let username = format!("nohub{}", &Uuid::new_v4().simple().to_string()[..10]);
-    let r=request(s,"meeting-service",None,None,Method::POST,"/api/v1/auth/register",Some(json!({"email":email,"username":username,"password":password,"confirm_password":password}))).await?;
-    if !(200..300).contains(&r.status) {
-        bail!("registration failed: {} {:?}", r.status, r.code());
-    }
-    let token = login(s, &email, &password).await?;
+    let token = login(s, &email).await?;
     let user = claims(&token)?["sub"]
         .as_str()
         .context("subject")?
@@ -1643,7 +1628,6 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
         .await?
         .is_none());
     hub_db.close().await?;
-    let new_password = format!("Q8!{}", Uuid::new_v4().simple());
     status(
         request(
             s,
@@ -1651,12 +1635,12 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
             Some(&token),
             None,
             Method::POST,
-            "/api/v1/auth/change-password",
-            Some(json!({"current_password":password,"new_password":new_password,"confirm_password":new_password})),
+            "/api/v2/me/sessions/revoke-all",
+            Some(json!({})),
         )
         .await?,
         200,
-        "password change",
+        "sign out everywhere",
     )?;
     eventually(
         &s.owner_urls["messaging"],
@@ -1694,7 +1678,7 @@ async fn section_14(s: &mut PersonalStack) -> anyhow::Result<()> {
         .await?;
     }
     db.close().await?;
-    assert!(!a.email.is_empty() && !a.password.is_empty() && !b.email.is_empty());
+    assert!(!a.email.is_empty() && !b.email.is_empty());
     println!("SECTION_14_REAL_E2E: managed_capability, conversation_context, hub_call_launch, timeline_cards, instant_meeting, meeting_share, membership_inbox, session_ends_devices, device_ends_session, reference_never_relayed, revocation_without_profile_messaging, revocation_without_profile_calling, principal_status_mirror: PASS");
     Ok(())
 }
@@ -1702,7 +1686,6 @@ fn clone_account(a: &Account) -> Account {
     Account {
         id: a.id,
         email: a.email.clone(),
-        password: a.password.clone(),
         session: a.session.clone(),
         refresh: a.refresh.clone(),
         principal: a.principal,
@@ -1861,18 +1844,12 @@ async fn production_e2ee_acceptance_client_passes_against_real_services() -> any
 }
 
 async fn e2ee_client_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
-    let mut accounts = vec![];
-    for _ in 0..2 {
-        let email = format!("e2ee-{}@acceptance.invalid", Uuid::new_v4().simple());
-        let password = format!("P9!{}", Uuid::new_v4().simple());
-        let username = format!("e2ee{}", &Uuid::new_v4().simple().to_string()[..10]);
-        let r = request(s, "meeting-service", None, None, Method::POST, "/api/v1/auth/register",
-            Some(json!({"email": email, "username": username, "password": password, "confirm_password": password}))).await?;
-        if !(200..300).contains(&r.status) {
-            bail!("account setup failed: {}", r.status);
-        }
-        accounts.push(json!({"email": email, "password": password}));
-    }
+    // Fixed-code test accounts of the personal stack: the acceptance binary signs every
+    // device in separately, and the first sign-in creates each account.
+    let accounts: Vec<Value> = cfmeet_certification::personal_stack::E2EE_TEST_ACCOUNTS
+        .iter()
+        .map(|(email, code)| json!({ "email": email, "code": code }))
+        .collect();
     let file = s.write("e2ee-accounts.json", &serde_json::to_string(&accounts)?)?;
     let out = tokio::process::Command::new(env!("CARGO_BIN_EXE_cfmeet-e2ee-acceptance"))
         .env("CFMEET_BASE_URL", &s.urls["meeting-service"])

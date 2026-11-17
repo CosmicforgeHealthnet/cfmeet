@@ -77,6 +77,12 @@ pub const UNSUPPRESSIBLE_CATEGORIES: &[&str] = &[
     category::OPERATIONS_ACCEPTANCE,
 ];
 
+/// Categories carrying one-time codes (sign-in, email change, step-up), whose delivery
+/// latency is watched (`auth_code_email_slow`).
+fn is_code_category(category: &str) -> bool {
+    category == category::AUTH_VERIFICATION || category == category::SECURITY_DEVICE_STEP_UP
+}
+
 /// The `ApiError::Conflict` message of an enqueue refused because the recipient is
 /// suppressed (S-12): one complaint, or two bounces, recorded for the same address.
 pub const RECIPIENT_SUPPRESSED: &str = "EMAIL_RECIPIENT_SUPPRESSED";
@@ -773,6 +779,23 @@ impl EmailWorker {
         Ok(())
     }
 
+    /// Passwordless sign-in: count a one-time-code email the provider accepted more than
+    /// 30 seconds after it was queued (`auth_code_email_slow`). Best effort, label-free.
+    async fn note_code_latency(&self, id: Uuid) {
+        let slow = self
+            .db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 AS slow FROM email_deliveries \
+                  WHERE id = $1 AND accepted_at - created_at > interval '30 seconds'",
+                [id.into()],
+            ))
+            .await;
+        if matches!(slow, Ok(Some(_))) {
+            inc(&OM.auth_code_email_slow);
+        }
+    }
+
     async fn reschedule(
         &self,
         id: Uuid,
@@ -859,6 +882,9 @@ impl EmailWorker {
                 Ok(provider_id) => {
                     self.finish(job.id, "ACCEPTED", provider_id, None).await?;
                     inc(&OM.email_provider_accepted);
+                    if is_code_category(&job.category) {
+                        self.note_code_latency(job.id).await;
+                    }
                     tracing::info!(delivery_id = %job.id, category = %job.category,
                         provider = self.provider.name(), "email accepted by provider");
                     report.accepted += 1;

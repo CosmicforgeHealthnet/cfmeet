@@ -75,8 +75,10 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // Section 17 ORG-006 operations (teams, team members and policies relay) + the
     // organization Messaging member resolution + Q&A restore + 13 multi-device policy
     // operations (device policy, devices, declaration, revocation, linking, security log) +
-    // 9 Document 4 §3.1 Notification Service user operations (U1–U9 relay).
-    assert_eq!(probed, 229, "all v2 operations probed");
+    // 9 Document 4 §3.1 Notification Service user operations (U1–U9 relay) + 4
+    // passwordless account-security operations (step-up request / verify, email change
+    // request / verify).
+    assert_eq!(probed, 233, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

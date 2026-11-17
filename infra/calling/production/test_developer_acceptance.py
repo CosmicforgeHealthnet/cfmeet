@@ -30,7 +30,10 @@ class FakeApi:
 
     def route(self, method, path, body, bearer):
         owner = (bearer or '').split('-')[0]
-        if path == '/api/v1/auth/login':
+        if path == '/api/v1/auth/otp/request':
+            return 200, {'message': 'sent'}
+        if path == '/api/v1/auth/otp/verify':
+            assert body['code'] == '024680'
             return 200, {'access_token': body['email'].split('@')[0] + '-tok'}
         if bearer and bearer.startswith('cfmk_'):
             if bearer in self.revoked or 'invalid' in bearer:
@@ -84,8 +87,9 @@ class FakeApi:
 
 class AcceptanceFlow(unittest.TestCase):
     def run_flow(self, api):
-        accounts = [{'email': 'devA@example.invalid', 'password': 'p'}, {'email': 'devB@example.invalid', 'password': 'p'}]
+        accounts = [{'email': 'devA@example.invalid'}, {'email': 'devB@example.invalid'}]
         with patch.object(da.app_acceptance, 'accounts', lambda ns, count: accounts), \
+                patch.object(da.app_acceptance, 'controlled_code', lambda key, url=None: '024680'), \
                 patch.object(da.Client, '_call', lambda self, *a: api(self, *a)), \
                 patch.object(da.time, 'sleep', lambda s: None):
             return da.run('77-1', 'https://receiver.example/204')

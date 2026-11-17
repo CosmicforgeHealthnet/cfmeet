@@ -15,8 +15,9 @@ lines through `emit` and never prints a secret, an address, an email body or a c
   failure restores the previous container (SMTP stays the transport), so Gmail is only
   retired once Resend delivery is verified.
 * `email-acceptance`: the same proof, repeatable, without changing anything else; with
-  `confirm=otp` it also runs the public OTP journey (register → Resend → verification code
-  → verify → sign in → deactivate the acceptance account).
+  `confirm=otp` it also runs the public passwordless journey (code request → Resend →
+  sign-in code → wrong / valid / reused code → authenticated session → step-up code →
+  deactivate the acceptance account).
 """
 
 import json
@@ -348,62 +349,76 @@ def last_line(out):
     return out.strip().splitlines()[-1] if out and out.strip() else ''
 
 
-def otp_from_redis(cr, env, address):
-    """A verification code for the controlled acceptance account (VPS only). Since N0-8 the
-    issued code is stored only as a salted hash: replace it with a fresh controlled code in
-    the same format (only if one was issued). The previous image stored it in clear: read it."""
-    hashed = controlled_otp.hashed_key(address)
-    if last_line(redis_command(cr, env, 'EXISTS "$KEY"', {'KEY': hashed})) == '1':
-        code = controlled_otp.new_code()
-        out = redis_command(cr, env, 'SET "$KEY" "$VALUE" EX 86400 XX',
-                            {'KEY': hashed, 'VALUE': controlled_otp.sealed(code)})
-        return code if last_line(out) == 'OK' else None
-    code = last_line(redis_command(cr, env, 'GET "$KEY"', {'KEY': controlled_otp.legacy_key(address)}))
-    return code if re.fullmatch(r'\d{6}', code) else None
+def otp_from_redis(cr, env, key):
+    """A one-time code for the controlled acceptance account (VPS only). Codes are stored only
+    as salted hashes: the issued one under `key` is replaced with a fresh controlled code in
+    the same format (only if one was issued; its TTL is kept)."""
+    if last_line(redis_command(cr, env, 'EXISTS "$KEY"', {'KEY': key})) != '1':
+        return None
+    code = controlled_otp.new_code()
+    out = redis_command(cr, env, 'SET "$KEY" "$VALUE" XX KEEPTTL', {'KEY': key, 'VALUE': controlled_otp.sealed(code)})
+    return code if last_line(out) == 'OK' else None
 
 
 def otp_journey(cr, run_id):
-    """Register → Resend → verify → sign in → deactivate, through the public API."""
+    """Passwordless sign-in through the public API, with the code mailed through Resend:
+    request → Resend → wrong / valid / reused code → session → step-up → deactivate."""
     env = p.env_of(p.inspect(cr.MEETING))
     label = 'cfmeetotp' + uuid.uuid4().hex[:10]
     address = labelled(acceptance_recipient(cr), label)
-    password = 'Acc!' + uuid.uuid4().hex + 'Z9'
     checks = {}
-    status, _ = public('POST', '/api/v1/auth/register', {
-        'username': label, 'email': address, 'password': password, 'confirm_password': password})
-    checks['register'] = 'PASS' if status == 201 else 'FAIL %s' % status
-    if status != 201:
+    status, _ = public('POST', '/api/v1/auth/otp/request', {'email': address})
+    checks['code_requested'] = 'PASS' if status == 200 else 'FAIL %s' % status
+    if status != 200:
         return checks
     time.sleep(2)
     rows = cr.meeting_psql(
         "SELECT id || '|' || status FROM email_deliveries WHERE category='AUTH_VERIFICATION' "
+        "AND idempotency_key LIKE 'otp:signin:%%' "
         "AND recipient_hash = encode(sha256(convert_to(lower('%s'),'UTF8')),'hex') "
         "ORDER BY created_at DESC LIMIT 1;" % address.replace("'", ''))
     delivery_id = rows.split('|')[0] if rows else None
-    checks['verification_email_recorded'] = 'PASS' if delivery_id else 'FAIL'
+    checks['sign_in_email_recorded'] = 'PASS' if delivery_id else 'FAIL'
     if delivery_id:
         accepted = wait_for(env, delivery_id, ('ACCEPTED', 'DELIVERED'), 90)
-        checks['verification_email_accepted_by_resend'] = (
+        checks['sign_in_email_accepted_by_resend'] = (
             'PASS' if accepted and accepted['status'] in ('ACCEPTED', 'DELIVERED') and accepted['provider'] == 'resend'
             else 'FAIL %s' % json.dumps(accepted))
-    code = otp_from_redis(cr, env, address)
+    code = otp_from_redis(cr, env, controlled_otp.hashed_key(address))
     checks['code_issued'] = 'PASS' if code else 'FAIL'
     wrong = '000000' if code != '000000' else '111111'
-    status, _ = public('POST', '/api/v1/auth/verify-email', {'email': address, 'token': wrong})
+    status, _ = public('POST', '/api/v1/auth/otp/verify', {'email': address, 'code': wrong})
     checks['invalid_code_refused'] = 'PASS' if status == 400 else 'FAIL %s' % status
-    status, _ = public('POST', '/api/v1/auth/verify-email', {'email': address, 'token': code or '999999'})
-    checks['valid_code_verifies'] = 'PASS' if status == 200 else 'FAIL %s' % status
-    status, _ = public('POST', '/api/v1/auth/verify-email', {'email': address, 'token': code or '999999'})
-    checks['used_code_refused'] = 'PASS' if status == 400 else 'FAIL %s' % status
-    status, body = public('POST', '/api/v1/auth/login', {'email': address, 'password': password})
+    status, body = public('POST', '/api/v1/auth/otp/verify', {'email': address, 'code': code or '999999'})
     token = (body or {}).get('access_token')
-    checks['sign_in_after_verification'] = 'PASS' if status == 200 and token else 'FAIL %s' % status
+    checks['valid_code_signs_in_and_creates_the_account'] = (
+        'PASS' if status == 200 and token and (body or {}).get('is_new_account') is True else 'FAIL %s' % status)
+    status, _ = public('POST', '/api/v1/auth/otp/verify', {'email': address, 'code': code or '999999'})
+    checks['used_code_refused'] = 'PASS' if status == 400 else 'FAIL %s' % status
+    status, _ = public('POST', '/api/v1/auth/login', {'email': address, 'password': 'not-a-password-1A!'})
+    checks['password_sign_in_removed'] = 'PASS' if status == 404 else 'FAIL %s' % status
     if token:
         status, _ = public('GET', '/api/v2/me/profile', token=token)
         checks['authenticated_session'] = 'PASS' if status == 200 else 'FAIL %s' % status
-        status, _ = public('POST', '/api/v1/users/me/deactivate', {'current_password': password}, token=token)
-        checks['cleanup_deactivated'] = 'PASS' if status in (200, 204) else 'MANUAL %s' % status
+        checks['cleanup_deactivated'] = deactivate(cr, env, token, body['user']['id'])
     return checks
+
+
+def deactivate(cr, env, token, user_id):
+    """Cleanup through the real step-up path: a code to the account address, replaced with a
+    controlled one, exchanged for a step-up token, then the deactivation."""
+    purpose = 'DEACTIVATE_ACCOUNT'
+    status, _ = public('POST', '/api/v2/me/step-up/request', {'purpose': purpose}, token=token)
+    if status != 200:
+        return 'MANUAL step-up request %s' % status
+    code = otp_from_redis(cr, env, controlled_otp.step_up_key(user_id, purpose))
+    status, value = public('POST', '/api/v2/me/step-up/verify', {'purpose': purpose, 'code': code or '999999'},
+                           token=token)
+    step_up = (value or {}).get('stepUpToken')
+    if status != 200 or not step_up:
+        return 'MANUAL step-up verify %s' % status
+    status, _ = public('POST', '/api/v1/users/me/deactivate', {'step_up_token': step_up}, token=token)
+    return 'PASS' if status in (200, 204) else 'MANUAL %s' % status
 
 
 def email_acceptance(cr, sha, run_id, confirm):
@@ -416,4 +431,4 @@ def email_acceptance(cr, sha, run_id, confirm):
         checks = otp_journey(cr, run_id)
         emit('otpJourney', checks)
         if any(not v.startswith(('PASS', 'MANUAL')) for v in checks.values()):
-            raise RuntimeError('OTP journey failed')
+            raise RuntimeError('Passwordless sign-in journey failed')

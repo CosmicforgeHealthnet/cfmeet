@@ -42,7 +42,8 @@ def verify_public():
         # Existing controlled accounts only; no customer credentials or account scans.
         import app_acceptance
         users=json.loads((p.SECRETS/'calling-acceptance-accounts.json').read_text())
-        token=app_acceptance.api('login',{'email':users[0]['email'],'password':users[0]['password']})['access_token']
+        # Passwordless sign-in (controlled code replaced in the candidate's Redis).
+        token=app_acceptance.sign_in(users[0])['access_token']
         request=urllib.request.Request(base+'/api/v2/communications/me',headers={'Authorization':'Bearer '+token})
         with urllib.request.urlopen(request,timeout=15) as response:profile=json.load(response)
         assert profile['activationState']=='ACTIVE' and profile['cfMeetId'].startswith('CF-')

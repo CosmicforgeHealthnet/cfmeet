@@ -90,12 +90,12 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 145 
 |---|---:|---|---|
 | `CALENDAR_FILE_DIRECT_INGRESS` | 2 | meetings | RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API. |
 | `CONTACT_VAULT_PRIVATE` | 5 | privacy-relay | Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway. |
-| `FIRST_PARTY_APP_ACCOUNT` | 19 | meetings | The CF Meet app's own account profile. |
+| `FIRST_PARTY_APP_ACCOUNT` | 23 | meetings | The CF Meet app's own account profile. |
 | `FIRST_PARTY_APP_BACKEND` | 16 | meetings | The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly. |
 | `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
 | `FIRST_PARTY_ORGANIZATIONS` | 39 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
-| `LEGACY_DIRECT_INGRESS` | 46 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
+| `LEGACY_DIRECT_INGRESS` | 42 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 2 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
@@ -118,7 +118,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 145 
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/disable` | `disableContact` | `cfmeet.privacy-relay.http-api` |
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/verification` | `assertContactVerification` | `cfmeet.privacy-relay.http-api` |
 
-#### `FIRST_PARTY_APP_ACCOUNT` (19)
+#### `FIRST_PARTY_APP_ACCOUNT` (23)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -135,12 +135,16 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 145 
 | GET | `/api/v2/me/devices` | `v2_list_my_devices` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/devices/current` | `v2_declare_my_device` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/devices/{deviceId}/revoke` | `v2_revoke_my_device` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/email/change/request` | `v2_request_email_change` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/email/change/verify` | `v2_confirm_email_change` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/profile` | `v2_get_my_profile` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/me/profile` | `v2_update_my_profile` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/security-events` | `v2_list_my_security_events` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/sessions` | `v2_list_my_sessions` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/sessions/revoke-all` | `v2_revoke_all_my_sessions` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/sessions/{sessionId}/revoke` | `v2_revoke_my_session` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/step-up/request` | `v2_request_step_up` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/step-up/verify` | `v2_verify_step_up` | `cfmeet.meeting-service.http-api` |
 
 #### `FIRST_PARTY_APP_BACKEND` (16)
 
@@ -228,7 +232,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 145 
 | POST | `/v1/messaging/session-devices` | `issueSessionDeviceToken` | `cfmeet.messaging.http-api` |
 | POST | `/v1/messaging/session-devices/revoke` | `revokeSessionDevices` | `cfmeet.messaging.http-api` |
 
-#### `LEGACY_DIRECT_INGRESS` (46)
+#### `LEGACY_DIRECT_INGRESS` (42)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -238,18 +242,14 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 145 
 | GET | `/api/v1/api-keys/{id}` | `get_api_key` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/api/meetings` | `api_create_meeting` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/api/meetings/{id}/join` | `api_join_meeting` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/change-password` | `change_password` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/forgot-password` | `forgot_password` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/login` | `login` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/email-change/revert` | `revert_email_change` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/auth/logout` | `logout` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v1/auth/oauth/google` | `oauth_google_init` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v1/auth/oauth/google/callback` | `oauth_google_callback` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/otp/request` | `request_otp` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/otp/verify` | `verify_otp` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/otp/verify-link` | `verify_otp_link` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/auth/refresh` | `refresh_token` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/register` | `register` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/resend-verification` | `resend_verification_email` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/reset-password` | `reset_password` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/verify-email` | `verify_email` | `cfmeet.meeting-service.http-api` |
-| POST | `/api/v1/auth/verify-reset-token` | `verify_reset_token` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v1/meetings` | `list_meetings` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/meetings` | `create_meeting` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v1/meetings/instant` | `create_instant_meeting` | `cfmeet.meeting-service.http-api` |

@@ -144,8 +144,9 @@ class Journey:
         return status, value
 
     def login(self, person):
-        _, value = self.call(None, 'POST', '/api/v1/auth/login',
-                             {'email': person.account['email'], 'password': person.account['password']})
+        import app_acceptance
+        value = app_acceptance.sign_in_via(lambda path, body: self.call(None, 'POST', path, body)[1],
+                                           person.account)
         if not value.get('access_token'):
             raise Failed('login returned no access token')
         person.token = value['access_token']

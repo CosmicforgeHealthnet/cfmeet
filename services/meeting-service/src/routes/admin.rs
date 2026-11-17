@@ -9,6 +9,10 @@ pub fn admin_routes(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/users", get(admin::list_users))
         .route("/users/:id", axum::routing::patch(admin::update_user))
+        .route(
+            "/users/:id/email",
+            axum::routing::patch(admin::change_user_email),
+        )
         .route("/meetings", get(admin::list_meetings))
         .route("/logs", get(admin::list_logs))
         .route_layer(middleware::from_fn_with_state(state, auth_middleware))
