@@ -12,6 +12,7 @@
 pub use sea_orm_migration::prelude::*;
 
 mod m20261116_000001_notifications_foundation;
+mod m20261117_000001_preference_copy;
 
 /// Name of the table recording which Notifications migrations have been applied.
 pub const MIGRATION_TABLE: &str = "notifications_seaql_migrations";
@@ -21,9 +22,10 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(
-            m20261116_000001_notifications_foundation::Migration,
-        )]
+        vec![
+            Box::new(m20261116_000001_notifications_foundation::Migration),
+            Box::new(m20261117_000001_preference_copy::Migration),
+        ]
     }
 
     fn migration_table_name() -> DynIden {

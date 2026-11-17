@@ -120,7 +120,7 @@ impl State {
         let (head, oldest) = self.sync_head(p).await?;
         Ok(
             json!({"schemaVersion":1,"me":self.me(p).await?,"capabilities":self.capabilities(scope,p).await,
-            "privacy":self.get_privacy(p).await?,"notificationPreferences":self.get_notification_preferences(p).await?,
+            "privacy":self.get_privacy(p).await?,"notificationPreferences":self.notification_preferences_embedded(p).await?,
             "counts":counts,"sync":{"latestPosition":head,"oldestRetainedPosition":oldest},
             "areas":{"chats":{"owner":"MESSAGING","list":"GET /api/v2/messaging/relay/v1/conversations","overlay":"GET /api/v2/communications/inbox"},
                 "calls":{"owner":"CALLING","history":"GET /api/v2/communications/calls/history"},
@@ -187,7 +187,7 @@ impl State {
     ) -> Result<Value> {
         let c = self.conversation(scope, p, conversation, None).await?;
         let prefs = self
-            .get_conversation_preferences(scope, p, conversation)
+            .conversation_preferences_view(scope, p, conversation, false)
             .await?;
         let (mark, cleared_at) = self.watermark_full(p, conversation).await?;
         let counterpart = if c.context_class == "DIRECT" {

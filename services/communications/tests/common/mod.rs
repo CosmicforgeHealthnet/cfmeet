@@ -59,6 +59,116 @@ pub struct World {
     pub revoked_endpoints: Vec<Uuid>,
     /// Replaces the Account's backfill page (malformed-owner tests).
     pub backfill_page: Option<Value>,
+    /// The Notification Service I2 (U6 / U7 only) behind the N10 preference facade.
+    pub notifications: MockNotifications,
+}
+/// One account's preference document in the mock Notification Service (U6 / U7 rules:
+/// absent = everything enabled, one document version bumped by every write).
+#[derive(Clone, Default, Debug)]
+pub struct NsDoc {
+    pub version: i64,
+    pub categories: BTreeMap<String, bool>,
+    pub conversations: BTreeMap<String, Value>,
+    pub contacts: BTreeMap<String, String>,
+}
+#[derive(Default)]
+pub struct MockNotifications {
+    pub docs: BTreeMap<String, NsDoc>,
+    /// Answer 503 to every call (outage tests).
+    pub down: bool,
+    /// Every dispatch body received.
+    pub calls: Vec<Value>,
+}
+pub const NS_CATEGORIES: [&str; 11] = [
+    "directMessages",
+    "groupMessages",
+    "incomingCalls",
+    "missedCalls",
+    "contactRequests",
+    "groupInvitations",
+    "meetingInvitations",
+    "meetingReminders",
+    "voicemail",
+    "organizationUpdates",
+    "developerUpdates",
+];
+impl NsDoc {
+    pub fn document(&self) -> Value {
+        let categories: serde_json::Map<String, Value> = NS_CATEGORIES
+            .iter()
+            .map(|k| {
+                (
+                    (*k).to_owned(),
+                    json!(self.categories.get(*k).copied().unwrap_or(true)),
+                )
+            })
+            .collect();
+        let contacts: serde_json::Map<String, Value> = self
+            .contacts
+            .iter()
+            .map(|(k, v)| (k.clone(), json!({ "notifications": v })))
+            .collect();
+        json!({"schemaVersion":1,"version":self.version,"categories":categories,"channels":{},"quietHours":null,
+            "conversations":self.conversations,"contacts":contacts,"securityEvents":true,"timeZone":"UTC"})
+    }
+}
+fn mock_notifications(ns: &mut MockNotifications, body: &Value) -> Response {
+    ns.calls.push(body.clone());
+    if ns.down {
+        return reject(StatusCode::SERVICE_UNAVAILABLE, "UNAVAILABLE");
+    }
+    if body["path"] != "/preferences" {
+        return reject(StatusCode::NOT_FOUND, "NOT_FOUND");
+    }
+    let account = body["account"].as_str().unwrap_or_default().to_owned();
+    let doc = ns.docs.entry(account).or_default();
+    match body["method"].as_str() {
+        Some("GET") => Json(doc.document()).into_response(),
+        Some("PUT") => {
+            if body["idempotencyKey"].as_str().is_none_or(|k| k.len() < 8) {
+                return reject(StatusCode::BAD_REQUEST, "VALIDATION_ERROR");
+            }
+            let u = &body["body"];
+            if u["expectedVersion"].as_i64() != Some(doc.version) {
+                return reject(StatusCode::CONFLICT, "VERSION_CONFLICT");
+            }
+            if let Some(c) = u["categories"].as_object() {
+                if c.keys().any(|k| !NS_CATEGORIES.contains(&k.as_str())) {
+                    return reject(StatusCode::BAD_REQUEST, "VALIDATION_ERROR");
+                }
+                for (k, v) in c {
+                    doc.categories.insert(k.clone(), v.as_bool().unwrap());
+                }
+            }
+            if let Some(c) = u["conversations"].as_object() {
+                for (k, v) in c {
+                    if v.is_null() {
+                        doc.conversations.remove(k);
+                    } else {
+                        doc.conversations.insert(
+                            k.clone(),
+                            json!({"notifications":v["notifications"],"mutedUntil":v.get("mutedUntil").cloned().unwrap_or(Value::Null)}),
+                        );
+                    }
+                }
+            }
+            if let Some(c) = u["contacts"].as_object() {
+                for (k, v) in c {
+                    match v["notifications"].as_str() {
+                        Some(n) => {
+                            doc.contacts.insert(k.clone(), n.to_owned());
+                        }
+                        None => {
+                            doc.contacts.remove(k);
+                        }
+                    }
+                }
+            }
+            doc.version += 1;
+            Json(doc.document()).into_response()
+        }
+        _ => reject(StatusCode::NOT_FOUND, "NOT_FOUND"),
+    }
 }
 #[derive(Clone)]
 pub struct MockConversation {
@@ -356,6 +466,9 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
     } else {
         serde_json::from_slice(&b).unwrap()
     };
+    if path == "/internal/v1/notifications/dispatch" {
+        return mock_notifications(&mut s.world.write().unwrap().notifications, &body);
+    }
     if let Some(response) = world_route(&mut s.world.write().unwrap(), &path, &body, caller) {
         return response;
     }
@@ -443,7 +556,8 @@ pub struct Harness {
     pub account_signer: Arc<ServiceTokenSigner>,
     pub calling_signer: Arc<ServiceTokenSigner>,
     pub operator: Arc<ServiceTokenSigner>,
-    /// The Notification Service: `communications-restrictions.read` only (X4).
+    /// The Notification Service: `communications-restrictions.read` (X4) and
+    /// `communications-preferences.export` (N10 copy + catch-up).
     pub notifications: Arc<ServiceTokenSigner>,
     /// The Hub's own signing key (what a receiver's trust bundle grants).
     pub hub_key: PublicJwk,
@@ -488,6 +602,15 @@ impl Harness {
         assert!(!communications_migration::ready(&db).await.unwrap());
         communications_migration::up_all(&db).await.unwrap();
         communications_migration::up_all(&db).await.unwrap();
+        // The previous (N7) image checks the first five histories exactly and the MSG-009 one
+        // the first four; the N10 preference-authority history is separate, so both still
+        // start (rollback safety).
+        assert!(communications_migration::notification_publications_ready(&db)
+            .await
+            .unwrap());
+        assert!(communications_migration::timeline_ready(&db)
+            .await
+            .unwrap());
         // The previous (Section 14) image checks foundation + unified + device-session
         // exactly; the MSG-009 history is separate, so it still starts (rollback safety).
         assert!(communications_migration::device_session_ready(&db)
@@ -545,6 +668,15 @@ impl Harness {
                     ],
                 )],
             ),
+            // N10: the Hub preference facade forwards U6 / U7 over I2.
+            verifier(
+                ServiceId::notifications(),
+                vec![(
+                    ServiceId::communications(),
+                    hub.public_jwk(),
+                    vec!["notifications-user.forward"],
+                )],
+            ),
         ];
         let accounts = Arc::new(RwLock::new(BTreeMap::new()));
         let blocked = Arc::new(RwLock::new(false));
@@ -566,6 +698,7 @@ impl Harness {
             ServiceId::meeting_service(),
             ServiceId::calling(),
             ServiceId::messaging(),
+            ServiceId::notifications(),
         ] {
             targets.insert(id, &format!("http://{address}")).unwrap();
         }
@@ -605,7 +738,10 @@ impl Harness {
                 (
                     ServiceId::notifications(),
                     notifications.public_jwk(),
-                    vec!["communications-restrictions.read"],
+                    vec![
+                        "communications-restrictions.read",
+                        "communications-preferences.export",
+                    ],
                 ),
             ],
         );
@@ -778,6 +914,23 @@ impl Harness {
             .await
             .unwrap();
         id
+    }
+    /// Sets the N10 preference-authority switch the way the release tooling does
+    /// (version-guarded single-row update).
+    pub async fn set_preference_authority(&self, mode: &str) {
+        let n = self
+            .state
+            .store
+            .db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "UPDATE communication_preference_authority SET mode=$1,version=version+1,changed_by_run='test',changed_at=now() WHERE singleton",
+                vec![mode.into()],
+            ))
+            .await
+            .unwrap()
+            .rows_affected();
+        assert_eq!(n, 1);
     }
     pub async fn close(self) {
         self.server.abort();

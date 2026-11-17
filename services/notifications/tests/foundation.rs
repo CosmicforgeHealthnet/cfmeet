@@ -7,14 +7,20 @@ use common::*;
 use serde_json::json;
 
 #[tokio::test]
-async fn the_migration_creates_17_prefixed_tables_with_every_route_off() {
+async fn the_migration_creates_18_prefixed_tables_with_every_route_off() {
     let Some(h) = Harness::new().await else {
         return;
     };
     let tables = h
         .count("SELECT count(*)::bigint FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'notif\\_%'")
         .await;
-    assert_eq!(tables, 17);
+    // The 17 service tables (N2) and the N10 preference-copy job row.
+    assert_eq!(tables, 18);
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_preference_copy WHERE mode = 'OFF'")
+            .await,
+        1
+    );
     assert_eq!(
         h.count("SELECT count(*)::bigint FROM information_schema.tables WHERE table_schema = 'public' AND table_name NOT LIKE 'notif\\_%' AND table_name <> 'notifications_seaql_migrations'").await,
         0

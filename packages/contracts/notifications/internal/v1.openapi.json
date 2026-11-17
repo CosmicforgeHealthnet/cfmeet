@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Notification Service internal API",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "Internal signed API of the unified Notification Service (cfmeet.notifications; blueprint Document 4 §3.3): I1–I11 and the optional I12 (approved under D-15). Frozen by roadmap N1 before the service exists (lifecycle experimental). Every route except I12 requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle (x-cfmeet-internal-permission); durable jti nonces; request binding emitted from day one. Never routed by public ingress. Health (/health, /ready with routingProtocol and per-lane heartbeats) is not counted as an API."
   },
   "paths": {
@@ -163,7 +163,7 @@
       "post": {
         "operationId": "dispatchNotificationsUser",
         "summary": "Forward an account-authenticated user request (I2)",
-        "description": "Relay envelope (packages/communications-policy Dispatch) from the Meeting Service carrying the server-resolved VerifiedAccount; path allowlist U1–U9 only. The response is the U-operation's response.",
+        "description": "Relay envelope (packages/communications-policy Dispatch) from the Meeting Service carrying the server-resolved VerifiedAccount; path allowlist U1–U9 only. The response is the U-operation's response. 1.2.0 (roadmap N10): the Communications Hub also holds notifications-user.forward for its preference facade; from cfmeet.communications only GET and PUT /preferences (U6 / U7) are accepted, anything else is 403 FORBIDDEN, and its U7 writes are recorded with origin HUB_FACADE in the preference change log.",
         "tags": [
           "Relay"
         ],

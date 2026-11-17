@@ -29,7 +29,10 @@ pub struct Config {
     pub client: Arc<InternalServiceClient>,
     pub calling_configured: bool,
     pub messaging_configured: bool,
-    /// `CF_NOTIFICATIONS_BASE_URL` is set: contact-request notifications are published.
+    /// `CF_NOTIFICATIONS_BASE_URL` is set: contact-request notifications are published (N7)
+    /// and the preference facade (N10) can reach the Notification Service. Optional: without
+    /// it nothing is published and the facade answers 503 DEPENDENCY_NOT_CONFIGURED while the
+    /// switch is SERVICE (never a local write).
     pub notifications_configured: bool,
 }
 fn required(k: &str) -> Result<String, String> {
@@ -76,7 +79,8 @@ impl Config {
             ),
             ("CF_CALLING_BASE_URL", ServiceId::calling(), false),
             ("CF_MESSAGING_BASE_URL", ServiceId::messaging(), false),
-            // Roadmap N7: I1 of the Notification Service; unset, nothing is published.
+            // Roadmap N7 / N10: the Notification Service (I1 publications, the preference
+            // facade); unset, nothing is published and the facade is unavailable.
             (
                 "CF_NOTIFICATIONS_BASE_URL",
                 ServiceId::notifications(),

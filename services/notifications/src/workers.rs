@@ -9,6 +9,7 @@
 //! | W4 scheduler: reminders after the takeover, expiry of overdue deliveries | — | 5 s |
 //! | W5 retention and erasure | — | hourly |
 //! | W6 shadow comparator | — | on read (I7 aggregates the observations recorded by W1) |
+//! | W7 preference copy + catch-up (roadmap N10; idle while `notif_preference_copy.mode` is OFF) | — | 50 ms – 5 s |
 //!
 //! With no email provider (`none`) W2 and W3-email are not started: mail stays QUEUED and
 //! expires (codes never linger). With no push provider the push part is not started.
@@ -106,6 +107,12 @@ pub fn spawn(state: &AppState) -> Workers {
                     _ = rx.changed() => {}
                 }
             }
+        }));
+    }
+    if let Some(hub) = &state.hub_preferences {
+        let (db, hub, rx) = (state.db.clone(), hub.clone(), rx.clone());
+        handles.push(tokio::spawn(async move {
+            crate::preference_copy::run(db, hub, rx).await
         }));
     }
     Workers {

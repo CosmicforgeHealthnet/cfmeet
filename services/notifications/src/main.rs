@@ -11,6 +11,7 @@ use notifications::{
     crypto::DataKeys,
     email, http,
     metrics::{Heartbeats, Metrics},
+    preference_copy::HubPreferenceSource,
     state::AppState,
     workers,
 };
@@ -63,12 +64,19 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     };
-    let authorities: Arc<dyn Authorities> =
-        match HttpAuthorities::from_config(&config, clock.clone()) {
-            Ok(Some(a)) => Arc::new(a),
-            Ok(None) => Arc::new(NoAuthorities),
-            Err(e) => fatal("owner API configuration error", e),
-        };
+    let http_authorities = match HttpAuthorities::from_config(&config, clock.clone()) {
+        Ok(a) => a.map(Arc::new),
+        Err(e) => fatal("owner API configuration error", e),
+    };
+    // Roadmap N10: the preference copy reads the Hub through the same signed client.
+    let hub_preferences: Option<Arc<dyn HubPreferenceSource>> = http_authorities
+        .as_ref()
+        .filter(|a| a.hub_configured())
+        .map(|a| a.clone() as Arc<dyn HubPreferenceSource>);
+    let authorities: Arc<dyn Authorities> = match http_authorities {
+        Some(a) => a,
+        None => Arc::new(NoAuthorities),
+    };
     if check_only {
         println!(
             "{}",
@@ -115,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
             .operator_alert_token
             .clone()
             .map(|t: SecretString| Arc::new(t)),
+        hub_preferences,
     };
     let running = config.workers_enabled.then(|| workers::spawn(&state));
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
