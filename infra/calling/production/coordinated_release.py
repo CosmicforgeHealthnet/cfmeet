@@ -2563,7 +2563,8 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, confirm)),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
-    + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')
+    + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review',
+       'notifications-acceptance')
 # The HTTPS receiver of the acceptance webhook: a public endpoint answering 204 to any POST.
 # (api.cfmeet.com itself resolves to the private TLS proxy on cfmeet-core-private, which the
 # worker's STRICT endpoint policy refuses as a private address.)
@@ -2623,6 +2624,22 @@ def run(operation, sha, run_id, confirm=''):
         emit('organizationAcceptanceSummary', checks)
         if any(v != 'PASS' for v in checks.values()):
             raise RuntimeError('Organization acceptance failed')
+    elif operation == 'notifications-acceptance':
+        # Real in-app delivery through the Notification Service: three fresh accounts and two
+        # organizations (archived again) through the public API only. Needs the Organizations
+        # producer and the ORGANIZATION_UPDATES IN_APP routing row ACTIVE.
+        if not done('activate-organizations-publications'):
+            raise RuntimeError('Acceptance needs activate-organizations-publications')
+        modes = notif_ops.service_modes(sys.modules[__name__], 'ORGANIZATION_UPDATES')
+        if modes.get('IN_APP') != 'ACTIVE':
+            raise RuntimeError('Acceptance needs the ORGANIZATION_UPDATES IN_APP routing row ACTIVE '
+                               '(activate-notifications-routing organization-updates-in-app-active)')
+        import notifications_acceptance
+        checks = notifications_acceptance.run(run_id, emit)
+        emit('notificationsAcceptanceSummary', checks)
+        notif_ops.notification_diagnostics(sys.modules[__name__])
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Notification acceptance failed')
     elif operation == 'developer-acceptance':
         # Writes acceptance data through the public API only; requires the activations it tests.
         missing = [o for o in ('activate-developer-console', 'activate-developer-webhooks', 'activate-gateway-families')
