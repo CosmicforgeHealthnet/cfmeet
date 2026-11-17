@@ -4,7 +4,9 @@ import { authApi } from "../api/auth.api";
 import { getApiError } from "@/lib/api/client";
 import { userStorage } from "@/lib/storage/secure-store";
 import { useAuthStore } from "@/store/auth.store";
-import type { MessageResponse, VerifyEmailRequest } from "@/lib/api/generated/meeting-service";
+import type { MessageResponse } from "@/lib/api/generated/meeting-service";
+
+import type { VerifyEmailRequest } from "../legacy-contract";
 
 export function useVerifyEmail() {
   return useMutation({
