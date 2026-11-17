@@ -1,5 +1,6 @@
-//! The closed event catalogue (Document 4 §5.2): 31 inbound types (30 core + the optional
-//! `operator.alert.fired`, approved under D-15) and the control event
+//! The closed event catalogue (Document 4 §5.2): 34 inbound types (30 core, the optional
+//! `operator.alert.fired` approved under D-15, and since contract 1.1.0 the three
+//! passwordless account codes #32–#34 of PR #97) and the control event
 //! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
 //! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
 //! the two ever differ.
@@ -125,6 +126,12 @@ impl SealedField {
 pub enum LegacyKey {
     OtpVerify,
     OtpReset,
+    /// `otp:signin:` — passwordless sign-in / sign-up code (PR #97).
+    OtpSignIn,
+    /// `otp:emailchange:` — code to the new address of an email change (PR #97).
+    OtpEmailChange,
+    /// `otp:stepup:` — action step-up code (PR #97).
+    OtpStepUp,
     DeviceStepUp,
     PasswordChanged,
     DeviceLinked,
@@ -145,11 +152,29 @@ fn uuid_like(s: &str) -> bool {
 }
 
 impl LegacyKey {
+    pub const ALL: &'static [LegacyKey] = &[
+        LegacyKey::OtpVerify,
+        LegacyKey::OtpReset,
+        LegacyKey::OtpSignIn,
+        LegacyKey::OtpEmailChange,
+        LegacyKey::OtpStepUp,
+        LegacyKey::DeviceStepUp,
+        LegacyKey::PasswordChanged,
+        LegacyKey::DeviceLinked,
+        LegacyKey::MeetingInvitation,
+        LegacyKey::OrgInvitation,
+        LegacyKey::MeetingNotification,
+        LegacyKey::DevplatAccess,
+    ];
+
     /// The contract's key name (`x-cfmeet-legacy-idempotency-keys`).
     pub fn name(self) -> &'static str {
         match self {
             LegacyKey::OtpVerify => "otp-verify",
             LegacyKey::OtpReset => "otp-reset",
+            LegacyKey::OtpSignIn => "otp-signin",
+            LegacyKey::OtpEmailChange => "otp-emailchange",
+            LegacyKey::OtpStepUp => "otp-stepup",
             LegacyKey::DeviceStepUp => "device-step-up",
             LegacyKey::PasswordChanged => "password-changed",
             LegacyKey::DeviceLinked => "device-linked",
@@ -164,6 +189,9 @@ impl LegacyKey {
         match self {
             LegacyKey::OtpVerify => "otp:verify:",
             LegacyKey::OtpReset => "otp:reset:",
+            LegacyKey::OtpSignIn => "otp:signin:",
+            LegacyKey::OtpEmailChange => "otp:emailchange:",
+            LegacyKey::OtpStepUp => "otp:stepup:",
             LegacyKey::DeviceStepUp => "device-step-up:",
             LegacyKey::PasswordChanged => "password-changed:",
             LegacyKey::DeviceLinked => "device-linked:",
@@ -194,6 +222,35 @@ impl LegacyKey {
     }
 }
 
+/// The kind of a recipient reference (`<kind>:<id>`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecipientKind {
+    /// `cfmeet-user:<account id>`.
+    Account,
+    /// `meeting-email-principal:<id>`: an address, sealed in the event or resolved by Meeting.
+    EmailPrincipal,
+}
+
+impl RecipientKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RecipientKind::Account => "cfmeet-user",
+            RecipientKind::EmailPrincipal => "meeting-email-principal",
+        }
+    }
+
+    /// Whether `reference` is of this kind (the id itself is checked separately).
+    pub fn matches(self, reference: &str) -> bool {
+        reference
+            .strip_prefix(self.as_str())
+            .is_some_and(|rest| rest.starts_with(':'))
+    }
+}
+
+/// The closed `purpose` values of `account.step-up-code.requested` (contract
+/// `StepUpPurpose`).
+pub const STEP_UP_PURPOSES: &[&str] = &["DEACTIVATE_ACCOUNT", "CHANGE_EMAIL"];
+
 /// One catalogue entry.
 #[derive(Debug, Clone, Copy)]
 pub struct EventSpec {
@@ -211,6 +268,10 @@ pub struct EventSpec {
     pub optional: bool,
     pub required_data: &'static [&'static str],
     pub optional_data: &'static [&'static str],
+    /// `Some(kind)`: exactly one recipient, of this kind (contract `recipient`).
+    pub recipient: Option<RecipientKind>,
+    /// Data keys whose value is a string from a closed set.
+    pub closed_data: &'static [(&'static str, &'static [&'static str])],
 }
 
 impl EventSpec {
@@ -275,6 +336,8 @@ const fn e(
         optional: false,
         required_data,
         optional_data: &[],
+        recipient: None,
+        closed_data: &[],
     }
 }
 
@@ -284,7 +347,7 @@ const CONNECTION: &[&str] = &["actorRef", "connectionId"];
 const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
 const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
 
-/// The catalogue, in contract order (#1–#31, then the control event).
+/// The catalogue, in contract order (#1–#34, then the control event).
 pub const CATALOGUE: &[EventSpec] = &[
     EventSpec {
         optional_data: &["role"],
@@ -626,6 +689,53 @@ pub const CATALOGUE: &[EventSpec] = &[
             &["alertName", "severity", "status"],
         )
     },
+    // Passwordless account codes (contract 1.1.0, PR #97). The sign-in code may be for an
+    // address with no account yet and the email-change code goes to an address that is not
+    // (yet) the account's: both name one email principal and seal its address.
+    EventSpec {
+        sealed: &[Code, Token, Address],
+        idempotency_key: Some(K::OtpSignIn),
+        optional_data: &["requestClient", "requestNetwork"],
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            32,
+            "account.sign-in-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["requestedAt", "ttlMinutes"],
+        )
+    },
+    EventSpec {
+        sealed: &[Code, Address],
+        idempotency_key: Some(K::OtpEmailChange),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            33,
+            "account.email-change-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["ttlMinutes"],
+        )
+    },
+    EventSpec {
+        sealed: &[Code],
+        idempotency_key: Some(K::OtpStepUp),
+        recipient: Some(RecipientKind::Account),
+        closed_data: &[("purpose", STEP_UP_PURPOSES)],
+        ..e(
+            34,
+            "account.step-up-code.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["purpose", "ttlMinutes"],
+        )
+    },
     EventSpec {
         number: 0,
         event_type: CONTROL_EVENT,
@@ -638,6 +748,8 @@ pub const CATALOGUE: &[EventSpec] = &[
         optional: false,
         required_data: &[],
         optional_data: &[],
+        recipient: None,
+        closed_data: &[],
     },
 ];
 

@@ -6,9 +6,9 @@
 //!
 //! | Enqueue point (after PR #97, passwordless sign-in) | Ledger category / key | Catalogue event |
 //! |---|---|---|
-//! | `EmailService::send_sign_in_code` | `AUTH_VERIFICATION`, `otp:signin:…` | none (no account yet, magic link) |
-//! | `EmailService::send_email_change_code` | `AUTH_VERIFICATION`, `otp:emailchange:…` | none (new address) |
-//! | `EmailService::send_step_up_code` | `SECURITY_DEVICE_STEP_UP`, `otp:stepup:…` | none (action code) |
+//! | `EmailService::send_sign_in_code` | `AUTH_VERIFICATION`, `otp:signin:…` | `account.sign-in-code.requested` (sealed code, magic-link token and address; one email principal, no subject) |
+//! | `EmailService::send_email_change_code` | `AUTH_VERIFICATION`, `otp:emailchange:…` | `account.email-change-code.requested` (sealed code and new address; one email principal, ACCOUNT subject) |
+//! | `EmailService::send_step_up_code` | `SECURITY_DEVICE_STEP_UP`, `otp:stepup:…` | `account.step-up-code.requested` (sealed code; `purpose`) |
 //! | `email::device_step_up_code_on` (device links) | `SECURITY_DEVICE_STEP_UP`, `device-step-up:…` | `account.device-step-up-code.requested` |
 //! | `email::device_notice_on` (device linked) | `NOTIFICATION`, `device-linked:…` | `account.security.device-linked` |
 //!
@@ -87,9 +87,11 @@ use crate::{
             self as fence, CriticalReroute, DecisionReason, LeaseGrant, MeetingCategory, Route,
             RoutingMode,
         },
+        notification_owner::email_principal_ref,
         notification_publications::{IngestResult, NotificationEventSink, PublishFailure},
         ops_metrics::{inc, OPS_METRICS as OM},
     },
+    templates::email::RequestDetails,
 };
 
 /// A never-leased `NEW` decision fails over to the legacy path after this long in `AUTO`
@@ -112,6 +114,9 @@ pub mod event_type {
     pub const DEVICE_STEP_UP_CODE: &str = "account.device-step-up-code.requested";
     pub const PASSWORD_CHANGED: &str = "account.security.password-changed";
     pub const DEVICE_LINKED: &str = "account.security.device-linked";
+    pub const SIGN_IN_CODE: &str = "account.sign-in-code.requested";
+    pub const EMAIL_CHANGE_CODE: &str = "account.email-change-code.requested";
+    pub const STEP_UP_CODE: &str = "account.step-up-code.requested";
 }
 
 fn rfc3339(t: DateTime<Utc>) -> String {
@@ -405,19 +410,30 @@ pub fn keys_from_env(sealing: Option<SealingKey>) -> Result<CriticalKeys, String
 
 // ------------------------------------------------------------------------------ event
 
-/// The catalogue event of one CRITICAL message (ids and bounded facts only; the code is
-/// sealed to the service key and never stored in clear).
+/// The catalogue event of one CRITICAL message (ids and bounded facts only; the code, the
+/// magic-link token and an address are sealed to the service key and never stored in
+/// clear).
 #[derive(Clone)]
 pub struct CriticalEvent {
     pub category: MeetingCategory,
     /// `None`: the message has no catalogue event (it is routed, and always decided
     /// `OLD` / `UNPUBLISHABLE` outside `LEGACY_ONLY`).
     pub event_type: Option<&'static str>,
+    /// The account (`Uuid::nil()` for a sign-in code, whose address may have none).
     pub account_id: Uuid,
+    /// Whether the envelope names the account as its `ACCOUNT` subject (never for a
+    /// sign-in code: the address may have no account, and the event must not reveal one).
+    pub subject: bool,
+    /// `None`: the recipient is the account (`cfmeet-user:<account>`, address via X1).
+    /// `Some`: the recipient is one email principal ([`email_principal_ref`]) and this
+    /// address is sealed (a sign-in code, or the new address of an email change).
+    pub address: Option<Zeroizing<String>>,
     /// Exactly the catalogue's data keys.
     pub data: Vec<(&'static str, Value)>,
     /// The one-time code (code events only).
     pub code: Option<Zeroizing<String>>,
+    /// The magic-link token (sign-in codes only).
+    pub token: Option<Zeroizing<String>>,
 }
 
 impl std::fmt::Debug for CriticalEvent {
@@ -430,38 +446,150 @@ impl std::fmt::Debug for CriticalEvent {
 }
 
 impl CriticalEvent {
-    /// A CRITICAL message the catalogue cannot carry (passwordless sign-in codes, step-up
-    /// action codes, email-change codes: PR #97). It is still routed — the guard trigger
-    /// requires a decision once its category leaves `LEGACY_ONLY` — and always stays on
-    /// the legacy path (`UNPUBLISHABLE`).
+    /// A CRITICAL message the catalogue cannot carry. It is still routed — the guard
+    /// trigger requires a decision once its category leaves `LEGACY_ONLY` — and always
+    /// stays on the legacy path (`UNPUBLISHABLE`). Since contract 1.1.0 every enqueue point
+    /// has a catalogue event; this remains for a sign-in code the catalogue cannot carry
+    /// exactly as its legacy email shows it ([`Self::sign_in_code`]).
     pub fn not_in_catalogue(category: MeetingCategory) -> Self {
         Self {
             category,
             event_type: None,
             account_id: Uuid::nil(),
+            subject: false,
+            address: None,
             data: Vec::new(),
             code: None,
+            token: None,
         }
+    }
+
+    /// An event of the account: its `cfmeet-user` recipient and `ACCOUNT` subject.
+    fn of_account(
+        category: MeetingCategory,
+        event_type: &'static str,
+        account_id: Uuid,
+        data: Vec<(&'static str, Value)>,
+        code: Option<&str>,
+    ) -> Self {
+        Self {
+            category,
+            event_type: Some(event_type),
+            account_id,
+            subject: true,
+            address: None,
+            data,
+            code: code.map(|c| Zeroizing::new(c.to_string())),
+            token: None,
+        }
+    }
+
+    /// Passwordless sign-in / sign-up code (PR #97) to `address`, which may have no account
+    /// yet: one email principal, no subject; the code, the magic-link token and the address
+    /// are sealed, and the request facts the legacy email shows (`details`) travel as data.
+    /// A message the catalogue cannot carry exactly as the legacy email shows it (no magic
+    /// link, request facts outside the contract's bounds) stays on the legacy path
+    /// (`UNPUBLISHABLE`), so the service never renders a different email.
+    pub fn sign_in_code(
+        address: &str,
+        code: &str,
+        link_token: Option<&str>,
+        ttl_minutes: i64,
+        details: &RequestDetails,
+    ) -> Self {
+        let requested_at =
+            chrono::NaiveDateTime::parse_from_str(&details.when_utc, "%Y-%m-%d %H:%M")
+                .ok()
+                .map(|t| t.and_utc().to_rfc3339_opts(SecondsFormat::Secs, true));
+        let client_ok = details.client.as_deref().is_none_or(|c| {
+            (1..=80).contains(&c.chars().count()) && !c.chars().any(char::is_control)
+        });
+        let network_ok = details.address.as_deref().is_none_or(masked_network);
+        let (Some(token), Some(requested_at), true, true) =
+            (link_token, requested_at, client_ok, network_ok)
+        else {
+            return Self::not_in_catalogue(MeetingCategory::AuthVerification);
+        };
+        let mut data = vec![
+            ("requestedAt", json!(requested_at)),
+            ("ttlMinutes", json!(ttl_minutes)),
+        ];
+        if let Some(client) = &details.client {
+            data.push(("requestClient", json!(client)));
+        }
+        if let Some(network) = &details.address {
+            data.push(("requestNetwork", json!(network)));
+        }
+        Self {
+            category: MeetingCategory::AuthVerification,
+            event_type: Some(event_type::SIGN_IN_CODE),
+            account_id: Uuid::nil(),
+            subject: false,
+            address: Some(Zeroizing::new(address.to_string())),
+            data,
+            code: Some(Zeroizing::new(code.to_string())),
+            token: Some(Zeroizing::new(token.to_string())),
+        }
+    }
+
+    /// The code proving ownership of the NEW address of an email change (PR #97): one
+    /// email principal with the new address sealed, on behalf of the account (subject).
+    pub fn email_change_code(
+        account_id: Uuid,
+        new_address: &str,
+        code: &str,
+        ttl_minutes: i64,
+    ) -> Self {
+        Self {
+            address: Some(Zeroizing::new(new_address.to_string())),
+            ..Self::of_account(
+                MeetingCategory::AuthVerification,
+                event_type::EMAIL_CHANGE_CODE,
+                account_id,
+                vec![("ttlMinutes", json!(ttl_minutes))],
+                Some(code),
+            )
+        }
+    }
+
+    /// The action step-up code (PR #97) to the account's current address; `purpose` is the
+    /// closed `StepUpPurpose` value (`DEACTIVATE_ACCOUNT`, `CHANGE_EMAIL`).
+    pub fn step_up_code(
+        account_id: Uuid,
+        purpose: &'static str,
+        code: &str,
+        ttl_minutes: i64,
+    ) -> Self {
+        Self::of_account(
+            MeetingCategory::SecurityDeviceStepUp,
+            event_type::STEP_UP_CODE,
+            account_id,
+            vec![
+                ("purpose", json!(purpose)),
+                ("ttlMinutes", json!(ttl_minutes)),
+            ],
+            Some(code),
+        )
     }
 
     pub fn verification_code(account_id: Uuid, code: &str, ttl_minutes: i64) -> Self {
-        Self {
-            category: MeetingCategory::AuthVerification,
-            event_type: Some(event_type::VERIFICATION_CODE),
+        Self::of_account(
+            MeetingCategory::AuthVerification,
+            event_type::VERIFICATION_CODE,
             account_id,
-            data: vec![("ttlMinutes", json!(ttl_minutes))],
-            code: Some(Zeroizing::new(code.to_string())),
-        }
+            vec![("ttlMinutes", json!(ttl_minutes))],
+            Some(code),
+        )
     }
 
     pub fn password_reset_code(account_id: Uuid, code: &str, ttl_minutes: i64) -> Self {
-        Self {
-            category: MeetingCategory::AuthPasswordReset,
-            event_type: Some(event_type::PASSWORD_RESET_CODE),
+        Self::of_account(
+            MeetingCategory::AuthPasswordReset,
+            event_type::PASSWORD_RESET_CODE,
             account_id,
-            data: vec![("ttlMinutes", json!(ttl_minutes))],
-            code: Some(Zeroizing::new(code.to_string())),
-        }
+            vec![("ttlMinutes", json!(ttl_minutes))],
+            Some(code),
+        )
     }
 
     pub fn device_step_up_code(
@@ -470,40 +598,68 @@ impl CriticalEvent {
         code: &str,
         ttl_minutes: i64,
     ) -> Self {
-        Self {
-            category: MeetingCategory::SecurityDeviceStepUp,
-            event_type: Some(event_type::DEVICE_STEP_UP_CODE),
+        Self::of_account(
+            MeetingCategory::SecurityDeviceStepUp,
+            event_type::DEVICE_STEP_UP_CODE,
             account_id,
-            data: vec![
+            vec![
                 ("accountDeviceId", json!(account_device_id.to_string())),
                 ("ttlMinutes", json!(ttl_minutes)),
             ],
-            code: Some(Zeroizing::new(code.to_string())),
-        }
+            Some(code),
+        )
     }
 
     pub fn password_changed(account_id: Uuid, changed_at: DateTime<Utc>) -> Self {
-        Self {
-            category: MeetingCategory::SecurityPasswordChanged,
-            event_type: Some(event_type::PASSWORD_CHANGED),
+        Self::of_account(
+            MeetingCategory::SecurityPasswordChanged,
+            event_type::PASSWORD_CHANGED,
             account_id,
-            data: vec![("changedAt", json!(rfc3339(changed_at)))],
-            code: None,
-        }
+            vec![("changedAt", json!(rfc3339(changed_at)))],
+            None,
+        )
     }
 
     pub fn device_linked(account_id: Uuid, account_device_id: Uuid, link_id: Uuid) -> Self {
-        Self {
-            category: MeetingCategory::SecurityDeviceLinked,
-            event_type: Some(event_type::DEVICE_LINKED),
+        Self::of_account(
+            MeetingCategory::SecurityDeviceLinked,
+            event_type::DEVICE_LINKED,
             account_id,
-            data: vec![
+            vec![
                 ("accountDeviceId", json!(account_device_id.to_string())),
                 ("linkId", json!(link_id.to_string())),
             ],
-            code: None,
-        }
+            None,
+        )
     }
+
+    /// The sealed part of this event (`None`: it carries no secret).
+    fn secret(&self) -> Option<SealedPlaintext> {
+        if self.code.is_none() && self.token.is_none() && self.address.is_none() {
+            return None;
+        }
+        let mut p = SealedPlaintext::default();
+        if let Some(code) = &self.code {
+            p = p.with_code(code.as_str());
+        }
+        if let Some(token) = &self.token {
+            p = p.with_token(token.as_str());
+        }
+        if let Some(address) = &self.address {
+            p = p.with_address(address.as_str());
+        }
+        Some(p)
+    }
+}
+
+/// A masked network prefix as `passwordless::mask_address` writes it (`102.89.x.x`,
+/// `2001:db8:x:x`; the contract's `requestNetwork`), never a full address.
+fn masked_network(value: &str) -> bool {
+    (3..=64).contains(&value.len())
+        && value.contains('x')
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || matches!(b, b'.' | b':' | b'x'))
 }
 
 /// The envelope event id of an outbox row.
@@ -532,18 +688,21 @@ pub fn build_envelope(
     .map_err(|_| DecisionReason::Unpublishable)?
     .event_id(event_id(row_id))
     .correlation_id(format!("corr_{}", row_id.simple()))
-    .subject(event.account_id, None)
-    .recipient(format!("cfmeet-user:{}", event.account_id))
     .dedupe_key(key)
     .idempotency_key(key)
     .expires_at(rfc3339(expires_at));
+    if event.subject {
+        builder = builder.subject(event.account_id, None);
+    }
+    builder = match &event.address {
+        Some(address) => builder.recipient(email_principal_ref(address)),
+        None => builder.recipient(format!("cfmeet-user:{}", event.account_id)),
+    };
     for (k, v) in &event.data {
         builder = builder.data(k, v.clone());
     }
-    let built = match (&event.code, sealing) {
-        (Some(code), Some(sealing)) => builder
-            .secret(SealedPlaintext::default().with_code(code.as_str()))
-            .build_sealed(sealing),
+    let built = match (event.secret(), sealing) {
+        (Some(secret), Some(sealing)) => builder.secret(secret).build_sealed(sealing),
         (Some(_), None) => return Err(DecisionReason::Unpublishable),
         (None, _) => builder.build(),
     };
@@ -1637,6 +1796,88 @@ mod tests {
         assert!(e.to_new().is_none());
     }
 
+    fn details() -> RequestDetails {
+        RequestDetails {
+            client: Some("TestBrowser/1.0".into()),
+            address: Some("102.89.x.x".into()),
+            when_utc: "2026-11-17 12:00".into(),
+        }
+    }
+
+    /// The sign-in code carries exactly the facts its legacy email shows; one the
+    /// catalogue cannot carry exactly stays on the legacy path.
+    #[test]
+    fn sign_in_codes_carry_their_request_facts_or_stay_legacy() {
+        let e = CriticalEvent::sign_in_code(
+            "a@example.com",
+            "123456",
+            Some("tok_0123456789abcdef"),
+            10,
+            &details(),
+        );
+        assert_eq!(e.event_type, Some(event_type::SIGN_IN_CODE));
+        let data: HashMap<&str, Value> = e.data.iter().cloned().collect();
+        assert_eq!(data["requestedAt"], "2026-11-17T12:00:00Z");
+        assert_eq!(data["requestClient"], "TestBrowser/1.0");
+        assert_eq!(data["requestNetwork"], "102.89.x.x");
+        assert_eq!(data["ttlMinutes"], 10);
+        let bare = RequestDetails {
+            client: None,
+            address: None,
+            ..details()
+        };
+        let e = CriticalEvent::sign_in_code(
+            "a@example.com",
+            "123456",
+            Some("tok_0123456789abcdef"),
+            10,
+            &bare,
+        );
+        assert_eq!(e.data.len(), 2);
+        assert!(masked_network("2001:db8:x:x") && !masked_network("102.89.12.7"));
+        for odd in [
+            RequestDetails {
+                when_utc: "yesterday".into(),
+                ..details()
+            },
+            RequestDetails {
+                address: Some("102.89.12.7".into()),
+                ..details()
+            },
+            RequestDetails {
+                client: Some("x".repeat(81)),
+                ..details()
+            },
+            RequestDetails {
+                client: Some("a\u{7}b".into()),
+                ..details()
+            },
+        ] {
+            let e = CriticalEvent::sign_in_code(
+                "a@example.com",
+                "123456",
+                Some("tok_0123456789abcdef"),
+                10,
+                &odd,
+            );
+            assert_eq!(e.event_type, None, "{odd:?}");
+        }
+        let e = CriticalEvent::sign_in_code("a@example.com", "123456", None, 10, &details());
+        assert_eq!(
+            e.event_type, None,
+            "no magic link: not the catalogue's email"
+        );
+    }
+
+    /// Every step-up purpose is a catalogue purpose (contract `StepUpPurpose`).
+    #[test]
+    fn step_up_purposes_are_the_catalogue_enum() {
+        use crate::services::step_up::StepUpPurpose;
+        let ours = [StepUpPurpose::DeactivateAccount, StepUpPurpose::ChangeEmail]
+            .map(StepUpPurpose::as_str);
+        assert_eq!(ours.as_slice(), cf_notification_client::STEP_UP_PURPOSES);
+    }
+
     #[test]
     fn envelopes_follow_the_catalogue() {
         let (public, _) =
@@ -1670,6 +1911,24 @@ mod tests {
                 CriticalEvent::device_linked(account, Uuid::new_v4(), Uuid::new_v4()),
                 &*format!("device-linked:{}", Uuid::new_v4()),
             ),
+            (
+                CriticalEvent::sign_in_code(
+                    "Ada@Example.com",
+                    "123456",
+                    Some("0123456789abcdef0123456789abcdef"),
+                    10,
+                    &details(),
+                ),
+                "otp:signin:aa:bb",
+            ),
+            (
+                CriticalEvent::email_change_code(account, "ada.new@example.com", "123456", 10),
+                "otp:emailchange:aa:bb",
+            ),
+            (
+                CriticalEvent::step_up_code(account, "DEACTIVATE_ACCOUNT", "123456", 10),
+                "otp:stepup:aa:bb",
+            ),
         ];
         for (event, key) in &cases {
             let v = build_envelope(
@@ -1684,11 +1943,21 @@ mod tests {
             .unwrap_or_else(|_| panic!("{:?}", event.event_type));
             let env: cf_notification_client::Envelope = serde_json::from_value(v.clone()).unwrap();
             cf_notification_client::validate(&env, Some("cfmeet.meeting-service")).unwrap();
-            assert_eq!(v["recipients"][0]["ref"], format!("cfmeet-user:{account}"));
+            match event.address.as_deref() {
+                // A sealed address names its email principal, never the account.
+                Some(address) => {
+                    assert_eq!(v["recipients"][0]["ref"], email_principal_ref(address));
+                    assert!(!v.to_string().to_ascii_lowercase().contains("example.com"));
+                }
+                None => assert_eq!(v["recipients"][0]["ref"], format!("cfmeet-user:{account}")),
+            }
+            assert_eq!(v["subject"].is_object(), event.subject);
+            assert_eq!(v["subject"].is_object(), *key != "otp:signin:aa:bb");
             assert_eq!(v["delivery"]["priority"], "CRITICAL");
             assert_eq!(v["delivery"]["idempotencyKey"], *key);
             assert_eq!(v.get("sealed").is_some(), event.code.is_some());
             assert!(!v.to_string().contains("123456"));
+            assert!(!v.to_string().contains("0123456789abcdef0123456789abcdef"));
             // A code never travels without the service key.
             if event.code.is_some() {
                 assert_eq!(
