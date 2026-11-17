@@ -88,4 +88,10 @@ Each is a separate run of `cfmeet-coordinated-release.yml` on the current `main`
 | `activate-notification-fence` | changes one producer routing-fence row (`confirm`: `<service>-<category>-<mode>`, e.g. `messaging-message-wakeups-shadow`); this version moves only between `LEGACY_ONLY` and `SHADOW` | SHADOW only for categories whose producer records decisions (`messaging`/`MESSAGE_WAKEUPS`), with `routingProtocol` and `activate-messaging-publications`; a `FENCED_*` row is never touched; `rollback` restores the previous mode |
 | `activate-notifications-routing` | changes one `notif_routing` row (`confirm`: `<category>-<channel>-<mode>`) | the gates of §2 and Document 6 N14: CRITICAL `active` refused; EMAIL `active` needs a provider and E1; social `active` needs the owner APIs |
 
+`diagnose` (read-only) also emits `notificationDiagnostics`, counts only:
+- per producer: fence modes, decisions by route and reason, publications by shadow, state, outcome and error code;
+- in the service: inbox rows by producer, shadow and state, shadow observations, deliveries, and the number of routing rows not `OFF`.
+
+It never reads ids, envelopes or recipients. Use it to evidence a SHADOW phase.
+
 The U1-U9 routes are classified `EXCLUDED` / `FIRST_PARTY_APP_NOTIFICATIONS` in `infra/api-gateway/public-routes.json`: they are served on the Meeting Service ingress to the CF Meet apps' own signed-in users, never routed as a customer API. Without `CF_NOTIFICATIONS_BASE_URL` every U route answers 503 after the 401 session check.

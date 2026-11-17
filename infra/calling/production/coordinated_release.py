@@ -2584,6 +2584,7 @@ def run(operation, sha, run_id, confirm=''):
         if confirm:
             raise RuntimeError('diagnose takes no confirmation')
         mail_ops.diagnose(sys.modules[__name__], sha, run_id)
+        notif_ops.notification_diagnostics(sys.modules[__name__])
     elif operation == 'developer-access-review':
         # One audited operator decision (or read) by a named reviewer; no image change.
         developer_access.review(sys.modules[__name__], sha, run_id, confirm)

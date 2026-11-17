@@ -22,7 +22,7 @@ Statuses are kept separate, as the mission requires:
 | **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
 | **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
 | **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PRs #76, #82) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-notifications-owners` 43922950325, X1/X2 publicly denied and proven | n/a (no traffic until routing leaves OFF) | §2.4, §4.2 |
-| **N7** producer publications + routing fence | **N7a fence foundation built** (Meeting + Messaging tables, inert guard triggers, decision module, `routingProtocol`, rollback floor); **N7b Messaging shadow publication built** (`MESSAGE_WAKEUPS`, outbox + I1 relay, `activate-messaging-publications`, `activate-notification-fence` LEGACY_ONLY ↔ SHADOW only); other producers not built | — | — | §2.8, §2.9, §5 |
+| **N7** producer publications + routing fence | **N7a fence foundation built** (Meeting + Messaging tables, inert guard triggers, decision module, `routingProtocol`, rollback floor); **N7b Messaging shadow publication built** (`MESSAGE_WAKEUPS`, outbox + I1 relay, `activate-messaging-publications`, `activate-notification-fence` LEGACY_ONLY ↔ SHADOW only); other producers not built | **N7b deployed, `MESSAGE_WAKEUPS` in SHADOW**: release 43987779716, certify 43997503927, publications 43999106430, fence 44000239278 (§4.3). Acknowledged shadow publications not yet evidenced | — | §2.8, §2.9, §4.3, §5 |
 | **N8** inbox | service side + U1–U9 (PR #75), Meeting relay (PR #82); web/mobile UI not built | **relay `PRODUCTION_DEPLOYED_AND_VERIFIED`**: release 43914242156, `activate-notifications-relay` 43926737306; inbox empty (routing OFF) | — | §2.4, §2.5, §4.2 |
 | **N9** push + call fast lane | service side built (U8/U9, dispatcher, I3); Messaging facades, Calling transport, service worker not built | — | — | §2.5, §5 |
 | **N10** preferences authority | U6/U7, change log, Hub copy function built; copy job, facade switch not built | — | — | §2.5, §5 |
@@ -238,6 +238,20 @@ With E1 recorded, the N14 gate no longer refuses email `ACTIVE` for lack of E1. 
 - **N6: `PRODUCTION_DEPLOYED_AND_VERIFIED`.** X1–X5 are granted and reachable only from `cfmeet.notifications`, and are publicly denied.
 - **N8 service side and relay: `PRODUCTION_DEPLOYED_AND_VERIFIED`.** U1–U9 are live through the Meeting relay. The web and mobile inbox UI is not built.
 - **Delivery:** nothing is delivered. Every `notif_routing` row is `OFF`, there is no email or push provider, and Resend stays suspended.
+
+### 4.3 N7b release, certification, Messaging publications and SHADOW
+
+| Step | Evidence |
+|---|---|
+| Release | run [43987779716](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43987779716) `release` on `be00f8b` (PR #92), finished 01:28 UTC. The gate waited for green main CI (00:58). Verification 35/35 PASS, violations none. `routing_protocol meeting-service` and `routing_protocol messaging` PASS; Messaging fence history 2 (publication outbox) applied. Regression PASS. |
+| Certification | run [43997503927](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43997503927) `certify` on `be00f8b`: **`CERTIFIED_READ_ONLY`** (01:46 UTC). |
+| Publications | run [43999106430](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/43999106430) `activate-messaging-publications` on `be00f8b`, 01:56 UTC.<br>• Activation base: head is the released SHA.<br>• Before the change: I1 answered 401 unsigned; Messaging reported `routingProtocol`; `messaging_notification_publications` exists; Messaging has a signing identity.<br>• Trust bundles of `notifications` and `notifications-2` changed (`notifications-event.publish` for `cfmeet.messaging`); Messaging gained `CF_NOTIFICATIONS_BASE_URL`, the private TLS route.<br>• After the change: I1 still 401 unsigned, `routingProtocol` still reported; regression PASS. |
+| SHADOW | run [44000239278](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/44000239278) `activate-notification-fence` `messaging-message-wakeups-shadow` on `be00f8b`, 02:05 UTC: `messaging`/`MESSAGE_WAKEUPS` **`LEGACY_ONLY` → `SHADOW`**, routing version 2, journaled (rollback restores `LEGACY_ONLY`). |
+
+**Production status:**
+- **N7b: deployed, `MESSAGE_WAKEUPS` in `SHADOW`.** Every message wake-up records an `OLD` decision and writes its legacy push jobs exactly as before. An audience of at most 40 candidates also enqueues one shadow publication, which the relay posts to I1 with `shadow: true`.
+- **Not yet evidenced:** acknowledged shadow publications in production (rows `ACKED` with outcome `HELD`/`ACCEPTED`), and the shadow comparison of Document 6 N7. This needs a read-only check after real traffic: `diagnose` now emits `notificationDiagnostics` (counts only) for exactly this. Until then N7b is not `PRODUCTION_DEPLOYED_AND_VERIFIED`.
+- **Delivery:** unchanged. Legacy Messaging push delivers every wake-up. The Notification Service delivers nothing (every `notif_routing` row `OFF`, shadow events are never delivered). No category is `FENCED_*`.
 
 ---
 
