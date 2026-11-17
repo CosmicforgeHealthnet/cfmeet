@@ -263,6 +263,12 @@
     {
       "domain": "calling",
       "method": "POST",
+      "path": "/v1/calls/{call_id}/participants/{participant_id}/rejoin",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
       "path": "/v1/calls/{call_id}/host",
       "class": "PUBLIC_CUSTOMER"
     },

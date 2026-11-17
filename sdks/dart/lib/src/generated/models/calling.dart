@@ -4313,6 +4313,56 @@ class RegisterEndpointRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on.
+class RejoinRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const RejoinRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory RejoinRequest.create({required Uuid endpointId}) =>
+      RejoinRequest.fromJson(<String, Object?>{
+        'endpointId': endpointId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get endpointId => json['endpointId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer.
+class RejoinResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const RejoinResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory RejoinResult.create({required CommonCallSummary call, required String operation, required Uuid participantId, required bool rejoined, required Uuid sessionId}) =>
+      RejoinResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'operation': operation,
+        'participantId': participantId,
+        'rejoined': rejoined,
+        'sessionId': sessionId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  String get operation => json['operation']! as String;
+
+  Uuid get participantId => json['participantId']! as String;
+
+  bool get rejoined => json['rejoined']! as bool;
+
+  Uuid get sessionId => json['sessionId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Body of PATCH /v1/enterprise/ivr-flows/{ivr_flow_id}.
 class RenameIvrFlowRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).

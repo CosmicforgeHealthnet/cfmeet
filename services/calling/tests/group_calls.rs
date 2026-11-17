@@ -287,3 +287,148 @@ async fn a_host_who_leaves_hands_the_role_to_someone_present() {
     let r = everyone(&a, call, "hold", host).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
 }
+
+// ---------------------------------------------------------------------------------------
+// Rejoining an ongoing call
+// ---------------------------------------------------------------------------------------
+
+async fn rejoin(
+    a: &AppWorld,
+    call: Uuid,
+    participant: Uuid,
+    endpoint: Uuid,
+) -> common::TestResponse {
+    a.post(
+        &format!("/v1/calls/{call}/participants/{participant}/rejoin"),
+        json!({ "endpointId": endpoint }),
+    )
+    .await
+}
+
+async fn leave(a: &AppWorld, call: Uuid, endpoint: Uuid) {
+    let session = a.session_on(call, endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/sessions/{session}/remove"),
+            json!({ "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+}
+
+#[tokio::test]
+async fn a_participant_who_left_rejoins_the_ongoing_group_call() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let (call, caller, callee, _third) = a.connected_group_call("VOICE").await;
+    let bob = a.participant_of(call, callee.principal).await;
+    leave(&a, call, callee.endpoint).await;
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+    assert!(a.session_on(call, callee.endpoint).await.is_none());
+    assert_eq!(a.media().participants(&AppWorld::room(call)).len(), 2);
+
+    let mut alice_signals = a.h().bus.subscribe(caller.endpoint);
+    let r = rejoin(&a, call, bob, callee.endpoint).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    common::contracts::check(
+        "calling/control/v1.schema.json#/$defs/RejoinResult",
+        &r.json,
+    );
+    assert_eq!(r.json["rejoined"], true);
+    assert_eq!(r.json["participantId"], bob.to_string());
+    let session: Uuid = r.json["sessionId"].as_str().unwrap().parse().unwrap();
+    assert_eq!(a.session_on(call, callee.endpoint).await, Some(session));
+    assert!(drain(&mut alice_signals).iter().any(|s| {
+        s["type"] == "call.participants_changed"
+            && s["data"]["rejoinedParticipantId"] == bob.to_string()
+    }));
+    // The new session joins the media resource like after an answer.
+    let joined = a.connect(call, session).await;
+    assert!(joined.permissions.can_publish_audio);
+    assert_eq!(a.media().participants(&AppWorld::room(call)).len(), 3);
+    // Asking again while that session is live returns it.
+    let again = rejoin(&a, call, bob, callee.endpoint).await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text);
+    assert_eq!(again.json["rejoined"], false);
+    assert_eq!(again.json["sessionId"], session.to_string());
+    assert_eq!(a.state(call).await.0, CallState::Connected);
+
+    // The creator leaves and comes back: it is the host again once present.
+    let alice = a.participant_of(call, caller.principal).await;
+    leave(&a, call, caller.endpoint).await;
+    assert_ne!(host_of(&a, call).await, alice.to_string());
+    let r = rejoin(&a, call, alice, caller.endpoint).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let session: Uuid = r.json["sessionId"].as_str().unwrap().parse().unwrap();
+    a.connect(call, session).await;
+    assert_eq!(host_of(&a, call).await, alice.to_string());
+}
+
+#[tokio::test]
+async fn rejoining_is_refused_after_removal_before_joining_and_on_foreign_endpoints() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let (call, caller, callee, third) = a.connected_group_call("VOICE").await;
+    let alice = a.participant_of(call, caller.principal).await;
+    let bob = a.participant_of(call, callee.principal).await;
+    let carol = a.participant_of(call, third.principal).await;
+
+    // A participant the host removed never comes back.
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/participants/{carol}/remove"),
+            json!({ "actingParticipantId": alice }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = rejoin(&a, call, carol, third.endpoint).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "CALL_NOT_AUTHORIZED");
+    // Another principal's endpoint is not the participant's own: 404.
+    assert_eq!(
+        rejoin(&a, call, bob, caller.endpoint).await.status,
+        StatusCode::NOT_FOUND
+    );
+    // Still in the call on its device: nothing to rejoin there (the live session is
+    // returned), and a second device is refused while the first is live.
+    let still = rejoin(&a, call, bob, callee.endpoint).await;
+    assert_eq!(still.status, StatusCode::OK, "{}", still.text);
+    assert_eq!(still.json["rejoined"], false);
+    let bob_tablet = a.device(&a.w.recipient, "bob-tablet").await;
+    let r = rejoin(&a, call, bob, bob_tablet.endpoint).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+
+    // Someone invited who never answered answers its invitation instead.
+    let dave = a.principal("rejoin-dave").await;
+    let dave_d = a.device(&dave, "rejoin-dave").await;
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/participants"),
+            json!({ "invitingParticipantId": alice, "targetPrincipalIds": [dave.id()],
+                    "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let dave_p = a.participant_of(call, dave.id().as_uuid()).await;
+    let r = rejoin(&a, call, dave_p, dave_d.endpoint).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "CALL_RESOURCE_STATE_CONFLICT");
+
+    // Once the call is over nobody rejoins.
+    let (_, version) = a.state(call).await;
+    let r = a
+        .post(
+            &format!("/v1/calls/{call}/end"),
+            json!({ "expectedVersion": version, "actingParticipantId": alice }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(
+        rejoin(&a, call, bob, callee.endpoint).await.status,
+        StatusCode::CONFLICT
+    );
+}

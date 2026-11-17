@@ -1253,6 +1253,18 @@ export namespace Calling {
     capabilities: EndpointCapabilities;
     pushTargetRef?: Uuid | null;
   };
+  /** Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on. */
+  export type RejoinRequest = {
+    endpointId: Uuid;
+  };
+  /** Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer. */
+  export type RejoinResult = {
+    call: CommonCallSummary;
+    operation: "REJOIN";
+    participantId: Uuid;
+    sessionId: Uuid;
+    rejoined: boolean;
+  };
   /** Body of PATCH /v1/enterprise/ivr-flows/{ivr_flow_id}. */
   export type RenameIvrFlowRequest = {
     /** The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing. */
@@ -2233,6 +2245,11 @@ export namespace Calling {
     registerEndpoint: {
       params: { body: RegisterEndpointRequest };
       response: Endpoint;
+    };
+    /** POST /v1/calls/{call_id}/participants/{participant_id}/rejoin — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    rejoinCall: {
+      params: { path: { call_id: string; participant_id: string }; body: RejoinRequest };
+      response: RejoinResult;
     };
     /** DELETE /v1/blocks/{block_id} — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     releaseBlock: {

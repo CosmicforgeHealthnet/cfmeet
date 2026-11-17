@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.21.0"
+      "description": "cfmeet.calling.http-api 1.22.0"
     },
     {
       "name": "privacy-relay",
@@ -26156,6 +26156,106 @@
         },
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.muteCallParticipant",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/participants/{participant_id}/rejoin": {
+      "post": {
+        "operationId": "rejoinCall",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Rejoin an ongoing call",
+        "description": "Requires calls.write. 1.22.0: a participant who left a live Call (ANSWERED, CONNECTED, HELD) by removing its sessions comes back with a new session on one of its own ACTIVE endpoints (201, rejoined: true); media credentials are then issued for that session as after an answer. A live session on the same endpoint is returned as is (200, rejoined: false). The participant must have joined before (else 409 CALL_RESOURCE_STATE_CONFLICT: it answers its invitation instead); a participant the host removed (or that left the Call for good) is refused with 403 CALL_NOT_AUTHORIZED; a Call that is not live: 409 CALL_STATE_CONFLICT; an endpoint that is not the participant's own active endpoint: 404. The Communications personal policy is re-checked as for an answer. Every endpoint of the Call receives call.participants_changed (data.rejoinedParticipantId).",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.ParticipantId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.RejoinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The participant's existing live session on that endpoint.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.RejoinResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The new session of the rejoined participant.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.RejoinResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.rejoinCall",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
         ]
@@ -56306,6 +56406,51 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "calling.calling.control.v1.RejoinRequest": {
+        "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "endpointId"
+        ],
+        "properties": {
+          "endpointId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          }
+        }
+      },
+      "calling.calling.control.v1.RejoinResult": {
+        "description": "Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call",
+          "operation",
+          "participantId",
+          "sessionId",
+          "rejoined"
+        ],
+        "properties": {
+          "call": {
+            "$ref": "#/components/schemas/calling.calling.common.v1.CallSummary"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "REJOIN"
+            ]
+          },
+          "participantId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "rejoined": {
+            "type": "boolean"
           }
         }
       },

@@ -243,6 +243,12 @@ references or telephone numbers.
    for good (`…/participants/{participant_id}/remove`, HOST_REMOVED) or mutes it
    (`…/participants/{participant_id}/mute`, enforced at the provider until unmuted). The
    Call view shows `hostParticipantId` and `mutedParticipantIds`.
+7. Leaving is removing one's sessions; a participant who left a live call (ANSWERED,
+   CONNECTED, HELD) rejoins with `POST /v1/calls/{id}/participants/{participant_id}/rejoin`
+   (`endpointId`: one of its own active endpoints). The new session continues the
+   participant's winning session lineage and gets media credentials as after an answer;
+   a participant the host removed (403), one that never joined (409) or one still live on
+   another device (409) is refused.
 
 Signals are sent only after the authoritative transaction commits and fan out across
 instances through PostgreSQL `LISTEN` / `NOTIFY` (`PgNotifySignalBus`); only endpoints

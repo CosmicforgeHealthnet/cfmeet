@@ -105,6 +105,12 @@
     },
     {
       "$ref": "#/$defs/HostControlResult"
+    },
+    {
+      "$ref": "#/$defs/RejoinRequest"
+    },
+    {
+      "$ref": "#/$defs/RejoinResult"
     }
   ],
   "$defs": {
@@ -1959,6 +1965,51 @@
           "type": "boolean"
         },
         "muted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RejoinRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId"
+      ],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "RejoinResult": {
+      "description": "Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation",
+        "participantId",
+        "sessionId",
+        "rejoined"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "REJOIN"
+          ]
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "rejoined": {
           "type": "boolean"
         }
       }

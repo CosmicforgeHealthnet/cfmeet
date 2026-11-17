@@ -76,6 +76,10 @@ pub fn routes() -> Router<AppState> {
             "/v1/calls/:call_id/participants/:participant_id/mute",
             post(mute_participant),
         )
+        .route(
+            "/v1/calls/:call_id/participants/:participant_id/rejoin",
+            post(rejoin_call),
+        )
         .route("/v1/calls/:call_id/ivr/input", post(ivr_input))
         .route(
             "/v1/calls/:call_id/sessions/:session_id/media-credentials",
@@ -979,6 +983,41 @@ async fn mute_participant(
         )
         .await?;
     Ok(respond(StatusCode::OK, out, false))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RejoinBody {
+    endpoint_id: Uuid,
+}
+
+/// `POST /v1/calls/:call_id/participants/:participant_id/rejoin` (calls.write): a
+/// participant who left an ongoing call comes back on one of its endpoints.
+async fn rejoin_call(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path((call_id, participant_id)): Path<(String, String)>,
+    body: Result<Json<RejoinBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_id = CallId::from_uuid(uuid_path(&call_id)?);
+    let participant = CallParticipantId::from_uuid(uuid_path(&participant_id)?);
+    let b = parse_body(body)?;
+    let out = state
+        .app
+        .rejoin_call(
+            &CallCommandContext::customer(&ctx),
+            call_id,
+            participant,
+            b.endpoint_id,
+        )
+        .await?;
+    let status = if out["rejoined"] == true {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok(respond(status, out, false))
 }
 
 #[derive(Debug, Deserialize)]
