@@ -142,6 +142,8 @@ pub async fn register(
         ],
     )
     .await?;
+    // N9 facade (off by default): mirror the committed registration to the service.
+    crate::push_mirror::after_change(state, device_id, Some(ctx.scope));
     Ok(json!({
         "deviceId": device_id,
         "platform": request.platform,
@@ -168,6 +170,7 @@ pub async fn unregister(
     if n == 0 {
         return Err(Error::code(ErrorCode::NotFound));
     }
+    crate::push_mirror::after_change(state, device_id, Some(ctx.scope));
     Ok(json!({ "deviceId": device_id, "enabled": false }))
 }
 

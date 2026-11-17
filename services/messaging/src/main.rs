@@ -286,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
         .targets
         .iter()
         .any(|(s, _)| s.as_str() == cf_service_auth::services::SMS_GATEWAY);
-    let state = if sms_configured {
+    let mut state = if sms_configured {
         let client = state.service_auth.client();
         state.with_sms_transport(Arc::new(messaging::sms_bridge::HttpSmsTransport::new(
             client,
@@ -388,6 +388,39 @@ async fn main() -> anyhow::Result<()> {
         webhook_sinks,
         config.workers.interval,
     ));
+    // Notification Service N9 (D-1b copy path): the push-registration facade. Off unless
+    // MESSAGING_PUSH_REGISTRATION_MIRROR=on; then the service target and CF Meet's personal
+    // scope are required (only first-party registrations are ever mirrored).
+    match messaging::push_mirror::interval_from_env(|k| std::env::var(k).ok()) {
+        Err(e) => anyhow::bail!("push-registration mirror configuration: {e}"),
+        Ok(None) => {}
+        Ok(Some(interval)) => {
+            if !has_target(cf_service_auth::services::NOTIFICATIONS) {
+                anyhow::bail!(
+                    "MESSAGING_PUSH_REGISTRATION_MIRROR=on needs CF_NOTIFICATIONS_BASE_URL"
+                );
+            }
+            let Some(scope) = personal_scope else {
+                anyhow::bail!(
+                    "MESSAGING_PUSH_REGISTRATION_MIRROR=on needs CF Meet's personal scope (CF_COMMUNICATIONS_PERSONAL_*)"
+                );
+            };
+            let mirror = std::sync::Arc::new(messaging::push_mirror::PushMirror {
+                scope,
+                sink: std::sync::Arc::new(
+                    messaging::push_mirror::NotificationServiceRegistrations::new(
+                        state.service_auth.client(),
+                    ),
+                ),
+            });
+            state.push_mirror = Some(mirror.clone());
+            tokio::spawn(messaging::push_mirror::run(state.clone(), mirror, interval));
+            tracing::info!(
+                interval_seconds = interval.as_secs(),
+                "push registrations are mirrored to the Notification Service"
+            );
+        }
+    }
     // Notification Service N7: the relay of Messaging's publications (shadow copies in
     // SHADOW, publications of NEW decisions) to I1. Off unless the service is configured:
     // the routing mode alone decides what is enqueued, and nothing is ever sent without it.

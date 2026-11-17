@@ -53,3 +53,7 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1", "to
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+# N9 Web Push tests: a browser's subscription keys, VAPID JWT verification and RFC 8291
+# decryption at a local fake push service (versions shared with cf-push-transport).
+p256 = { version = "0.14", default-features = false, features = ["ecdh", "ecdsa", "pkcs8", "pem", "std", "getrandom"] }
+ring = "0.17"
