@@ -134,6 +134,27 @@ counters!(
     notification_publications_retried,
     notification_publications_expired,
     notification_publications_unpublishable,
+    // Notification Service N12: the Account CRITICAL lane (codes and security notices).
+    // `critical_auto_failover` / `critical_possible_duplicate` / `critical_dead` /
+    // `critical_fallback_unavailable` page (D-9, meeting-service.rules.yml).
+    critical_enqueued_new,
+    critical_shadowed,
+    critical_unpublishable,
+    critical_acked,
+    critical_retried,
+    critical_rejected,
+    critical_dead,
+    critical_expired,
+    critical_auto_failover,
+    critical_operator_reroutes,
+    critical_possible_duplicate,
+    critical_fallback_unavailable,
+    critical_leases_granted,
+    critical_lease_revoked,
+    critical_lease_busy,
+    critical_completions,
+    critical_completion_after_reroute,
+    critical_fallback_drills,
     // Final completion: conference lifecycle (empty instant conferences, archive).
     conferences_empty_ended,
     conferences_archive_ended,

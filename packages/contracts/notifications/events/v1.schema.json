@@ -952,6 +952,11 @@
                   "PRIVATE_E2EE",
                   "MANAGED"
                 ]
+              },
+              "sequence": {
+                "description": "1.1.0 (N9): the message sequence, carried into the 5-key metadata wake-up payload (parity with Messaging's legacy push).",
+                "type": "integer",
+                "minimum": 0
               }
             }
           }
@@ -2249,12 +2254,13 @@
       "sealed": null,
       "idempotencyKey": null,
       "optional": false,
-      "note": "ids only; recipients and entitlement via X3 at send and dispatch; category DIRECT_MESSAGES or GROUP_MESSAGES by conversationKind; never content",
+      "note": "ids only; recipients and entitlement via X3 at send and dispatch; category DIRECT_MESSAGES or GROUP_MESSAGES by conversationKind; never content; optional sequence (message sequence, 1.1.0) keeps the 5-key wake-up payload",
       "dataKeys": [
         "conversationId",
         "conversationKind",
         "eventSequence",
-        "securityProfile"
+        "securityProfile",
+        "sequence"
       ]
     },
     {

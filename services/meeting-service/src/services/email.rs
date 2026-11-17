@@ -5,13 +5,15 @@
 //! the email worker delivers them through the configured provider (Resend in production).
 
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::{ConnectionTrait, DatabaseConnection};
+use sea_orm::{ConnectionTrait, DatabaseConnection, TransactionTrait};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::config::EmailConfig;
 use crate::error::ApiResult;
+use crate::services::critical_notifications::{self as critical, CriticalEvent};
 use crate::services::email_delivery::{self, category, Enqueued, NewEmail};
+use crate::services::notification_fence::MeetingCategory;
 use crate::templates::email::{
     email_change_code_email, email_changed_new_address_email, email_changed_old_address_email,
     email_in_use_notice_email, new_sign_in_email, notification_email, sign_in_code_email,
@@ -94,6 +96,11 @@ impl EmailService {
 
     /// Passwordless sign-in code, with an optional magic link (`link_token`, which the
     /// web app's `/auth/magic` page POSTs to `/api/v1/auth/otp/verify-link`).
+    ///
+    /// CRITICAL lane (N12, `AUTH_VERIFICATION`): routed by the fence; `LEGACY_ONLY`
+    /// records exactly this ledger row. The catalogue has no event for it (the address may
+    /// have no account yet, the key is `otp:signin:`, and the email carries a magic link),
+    /// so outside `LEGACY_ONLY` it is always decided `OLD` (`UNPUBLISHABLE`).
     pub async fn send_sign_in_code(
         &self,
         to_email: &str,
@@ -109,24 +116,33 @@ impl EmailService {
             )
         });
         let template = sign_in_code_email(code, CODE_TTL_TEXT, link.as_deref(), details);
-        self.enqueue_template(
-            category::AUTH_VERIFICATION,
-            Some(format!(
-                "otp:signin:{}:{}",
-                email_delivery::recipient_hash(to_email),
-                digest(code)
-            )),
-            to_email,
-            None,
-            "Your CF Meet sign-in code",
-            template,
-            Some(Utc::now() + CODE_TTL),
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::AUTH_VERIFICATION,
+                format!(
+                    "otp:signin:{}:{}",
+                    email_delivery::recipient_hash(to_email),
+                    digest(code)
+                ),
+                to_email,
+                None,
+                "Your CF Meet sign-in code",
+                template,
+                Utc::now() + CODE_TTL,
+            ),
+            CriticalEvent::not_in_catalogue(MeetingCategory::AuthVerification),
         )
         .await
         .map(|e| e.id)
     }
 
-    /// Step-up confirmation code sent to the account's current address.
+    /// Step-up confirmation code sent to the account's current address. CRITICAL lane
+    /// (N12, `SECURITY_DEVICE_STEP_UP`): routed by the fence; `LEGACY_ONLY` records exactly
+    /// this ledger row. The catalogue's step-up event is the device-link one
+    /// (`device-step-up:` key, `accountDeviceId`), so this action code is always decided
+    /// `OLD` (`UNPUBLISHABLE`) outside `LEGACY_ONLY`.
     pub async fn send_step_up_code(
         &self,
         to_email: &str,
@@ -135,24 +151,32 @@ impl EmailService {
         action: &str,
     ) -> ApiResult<Uuid> {
         let template = step_up_code_email(username, code, CODE_TTL_TEXT, action);
-        self.enqueue_template(
-            category::SECURITY_DEVICE_STEP_UP,
-            Some(format!(
-                "otp:stepup:{}:{}",
-                email_delivery::recipient_hash(to_email),
-                digest(code)
-            )),
-            to_email,
-            Some(username),
-            "Confirm it's you",
-            template,
-            Some(Utc::now() + CODE_TTL),
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::SECURITY_DEVICE_STEP_UP,
+                format!(
+                    "otp:stepup:{}:{}",
+                    email_delivery::recipient_hash(to_email),
+                    digest(code)
+                ),
+                to_email,
+                Some(username),
+                "Confirm it's you",
+                template,
+                Utc::now() + CODE_TTL,
+            ),
+            CriticalEvent::not_in_catalogue(MeetingCategory::SecurityDeviceStepUp),
         )
         .await
         .map(|e| e.id)
     }
 
-    /// Code proving ownership of the new address of an email change.
+    /// Code proving ownership of the new address of an email change. CRITICAL lane (N12,
+    /// `AUTH_VERIFICATION`): routed by the fence; `LEGACY_ONLY` records exactly this ledger
+    /// row. It goes to an address that is not (yet) the account's, which no catalogue
+    /// recipient can name, so it is always decided `OLD` (`UNPUBLISHABLE`).
     pub async fn send_email_change_code(
         &self,
         to_new_email: &str,
@@ -160,18 +184,23 @@ impl EmailService {
         code: &str,
     ) -> ApiResult<Uuid> {
         let template = email_change_code_email(username, code, CODE_TTL_TEXT);
-        self.enqueue_template(
-            category::AUTH_VERIFICATION,
-            Some(format!(
-                "otp:emailchange:{}:{}",
-                email_delivery::recipient_hash(to_new_email),
-                digest(code)
-            )),
-            to_new_email,
-            Some(username),
-            "Confirm your new CF Meet email address",
-            template,
-            Some(Utc::now() + CODE_TTL),
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::AUTH_VERIFICATION,
+                format!(
+                    "otp:emailchange:{}:{}",
+                    email_delivery::recipient_hash(to_new_email),
+                    digest(code)
+                ),
+                to_new_email,
+                Some(username),
+                "Confirm your new CF Meet email address",
+                template,
+                Utc::now() + CODE_TTL,
+            ),
+            CriticalEvent::not_in_catalogue(MeetingCategory::AuthVerification),
         )
         .await
         .map(|e| e.id)
@@ -317,19 +346,47 @@ pub async fn email_changed_notices_on<C: ConnectionTrait>(
     Ok(())
 }
 
+/// One rendered legacy email of the CRITICAL lane (the row `LEGACY_ONLY` records; the
+/// same fields `EmailService::enqueue_template` writes).
+fn rendered(
+    category: &'static str,
+    key: String,
+    to: &str,
+    to_name: Option<&str>,
+    subject: &str,
+    template: EmailTemplate,
+    expires_at: DateTime<Utc>,
+) -> NewEmail {
+    NewEmail {
+        category,
+        idempotency_key: Some(key),
+        to: to.to_string(),
+        to_name: to_name.map(str::to_string),
+        subject: subject.to_string(),
+        html: template.html,
+        text: template.text,
+        expires_at: Some(expires_at),
+    }
+}
+
 /// N0-10 (S-9): a device security notice recorded on the caller's transaction, with the
-/// deterministic key `device-linked:<link id>` (one notice per completed link).
-pub async fn device_notice_on<C: ConnectionTrait>(
+/// deterministic key `device-linked:<link id>` (one notice per completed link). CRITICAL
+/// lane (N12): routed by the `SECURITY_DEVICE_LINKED` fence mode ([`critical::enqueue`]).
+#[allow(clippy::too_many_arguments)]
+pub async fn device_notice_on<C: ConnectionTrait + TransactionTrait>(
     conn: &C,
     to_email: &str,
     username: &str,
+    user_id: Uuid,
+    device_id: Uuid,
     link_id: Uuid,
     subject: &str,
     message: &str,
 ) -> ApiResult<Uuid> {
     let template = notification_email(username, subject, message);
-    email_delivery::enqueue(
+    critical::enqueue(
         conn,
+        critical::installed(),
         NewEmail {
             category: category::NOTIFICATION,
             idempotency_key: Some(format!("device-linked:{link_id}")),
@@ -340,9 +397,45 @@ pub async fn device_notice_on<C: ConnectionTrait>(
             text: template.text,
             expires_at: Some(Utc::now() + Duration::days(2)),
         },
+        CriticalEvent::device_linked(user_id, device_id, link_id),
     )
     .await
     .map(|e| e.id)
+}
+
+/// The device step-up code email (`account_devices`), recorded on the caller's
+/// transaction with the key `device-step-up:<link id>:<code digest prefix>`. CRITICAL lane
+/// (N12): routed by the `SECURITY_DEVICE_STEP_UP` fence mode ([`critical::enqueue`]); the
+/// catalogue event `account.device-step-up-code.requested` carries the sealed code.
+#[allow(clippy::too_many_arguments)]
+pub async fn device_step_up_code_on<C: ConnectionTrait + TransactionTrait>(
+    conn: &C,
+    to_email: &str,
+    username: &str,
+    user_id: Uuid,
+    device_id: Uuid,
+    key: String,
+    code: &str,
+    template: EmailTemplate,
+    expires_at: DateTime<Utc>,
+) -> ApiResult<Enqueued> {
+    let ttl_minutes = (expires_at - Utc::now()).num_minutes().max(1);
+    critical::enqueue(
+        conn,
+        critical::installed(),
+        NewEmail {
+            category: category::SECURITY_DEVICE_STEP_UP,
+            idempotency_key: Some(key),
+            to: to_email.to_string(),
+            to_name: Some(username.to_string()),
+            subject: "Your CF Meet device verification code".into(),
+            html: template.html,
+            text: template.text,
+            expires_at: Some(expires_at),
+        },
+        CriticalEvent::device_step_up_code(user_id, device_id, code, ttl_minutes),
+    )
+    .await
 }
 
 /// A security notice must never block the security change itself because the stored

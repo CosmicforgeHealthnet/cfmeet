@@ -547,11 +547,17 @@ pub struct Harness {
 #[derive(Default)]
 pub struct RecordingPush {
     sent: std::sync::Mutex<Vec<(uuid::Uuid, Value)>>,
+    offers: std::sync::Mutex<Vec<calling::signaling::PushOffer>>,
 }
 
 impl RecordingPush {
     pub fn sent(&self) -> Vec<(uuid::Uuid, Value)> {
         self.sent.lock().unwrap().clone()
+    }
+
+    /// Every offer with its recipient facts (N9).
+    pub fn offers(&self) -> Vec<calling::signaling::PushOffer> {
+        self.offers.lock().unwrap().clone()
     }
 }
 
@@ -559,6 +565,11 @@ impl RecordingPush {
 impl calling::signaling::PushDispatcher for RecordingPush {
     async fn dispatch(&self, push_target_ref: uuid::Uuid, payload: Value) {
         self.sent.lock().unwrap().push((push_target_ref, payload));
+    }
+
+    async fn dispatch_offer(&self, offer: calling::signaling::PushOffer) {
+        self.offers.lock().unwrap().push(offer.clone());
+        self.dispatch(offer.push_target_ref, offer.payload).await;
     }
 }
 

@@ -459,6 +459,38 @@ async fn main() -> anyhow::Result<()> {
     }
     let authority: Arc<dyn IdentityAuthority> =
         Arc::new(HttpIdentityAuthority::new(service_auth.client_arc()));
+    // Notification Service roadmap N9: the call fast lane. `none` (default) keeps
+    // today's behaviour (no incoming-call push is sent).
+    let push: Arc<dyn calling::signaling::PushDispatcher> =
+        match calling::signaling::PushTransportSetting::from_lookup(|k| std::env::var(k).ok()) {
+            Ok(calling::signaling::PushTransportSetting::None) => Arc::new(NoPushTransport),
+            Ok(calling::signaling::PushTransportSetting::Notifications { timeout }) => {
+                if !service_auth_settings
+                    .targets
+                    .iter()
+                    .any(|(s, _)| s.as_str() == cf_service_auth::services::NOTIFICATIONS)
+                {
+                    tracing::error!(
+                        "CALLING_PUSH_TRANSPORT=notifications needs CF_NOTIFICATIONS_BASE_URL"
+                    );
+                    std::process::exit(2);
+                }
+                tracing::info!(
+                    timeout_ms = timeout.as_millis() as u64,
+                    "incoming-call pushes of first-party recipients go to the Notification Service (I3)"
+                );
+                Arc::new(calling::signaling::NotificationsPushTransport::new(
+                    Arc::new(calling::signaling::NotificationServiceCallPush::new(
+                        service_auth.client_arc(),
+                    )),
+                    timeout,
+                ))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "push transport configuration error");
+                std::process::exit(2);
+            }
+        };
     let clock: SharedClock = Arc::new(SystemClock);
     let mut state = AppState::new(
         db,
@@ -472,7 +504,7 @@ async fn main() -> anyhow::Result<()> {
             media_gateway: media.gateway,
             credential_policy: media_settings.credential_policy,
             bus,
-            push: Arc::new(NoPushTransport),
+            push,
             app_config,
             call_config: CallServiceConfig {
                 notification_publications: notifications_configured,

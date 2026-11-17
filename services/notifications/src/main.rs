@@ -88,6 +88,9 @@ async fn main() -> anyhow::Result<()> {
                 "emailProvider": config.email.provider.as_str(),
                 "emailFrom": config.email.from,
                 "pushPlatforms": push.as_ref().map(|p| ["APNS", "FCM", "WEB_PUSH"].iter().filter(|x| p.supports(x)).count()).unwrap_or(0),
+                // Public by nature: must equal Messaging's `GET /v1/messaging/push/configuration`
+                // key, or copied browser subscriptions cannot be delivered (N9, D-1b).
+                "webPushApplicationServerKey": push.as_ref().and_then(|p| p.web_push_application_server_key()),
                 "authorities": authorities.configured(),
                 "sealedOpening": opening.is_some(),
                 "workers": config.workers_enabled,
@@ -124,6 +127,10 @@ async fn main() -> anyhow::Result<()> {
             .clone()
             .map(|t: SecretString| Arc::new(t)),
         hub_preferences,
+        first_party_scope: config
+            .authorities
+            .first_party_scope
+            .map(|s| (s.tenant_id, s.application_id, s.environment_id)),
     };
     let running = config.workers_enabled.then(|| workers::spawn(&state));
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;

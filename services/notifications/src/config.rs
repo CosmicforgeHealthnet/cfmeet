@@ -27,7 +27,7 @@
 //! | `NOTIFICATIONS_EMAIL_RETENTION_DAYS` | no | 7–365, default 30 |
 //! | `NOTIFICATIONS_APP_URL` | no | link base in emails, default `https://cfmeet.com` |
 //! | `NOTIFICATIONS_PUSH_PROVIDER` | no | `none` (default), `live`, `local-test` (local/test only) |
-//! | `NOTIFICATIONS_PUSH_WEB_VAPID_KEY_FILE`, `_WEB_SUBJECT`, `_WEB_ALLOWED_HOSTS` | with live Web Push | |
+//! | `NOTIFICATIONS_PUSH_WEB_VAPID_KEY_FILE`, `_WEB_SUBJECT`, `_WEB_ALLOWED_HOSTS` | with live Web Push | VAPID key: P-256 PKCS#8 (or SEC1) PEM file — the SAME file Messaging's `activate-web-push` generated (`MESSAGING_PUSH_WEB_VAPID_KEY_FILE`), so existing browser subscriptions stay valid; subject `https://cfmeet.com`; hosts default to Messaging's allowlist |
 //! | `NOTIFICATIONS_PUSH_APNS_KEY_FILE`, `_APNS_KEY_ID`, `_APNS_TEAM_ID`, `_APNS_TOPIC`, `_APNS_BASE_URL` | with live APNs | |
 //! | `NOTIFICATIONS_PUSH_FCM_SERVICE_ACCOUNT_FILE`, `_FCM_BASE_URL` | with live FCM | |
 //! | `NOTIFICATIONS_AUTHORITIES` | no | comma list of owner APIs to call: `account`, `meeting`, `messaging`, `communications`, `organizations` (default none) |
@@ -637,16 +637,15 @@ impl NotificationsConfig {
                                 .filter(|s| !s.is_empty())
                                 .collect()
                         })
+                        // Messaging's default allowlist (N9 parity): every browser
+                        // subscription Messaging accepted is accepted here (Edge's WNS
+                        // endpoints are `<node>.notify.windows.com`, Firefox's
+                        // `<x>.push.services.mozilla.com`).
                         .unwrap_or_else(|| {
-                            [
-                                "fcm.googleapis.com",
-                                "updates.push.services.mozilla.com",
-                                "web.push.apple.com",
-                                "notify.windows.com",
-                            ]
-                            .iter()
-                            .map(|s| s.to_string())
-                            .collect()
+                            cf_push_transport::adapters::DEFAULT_WEB_PUSH_HOSTS
+                                .iter()
+                                .map(|s| s.to_string())
+                                .collect()
                         }),
                 });
             }

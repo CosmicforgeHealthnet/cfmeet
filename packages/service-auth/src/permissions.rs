@@ -377,6 +377,12 @@ pub enum InternalPermission {
     /// best-effort). Calling only; ringing stays in Calling.
     #[serde(rename = "notifications-call-push.dispatch")]
     NotificationsCallPushDispatch,
+    /// Notifications I13 (roadmap N9, D-1b copy path): mirror Messaging's push
+    /// registrations of CF Meet first-party accounts into the service's push endpoints
+    /// (the one-off copy and the registration facade). Carries push handles in transit
+    /// (sealed at rest by the receiver, never echoed). Messaging only.
+    #[serde(rename = "notifications-push-registration.sync")]
+    NotificationsPushRegistrationSync,
     /// Notifications I4, I5, I7, I8: PII-free delivery search, dead letters, shadow report
     /// and routing / route audit. Operator tooling only.
     #[serde(rename = "notifications-observability.read")]
@@ -1059,6 +1065,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Dispatch a post-commit, best-effort call-invitation push to registered push targets (no queue, no retry; ringing stays in Calling)",
     },
     PermissionDefinition {
+        permission: InternalPermission::NotificationsPushRegistrationSync,
+        name: "notifications-push-registration.sync",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::MESSAGING],
+        sensitive: false,
+        description: "Mirror Messaging push registrations of CF Meet first-party accounts into the Notification Service push endpoints (copy and registration facade; handles sealed at rest, never echoed)",
+    },
+    PermissionDefinition {
         permission: InternalPermission::NotificationsObservabilityRead,
         name: "notifications-observability.read",
         receiver: services::NOTIFICATIONS,
@@ -1235,6 +1249,7 @@ impl InternalPermission {
         InternalPermission::NotificationsEventPublish,
         InternalPermission::NotificationsUserForward,
         InternalPermission::NotificationsCallPushDispatch,
+        InternalPermission::NotificationsPushRegistrationSync,
         InternalPermission::NotificationsObservabilityRead,
         InternalPermission::NotificationsOperationsReplay,
         InternalPermission::NotificationsOperationsReroute,
@@ -1583,6 +1598,8 @@ mod tests {
         "organization.read",
         // Notification Service I1: message wake-up and member-invited publications.
         "notifications-event.publish",
+        // Notification Service I13 (N9): the push-registration facade and D-1b copy.
+        "notifications-push-registration.sync",
     ];
 
     #[test]
@@ -1932,6 +1949,7 @@ mod tests {
                 "notifications-event.publish",
                 "notifications-user.forward",
                 "notifications-call-push.dispatch",
+                "notifications-push-registration.sync",
                 "notifications-observability.read",
                 "notifications-operations.replay",
                 "notifications-operations.reroute",
@@ -1973,6 +1991,11 @@ mod tests {
             NotificationsCallPushDispatch.definition().grantable_to,
             &[services::CALLING]
         );
+        // The push-registration facade (N9, D-1b): Messaging only. Not "sensitive" (no
+        // sensitive permission is grantable to Messaging); handles are sealed at rest.
+        let sync = NotificationsPushRegistrationSync.definition();
+        assert_eq!(sync.grantable_to, &[services::MESSAGING]);
+        assert!(!sync.sensitive);
         // Operator operations: operator tooling only; replay and reroute are sensitive.
         for (p, sensitive) in [
             (NotificationsObservabilityRead, false),

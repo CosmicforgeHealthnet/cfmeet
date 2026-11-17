@@ -162,6 +162,7 @@
         "notifications-event.publish",
         "notifications-user.forward",
         "notifications-call-push.dispatch",
+        "notifications-push-registration.sync",
         "notifications-observability.read",
         "notifications-operations.replay",
         "notifications-operations.reroute",

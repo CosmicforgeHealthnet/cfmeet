@@ -5,8 +5,8 @@
 //! `MEETING_NOTIFICATION` and `ORGANIZATION_INVITATION` are routed by
 //! [`crate::services::notifications`] through [`current_mode`] and [`route_message_capable`]
 //! (publications: [`crate::services::notification_publications`]). The CRITICAL categories
-//! have no producer yet: they keep the old path, and their guard triggers stay inert while
-//! they are `LEGACY_ONLY`.
+//! (roadmap N12) are routed by [`crate::services::critical_notifications`] at their legacy
+//! enqueue points (`account_notification_outbox`, X6 / X7 leases, AUTO / FORCED failover).
 //!
 //! * [`route_message`] — §9.3: sticky decision per idempotency key (`SELECT … FOR UPDATE`),
 //!   mode + canary + CRITICAL `FORCED` fallback, `reason = ROUTED`. The caller writes the

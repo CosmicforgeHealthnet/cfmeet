@@ -91,6 +91,7 @@ fn sample(key: &str) -> Value {
         "startsAt" | "changedAt" | "expiresAt" => json!("2026-11-20T09:00:00Z"),
         "ttlMinutes" => json!(1440),
         "eventSequence" => json!(42),
+        "sequence" => json!(41),
         "role" => json!("MEMBER"),
         "conversationKind" => json!("DIRECT"),
         "securityProfile" => json!("MANAGED"),
