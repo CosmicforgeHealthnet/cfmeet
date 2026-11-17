@@ -1,0 +1,16 @@
+# Blackbox exporter modules for the production health probes (backend gap audit P3).
+# Deployed as cfmeet-blackbox on the private network by
+# infra/calling/production/monitoring_stack.py; Prometheus job `health-probes` probes each
+# service's own health / readiness route (the route coordinated_release.SERVICES lists),
+# never a customer or internal API route. Credential-free GETs only.
+
+modules:
+  http_ready:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
+      follow_redirects: false
