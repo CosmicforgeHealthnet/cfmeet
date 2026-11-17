@@ -1554,7 +1554,7 @@ async fn every_published_communications_operation_is_routed() {
             );
         }
     }
-    assert_eq!(operations, 73, "published Communications operations");
+    assert_eq!(operations, 74, "published Communications operations");
     let body = serde_json::to_value(route("GET", "phone/verification".into())).unwrap();
     let (status, headers) = h
         .http_full(
@@ -2427,5 +2427,76 @@ async fn call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nud
     let undelivered: Value = one(&h.state.store.db, "SELECT jsonb_build_object('n',count(*)) doc FROM communication_outbox WHERE event_type='communications.timeline.changed' AND state<>'DELIVERED'",
         vec![]).await.unwrap().unwrap();
     assert_eq!(undelivered["n"], 0);
+    h.close().await;
+}
+
+/// Connected personal contacts are added to a running call by contact id; the Hub resolves
+/// them to principals server-side and never returns a principal id. Strangers and
+/// blocked contacts are refused before Calling is asked.
+#[tokio::test]
+async fn contacts_are_added_to_a_running_call_without_exposing_principals() {
+    let h = Harness::new().await;
+    let (a, b, c) = (user(&h).await, user(&h).await, user(&h).await);
+    h.connected(&a.profile, &b.profile).await;
+    h.connected(&a.profile, &c.profile).await;
+    let ab = contact_id(&h, &a.profile, &b.profile).await;
+    let ac = contact_id(&h, &a.profile, &c.profile).await;
+    let sa = h.delegated(&a.account);
+    let call = Uuid::new_v4();
+    let body = |ids: Vec<Uuid>| {
+        json!({"targetContactIds":ids,"invitingParticipantId":Uuid::new_v4(),
+            "expectedVersion":1,"clientRequestId":Uuid::new_v4()})
+    };
+    let added = h
+        .state
+        .add_contacts_to_call(&sa, &a.profile, call, body(vec![ab, ac]))
+        .await
+        .unwrap();
+    assert_eq!(added["callId"], json!(call));
+    assert_eq!(added["addedContactIds"], json!([ab, ac]));
+    assert!(
+        !added
+            .to_string()
+            .contains(&b.profile.principal_id.to_string()),
+        "no principal id leaves the Hub: {added}"
+    );
+    {
+        let world = h.world.read().unwrap();
+        assert_eq!(world.invites.len(), 1);
+        assert_eq!(world.invites[0].0, call);
+        assert_eq!(
+            world.invites[0].2,
+            vec![b.profile.principal_id, c.profile.principal_id]
+        );
+    }
+    // Validation: empty, duplicated, unknown contacts.
+    assert!(matches!(
+        h.state
+            .add_contacts_to_call(&sa, &a.profile, call, body(vec![]))
+            .await,
+        Err(Error::Validation)
+    ));
+    assert!(matches!(
+        h.state
+            .add_contacts_to_call(&sa, &a.profile, call, body(vec![ab, ab]))
+            .await,
+        Err(Error::Validation)
+    ));
+    assert!(matches!(
+        h.state
+            .add_contacts_to_call(&sa, &a.profile, call, body(vec![Uuid::new_v4()]))
+            .await,
+        Err(Error::NotFound)
+    ));
+    // Blocks deny before Calling is asked.
+    *h.blocked.write().unwrap() = true;
+    assert!(matches!(
+        h.state
+            .add_contacts_to_call(&sa, &a.profile, call, body(vec![ab]))
+            .await,
+        Err(Error::ActionNotAllowed)
+    ));
+    *h.blocked.write().unwrap() = false;
+    assert_eq!(h.world.read().unwrap().invites.len(), 1);
     h.close().await;
 }

@@ -742,7 +742,7 @@
     },
     {
       "id": "cfmeet.calling.communications-internal-bundled",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "bundled/calling/communications-internal/v1.openapi.json",
       "owner": "calling",
@@ -750,7 +750,7 @@
       "lifecycle": "beta",
       "authority": "generated",
       "generated_by": "scripts/contracts/bundle_openapi.py (checked by .github/workflows/contracts.yml: --check)",
-      "description": "Self-contained rendering of cfmeet.calling.communications-internal (calling/communications-internal/v1.openapi.json) for Swagger UI, the private engineering catalogue and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.calling.communications-internal stays the authority."
+      "description": "Self-contained rendering of cfmeet.calling.communications-internal (calling/communications-internal/v1.openapi.json) for Swagger UI, the private engineering catalogue and offline consumers: every https://schemas.cfmeet.com/ reference is inlined into components/schemas. Derived, never edited; cfmeet.calling.communications-internal stays the authority. 1.3.0 POST /internal/v1/communications/calls/participants: the Hub adds a user's resolved contacts to a running call (invite path, inviter must be the user's own participant)."
     },
     {
       "id": "cfmeet.communications.communications-internal-bundled",
@@ -1034,18 +1034,18 @@
     },
     {
       "id": "cfmeet.communications.http-api",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "openapi",
       "path": "communications/http/v1.openapi.json",
       "owner": "communications",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy. Sections 9-23: unified Chats/Calls/Contacts/Meetings/Settings facades, timeline cards, chat controls, collections, devices and change feed. 1.4.0 (CF Meet chat remediation): capabilities messaging.attachments (effective attachment availability, maxBytes, allowedKinds, per-context switch); CommonGroup carries securityProfile, title / avatarRef (MANAGED only) and memberCount for groups both people currently belong to; MediaItem carries securityProfile, kind / fileName / mediaType (MANAGED only), metadataLocation and download / thumbnail grant references (relative relay paths, never URLs)."
+      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy. Sections 9-23: unified Chats/Calls/Contacts/Meetings/Settings facades, timeline cards, chat controls, collections, devices and change feed. 1.4.0 (CF Meet chat remediation): capabilities messaging.attachments (effective attachment availability, maxBytes, allowedKinds, per-context switch); CommonGroup carries securityProfile, title / avatarRef (MANAGED only) and memberCount for groups both people currently belong to; MediaItem carries securityProfile, kind / fileName / mediaType (MANAGED only), metadataLocation and download / thumbnail grant references (relative relay paths, never URLs). 1.5.0 POST /api/v2/communications/calls/{callId}/participants adds connected personal contacts to a running call by contact id (resolved server-side; no principal id is exposed)."
     },
     {
       "id": "cfmeet.communications.public-api",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "openapi",
       "path": "bundled/public/communications/v1.openapi.json",
       "owner": "communications",
@@ -1068,14 +1068,14 @@
     },
     {
       "id": "cfmeet.calling.communications-internal",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "kind": "openapi",
       "path": "calling/communications-internal/v1.openapi.json",
       "owner": "calling",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by calling; no consumer credential or copied data authority. 1.1.0: Sections 9–23 Calling owner interfaces — POST /internal/v1/communications/calls (calling-communications.launch; the canonical app-call creation path for the delegated user, Hub-namespaced idempotency), /calls/participation and /calls/history (calling-communications.read; canonical history entries), /endpoints/verify (read) and /endpoints/revoke (calling-communications.apply; canonical revoke)."
+      "description": "Private signed Communications integration owned by calling; no consumer credential or copied data authority. 1.1.0: Sections 9–23 Calling owner interfaces — POST /internal/v1/communications/calls (calling-communications.launch; the canonical app-call creation path for the delegated user, Hub-namespaced idempotency), /calls/participation and /calls/history (calling-communications.read; canonical history entries), /endpoints/verify (read) and /endpoints/revoke (calling-communications.apply; canonical revoke). 1.3.0 POST /internal/v1/communications/calls/participants: the Hub adds a user's resolved contacts to a running call (invite path, inviter must be the user's own participant)."
     },
     {
       "id": "cfmeet.messaging.communications-internal",
@@ -1101,7 +1101,7 @@
     },
     {
       "id": "cfmeet.communications.swagger-api",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "openapi",
       "path": "bundled/communications/http/v1.openapi.json",
       "owner": "communications",
@@ -1109,7 +1109,7 @@
       "lifecycle": "beta",
       "authority": "generated",
       "generated_by": "python3 scripts/contracts/bundle_openapi.py",
-      "description": "Self-contained Swagger rendering of the canonical Communications consumer contract."
+      "description": "Self-contained Swagger rendering of the canonical Communications consumer contract. 1.5.0 POST /api/v2/communications/calls/{callId}/participants adds connected personal contacts to a running call by contact id (resolved server-side; no principal id is exposed)."
     },
     {
       "id": "cfmeet.notifications.common",

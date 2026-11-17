@@ -528,6 +528,9 @@ async fn dispatch_inner(
         ("GET", ["events"]) => s.changes(p, &r.query, true).await,
         ("GET", ["calls", "history"]) => s.call_history(scope, p, &r.query).await,
         ("GET", ["calls", call, "context"]) => s.call_context(scope, p, id(call)?).await,
+        ("POST", ["calls", call, "participants"]) => {
+            s.add_contacts_to_call(scope, p, id(call)?, body(&r)).await
+        }
         ("POST", ["contacts", contact, "calls"]) => {
             s.call_contact(scope, p, id(contact)?, body(&r)).await
         }

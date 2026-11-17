@@ -4348,6 +4348,12 @@
     {
       "domain": "communications",
       "method": "POST",
+      "path": "/api/v2/communications/calls/{callId}/participants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
       "path": "/api/v2/communications/conversations/{conversationId}/calls",
       "class": "PUBLIC_CUSTOMER"
     },

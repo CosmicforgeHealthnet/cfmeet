@@ -57,6 +57,8 @@ pub struct World {
     pub push_status: Option<Value>,
     pub revoked_devices: Vec<Uuid>,
     pub revoked_endpoints: Vec<Uuid>,
+    /// Calls joined by contact resolution: (call id, acting principal, targets).
+    pub invites: Vec<(Uuid, Uuid, Vec<Uuid>)>,
     /// Replaces the Account's backfill page (malformed-owner tests).
     pub backfill_page: Option<Value>,
 }
@@ -110,6 +112,7 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
         "endpoints/revoke",
         "calls",
         "calls/participation",
+        "calls/participants",
         "calls/history",
         "meetings/instant",
         "meetings/resolve",
@@ -124,6 +127,8 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
         body,
         if path.ends_with("/calls") {
             "initiatorPrincipalId"
+        } else if path.ends_with("/calls/participants") {
+            "actingPrincipalId"
         } else {
             "principalId"
         },
@@ -221,6 +226,22 @@ fn world_route(world: &mut World, path: &str, body: &Value, caller: Uuid) -> Opt
                     ok(json!({"schemaVersion":1,"revoked":true,"alreadyRevoked":false}))
                 }
             }
+        }
+        "/internal/v1/communications/calls/participants" => {
+            if world.calling_down {
+                return Some(StatusCode::SERVICE_UNAVAILABLE.into_response());
+            }
+            let call = uuid_at(body, "callId");
+            let targets: Vec<Uuid> = body["targetPrincipalIds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| Uuid::parse_str(v.as_str().unwrap()).unwrap())
+                .collect();
+            world.invites.push((call, principal, targets.clone()));
+            ok(json!({"schemaVersion":1,"call":{"callId":call,"state":"CONNECTED","version":2},
+                "operation":"ADD_PARTICIPANTS","participants":targets.iter().map(|t| json!({"principalId":t})).collect::<Vec<_>>(),
+                "replayed":false}))
         }
         "/internal/v1/communications/calls" => {
             if world.calling_down {
