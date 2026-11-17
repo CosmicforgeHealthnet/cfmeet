@@ -10,7 +10,11 @@
 //!    with no consumer configured every row stays PENDING);
 //! 5. when provisioning is enabled, one pass of the Section 7 saga
 //!    ([`crate::provisioning::run_once`]: enqueue, advance, tenant-status sync,
-//!    reconciliation).
+//!    reconciliation);
+//! 6. when `CF_NOTIFICATIONS_BASE_URL` is set, one pass of the Notification Service
+//!    publications ([`crate::notification_publications::run_once`]: expire / purge,
+//!    discovery from the committed outbox record rows, relay to I1). Unset: this step
+//!    does not run and touches nothing.
 
 use std::{sync::Arc, time::Duration};
 
@@ -20,6 +24,7 @@ use uuid::Uuid;
 
 use crate::{
     db,
+    notification_publications::{self, NotificationEventSink},
     outbox::{self, EventDispatcher},
     provisioning::{self, PlatformScopes},
     store::{self, Event, InvitationRow, OpContext, INVITATION_COLUMNS},
@@ -132,14 +137,17 @@ pub async fn run(
     interval: Duration,
     shutdown: impl std::future::Future<Output = ()>,
 ) {
-    run_with(db, dispatcher, None, interval, shutdown).await
+    run_with(db, dispatcher, None, None, interval, shutdown).await
 }
 
-/// [`run`] plus, when `provisioner` is set, one provisioning pass per tick.
+/// [`run`] plus, when `provisioner` is set, one provisioning pass per tick and, when
+/// `notifications` is set (`CF_NOTIFICATIONS_BASE_URL`), one notification publication
+/// pass per tick.
 pub async fn run_with(
     db: DatabaseConnection,
     dispatcher: Arc<dyn EventDispatcher>,
     provisioner: Option<Arc<dyn PlatformScopes>>,
+    notifications: Option<Arc<dyn NotificationEventSink>>,
     interval: Duration,
     shutdown: impl std::future::Future<Output = ()>,
 ) {
@@ -167,6 +175,17 @@ pub async fn run_with(
                             "organizations provisioning pass"),
                         Ok(_) => {}
                         Err(e) => tracing::warn!(summary = %db::summarize_db_error(&e), "organizations provisioning pass failed"),
+                    }
+                }
+                if let Some(sink) = &notifications {
+                    match notification_publications::run_once(&db, sink.as_ref()).await {
+                        Ok(r) if r != notification_publications::PublicationReport::default() => tracing::info!(
+                            discovered = r.discovered, skipped = r.skipped, acked = r.acked,
+                            retried = r.retried, dead = r.dead, expired = r.expired, purged = r.purged,
+                            not_configured = r.not_configured,
+                            "organizations notification publication pass"),
+                        Ok(_) => {}
+                        Err(e) => tracing::warn!(summary = %db::summarize_db_error(&e), "organizations notification publication pass failed"),
                     }
                 }
             }

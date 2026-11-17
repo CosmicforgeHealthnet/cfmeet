@@ -13,16 +13,18 @@
 //! | `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 Platform Access provisioning saga |
 //! | `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` | no | `true` / `false` (default `false`): the saga also creates, verifies, renews and (on archive) revokes each organization's Calling and Messaging service bindings through Platform Access (`platform-identity.bind-organization-services`, ADR 0058 A2); an organization is READY only once both are verified. Refused without provisioning |
 //! | `ORGANIZATIONS_EVENT_DESTINATIONS` | no | comma-separated consumers that receive organization events (today only `cfmeet.meeting-service`); empty (default): events stay PENDING in the outbox |
-//! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning or event delivery | `kid` of the Organizations signing key |
-//! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning or event delivery | PKCS#8 PEM Ed25519 private key FILE |
+//! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning, event delivery or notification publication | `kid` of the Organizations signing key |
+//! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning, event delivery or notification publication | PKCS#8 PEM Ed25519 private key FILE |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (`platform-identity.provision-first-party`; with service bindings also `platform-identity.bind-organization-services`) |
 //! | `CF_MEETING_SERVICE_BASE_URL` | when `cfmeet.meeting-service` receives events | Meeting Service internal base URL (`meeting-organization-events.apply`) |
+//! | `CF_NOTIFICATIONS_BASE_URL` | no | Notification Service internal base URL (I1, `notifications-event.publish`, roadmap N7): when set, the catalogue events `organizations.*` are published from the committed outbox record rows; unset (default): nothing is published and nothing is written |
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //!
-//! Outbound, Organizations calls Platform Access when provisioning is enabled and each
-//! configured event consumer's signed ingress; both sign with its own key file (inline
-//! keys are refused regardless). With provisioning off (the default) organizations stay
+//! Outbound, Organizations calls Platform Access when provisioning is enabled, each
+//! configured event consumer's signed ingress and, with `CF_NOTIFICATIONS_BASE_URL`, the
+//! Notification Service's I1; all sign with its own key file (inline keys are refused
+//! regardless). With provisioning off (the default) organizations stay
 //! PENDING and the provisioning read reports it truthfully. Error messages never echo a
 //! value.
 
@@ -35,6 +37,7 @@ use cf_service_auth::{
 };
 
 use crate::{
+    notification_publications::{NotificationEventSink, NotificationServiceEvents},
     outbox::{DisabledDispatcher, EventDispatcher, HttpEventDispatcher},
     provisioning::{HttpPlatformScopes, PlatformScopes},
 };
@@ -113,7 +116,10 @@ pub struct OrganizationsConfig {
     pub service_bindings_enabled: bool,
     /// Consumers organization events are delivered to (empty: delivery disabled).
     pub event_consumers: Vec<EventConsumer>,
-    /// `Some` iff provisioning or event delivery is enabled.
+    /// `CF_NOTIFICATIONS_BASE_URL`: the Notification Service (I1); `None`: no
+    /// notification is published.
+    pub notifications_base_url: Option<String>,
+    /// `Some` iff provisioning, event delivery or notification publication is enabled.
     pub signing: Option<SigningSettings>,
 }
 
@@ -134,6 +140,10 @@ impl fmt::Debug for OrganizationsConfig {
                     .iter()
                     .map(|c| c.destination.as_str())
                     .collect::<Vec<_>>(),
+            )
+            .field(
+                "notification_publications",
+                &self.notifications_base_url.is_some(),
             )
             .finish_non_exhaustive()
     }
@@ -280,7 +290,9 @@ impl OrganizationsConfig {
                 base_url: required(url_var)?,
             });
         }
-        let signing = if enabled || !event_consumers.is_empty() {
+        let notifications_base_url = get("CF_NOTIFICATIONS_BASE_URL");
+        let signing = if enabled || !event_consumers.is_empty() || notifications_base_url.is_some()
+        {
             let key_id = KeyId::parse(&required("CF_SERVICE_AUTH_KEY_ID")?)
                 .map_err(|_| invalid("CF_SERVICE_AUTH_KEY_ID", "is not a valid key id"))?;
             let token_ttl = match get("CF_SERVICE_TOKEN_TTL_SECONDS") {
@@ -332,8 +344,46 @@ impl OrganizationsConfig {
             provisioning,
             service_bindings_enabled,
             event_consumers,
+            notifications_base_url,
             signing,
         })
+    }
+
+    fn signer(
+        &self,
+        s: &SigningSettings,
+        clock: SharedClock,
+    ) -> Result<Arc<ServiceTokenSigner>, ConfigError> {
+        let key = ServiceSigningKey::from_pkcs8_pem_file(s.key_id.clone(), &s.private_key_file)
+            .map_err(|e| invalid("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", e.to_string()))?;
+        Ok(Arc::new(ServiceTokenSigner::new(
+            organizations_service_id(),
+            self.runtime_environment,
+            key,
+            s.token_ttl,
+            clock,
+        )))
+    }
+
+    /// The Notification Service I1 publisher (`None` without `CF_NOTIFICATIONS_BASE_URL`:
+    /// nothing is published). Signs with the outbound service-auth key; loads it and
+    /// validates the target URL; fails closed.
+    pub fn notification_sink(
+        &self,
+        clock: SharedClock,
+    ) -> Result<Option<Arc<dyn NotificationEventSink>>, ConfigError> {
+        let (Some(url), Some(s)) = (&self.notifications_base_url, &self.signing) else {
+            return Ok(None);
+        };
+        let mut targets = InternalTargets::new(self.runtime_environment);
+        targets
+            .insert(ServiceId::notifications(), url)
+            .map_err(|e| invalid("CF_NOTIFICATIONS_BASE_URL", e.to_string()))?;
+        let client = InternalServiceClient::new(self.signer(s, clock)?, targets, s.http_timeout)
+            .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?;
+        Ok(Some(Arc::new(NotificationServiceEvents::new(Arc::new(
+            client,
+        )))))
     }
 
     /// The event dispatcher: signed delivery to every configured consumer, or the
@@ -596,6 +646,50 @@ mod tests {
             let err = OrganizationsConfig::from_lookup(lookup(&pairs)).unwrap_err();
             assert!(!err.to_string().contains("unknown-consumer"), "{value}");
         }
+    }
+
+    #[test]
+    fn notification_publication_is_off_by_default_and_signs_with_the_outbound_key() {
+        let clock = || -> SharedClock { Arc::new(cf_service_auth::SystemClock) };
+        let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
+        assert!(cfg.notifications_base_url.is_none() && cfg.signing.is_none());
+        assert!(cfg.notification_sink(clock()).unwrap().is_none());
+        let mut on: Vec<_> = BASE.to_vec();
+        on.push((
+            "CF_NOTIFICATIONS_BASE_URL",
+            "https://notifications.internal:8443",
+        ));
+        // The outbound signing key is required.
+        assert!(OrganizationsConfig::from_lookup(lookup(&on)).is_err());
+        let pem = std::env::temp_dir().join(format!("org-notif-{}.pem", uuid::Uuid::new_v4()));
+        let key = ServiceSigningKey::generate(KeyId::parse("organizations-staging-1").unwrap());
+        std::fs::write(&pem, key.to_pkcs8_pem().as_bytes()).unwrap();
+        let pem_path = pem.to_string_lossy().to_string();
+        on.extend([
+            ("CF_SERVICE_AUTH_KEY_ID", "organizations-staging-1"),
+            ("CF_SERVICE_AUTH_PRIVATE_KEY_FILE", pem_path.as_str()),
+        ]);
+        let cfg = OrganizationsConfig::from_lookup(lookup(&on)).unwrap();
+        // Publication alone enables neither provisioning nor event delivery.
+        assert!(cfg.provisioning.is_none() && cfg.event_consumers.is_empty());
+        assert!(!cfg.event_dispatcher(clock()).unwrap().enabled());
+        assert!(cfg.notification_sink(clock()).unwrap().is_some());
+        assert!(format!("{cfg:?}").contains("notification_publications: true"));
+        // A plain-HTTP target outside local / test is refused without echo.
+        let mut bad: Vec<_> = on
+            .iter()
+            .filter(|(k, _)| *k != "CF_NOTIFICATIONS_BASE_URL")
+            .copied()
+            .collect();
+        bad.push(("CF_NOTIFICATIONS_BASE_URL", "http://plain-notif-host:80"));
+        let err = OrganizationsConfig::from_lookup(lookup(&bad))
+            .unwrap()
+            .notification_sink(clock())
+            .err()
+            .expect("refused");
+        assert!(err.to_string().contains("CF_NOTIFICATIONS_BASE_URL"));
+        assert!(!err.to_string().contains("plain-notif-host"));
+        std::fs::remove_file(&pem).ok();
     }
 
     #[test]

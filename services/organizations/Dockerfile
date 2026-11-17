@@ -4,8 +4,9 @@
 #
 #   docker build -f services/organizations/Dockerfile -t cfmeet-organizations .
 #
-# Only packages/service-auth, packages/contracts/organizations and services/organizations
-# enter the build context (Dockerfile.dockerignore).
+# Only packages/service-auth, packages/migration-guard, packages/notification-client,
+# packages/contracts/organizations and services/organizations enter the build context
+# (Dockerfile.dockerignore).
 #
 # The image contains the API (`organizations`, with its in-process maintenance loop), the
 # migration runner (`organizations-migration`) and the migration import CLI
@@ -17,6 +18,8 @@ WORKDIR /src
 COPY packages/service-auth packages/service-auth
 # SEC-015 destructive migration subcommand guard (path dependency of the migration crate).
 COPY packages/migration-guard packages/migration-guard
+# Notification Service producer client (envelope builder / validator; roadmap N7).
+COPY packages/notification-client packages/notification-client
 COPY packages/contracts/organizations packages/contracts/organizations
 COPY services/organizations services/organizations
 WORKDIR /src/services/organizations

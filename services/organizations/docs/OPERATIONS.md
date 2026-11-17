@@ -25,8 +25,10 @@ release does; production steps need the release approvals of ADR 0056 §2 / §9.
 | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | receiver-authoritative trust bundle (`receiver: cfmeet.organizations`) |
 | `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 provisioning saga (ADR 0058) |
 | `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` | no | `true` / `false` (default `false`; requires provisioning): the saga also creates, verifies, renews and (after archive) revokes each organization's Calling and Messaging service bindings (ADR 0058 A2; Platform Access must grant `platform-identity.bind-organization-services`) |
-| `CF_SERVICE_AUTH_KEY_ID` | when provisioning | `kid` of the Organizations signing key |
-| `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning | PKCS#8 PEM Ed25519 private key file |
+| `ORGANIZATIONS_EVENT_DESTINATIONS` | no | comma-separated organization-event consumers (today only `cfmeet.meeting-service`, with `CF_MEETING_SERVICE_BASE_URL`); empty: events stay PENDING |
+| `CF_NOTIFICATIONS_BASE_URL` | no | Notification Service internal base URL (https outside local / test). When set, the catalogue events `organizations.*` are published to its I1 (see below); unset (default): nothing is published and nothing is written |
+| `CF_SERVICE_AUTH_KEY_ID` | when provisioning, event delivery or notification publication | `kid` of the Organizations signing key |
+| `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning, event delivery or notification publication | PKCS#8 PEM Ed25519 private key file |
 | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (https outside local / test) |
 | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300, default 120 |
 | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | 100–30000, default 5000 |
@@ -57,6 +59,42 @@ sweep idempotency records older than 24 h, expire PENDING invitations past `expi
 (`invitation.expired` event + audit, `FOR UPDATE SKIP LOCKED`), and deliver outbox rows
 when a dispatcher is enabled. **Delivery is disabled in Section 5**: events are recorded
 for destination `cfmeet.reconciliation` and stay PENDING; `/ready` shows the backlog.
+
+## Notification Service publications (`src/notification_publications.rs`, roadmap N7)
+
+Runs in the same loop only when `CF_NOTIFICATIONS_BASE_URL` is set; unset, the step does
+not run and the table `organization_notification_publications` stays untouched.
+Organizations never notified users itself, so there is no old path and no routing fence:
+everything it publishes is new-only.
+
+* **Source.** The committed `cfmeet.reconciliation` record rows of the outbox (written in
+  the transaction of every change) of the ten source types `invitation.{created, accepted,
+  declined, revoked, expired}`, `membership.{role_changed, suspended, removed}`,
+  `ownership.transferred` and `organization.suspended`, younger than 24 h. Nothing is added
+  to the business transaction; on first activation, the last 24 h of events are published.
+* **Envelope.** Built once with `packages/notification-client` and stored (re-posts are
+  byte-identical): ids only (`invitationId` / `membershipId`, `organizationId`, the role
+  when the contract can carry it: never `MANAGER`), no name, email, token or free text.
+  `eventId` / `route.decisionId` derive from the source event id and the recipient chunk
+  (redelivery = `DUPLICATE`); `dedupeKey` = `<type>:<source event id>`.
+* **Recipients** (`cfmeet-user:<id>`, never the acting user, only within the event's
+  organization): invitee account for `invitation.created` (unknown for an email-addressed
+  pending invitation: `SKIPPED NO_RECIPIENTS`); inviter for accepted / declined; inviter
+  and known invitee for revoked / expired; the member for membership events; the new and
+  previous owner for `ownership.transferred`; ACTIVE members (chunks of 40) for
+  `organization.suspended`.
+* **Relay.** Batches of ≤ 100 to `POST /internal/v1/notification-events`
+  (audience `cfmeet.notifications`, permission `notifications-event.publish`; the
+  Notification Service trust bundle must grant it to `cfmeet.organizations`). ACCEPTED /
+  DUPLICATE / HELD → `ACKED`; REJECTED or a 4xx contract refusal → `DEAD`; 5xx, 401, 403,
+  408, 429 and transport errors retry with backoff (2^n s, ≤ 5 min, at most 16 attempts,
+  then `DEAD ATTEMPTS_EXHAUSTED`); unacknowledged after 24 h → `EXPIRED`. Settled rows are
+  purged after 30 days.
+
+```sql
+SELECT event_type, state, last_error, count(*) FROM organization_notification_publications
+ GROUP BY 1, 2, 3 ORDER BY 1, 2;
+```
 
 ## Provisioning saga (`src/provisioning.rs::run_once`, Section 7, ADR 0058)
 
