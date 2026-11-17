@@ -740,6 +740,23 @@ PRODUCER_DIAGNOSTICS_SQL = {
         "'enabledPushRegistrations', (SELECT count(*) FROM messaging_push_registrations WHERE enabled), "
         "'pushJobsSinceFenceChange', (SELECT count(*) FROM messaging_push_jobs WHERE created_at >= (SELECT changed_at "
         "FROM messaging_notification_routing_state WHERE category = 'MESSAGE_WAKEUPS')));"),
+    # The Meeting fence: modes, decisions by category / route / reason (AUTO_FAILOVER and
+    # REROUTED_* show the failover path), publications by state and outcome, and the legacy
+    # ledger rows written since each category last changed mode (0 while FENCED_NEW routes all).
+    'meeting-service': (
+        "SELECT json_build_object("
+        "'fence', (SELECT coalesce(json_agg(json_build_object('category', category, 'mode', mode, "
+        "'fallback', critical_fallback, 'routingVersion', routing_version) ORDER BY category), '[]') "
+        "FROM notification_routing_state), "
+        "'decisions', (SELECT coalesce(json_agg(d), '[]') FROM (SELECT category, route, reason, "
+        "count(*) FILTER (WHERE ns_completed_at IS NOT NULL) AS completed, count(*) AS count, max(decided_at) AS last "
+        "FROM notification_route_decisions GROUP BY 1, 2, 3 ORDER BY 1, 2, 3) d), "
+        "'publications', (SELECT coalesce(json_agg(q), '[]') FROM (SELECT category, shadow, state, outcome, last_error, "
+        "count(*) AS count, max(created_at) AS last FROM meeting_notification_publications "
+        "GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5) q), "
+        "'legacyEmailsSinceFenceChange', (SELECT coalesce(json_agg(e), '[]') FROM (SELECT r.category, e.status, "
+        "count(*) AS count FROM email_deliveries e JOIN notification_routing_state r ON r.category = e.category "
+        "AND e.created_at >= r.changed_at GROUP BY 1, 2 ORDER BY 1, 2) e));"),
 }
 SERVICE_DIAGNOSTICS_SQL = (
     "SELECT json_build_object("
@@ -747,6 +764,22 @@ SERVICE_DIAGNOSTICS_SQL = (
     "max(received_at) AS last FROM notif_event_inbox GROUP BY producer, shadow, state ORDER BY producer, shadow, state) i), "
     "'shadowObservations', (SELECT count(*) FROM notif_shadow_observations), "
     "'deliveries', (SELECT count(*) FROM notif_deliveries), "
+    # Delivery evidence by channel (counts only): every delivery, its push attempts with the
+    # provider's HTTP status class, the email ledger by provider status, the inbox items.
+    "'deliveriesByChannel', (SELECT coalesce(json_agg(d), '[]') FROM (SELECT d.channel, n.route_category AS category, "
+    "d.status, count(*) AS count, max(coalesce(d.completed_at, d.created_at)) AS last FROM notif_deliveries d JOIN notif_notifications n "
+    "ON n.id = d.notification_id GROUP BY 1, 2, 3 ORDER BY 1, 2, 3) d), "
+    "'pushAttempts', (SELECT coalesce(json_agg(a), '[]') FROM (SELECT a.outcome, (a.http_status / 100) || 'xx' AS http, "
+    "count(*) AS count FROM notif_delivery_attempts a JOIN notif_deliveries d ON d.id = a.delivery_id "
+    "WHERE d.channel = 'PUSH' GROUP BY 1, 2 ORDER BY 1, 2) a), "
+    "'emailMessages', (SELECT coalesce(json_agg(e), '[]') FROM (SELECT category, lane, status, provider, count(*) AS count, "
+    "max(updated_at) AS last FROM notif_email_messages GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4) e), "
+    "'emailProviderEvents', (SELECT count(*) FROM notif_email_provider_events), "
+    "'inboxItems', (SELECT coalesce(json_agg(i), '[]') FROM (SELECT category, count(*) AS count FROM notif_inbox_items "
+    "GROUP BY 1 ORDER BY 1) i), "
+    "'pushEndpoints', (SELECT count(*) FROM notif_push_endpoints), "
+    "'routingActive', (SELECT coalesce(json_agg(r), '[]') FROM (SELECT category, channel FROM notif_routing "
+    "WHERE mode = 'ACTIVE' ORDER BY 1, 2) r), "
     "'routingNotOff', (SELECT count(*) FROM notif_routing WHERE mode <> 'OFF'));")
 
 
