@@ -234,7 +234,7 @@ references or telephone numbers.
 5. Hold / resume / transfer / session removal / end are commands with `expectedVersion`;
    the provider enforces them. END reaches ENDED only on cleanup evidence; usage is
    finalized.
-6. Group calls have a host (C4, migration 000052): the creator, unless the role was
+6. Group calls have a host (C4, gap-closure migration 000052): the creator, unless the role was
    handed over (`POST /v1/calls/{id}/host`); while the host is not present (its sessions
    removed) the longest-standing present participant holds the role. In a group call
    (more than two participants, ever) END / HOLD / RESUME naming an
@@ -726,6 +726,14 @@ curl http://127.0.0.1:8090/health
 ```
 
 From the repository root: `make calling-migrate`, `make calling`.
+
+`calling-migration up` applies two histories: the main one (`calling_seaql_migrations`,
+fail-closed on versions it does not know) and then the additive gap-closure history
+(`calling_gap_closure_seaql_migrations`, `migration/src/gap/`). New additive changes go
+to the gap-closure history so the previous image still starts against a database that
+has them; this image refuses to start until both are applied
+(`calling_migration::pending_migrations`). `reset` rolls the gap-closure history back
+first; other subcommands concern the main history.
 
 ## Administration
 

@@ -7,6 +7,7 @@
 
 pub use sea_orm_migration::prelude::*;
 
+mod gap;
 mod m20261007_000001_platform_consumers;
 mod m20261007_000002_platform_credentials;
 mod m20261007_000003_platform_principals;
@@ -57,7 +58,6 @@ mod m20261201_000048_enterprise_audit_acting_principal;
 mod m20261202_000049_call_kind_upgrade;
 mod m20261202_000050_call_screen_share;
 mod m20261202_000051_call_add_participants;
-mod m20261203_000052_call_host_controls;
 
 /// Name of the table recording which Calling migrations have been applied.
 pub const MIGRATION_TABLE: &str = "calling_seaql_migrations";
@@ -118,7 +118,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20261202_000049_call_kind_upgrade::Migration),
             Box::new(m20261202_000050_call_screen_share::Migration),
             Box::new(m20261202_000051_call_add_participants::Migration),
-            Box::new(m20261203_000052_call_host_controls::Migration),
         ]
     }
 
@@ -127,7 +126,41 @@ impl MigratorTrait for Migrator {
     }
 }
 
-/// The migrations of [`Migrator`] not yet recorded in [`MIGRATION_TABLE`] — READ-ONLY.
+/// Name of the table recording which gap-closure migrations have been applied.
+pub const GAP_CLOSURE_MIGRATION_TABLE: &str = "calling_gap_closure_seaql_migrations";
+
+/// The gap-closure migrations: a SEPARATE, additive history (its own table) applied by
+/// `calling-migration up` after [`Migrator`]. The main history fails closed on versions
+/// it does not know (an older binary refuses a newer schema), so new additive changes
+/// live here: the previous image keeps starting against a database that has them (it
+/// never reads this table), while this image requires them ([`pending_migrations`]).
+/// Every migration here is additive and backward compatible with the previous image.
+pub struct GapClosureMigrator;
+
+#[async_trait::async_trait]
+impl MigratorTrait for GapClosureMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(gap::m20261203_000052_call_host_controls::Migration),
+        ]
+    }
+
+    fn migration_table_name() -> DynIden {
+        Alias::new(GAP_CLOSURE_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// Applies the main history, then the gap-closure history (what `calling-migration up`
+/// does).
+pub async fn up_all(
+    db: &sea_orm_migration::sea_orm::DatabaseConnection,
+) -> Result<(), sea_orm_migration::sea_orm::DbErr> {
+    Migrator::up(db, None).await?;
+    GapClosureMigrator::up(db, None).await
+}
+
+/// The migrations of [`Migrator`] and of [`GapClosureMigrator`] not yet recorded in their
+/// tables — READ-ONLY.
 ///
 /// `MigratorTrait::get_pending_migrations` first (re)creates the migration table with DDL,
 /// which the least-privilege runtime role
@@ -138,16 +171,33 @@ pub async fn pending_migrations<C>(db: &C) -> Result<Vec<String>, sea_orm_migrat
 where
     C: sea_orm_migration::sea_orm::ConnectionTrait,
 {
-    use sea_orm_migration::sea_orm::Statement;
-    let known: Vec<String> = Migrator::migrations()
+    let main: Vec<String> = Migrator::migrations()
         .iter()
         .map(|m| m.name().to_string())
         .collect();
+    let gap: Vec<String> = GapClosureMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let mut pending = pending_in(db, MIGRATION_TABLE, main).await?;
+    pending.extend(pending_in(db, GAP_CLOSURE_MIGRATION_TABLE, gap).await?);
+    Ok(pending)
+}
+
+async fn pending_in<C>(
+    db: &C,
+    table: &str,
+    known: Vec<String>,
+) -> Result<Vec<String>, sea_orm_migration::sea_orm::DbErr>
+where
+    C: sea_orm_migration::sea_orm::ConnectionTrait,
+{
+    use sea_orm_migration::sea_orm::Statement;
     let backend = db.get_database_backend();
     let present = db
         .query_one(Statement::from_string(
             backend,
-            format!("SELECT to_regclass('{MIGRATION_TABLE}') IS NOT NULL AS present"),
+            format!("SELECT to_regclass('{table}') IS NOT NULL AS present"),
         ))
         .await?
         .map(|r| r.try_get::<bool>("", "present"))
@@ -159,7 +209,7 @@ where
     let applied = db
         .query_all(Statement::from_string(
             backend,
-            format!("SELECT version FROM {MIGRATION_TABLE}"),
+            format!("SELECT version FROM {table}"),
         ))
         .await?
         .iter()
