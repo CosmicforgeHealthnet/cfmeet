@@ -612,7 +612,7 @@
           "Authentication"
         ],
         "summary": "Change password for authenticated user",
-        "description": "Changes the signed-in user's password after checking `current_password`. Requires a bearer\naccess token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400\nif the current password is wrong or the account uses Google sign-in. A change signs the account\nout of every session, including the current one; sign in again with the new password.",
+        "description": "Changes the signed-in user's password after checking `current_password`. Requires a bearer\naccess token. `new_password` must be 8-72 characters and match `confirm_password`. Returns 400\nif the current password is wrong or the account uses Google sign-in. A change signs the account\nout of every session, including the current one; sign in again with the new password.",
         "operationId": "change_password",
         "requestBody": {
           "content": {
@@ -887,7 +887,7 @@
           "Authentication"
         ],
         "summary": "Register a new user",
-        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.\nEmail addresses are case-insensitive and stored lowercased. The answer never reveals whether\nthe email already has an account (owner decision D-12): an address already registered gets\nthe same 201 answer, no account is created or changed, and its owner receives an email notice\ninstead of a code. Returns 409 only if the username is taken (usernames are public).",
+        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-72 characters.\nEmail addresses are case-insensitive and stored lowercased. The answer never reveals whether\nthe email already has an account (owner decision D-12): an address already registered gets\nthe same 201 answer, no account is created or changed, and its owner receives an email notice\ninstead of a code. Returns 409 only if the username is taken (usernames are public).",
         "operationId": "register",
         "requestBody": {
           "content": {
@@ -966,7 +966,7 @@
           "Authentication"
         ],
         "summary": "Reset password with token",
-        "description": "Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public\nendpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is\nsingle-use; repeated wrong codes for the same email are rate-limited (429). A reset signs the\naccount out of every session.",
+        "description": "Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public\nendpoint. `new_password` must be 8-72 characters and match `confirm_password`. The code is\nsingle-use; repeated wrong codes for the same email are rate-limited (429). A reset signs the\naccount out of every session.",
         "operationId": "reset_password",
         "requestBody": {
           "content": {

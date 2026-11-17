@@ -94,3 +94,55 @@ async fn gap_reset_and_verify_answer_alike_for_unknown_and_existing_addresses() 
         assert_eq!(answers[0][5].0, StatusCode::TOO_MANY_REQUESTS, "{path}");
     }
 }
+
+/// A9: a signed-in session cannot guess the current password without bound.
+#[tokio::test]
+async fn gap_current_password_guesses_are_limited() {
+    let app = app_with_redis!();
+    let e = email();
+    let id = Uuid::new_v4();
+    let hash = backend::services::auth::hash_password("Str0ng!Passw0rd").unwrap();
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO users (id, username, email, password_hash, auth_type, role, status, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, 'local', 'user', 'active'::user_status, now(), now())",
+            [
+                id.into(),
+                format!("u_{}", &id.simple().to_string()[..10]).into(),
+                e.clone().into(),
+                hash.into(),
+            ],
+        ))
+        .await
+        .unwrap();
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/login",
+            Auth::None,
+            json!({ "email": e, "password": "Str0ng!Passw0rd" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let token = v["access_token"].as_str().unwrap().to_string();
+    let body = json!({
+        "current_password": "Wr0ng!Passw0rd",
+        "new_password": "N3w!Passw0rd-long",
+        "confirm_password": "N3w!Passw0rd-long",
+    });
+    for _ in 0..10 {
+        let (s, _) = app
+            .post(
+                "/api/v1/auth/change-password",
+                Auth::Bearer(&token),
+                body.clone(),
+            )
+            .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+    let (s, _) = app
+        .post("/api/v1/auth/change-password", Auth::Bearer(&token), body)
+        .await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+}

@@ -160,7 +160,7 @@ pub async fn deactivate_account(
     }
 
     // ACC-026: a stolen or stale token alone cannot deactivate the account.
-    let method = reauthentication(&state, &claims, &user, body.current_password.as_deref())?;
+    let method = reauthentication(&state, &claims, &user, body.current_password.as_deref()).await?;
     let Some(method) = method else {
         security::record_event_best_effort(
             &state.db,
@@ -205,7 +205,7 @@ pub async fn deactivate_account(
 
 /// ACC-026: how the caller proved it is the account holder (`None`: it did not).
 /// A wrong password never falls back to the recent-sign-in rule.
-fn reauthentication(
+async fn reauthentication(
     state: &AppState,
     claims: &Claims,
     user: &users::Model,
@@ -216,6 +216,16 @@ fn reauthentication(
         return Ok(Some("NOT_REQUIRED"));
     }
     if let Some(password) = current_password {
+        // Gap audit A9: bounded guesses (shared with change-password).
+        state
+            .rate_limiter
+            .check_action_rate(
+                "auth:current-password",
+                &user.id.to_string(),
+                crate::handlers::auth::MAX_CURRENT_PASSWORD_GUESSES,
+                15 * 60,
+            )
+            .await?;
         let ok = match user.password_hash.as_deref() {
             Some(hash) => verify_password(password, hash)?,
             None => false,

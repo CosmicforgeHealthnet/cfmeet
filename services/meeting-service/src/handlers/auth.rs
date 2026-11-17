@@ -51,6 +51,10 @@ fn status_string(state: &AppState, user: &users::Model) -> String {
         .to_owned()
 }
 
+/// Gap audit A9: current-password checks (change password, deactivation) per account
+/// and 15 minutes.
+pub const MAX_CURRENT_PASSWORD_GUESSES: i64 = 10;
+
 /// Uniform answer for the account-recovery endpoints, whether or not an account exists
 /// (ACC-014).
 const RECOVERY_ACCEPTED: &str =
@@ -60,7 +64,7 @@ const RECOVERY_ACCEPTED: &str =
 ///
 /// Creates an email-and-password account with the `user` role and `pending_verification` status,
 /// then emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are
-/// returned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.
+/// returned. Username must be 3-50 letters, digits or underscores and password 8-72 characters.
 /// Email addresses are case-insensitive and stored lowercased. The answer never reveals whether
 /// the email already has an account (owner decision D-12): an address already registered gets
 /// the same 201 answer, no account is created or changed, and its owner receives an email notice
@@ -289,8 +293,13 @@ pub async fn login(
     limit_by_client(&state, &headers, "login", 30, 15 * 60).await?;
     let email = security::normalize_email(&payload.email);
 
-    // Check rate limit before processing login
-    state.rate_limiter.check_login_rate(&email).await?;
+    // Check rate limit before processing login (gap audit A9: per account and client
+    // address when the trusted address header is configured).
+    let client = state.auth_policy.client_ip(&headers);
+    state
+        .rate_limiter
+        .check_login_rate_from(&email, client.as_deref())
+        .await?;
 
     // Unknown accounts, Google-only accounts and wrong passwords take the same time and
     // get the same answer (ACC-014).
@@ -353,7 +362,10 @@ pub async fn login(
     }
 
     // Clear rate limit on successful login
-    state.rate_limiter.clear_login_rate(&email).await?;
+    state
+        .rate_limiter
+        .clear_login_rate_from(&email, client.as_deref())
+        .await?;
 
     let issued = security::start_session(
         &state,
@@ -838,7 +850,7 @@ pub async fn forgot_password(
 /// Reset password with token
 ///
 /// Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public
-/// endpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is
+/// endpoint. `new_password` must be 8-72 characters and match `confirm_password`. The code is
 /// single-use; repeated wrong codes for the same email are rate-limited (429). A reset signs the
 /// account out of every session.
 #[utoipa::path(
@@ -975,7 +987,7 @@ pub async fn verify_reset_token(
 /// Change password for authenticated user
 ///
 /// Changes the signed-in user's password after checking `current_password`. Requires a bearer
-/// access token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400
+/// access token. `new_password` must be 8-72 characters and match `confirm_password`. Returns 400
 /// if the current password is wrong or the account uses Google sign-in. A change signs the account
 /// out of every session, including the current one; sign in again with the new password.
 #[utoipa::path(
@@ -1021,6 +1033,16 @@ pub async fn change_password(
         .as_ref()
         .ok_or_else(|| ApiError::BadRequest("No password set for this account".to_string()))?;
 
+    // Gap audit A9: a stolen session cannot guess the current password without bound.
+    state
+        .rate_limiter
+        .check_action_rate(
+            "auth:current-password",
+            &user_id.to_string(),
+            MAX_CURRENT_PASSWORD_GUESSES,
+            15 * 60,
+        )
+        .await?;
     let is_valid = verify_password(&payload.current_password, password_hash)?;
     if !is_valid {
         security::record_event_best_effort(
