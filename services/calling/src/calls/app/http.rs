@@ -1004,6 +1004,10 @@ struct AbuseReportBody {
     category: String,
     #[serde(default)]
     comment_code: Option<String>,
+    /// C5: the participant being reported (required to name one in a call of more than
+    /// two people; must be another participant of that call).
+    #[serde(default)]
+    reported_principal_id: Option<Uuid>,
 }
 
 /// `POST /v1/calls/:call_id/abuse-reports` (calls.write): a participant reports the
@@ -1026,6 +1030,7 @@ async fn create_abuse_report(
                 principal_id: b.principal_id,
                 category: b.category,
                 comment_code: b.comment_code,
+                reported_principal_id: b.reported_principal_id,
             },
         )
         .await?;

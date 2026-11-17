@@ -3,7 +3,8 @@
 //! category and comment code are bounded vocabularies (never free text), a report is
 //! idempotent per (Call, reporter), a burst against one principal raises exactly one
 //! `ABUSE_REPORTS_BURST` incident whose occurrences grow, and a stored report holds no
-//! number or provider payload.
+//! number or provider payload. C5: in a Call of more than two people the reporter names
+//! the reported participant, which must be another participant of that Call.
 
 mod common;
 
@@ -122,7 +123,10 @@ async fn categories_and_comment_codes_are_bounded_and_reports_are_idempotent() {
         json!({ "principalId": reporter, "category": "SPAM", "commentCode": "A".repeat(65) }),
         json!({ "principalId": reporter, "category": "SPAM", "commentCode": "" }),
         json!({ "principalId": reporter, "category": "SPAM", "comment": "free text" }),
-        json!({ "principalId": reporter, "category": "SPAM", "reportedPrincipalId": w.w.recipient.id() }),
+        // C5: a named reported principal must be ANOTHER participant of the Call.
+        json!({ "principalId": reporter, "category": "SPAM", "reportedPrincipalId": reporter }),
+        json!({ "principalId": reporter, "category": "SPAM", "reportedPrincipalId": Uuid::new_v4() }),
+        json!({ "principalId": reporter, "category": "SPAM", "reportedPrincipalId": "not-a-uuid" }),
     ] {
         let r = report(&w, w.secret(), call, body.clone()).await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}: {}", r.text);
@@ -248,4 +252,87 @@ async fn a_stored_report_holds_no_number_free_text_or_provider_payload() {
     assert!(number_like_runs(&stored[0]).is_empty(), "{}", stored[0]);
     assert!(!stored[0].contains("+234"));
     assert!(stored[0].contains("SEE_CASE_12"));
+}
+
+/// C5: in a group Call the reporter names the reported participant (stored and counted
+/// against it); a principal that was not on the Call, or the reporter itself, is refused
+/// with nothing stored; without a name the report stays unattributed; in a two-party Call
+/// naming the other party is accepted.
+#[tokio::test]
+async fn a_group_call_report_names_one_of_its_participants() {
+    let Some(w) = AppWorld::new().await else {
+        return;
+    };
+    let (call, _, _, third) = w.connected_group_call("VOICE").await;
+    let reporter = w.w.initiator.id();
+    let stranger = w.principal("not-on-the-call").await;
+    for named in [stranger.id().as_uuid(), reporter.as_uuid()] {
+        let r = report(
+            &w,
+            w.secret(),
+            call,
+            json!({ "principalId": reporter, "category": "HARASSMENT", "reportedPrincipalId": named }),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    }
+    assert_eq!(rows(&w).await, 0);
+    let r = report(
+        &w,
+        w.secret(),
+        call,
+        json!({ "principalId": reporter, "category": "HARASSMENT",
+                "reportedPrincipalId": third.principal }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["reportedPrincipalId"], third.principal.to_string());
+    assert_eq!(
+        strings(
+            w.h().conn(),
+            &format!(
+                "SELECT reported_principal_id::text FROM calling_abuse_reports \
+                 WHERE call_id = '{call}' AND reporting_principal_id = '{reporter}'"
+            ),
+        )
+        .await,
+        [third.principal.to_string()]
+    );
+    // The same reporter again: the existing report (idempotent, not re-attributed).
+    let again = report(
+        &w,
+        w.secret(),
+        call,
+        json!({ "principalId": reporter, "category": "SPAM",
+                "reportedPrincipalId": w.w.recipient.id() }),
+    )
+    .await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text);
+    assert_eq!(
+        again.json["reportedPrincipalId"],
+        third.principal.to_string()
+    );
+    // Another participant without a name: unattributed (as before C5).
+    let r = report(
+        &w,
+        w.secret(),
+        call,
+        json!({ "principalId": w.w.recipient.id(), "category": "SPAM" }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert!(r.json["reportedPrincipalId"].is_null(), "{}", r.text);
+
+    // A two-party Call: naming the other party is the same as letting the server derive it.
+    let (one_to_one, _, _) = w.connected_call("VOICE").await;
+    let r = report(
+        &w,
+        w.secret(),
+        one_to_one,
+        json!({ "principalId": w.w.recipient.id(), "category": "SPAM",
+                "reportedPrincipalId": reporter }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert_eq!(r.json["reportedPrincipalId"], reporter.to_string());
 }

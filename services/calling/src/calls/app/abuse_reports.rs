@@ -2,9 +2,12 @@
 //!
 //! * `POST /v1/calls/:call_id/abuse-reports` (`calls.write`): the reporting principal
 //!   must be a participant of that Call (a foreign Call, or one the reporter took no
-//!   part in, is 404 like every foreign resource); the reported principal — the other party of a two-party Call — is
-//!   derived by the server and never supplied. One report per (Call, reporter): a repeat
-//!   returns the existing report.
+//!   part in, is 404 like every foreign resource). The reported principal of a two-party
+//!   Call is derived by the server (the other party); in a Call of more than two people
+//!   the reporter names it (`reportedPrincipalId`, C5), and it must be ANOTHER participant
+//!   of that Call (anything else is 400 — nothing is recorded). Naming a principal in a
+//!   two-party Call is allowed only if it is the other party. One report per (Call,
+//!   reporter): a repeat returns the existing report.
 //! * `GET /v1/abuse-reports?principalId=` (`calls.read`): the reports a principal filed.
 //! * Operators review with `platform_admin abuse-report set-status` (audited).
 //! * ≥ `CALLING_ABUSE_REPORTS_INCIDENT_THRESHOLD` reports against one principal within
@@ -79,6 +82,8 @@ pub struct CreateAbuseReport {
     pub principal_id: Uuid,
     pub category: String,
     pub comment_code: Option<String>,
+    /// C5: the reported participant (optional; see the module documentation).
+    pub reported_principal_id: Option<Uuid>,
 }
 
 fn valid_comment_code(code: &str) -> bool {
@@ -129,6 +134,7 @@ impl AppCallService {
                 request.principal_id,
                 category,
                 request.comment_code.clone(),
+                request.reported_principal_id,
             )
             .await?;
         if created {
@@ -148,6 +154,7 @@ impl AppCallService {
         principal_id: Uuid,
         category: AbuseCategory,
         comment_code: Option<String>,
+        named: Option<Uuid>,
     ) -> CallResult<(AbuseReportView, bool)> {
         let now = self.calls.now();
         let txn = self.db().begin().await?;
@@ -178,9 +185,17 @@ impl AppCallService {
             .into_iter()
             .filter(|p| *p != principal_id)
             .collect();
-        let reported = match others[..] {
-            [only] => Some(only),
-            _ => None,
+        let reported = match (named, &others[..]) {
+            // C5: the reporter names the participant it reports; it must be another
+            // participant of this Call (never the reporter, never an outsider).
+            (Some(named), _) if others.contains(&named) => Some(named),
+            (Some(_), _) => {
+                return Err(CallError::Validation(
+                    "reportedPrincipalId must be another participant of the call.",
+                ))
+            }
+            (None, [only]) => Some(*only),
+            (None, _) => None,
         };
         if let Some(existing) = AbuseReportView::find_by_statement(stmt(
             &format!(

@@ -1652,7 +1652,14 @@ export namespace Calling {
     };
     /** POST /v1/calls/{call_id}/abuse-reports — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     createAbuseReport: {
-      params: { path: { call_id: string }; body: { [key: string]: unknown } };
+      params: { path: { call_id: string }; body: {
+          /** The reporting principal (a participant of the call). */
+          principalId: Uuid;
+          category: "UNWANTED" | "HARASSMENT" | "SPAM" | "FRAUD_SUSPECTED" | "OTHER";
+          commentCode?: string;
+          /** C5: the reported participant. Derived by the server in a two-party call (naming it there must name the other party); in a call of more than two people the reporter names it, and it must be another participant of that call (else 400, nothing stored). */
+          reportedPrincipalId?: Uuid;
+        } };
       response: { [key: string]: unknown };
     };
     /** POST /v1/blocks — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */

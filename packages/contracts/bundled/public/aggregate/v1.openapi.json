@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.18.0"
+      "description": "cfmeet.calling.http-api 1.19.0"
     },
     {
       "name": "privacy-relay",
@@ -24935,7 +24935,7 @@
           "calling"
         ],
         "summary": "Report an unwanted or abusive call",
-        "description": "Part H §69: a participant principal of the call reports it with a bounded category and optional code (no free text, no number). Idempotent per reporter and call.",
+        "description": "Part H §69: a participant principal of the call reports it with a bounded category and optional code (no free text, no number). Idempotent per reporter and call. C5: reportedPrincipalId names the reported participant of a call of more than two people.",
         "security": [
           {
             "calling.platformCredential": [
@@ -25017,7 +25017,44 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "principalId",
+                  "category"
+                ],
+                "properties": {
+                  "principalId": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+                      }
+                    ],
+                    "description": "The reporting principal (a participant of the call)."
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "UNWANTED",
+                      "HARASSMENT",
+                      "SPAM",
+                      "FRAUD_SUSPECTED",
+                      "OTHER"
+                    ]
+                  },
+                  "commentCode": {
+                    "type": "string",
+                    "pattern": "^[A-Z0-9_]{1,64}$"
+                  },
+                  "reportedPrincipalId": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+                      }
+                    ],
+                    "description": "C5: the reported participant. Derived by the server in a two-party call (naming it there must name the other party); in a call of more than two people the reporter names it, and it must be another participant of that call (else 400, nothing stored)."
+                  }
+                }
               }
             }
           }
