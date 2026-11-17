@@ -96,3 +96,13 @@ Each is a separate run of `cfmeet-coordinated-release.yml` on the current `main`
 It never reads ids, envelopes or recipients. Use it to evidence a SHADOW phase.
 
 The U1-U9 routes are classified `EXCLUDED` / `FIRST_PARTY_APP_NOTIFICATIONS` in `infra/api-gateway/public-routes.json`: they are served on the Meeting Service ingress to the CF Meet apps' own signed-in users, never routed as a customer API. Without `CF_NOTIFICATIONS_BASE_URL` every U route answers 503 after the 401 session check.
+
+### Communications Hub publications (`CONTACT_REQUESTS`)
+
+The Hub (`services/communications`) publishes `communications.connection.requested` (to the addressee of a new contact request) and `communications.connection.connected` (to the requester when the addressee accepts) through its own outbox `communication_notification_publications` (migration history `communications_notification_publications_seaql_migrations`). The Hub has no legacy notification path for these events, so there is no producer routing fence: each envelope carries its own route decision (`routingVersion` 1) and delivery is governed only by `notif_routing` for `CONTACT_REQUESTS` (HELD while `OFF`; the service re-checks blocks and privacy through X4).
+
+| Hub variable | Effect |
+|---|---|
+| `CF_NOTIFICATIONS_BASE_URL` | set: publications are written in the relationship transaction and relayed to I1, signed as `cfmeet.communications` for audience `cfmeet.notifications`. Unset (default): nothing is written or sent; the Hub behaves exactly as before |
+
+Activation needs the grant on both Notification Service replicas: receiver `cfmeet.notifications`, issuer `cfmeet.communications`, permission `notifications-event.publish`, then `CF_NOTIFICATIONS_BASE_URL` on the Hub. No coordinated-release operation does this yet. Rows: `PENDING` → `ACKED` (ACCEPTED / DUPLICATE / HELD), `DEAD` (REJECTED or a contract 4xx), `SKIPPED` (no CF Meet account, a block, a request or connection that no longer holds), `EXPIRED` (not posted within 24 h); settled rows are purged after 30 days. Retries back off from 2 s to at most 5 min.

@@ -1,3 +1,17 @@
+//! Communications Hub runtime configuration (environment variables).
+//!
+//! | Variable | Required | Meaning |
+//! |---|---|---|
+//! | `CF_RUNTIME_ENVIRONMENT` | yes | runtime environment of the service-token signer and trust bundle |
+//! | `CF_SERVICE_AUTH_KEY_ID`, `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | yes | the Hub's signing identity (`cfmeet.communications`) for every outbound internal call |
+//! | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | the Hub's inbound trust bundle |
+//! | `CF_PLATFORM_ACCESS_BASE_URL`, `CF_MEETING_SERVICE_BASE_URL` | yes | Platform Access and the Account (Meeting Service) |
+//! | `CF_CALLING_BASE_URL`, `CF_MESSAGING_BASE_URL` | no | Calling and Messaging owners; unset: their features answer `DEPENDENCY_NOT_CONFIGURED` |
+//! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service's I1 (`notifications-event.publish`, audience `cfmeet.notifications`; roadmap N7). Set: contact-request notifications are written to `communication_notification_publications` and relayed ([`crate::notification_publications`]). Unset: nothing is written or sent (the Hub behaves exactly as before) |
+//! | `COMMUNICATIONS_INVITE_DIGEST_KEY_FILE` | yes | 32-byte hex invitation digest key |
+//! | `CFMEET_PUBLIC_APP_URL` | yes | public application URL (invitations) |
+//! | `DATABASE_URL` | yes | the Hub's own PostgreSQL |
+//! | `COMMUNICATIONS_BIND_ADDRESS` | no | listener (default `0.0.0.0:8080`) |
 use cf_service_auth::{
     client::{InternalServiceClient, InternalTargets},
     KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner,
@@ -15,6 +29,8 @@ pub struct Config {
     pub client: Arc<InternalServiceClient>,
     pub calling_configured: bool,
     pub messaging_configured: bool,
+    /// `CF_NOTIFICATIONS_BASE_URL` is set: contact-request notifications are published.
+    pub notifications_configured: bool,
 }
 fn required(k: &str) -> Result<String, String> {
     std::env::var(k)
@@ -60,6 +76,12 @@ impl Config {
             ),
             ("CF_CALLING_BASE_URL", ServiceId::calling(), false),
             ("CF_MESSAGING_BASE_URL", ServiceId::messaging(), false),
+            // Roadmap N7: I1 of the Notification Service; unset, nothing is published.
+            (
+                "CF_NOTIFICATIONS_BASE_URL",
+                ServiceId::notifications(),
+                false,
+            ),
         ] {
             match std::env::var(key).ok().filter(|v| !v.is_empty()) {
                 Some(url) => targets
@@ -71,6 +93,7 @@ impl Config {
         }
         let calling_configured = targets.contains(&ServiceId::calling());
         let messaging_configured = targets.contains(&ServiceId::messaging());
+        let notifications_configured = targets.contains(&ServiceId::notifications());
         let client = Arc::new(
             InternalServiceClient::new(signer, targets, Duration::from_secs(5))
                 .map_err(|_| "invalid internal client")?,
@@ -114,6 +137,7 @@ impl Config {
             client,
             calling_configured,
             messaging_configured,
+            notifications_configured,
         })
     }
 }
