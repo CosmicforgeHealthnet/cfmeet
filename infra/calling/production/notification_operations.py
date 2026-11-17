@@ -116,8 +116,9 @@ PRODUCERS = {
     'developer-platform': dict(operation='activate-developer-publications',
                                containers=('developer-platform', 'developer-platform-worker'),
                                outbox='devplat_notification_publications'),
+    # MEETING_INVITATION / MEETING_NOTIFICATION / ORGANIZATION_INVITATION through the fence.
     'meeting-service': dict(operation='activate-meeting-publications', containers=('meeting-service',),
-                            outbox=None),
+                            outbox='meeting_notification_publications', sealing=True),
 }
 GRANTS += tuple((spec['operation'], replica, issuer, PUBLICATION_PERMISSIONS)
                 for issuer, spec in PRODUCERS.items() for replica in REPLICAS)
@@ -338,6 +339,70 @@ def activate_messaging_publications(cr, sha, run_id, confirm):
                         [('messaging', overrides)], post=post)
 
 
+# --- The service's HPKE sealing key (codes, tokens and addresses sealed by producers) --------
+# The private key opens sealed parts in the renderer only (NOTIFICATIONS_HPKE_PRIVATE_KEY_FILE on
+# both replicas, owned by the service user, 0400, never printed); producers get only the public
+# key (CF_NOTIFICATIONS_SEALING_KEY = <kid>:<base64url X25519 public key>). Generated once on the
+# VPS; a new pair is never generated over an existing one (sealed rows in flight would not open).
+HPKE_PRIVATE = 'notifications-hpke.key'
+HPKE_PUBLIC = 'notifications-hpke.pub'
+HPKE_TARGET = '/run/secrets/notifications-hpke.key'
+X25519_P = 2 ** 255 - 19
+
+
+def x25519_public(private):
+    """RFC 7748 X25519(k, 9): the public key of a 32-byte private key (clamped as the
+    Notification Service's HPKE library clamps it). Dependency-free: the VPS needs no extra
+    Python package."""
+    k = bytearray(private)
+    k[0] &= 248
+    k[31] &= 127
+    k[31] |= 64
+    scalar = int.from_bytes(bytes(k), 'little')
+    x1, x2, z2, x3, z3, swap = 9, 1, 0, 9, 1, 0
+    a24 = 121665
+    for t in reversed(range(255)):
+        bit = (scalar >> t) & 1
+        swap ^= bit
+        if swap:
+            x2, x3, z2, z3 = x3, x2, z3, z2
+        swap = bit
+        a, b = (x2 + z2) % X25519_P, (x2 - z2) % X25519_P
+        aa, bb = a * a % X25519_P, b * b % X25519_P
+        e = (aa - bb) % X25519_P
+        c, d = (x3 + z3) % X25519_P, (x3 - z3) % X25519_P
+        da, cb = d * a % X25519_P, c * b % X25519_P
+        x3 = (da + cb) ** 2 % X25519_P
+        z3 = x1 * (da - cb) ** 2 % X25519_P
+        x2 = aa * bb % X25519_P
+        z2 = e * (aa + a24 * e) % X25519_P
+    if swap:
+        x2, z2 = x3, z3
+    return (x2 * pow(z2, X25519_P - 2, X25519_P) % X25519_P).to_bytes(32, 'little')
+
+
+def sealing_key(cr, today=None):
+    """(kid, private key path, producer value) — generated once, then reused."""
+    import base64
+    import datetime
+    import os
+    import secrets
+    private, public = cr.p.SECRETS / HPKE_PRIVATE, cr.p.SECRETS / HPKE_PUBLIC
+    if not private.exists():
+        kid = 'notif-hpke-%s-1' % (today or datetime.date.today()).strftime('%Y-%m')
+        raw = secrets.token_bytes(32)
+        cr.p.write_private(private, base64.b64encode(raw).decode())
+        cr.p.write_private(public, '%s:%s' % (kid, base64.urlsafe_b64encode(x25519_public(raw)).decode().rstrip('=')))
+    uid = cr.SERVICES['notifications']['uid']
+    os.chown(private, uid, uid)
+    os.chmod(private, 0o400)
+    value = public.read_text().strip()
+    kid = value.split(':', 1)[0]
+    if not re.fullmatch(r'notif-hpke-\d{4}-\d{2}(-[a-z0-9]{1,8})?', kid):
+        raise RuntimeError('The sealing public key file is malformed')
+    return kid, private, value
+
+
 def producer_sql(cr, service):
     if service == 'meeting-service':
         return cr.meeting_psql
@@ -364,14 +429,23 @@ def activate_publications(cr, sha, run_id, producer):
     for container in spec['containers']:
         cr.has_signing_identity(container)
     overrides = {'CF_NOTIFICATIONS_BASE_URL': cr.private_url(notif_tls)}
+    changes = []
+    if spec.get('sealing'):
+        # Sealed parts (invitation tokens / addresses): the service opens them, the producer
+        # only seals. Both replicas get the private key, the producer the public one.
+        kid, private, public = sealing_key(cr)
+        changes += [(replica, {'NOTIFICATIONS_HPKE_PRIVATE_KEY_FILE': HPKE_TARGET, 'NOTIFICATIONS_HPKE_KEY_ID': kid},
+                     {'mounts': [(private, HPKE_TARGET)]}) for replica in REPLICAS]
+        overrides['CF_NOTIFICATIONS_SEALING_KEY'] = public
+        cr.emit('notificationsSealingKey', {'kid': kid, 'replicas': list(REPLICAS), 'producer': producer})
+    changes += [(container, dict(overrides)) for container in spec['containers']]
 
     def post():
         status = private_status(cr, probe)
         if status != '401':
             raise RuntimeError('Notification Service I1 answers %s to an unsigned probe after activation' % status)
 
-    cr.apply_activation(spec['operation'], sha, run_id,
-                        [(container, dict(overrides)) for container in spec['containers']], post=post)
+    cr.apply_activation(spec['operation'], sha, run_id, changes, post=post)
 
 
 # --- Routing fence v1 (Document 4 §9.6): producers' protocol and the rollback floor ---------
@@ -450,6 +524,16 @@ def require_fence_protocol(cr, service, minimum=1):
 FENCE_ROUTABLE = {
     ('messaging', 'MESSAGE_WAKEUPS'): dict(publications='activate-messaging-publications',
                                            service_channels=('PUSH',), service_category='MESSAGE_WAKEUPS'),
+    # Meeting's non-critical email categories (N11). The CRITICAL ones (AUTH_*, SECURITY_*) stay
+    # LEGACY_ONLY until the N12 lease path exists.
+    ('meeting-service', 'MEETING_INVITATION'): dict(publications='activate-meeting-publications',
+                                                    service_channels=('EMAIL',), service_category='MEETING_INVITATION'),
+    ('meeting-service', 'ORGANIZATION_INVITATION'): dict(publications='activate-meeting-publications',
+                                                         service_channels=('EMAIL',),
+                                                         service_category='ORGANIZATION_INVITATION'),
+    ('meeting-service', 'MEETING_NOTIFICATION'): dict(publications='activate-meeting-publications',
+                                                      service_channels=('EMAIL', 'IN_APP'),
+                                                      service_category='MEETING_NOTIFICATION'),
 }
 FENCE_MODES = {'legacy-only': 'LEGACY_ONLY', 'shadow': 'SHADOW', 'fenced-old': 'FENCED_OLD', 'fenced-new': 'FENCED_NEW'}
 # FENCED_NEW routes every new decision NEW (canary 100); the canary percentage is not a

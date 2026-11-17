@@ -588,5 +588,67 @@ class NotificationsEmail(unittest.TestCase):
         self.assertIn('activate-notifications-email', cr.OPERATIONS)
 
 
+
+class SealingKey(unittest.TestCase):
+    def test_x25519_matches_rfc7748_and_the_reference_library(self):
+        # RFC 7748 §6.1 (Alice).
+        sk = bytes.fromhex('77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a')
+        self.assertEqual(no.x25519_public(sk).hex(),
+                         '8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a')
+        try:
+            from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+            from cryptography.hazmat.primitives import serialization
+        except ImportError:
+            return
+        import os
+        for _ in range(5):
+            raw = os.urandom(32)
+            ref = X25519PrivateKey.from_private_bytes(raw).public_key().public_bytes(
+                serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+            self.assertEqual(no.x25519_public(raw), ref)
+
+    def test_the_pair_is_generated_once_and_mounted_on_both_replicas(self):
+        import tempfile
+        from unittest import mock
+        directory = cr.Path(tempfile.mkdtemp())
+        fake = FakeProducerCr([], statuses=['401', '401'])
+        fake.release.db_sql = lambda db, sql: 't'
+        fake.meeting_psql = lambda q: 't'
+        run = fake.p.run
+
+        class P:
+            NET = 'net'
+            SECRETS = directory
+
+            @staticmethod
+            def write_private(path, data):
+                path.write_text(data)
+        P.run = staticmethod(run)
+        fake.p = P
+        with mock.patch('os.chown'):
+            no.activate_publications(fake, 'a' * 40, '42-1', 'meeting-service')
+            first = (directory / 'notifications-hpke.pub').read_text()
+            fake.statuses = ['401', '401']
+            no.activate_publications(fake, 'a' * 40, '43-1', 'meeting-service')
+        self.assertEqual((directory / 'notifications-hpke.pub').read_text(), first)  # never regenerated
+        kid, public = first.split(':', 1)
+        self.assertRegex(kid, r'^notif-hpke-\d{4}-\d{2}-1$')
+        [(_, changes), _] = fake.activations
+        names = [c[0] for c in changes]
+        self.assertEqual(names, ['notifications', 'notifications-2', 'meeting-service'])
+        for name, env, extra in changes[:2]:
+            self.assertEqual(env, {'NOTIFICATIONS_HPKE_PRIVATE_KEY_FILE': '/run/secrets/notifications-hpke.key',
+                                   'NOTIFICATIONS_HPKE_KEY_ID': kid})
+            self.assertEqual([t for _, t in extra['mounts']], ['/run/secrets/notifications-hpke.key'])
+        meeting = changes[2][1]
+        self.assertEqual(meeting['CF_NOTIFICATIONS_SEALING_KEY'], first)
+        # The private key never leaves the VPS: not in any override or emitted record.
+        private = (directory / 'notifications-hpke.key').read_text()
+        self.assertNotIn(private, json.dumps(fake.emitted) + json.dumps([c[1] for c in changes]))
+        import base64
+        self.assertEqual(base64.urlsafe_b64decode(public + '=='),
+                         no.x25519_public(base64.b64decode(private)))
+
+
 if __name__ == '__main__':
     unittest.main()
