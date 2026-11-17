@@ -339,10 +339,11 @@ async fn provider_webhooks_are_authenticated_deduplicated_and_monotonic() {
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
 
-/// The OTP journey: registration records a verification email in the ledger, the
-/// provider receives the code, the code verifies the address and the account signs in.
+/// The passwordless journey: a code request records a sign-in email in the ledger, the
+/// provider receives the code and link, the code signs in (creating the account), and a
+/// later request's one-click link signs in too, consuming its code.
 #[tokio::test]
-async fn otp_journey_from_registration_to_session() {
+async fn otp_journey_from_code_request_to_session() {
     let app = app!();
     if !require_test_redis() {
         return;
@@ -351,14 +352,20 @@ async fn otp_journey_from_registration_to_session() {
         "otp-{}@example.com",
         &Uuid::new_v4().simple().to_string()[..8]
     );
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/register",
-            Auth::None,
-            json!({"email": address, "username": format!("otp{}", &Uuid::new_v4().simple().to_string()[..6]), "password": "Str0ng!Passw0rd#", "confirm_password": "Str0ng!Passw0rd#"}),
-        )
-        .await;
-    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let request = || {
+        let app = &app;
+        let address = address.clone();
+        async move {
+            app.post(
+                "/api/v1/auth/otp/request",
+                Auth::None,
+                json!({ "email": address }),
+            )
+            .await
+        }
+    };
+    let (s, v) = request().await;
+    assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(
         app.scalar("SELECT count(*) FROM email_deliveries WHERE category='AUTH_VERIFICATION' AND status='QUEUED'")
             .await,
@@ -369,12 +376,15 @@ async fn otp_journey_from_registration_to_session() {
     assert_eq!(worker.tick(Utc::now()).await.unwrap().accepted, 1);
     let (_, to, subject, text) = provider.sent()[0].clone();
     assert_eq!(to, address);
-    assert_eq!(subject, "Your CF Meet verification code");
-    let code: String = text
-        .split_whitespace()
-        .find(|w| w.len() == 6 && w.chars().all(|c| c.is_ascii_digit()))
-        .expect("code in the email")
-        .to_string();
+    assert_eq!(subject, "Your CF Meet sign-in code");
+    let six = |text: &str| -> String {
+        text.split_whitespace()
+            .find(|w| w.len() == 6 && w.chars().all(|c| c.is_ascii_digit()))
+            .expect("code in the email")
+            .to_string()
+    };
+    let code = six(&text);
+    assert!(text.contains("/auth/magic?email="), "{text}");
     // Content (with the code) is erased once accepted.
     assert_eq!(
         app.scalar("SELECT count(*) FROM email_deliveries WHERE category='AUTH_VERIFICATION' AND text_body IS NULL")
@@ -382,77 +392,77 @@ async fn otp_journey_from_registration_to_session() {
         1
     );
 
-    // Wrong code → 400; right code → verified; reused code → 400.
+    // Wrong code → 400; right code → signed in, new account; reused code → 400.
     let wrong = if code == "000000" { "111111" } else { "000000" };
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/verify-email",
-            Auth::None,
-            json!({"email": address, "token": wrong}),
-        )
-        .await;
+    let verify = |code: String| {
+        let app = &app;
+        let address = address.clone();
+        async move {
+            app.post(
+                "/api/v1/auth/otp/verify",
+                Auth::None,
+                json!({ "email": address, "code": code }),
+            )
+            .await
+        }
+    };
+    let (s, _) = verify(wrong.to_string()).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/verify-email",
-            Auth::None,
-            json!({"email": address, "token": code}),
-        )
-        .await;
+    let (s, v) = verify(code.clone()).await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/verify-email",
-            Auth::None,
-            json!({"email": address, "token": code}),
-        )
-        .await;
-    assert_eq!(s, StatusCode::BAD_REQUEST);
-
-    // Sign in → session tokens.
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({"email": address, "password": "Str0ng!Passw0rd#"}),
-        )
-        .await;
-    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["is_new_account"], true);
     assert!(
         v["access_token"].as_str().is_some_and(|t| !t.is_empty()),
         "{v}"
     );
+    let (s, _) = verify(code).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // The new account gets one welcome email.
+    worker.tick(Utc::now()).await.unwrap();
+    assert!(provider
+        .sent()
+        .iter()
+        .any(|(_, to, subject, _)| to == &address && subject == "Welcome to CF Meet"));
 
-    // Password reset: code email in the ledger; the reset sends a security notice.
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/forgot-password",
-            Auth::None,
-            json!({"email": address}),
-        )
-        .await;
+    // A second request: the one-click link signs in, and its code is then used up.
+    let (s, _) = request().await;
     assert_eq!(s, StatusCode::OK);
     worker.tick(Utc::now()).await.unwrap();
-    let (_, _, subject, text) = provider.sent().last().cloned().unwrap();
-    assert_eq!(subject, "Reset your CF Meet password");
-    let reset: String = text
+    let (_, _, subject, text) = provider
+        .sent()
+        .into_iter()
+        .rev()
+        .find(|(_, _, subject, _)| subject == "Your CF Meet sign-in code")
+        .unwrap();
+    assert_eq!(subject, "Your CF Meet sign-in code");
+    let second_code = six(&text);
+    let token: String = text
         .split_whitespace()
-        .find(|w| w.len() == 6 && w.chars().all(|c| c.is_ascii_digit()))
-        .unwrap()
-        .to_string();
+        .find_map(|w| w.split("token=").nth(1))
+        .expect("magic link token")
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit())
+        .collect();
+    assert_eq!(token.len(), 64);
     let (s, v) = app
         .post(
-            "/api/v1/auth/reset-password",
+            "/api/v1/auth/otp/verify-link",
             Auth::None,
-            json!({"email": address, "token": reset, "new_password": "An0ther!Passw0rd#", "confirm_password": "An0ther!Passw0rd#"}),
+            json!({ "email": address, "token": token }),
         )
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    worker.tick(Utc::now()).await.unwrap();
-    assert_eq!(
-        provider.sent().last().unwrap().2,
-        "Your CF Meet password was changed"
-    );
+    assert_eq!(v["is_new_account"], false);
+    let (s, _) = verify(second_code).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "the link consumed its code");
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/otp/verify-link",
+            Auth::None,
+            json!({ "email": address, "token": token }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "the link is single use");
 }
 
 /// The operator console notifies the applicant of a production-access decision through
@@ -717,22 +727,23 @@ async fn complained_or_twice_bounced_recipients_are_suppressed_except_for_securi
 }
 
 /// Notification Service N0-8 (S-5): Redis holds neither the code nor the address; the code
-/// verifies once; a code issued by the previous image (plaintext under the address) still
-/// verifies until it expires and is never written again.
+/// verifies once; a new code replaces the previous one.
 #[tokio::test]
 async fn otp_codes_are_stored_as_salted_hashes_under_address_digests() {
     use backend::services::otp::{email_key, OtpType};
     let app = app!();
+    if !require_test_redis() {
+        return;
+    }
     let otp = app.state.otp_service.clone();
     let redis = app.state.redis.clone();
     let address = format!(
         "Otp-{}@Example.com",
         &Uuid::new_v4().simple().to_string()[..8]
     );
-    let hashed_key = format!("otp:verify:h:{}", email_key(&address));
-    let legacy_key = format!("otp:verify:{}", address.to_lowercase());
+    let hashed_key = format!("otp:signin:h:{}", email_key(&address));
 
-    otp.store_code(&address, "482913", OtpType::Verification)
+    otp.store_code(&address, "482913", OtpType::SignIn)
         .await
         .unwrap();
     let stored = redis
@@ -745,53 +756,45 @@ async fn otp_codes_are_stored_as_salted_hashes_under_address_digests() {
         !hashed_key.contains('@') && !hashed_key.contains("otp-"),
         "no address in the key"
     );
-    assert_eq!(
-        redis.get(&legacy_key).await.unwrap(),
-        None,
-        "the legacy key is never written"
-    );
-    assert!(otp.has_code(&address, OtpType::Verification).await.unwrap());
+    assert!(otp.has_code(&address, OtpType::SignIn).await.unwrap());
 
     assert!(!otp
-        .verify_code(&address, "000000", OtpType::Verification)
+        .verify_code(&address, "000000", OtpType::SignIn)
         .await
         .unwrap());
     assert!(otp
-        .verify_code(&address.to_uppercase(), "482913", OtpType::Verification)
+        .verify_code(&address.to_uppercase(), "482913", OtpType::SignIn)
         .await
         .unwrap());
     assert!(
-        !otp.verify_code(&address, "482913", OtpType::Verification)
+        !otp.verify_code(&address, "482913", OtpType::SignIn)
             .await
             .unwrap(),
         "single use"
     );
     assert_eq!(redis.get(&hashed_key).await.unwrap(), None);
 
-    // A code issued by the previous image before the release.
-    redis.set(&legacy_key, "731842", Some(600)).await.unwrap();
-    assert!(otp.has_code(&address, OtpType::Verification).await.unwrap());
-    assert!(!otp
-        .verify_code(&address, "731843", OtpType::Verification)
+    // A new code replaces the previous one (which then no longer verifies).
+    otp.store_code(&address, "111111", OtpType::SignIn)
         .await
-        .unwrap());
-    assert!(otp
-        .verify_code(&address, "731842", OtpType::Verification)
-        .await
-        .unwrap());
-    assert_eq!(redis.get(&legacy_key).await.unwrap(), None, "consumed");
-
-    // A new code replaces a legacy one (which then no longer verifies).
-    redis.set(&legacy_key, "111111", Some(600)).await.unwrap();
-    otp.store_code(&address, "222222", OtpType::Verification)
+        .unwrap();
+    otp.store_code(&address, "222222", OtpType::SignIn)
         .await
         .unwrap();
     assert!(!otp
-        .verify_code(&address, "111111", OtpType::Verification)
+        .verify_code(&address, "111111", OtpType::SignIn)
         .await
         .unwrap());
     assert!(otp
-        .verify_code(&address, "222222", OtpType::Verification)
+        .verify_code(&address, "222222", OtpType::SignIn)
+        .await
+        .unwrap());
+    // Types never mix: a sign-in code is not a step-up code.
+    otp.store_code(&address, "333333", OtpType::SignIn)
+        .await
+        .unwrap();
+    assert!(!otp
+        .verify_code(&address, "333333", OtpType::StepUp)
         .await
         .unwrap());
 }

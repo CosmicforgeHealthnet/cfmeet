@@ -9,8 +9,11 @@
 //! with fresh keys and reads future messages only.
 //!
 //! Inputs: `CFMEET_BASE_URL` (for example https://api.cfmeet.com) and `CFMEET_E2EE_ACCOUNTS`
-//! (a JSON file `[{"email","password"},{"email","password"}]` of two fresh accounts).
-//! Output: one line `E2EE_ACCEPTANCE_REPORT {json}` (no tokens, passwords or keys; the
+//! (a JSON file `[{"email","code"},{"email","code"}]` of two fresh accounts). Sign-in is
+//! passwordless and every device signs in separately, so both accounts are fixed-code
+//! test accounts (`AUTH_TEST_ACCOUNTS`, enabled for the run with
+//! `AUTH_TEST_ACCOUNTS_ALLOW_IN_PRODUCTION`) and `code` is their fixed 6-digit code.
+//! Output: one line `E2EE_ACCEPTANCE_REPORT {json}` (no tokens, codes or keys; the
 //! random test phrases are listed so the operator can prove the server never stored them).
 use std::collections::BTreeMap;
 
@@ -131,7 +134,8 @@ struct Mls {
 
 struct Account {
     email: String,
-    password: String,
+    /// Fixed sign-in code of the test account.
+    code: String,
     principal: Uuid,
     cfmeet_id: String,
     scope: (Uuid, Uuid, Uuid),
@@ -165,9 +169,9 @@ impl Journey {
             .api
             .ok(
                 Method::POST,
-                "/api/v1/auth/login",
+                "/api/v1/auth/otp/verify",
                 None,
-                Some(json!({"email": a.email, "password": a.password})),
+                Some(json!({"email": a.email, "code": a.code})),
                 &[200],
                 "sign in",
             )
@@ -369,14 +373,14 @@ impl Journey {
     async fn account(
         &self,
         email: &str,
-        password: &str,
+        code: &str,
         first: &mut Option<Signin>,
     ) -> anyhow::Result<Account> {
         let mut s = self
             .sign_in(
                 &Account {
                     email: email.into(),
-                    password: password.into(),
+                    code: code.into(),
                     principal: Uuid::nil(),
                     cfmeet_id: String::new(),
                     scope: (Uuid::nil(), Uuid::nil(), Uuid::nil()),
@@ -414,7 +418,7 @@ impl Journey {
             .await?;
         let account = Account {
             email: email.into(),
-            password: password.into(),
+            code: code.into(),
             principal: uuid_of(&me["principalId"])?,
             cfmeet_id: profile["cfMeetId"].as_str().context("cfMeetId")?.into(),
             scope: (
@@ -621,7 +625,7 @@ impl Journey {
         self.pass("web_only_account_bootstraps_a_trusted_browser_without_phone");
         let mut a_web2 = self.sign_in(&a, "web-2", "WEB", "WEB").await?;
         if self.declare(&mut a_web2).await?["trust"] != "UNTRUSTED" {
-            bail!("a password sign-in alone produced a trusted browser");
+            bail!("a sign-in code alone produced a trusted browser");
         }
         self.link(&a_web2, &a_web1).await?;
         self.pass("second_browser_linked_by_trusted_device_approval");
@@ -984,7 +988,7 @@ async fn main() {
                 .filter_map(|a| {
                     Some((
                         a["email"].as_str()?.to_string(),
-                        a["password"].as_str()?.to_string(),
+                        a["code"].as_str()?.to_string(),
                     ))
                 })
                 .collect()

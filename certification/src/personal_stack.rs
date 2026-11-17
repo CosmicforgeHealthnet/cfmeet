@@ -19,6 +19,14 @@ const OWNERS: &[&str] = &[
     services::MESSAGING,
     services::COMMUNICATIONS,
 ];
+
+/// Fixed-code test accounts of the personal stack (`AUTH_TEST_ACCOUNTS`): the multi-device
+/// E2EE acceptance binary signs every device in separately and cannot read a mailbox.
+pub const E2EE_TEST_ACCOUNTS: [(&str, &str); 2] = [
+    ("e2ee-a@acceptance.invalid", "135791"),
+    ("e2ee-b@acceptance.invalid", "246802"),
+];
+
 pub struct PersonalStack {
     pub urls: BTreeMap<String, String>,
     pub owner_urls: BTreeMap<String, String>,
@@ -295,6 +303,14 @@ impl PersonalStack {
                     .into(),
             ),
             ("APP_ENV".into(), "test".into()),
+            (
+                "AUTH_TEST_ACCOUNTS".into(),
+                E2EE_TEST_ACCOUNTS
+                    .iter()
+                    .map(|(email, code)| format!("{email}:{code}"))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
             ("APP_URL".into(), "http://127.0.0.1:3000".into()),
             ("FRONTEND_URLS".into(), "http://127.0.0.1:3000".into()),
             ("JWT_SECRET".into(), random()),

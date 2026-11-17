@@ -18,7 +18,6 @@ use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-const PASSWORD: &str = "Str0ng!Passw0rd";
 
 macro_rules! app_with_redis {
     () => {{
@@ -99,24 +98,34 @@ impl Device {
 use backend::services::account_devices::ProofPurpose as P;
 
 async fn password_user(app: &TestApp, email: &str) -> Uuid {
+    // An existing email account (sign-in is by emailed code; the name is historical).
     let id = Uuid::new_v4();
-    let hash = backend::services::auth::hash_password(PASSWORD).unwrap();
     app.db
         .conn
         .execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            "INSERT INTO users (id, username, email, password_hash, auth_type, role, status, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, 'local', 'user', 'active'::user_status, now(), now())",
+            "INSERT INTO users (id, username, email, auth_type, role, status, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'local', 'user', 'active'::user_status, now(), now())",
             [
                 id.into(),
                 format!("u_{}", &id.simple().to_string()[..10]).into(),
                 email.into(),
-                hash.into(),
             ],
         ))
         .await
         .unwrap();
     id
+}
+
+/// Passwordless sign-in with a seeded code: the raw `/otp/verify` answer.
+async fn otp_login(app: &TestApp, email: &str) -> (StatusCode, Value) {
+    app.seed_sign_in_code(email, TEST_SIGN_IN_CODE).await;
+    app.post(
+        "/api/v1/auth/otp/verify",
+        Auth::None,
+        json!({ "email": email, "code": TEST_SIGN_IN_CODE }),
+    )
+    .await
 }
 
 fn email() -> String {
@@ -126,15 +135,9 @@ fn email() -> String {
     )
 }
 
-/// Sign in on `d` (password) and declare it. Returns the declare response.
+/// Sign in on `d` (emailed code) and declare it. Returns the declare response.
 async fn sign_in(app: &TestApp, email: &str, d: &mut Device) -> (StatusCode, Value) {
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": email, "password": PASSWORD }),
-        )
-        .await;
+    let (s, v) = otp_login(&app, &email).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     d.access = v["access_token"].as_str().unwrap().into();
     d.refresh = v["refresh_token"].as_str().unwrap().into();
@@ -282,7 +285,7 @@ async fn web_only_account_bootstraps_a_trusted_browser_and_stays_fully_usable() 
     assert_eq!(sessions["sessions"][0]["deviceId"], json!(web.id.unwrap()));
 }
 
-/// The common `User` wrapper for a password user's session token.
+/// The common `User` wrapper for an email user's session token.
 async fn backend_user(_app: &TestApp, email: &str, token: &str) -> User {
     User {
         id: Uuid::nil(),
@@ -305,7 +308,7 @@ async fn four_browser_profiles_one_device_each_and_the_fifth_is_refused() {
         assert_eq!(s, StatusCode::OK, "{v}");
         assert_eq!(
             v["device"]["trust"], "UNTRUSTED",
-            "password alone never trusts"
+            "a sign-in code alone never trusts"
         );
         assert_eq!(
             me(&app, &d).await,
@@ -627,21 +630,9 @@ async fn proofs_are_single_use_and_bound_refresh_needs_the_device_key() {
     assert_eq!(s, StatusCode::UNAUTHORIZED, "replayed proof refused");
     // A proof for one purpose is useless for another, and a stale one is refused.
     let mut other = Device::web();
-    let (s, _) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": e, "password": PASSWORD }),
-        )
-        .await;
+    let (s, _) = otp_login(&app, &e).await;
     assert_eq!(s, StatusCode::OK);
-    let (_, v) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": e, "password": PASSWORD }),
-        )
-        .await;
+    let (_, v) = otp_login(&app, &e).await;
     other.access = v["access_token"].as_str().unwrap().into();
     other.session = app
         .state
@@ -703,7 +694,7 @@ async fn forged_and_cross_account_links_are_refused() {
     sign_in(&app, &e1, &mut alice).await;
     let mut bob = Device::web();
     sign_in(&app, &e2, &mut bob).await;
-    let mut attacker = Device::web(); // knows Alice's password
+    let mut attacker = Device::web(); // got into Alice's mailbox once
     sign_in(&app, &e1, &mut attacker).await;
     let link = request_link(&app, &attacker).await;
     let c = link["comparisonCode"].as_str().unwrap().to_string();
@@ -803,13 +794,7 @@ async fn unclassified_sign_ins_keep_working_and_never_count() {
     // Existing clients that never declare a device are untouched by the policy.
     let mut legacy = vec![];
     for _ in 0..6 {
-        let (s, v) = app
-            .post(
-                "/api/v1/auth/login",
-                Auth::None,
-                json!({ "email": e, "password": PASSWORD }),
-            )
-            .await;
+        let (s, v) = otp_login(&app, &e).await;
         assert_eq!(s, StatusCode::OK);
         legacy.push(v["access_token"].as_str().unwrap().to_string());
     }
@@ -881,16 +866,10 @@ async fn aged_access_token(app: &TestApp, access: &str, secs: i64) -> String {
         .0
 }
 
-/// A password sign-in that never declares a device (legacy client). Returns (access,
+/// A sign-in that never declares a device (legacy client). Returns (access,
 /// refresh, session id).
 async fn legacy_sign_in(app: &TestApp, email: &str) -> (String, String, Uuid) {
-    let (s, v) = app
-        .post(
-            "/api/v1/auth/login",
-            Auth::None,
-            json!({ "email": email, "password": PASSWORD }),
-        )
-        .await;
+    let (s, v) = otp_login(&app, &email).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     let access = v["access_token"].as_str().unwrap().to_string();
     let refresh = v["refresh_token"].as_str().unwrap().to_string();
