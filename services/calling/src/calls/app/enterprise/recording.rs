@@ -707,7 +707,10 @@ impl AppCallService {
         if !self.enterprise_flags.call_recording {
             return Ok(out);
         }
-        if context_of(txn, call.id).await?.is_none() {
+        if context_of(txn, call.id)
+            .await?
+            .is_none_or(|c| c.entry_extension_id.is_none())
+        {
             out.capture = Err("NOT_AN_ENTERPRISE_CALL");
             return Ok(out);
         }
@@ -1518,6 +1521,7 @@ impl AppCallService {
                 .query_all(stmt(
                     "SELECT c.id FROM calls c \
                        JOIN enterprise_call_contexts x ON x.call_id = c.id \
+                         AND x.entry_extension_id IS NOT NULL \
                        JOIN call_recording_policies p ON p.tenant_id = c.tenant_id \
                          AND p.application_id = c.application_id AND p.environment_id = c.environment_id \
                          AND p.is_default AND p.status = 'ACTIVE' AND p.mode = 'AUTO_WHEN_AUTHORIZED' \

@@ -335,7 +335,8 @@ async fn foreign_authority<C: ConnectionTrait>(db: &C, call_id: Uuid) -> CallRes
             DbBackend::Postgres,
             "SELECT 1 WHERE EXISTS (SELECT 1 FROM call_legs WHERE call_id = $1 \
                                      AND leg_kind <> 'APPLICATION') \
-                        OR EXISTS (SELECT 1 FROM enterprise_call_contexts WHERE call_id = $1)",
+                        OR EXISTS (SELECT 1 FROM enterprise_call_contexts WHERE call_id = $1 \
+                             AND entry_extension_id IS NOT NULL)",
             vec![call_id.into()],
         ))
         .await?

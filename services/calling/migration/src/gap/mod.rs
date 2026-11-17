@@ -4,3 +4,4 @@
 
 pub mod m20261203_000052_call_host_controls;
 pub mod m20261204_000053_call_history_visibility;
+pub mod m20261205_000054_direct_call_routing;

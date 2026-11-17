@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.24.0"
+      "description": "cfmeet.calling.http-api 1.25.0"
     },
     {
       "name": "privacy-relay",
@@ -24965,7 +24965,7 @@
           "calling"
         ],
         "summary": "Create and ring an application call",
-        "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice.",
+        "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice. 1.25.0 (direct forwarding): a one-to-one application call (one targetPrincipalIds entry, no privacyRelaySessionId) to a callee with an ACTIVE forwarding rule (/v1/enterprise/forwarding-rules) or an ACTIVE mailbox of its own is routed like an extension call from the callee: ALWAYS forwards before ringing; with no eligible endpoint the UNAVAILABLE rule (else the mailbox) takes it instead of FAILED; BUSY (every offer declined) / NO_ANSWER (offers expired) follow the matching rule, else the callee's mailbox, on the same Call. Loops (including back to the caller) are blocked, the scope's effective enterprise policy applies (forwardingAllowed, voicemailAllowed), ENTERPRISE_CALLING_ENABLED off disables it, and in a scope governed by the Communications personal policy only the voicemail fallback applies. The response of such a call carries no enterprise block; without a rule or mailbox nothing changes.",
         "security": [
           {
             "calling.platformCredential": [
@@ -33139,7 +33139,7 @@
           "calling"
         ],
         "summary": "Create a forwarding rule",
-        "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting forwarding (public targets: public forwarding). Audited.",
+        "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting forwarding (public targets: public forwarding). Audited. 1.25.0: a principal's rules also apply to direct one-to-one application calls to that principal (see POST /v1/calls).",
         "security": [
           {
             "calling.platformCredential": [

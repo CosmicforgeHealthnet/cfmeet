@@ -605,6 +605,9 @@ impl AppCallService {
                 if round.is_empty() || round.iter().any(|i| i.status.is_live()) {
                     return Ok(RingOutcome::Unchanged);
                 }
+                // A direct call whose callee has a forwarding rule or a mailbox gets its
+                // routing context now (BUSY / NO_ANSWER continuation below).
+                self.direct_routing_at_ring_end_in(txn, call).await?;
                 // Enterprise routing first: the next ordered ring-group member or a
                 // fallback takes the SAME Call before any no-answer outcome.
                 match self.enterprise_continue_in(txn, cmd, call).await? {

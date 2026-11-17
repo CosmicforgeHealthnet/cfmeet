@@ -447,18 +447,17 @@ impl AppCallService {
         let policy = effective_policy(txn, scope, context.policy_id)
             .await
             .map_err(super::enterprise_error)?;
-        let Some(action) = router::resolve_forward(
-            &self.calls,
-            txn,
-            &self.principals,
-            scope,
-            &policy,
-            context,
-            destination.id,
-            condition,
-            self.calls.now(),
-        )
-        .await?
+        let Some(action) = self
+            .forward_or_voicemail_in(
+                txn,
+                call,
+                &policy,
+                context,
+                destination.id,
+                condition,
+                self.calls.now(),
+            )
+            .await?
         else {
             return Ok(None);
         };

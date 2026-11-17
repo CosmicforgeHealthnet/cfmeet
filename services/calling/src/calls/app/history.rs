@@ -614,7 +614,7 @@ impl AppCallService {
              LEFT JOIN enterprise_queue_entries e ON e.id = x.queue_entry_id \
              LEFT JOIN enterprise_call_queues q ON q.id = e.queue_id \
              WHERE x.tenant_id = $1 AND x.application_id = $2 AND x.environment_id = $3 \
-             AND x.call_id = ANY($4)",
+             AND x.call_id = ANY($4) AND x.entry_extension_id IS NOT NULL",
             with_ids(Vec::new()),
         ))
         .all(self.db())
