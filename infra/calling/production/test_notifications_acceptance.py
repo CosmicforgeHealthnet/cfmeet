@@ -122,6 +122,28 @@ class Acceptance(unittest.TestCase):
         self.assertEqual(checks['preference_off_suppresses_and_on_restores'], 'FAIL')
         self.assertEqual(checks['role_change_reaches_the_member_once'], 'PASS')
 
+    def test_run_asks_app_acceptance_for_accounts_it_accepts(self):
+        """The real argument checks of app_acceptance.accounts (production run 44173524918 failed
+        on them: auth security checks are for the organization namespace only)."""
+        import tempfile
+        from unittest import mock
+        import app_acceptance
+        seen = []
+
+        def accounts(namespace=None, count=3, security_checks=False, keep_sessions=False):
+            with mock.patch.object(app_acceptance.p, 'SECRETS', cr.Path(tempfile.mkdtemp())), \
+                    mock.patch.object(app_acceptance.p, 'write_private', lambda *a: None), \
+                    mock.patch.object(app_acceptance, 'redis_url', lambda: None), \
+                    mock.patch.object(app_acceptance, 'sign_in',
+                                      lambda a, url: {'is_new_account': True, 'user': {'id': str(uuid.uuid4())}}):
+                seen.append(namespace)
+                return real(namespace, count, security_checks, keep_sessions)
+        real = app_acceptance.accounts
+        with mock.patch.object(app_acceptance, 'accounts', accounts), \
+                mock.patch.object(na.Journey, 'run', lambda self: {}):
+            na.run('44173524918-1', lambda *a: None)
+        self.assertEqual(seen, ['notifications-44173524918-1'])
+
     def test_the_operation_is_gated_on_the_producer_and_the_routing_row(self):
         self.assertIn('notifications-acceptance', cr.OPERATIONS)
         src = (cr.Path(__file__).resolve().parent / 'coordinated_release.py').read_text()

@@ -203,6 +203,6 @@ class Journey(oa.Journey):
 
 def run(run_id, emit):
     import app_acceptance
-    accounts = app_acceptance.accounts('notifications-' + run_id.replace('_', '-').lower()[:48], count=3,
-                                      security_checks=True)
+    # No auth security checks here (app_acceptance runs them for the organization journey only).
+    accounts = app_acceptance.accounts('notifications-' + run_id.replace('_', '-').lower()[:48], count=3)
     return Journey(accounts, emit).run()
