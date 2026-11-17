@@ -3,3 +3,4 @@
 //! history so the previous image can still start against a database that has them.
 
 pub mod m20261203_000052_call_host_controls;
+pub mod m20261204_000053_call_history_visibility;

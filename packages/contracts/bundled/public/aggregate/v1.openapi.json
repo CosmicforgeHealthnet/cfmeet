@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.23.0"
+      "description": "cfmeet.calling.http-api 1.24.0"
     },
     {
       "name": "privacy-relay",
@@ -25736,6 +25736,77 @@
         },
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.endCall",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/history": {
+      "delete": {
+        "operationId": "hideCallFromHistory",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Hide a finished call from a principal's history",
+        "description": "Requires calls.write. 1.24.0: the named principal (a participant of the Call) hides the finished Call from its own history: GET /v1/calls?principalId= and GET /v1/calling/history no longer list it for that principal. Other participants' histories, the Call itself, its events and usage are unchanged (retained evidence). Idempotent; the hide is final. A Call the principal took no part in (or of another scope): 404; a Call not finished yet: 409 CALL_STATE_CONFLICT; any query parameter other than principalId: 400. Separately, the retention worker removes every finished Call from every history CALLING_RETENTION_CALL_HISTORY_DAYS (default 400) after it ended.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": true,
+            "description": "The participant principal whose history hides the Call.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Hidden (or already hidden).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.hideCallFromHistory",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
         ]

@@ -375,6 +375,7 @@ data class has one policy; bounds are configuration (`CALLING_RETENTION_*`, see
 | Class | Action | Bound (default) |
 |---|---|---|
 | `CALL_RECORD` | MINIMIZE display metadata of terminal Calls (participant display names, enterprise entry label → extension code) | `CALLING_RETENTION_CALL_DISPLAY_DAYS` (365) |
+| `CALL_HISTORY` | MINIMIZE: terminal Calls leave every participant's history (`call_participants.history_hidden_at`, reason RETENTION); the Call, events and usage stay. A principal can also hide a finished Call from its own history at any time: `DELETE /v1/calls/{id}/history?principalId=` (reason USER) | `CALLING_RETENTION_CALL_HISTORY_DAYS` (400) |
 | `CALL_EVENT`, `CALL_USAGE`, `SPEND_EVIDENCE`, `ADMIN_AUDIT`, `RECORDING_ACCESS_AUDIT` | RETAIN (evidence other records need; `CALLING_RETENTION_CALL_EVENTS_DAYS` refuses startup) | — |
 | `WEBHOOK_DELIVERY_HISTORY` / `WEBHOOK_EVENT_HISTORY` | DELETE terminal deliveries + attempts, then events without deliveries | `CALLING_RETENTION_WEBHOOK_HISTORY_DAYS` (90) |
 | `CALLING_INCIDENT` | DELETE RESOLVED incidents | `CALLING_RETENTION_INCIDENTS_DAYS` (365) |

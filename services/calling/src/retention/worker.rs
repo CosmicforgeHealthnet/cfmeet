@@ -44,6 +44,8 @@ use crate::{
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RetentionReport {
     pub calls_minimized: usize,
+    /// Calls purged from every participant's history.
+    pub call_histories_purged: usize,
     pub webhook_deliveries_deleted: usize,
     pub webhook_events_deleted: usize,
     pub incidents_deleted: usize,
@@ -56,6 +58,7 @@ pub struct RetentionReport {
 impl RetentionReport {
     pub fn total(&self) -> usize {
         self.calls_minimized
+            + self.call_histories_purged
             + self.webhook_deliveries_deleted
             + self.webhook_events_deleted
             + self.incidents_deleted
@@ -68,6 +71,7 @@ impl RetentionReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Target {
     CallDisplay,
+    CallHistory,
     WebhookDeliveries,
     WebhookEvents,
     Incidents,
@@ -123,6 +127,18 @@ const CALL_RECORD: Sweep = Sweep {
           AND (EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id AND p.display_minimized_at IS NULL) \
                OR EXISTS (SELECT 1 FROM enterprise_call_contexts x WHERE x.call_id = c.id \
                           AND x.entry_label <> x.entry_extension_number))",
+    held: "calling_retention_held($2, c.id, c.tenant_id, c.application_id, c.environment_id)",
+    order: "c.ended_at, c.id",
+    lock: "c",
+};
+
+const CALL_HISTORY: Sweep = Sweep {
+    target: Target::CallHistory,
+    id: "c.id",
+    from: "calls c",
+    due: "c.ended_at IS NOT NULL AND c.ended_at <= $1 \
+          AND EXISTS (SELECT 1 FROM call_participants p WHERE p.call_id = c.id \
+                      AND p.history_hidden_at IS NULL)",
     held: "calling_retention_held($2, c.id, c.tenant_id, c.application_id, c.environment_id)",
     order: "c.ended_at, c.id",
     lock: "c",
@@ -202,8 +218,9 @@ const OPERATOR_AUDIT: Sweep = Sweep {
 };
 
 /// The classes the worker acts on, in sweep order (deliveries before their events).
-pub const SWEPT_CLASSES: [DataClass; 6] = [
+pub const SWEPT_CLASSES: [DataClass; 7] = [
     DataClass::CallRecord,
+    DataClass::CallHistory,
     DataClass::WebhookDeliveryHistory,
     DataClass::WebhookEventHistory,
     DataClass::CallingIncident,
@@ -214,6 +231,7 @@ pub const SWEPT_CLASSES: [DataClass; 6] = [
 fn sweeps(class: DataClass) -> &'static [Sweep] {
     match class {
         DataClass::CallRecord => std::slice::from_ref(&CALL_RECORD),
+        DataClass::CallHistory => std::slice::from_ref(&CALL_HISTORY),
         DataClass::WebhookDeliveryHistory => std::slice::from_ref(&WEBHOOK_DELIVERIES),
         DataClass::WebhookEventHistory => std::slice::from_ref(&WEBHOOK_EVENTS),
         DataClass::CallingIncident => std::slice::from_ref(&INCIDENTS),
@@ -283,6 +301,7 @@ impl RetentionWorker {
             };
             match class {
                 DataClass::CallRecord => report.calls_minimized = acted,
+                DataClass::CallHistory => report.call_histories_purged = acted,
                 DataClass::WebhookDeliveryHistory => report.webhook_deliveries_deleted = acted,
                 DataClass::WebhookEventHistory => report.webhook_events_deleted = acted,
                 DataClass::CallingIncident => report.incidents_deleted = acted,
@@ -294,6 +313,7 @@ impl RetentionWorker {
         if report.total() > 0 || !report.failed.is_empty() {
             tracing::info!(
                 calls_minimized = report.calls_minimized,
+                call_histories_purged = report.call_histories_purged,
                 webhook_deliveries_deleted = report.webhook_deliveries_deleted,
                 webhook_events_deleted = report.webhook_events_deleted,
                 incidents_deleted = report.incidents_deleted,
@@ -510,6 +530,18 @@ async fn act(
                 )
                 .await?,
             );
+            calls.sort_unstable();
+            calls.dedup();
+            Ok(calls.len())
+        }
+        Target::CallHistory => {
+            // History visibility only: the participant rows (and every relation) stay.
+            let mut calls = minimized_calls(
+                "UPDATE call_participants SET history_hidden_at = $2, \
+                   history_hidden_reason = 'RETENTION' \
+                 WHERE call_id = ANY($1) AND history_hidden_at IS NULL RETURNING call_id",
+            )
+            .await?;
             calls.sort_unstable();
             calls.dedup();
             Ok(calls.len())

@@ -17,7 +17,7 @@ use axum::{
     extract::{rejection::QueryRejection, Path, Query, State},
     http::{header, HeaderValue},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{delete, get},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -48,6 +48,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/v1/calls", get(list_calls))
         .route("/v1/calls/:call_id", get(get_call))
+        .route("/v1/calls/:call_id/history", delete(hide_from_history))
 }
 
 /// Call data is customer data: never cached by intermediaries or clients.
@@ -76,6 +77,41 @@ async fn get_call(
     let mut view = CallView::from(&detail);
     view.can_view_recordings = ctx.has_scope(names::ENTERPRISE_RECORDING_READ);
     Ok(no_store(view))
+}
+
+/// `DELETE /v1/calls/{call_id}/history?principalId=` (calls.write): the principal hides a
+/// finished Call from its own history (204, idempotent).
+async fn hide_from_history(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let Query(pairs) =
+        query.map_err(|_| CallingError::Validation("The query string is invalid."))?;
+    let principal = match pairs.as_slice() {
+        [(k, v)] if k == "principalId" => Uuid::parse_str(v)
+            .map(PrincipalId::from_uuid)
+            .map_err(|_| CallingError::Validation("principalId must be a UUID."))?,
+        _ => {
+            return Err(CallingError::Validation(
+                "principalId (and nothing else) is required.",
+            ))
+        }
+    };
+    let call_id = Uuid::parse_str(&call_id)
+        .map(CallId::from_uuid)
+        .map_err(|_| CallingError::NotFound)?;
+    state
+        .app
+        .hide_from_history(CallScope::of_platform(&ctx), principal, call_id)
+        .await?;
+    let mut response = axum::http::StatusCode::NO_CONTENT.into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
 }
 
 async fn list_calls(

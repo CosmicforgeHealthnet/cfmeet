@@ -25,6 +25,13 @@
 //!      (expired, the caller cancelled, the Call ended, the ring moved on);
 //!   6. NOT_REACHED — never offered and the Call is over; IN_PROGRESS otherwise.
 //!
+//! A principal may hide a finished Call from its own history
+//! (`DELETE /v1/calls/{id}/history?principalId=`, [`AppCallService::hide_from_history`]),
+//! and the retention worker purges Calls that ended longer ago than
+//! `CALLING_RETENTION_CALL_HISTORY_DAYS` (default 400) from every history: either way
+//! `call_participants.history_hidden_at` is set once and the entry is never listed again
+//! (the canonical Call, its events and usage are retained evidence and stay).
+//!
 //! Every query is confined to the caller's scope and to one principal, walks the
 //! `idx_call_participants_history` keyset (never the whole table), and returns safe
 //! fields only: no provider, edge or contact data, no object key or URL.
@@ -328,7 +335,7 @@ fn history_statement_for(
            WHEN c.current_state IN {TERMINAL} THEN 'NOT_REACHED' \
            ELSE 'IN_PROGRESS' END AS outcome) h \
          WHERE p.tenant_id = $1 AND p.application_id = $2 AND p.environment_id = $3 \
-           AND p.principal_id = $4"
+           AND p.principal_id = $4 AND p.history_hidden_at IS NULL"
     );
     push_keyset(
         &mut sql,
@@ -464,6 +471,59 @@ impl AppCallService {
         let mut entries = history_entries(&rows)?;
         self.enrich(scope, principal, &mut entries).await?;
         Ok(entries)
+    }
+
+    /// `DELETE /v1/calls/{id}/history?principalId=`: `principal` hides the finished Call
+    /// from its own history (no other participant's history changes). Idempotent; a Call
+    /// the principal took no part in, or of another scope, is 404; a Call not finished yet
+    /// is 409 (it is still the principal's live call). Returns whether this request hid it.
+    pub async fn hide_from_history(
+        &self,
+        scope: CallScope,
+        principal: PrincipalId,
+        call_id: CallId,
+    ) -> CallResult<bool> {
+        let mut values = scope_values(scope);
+        values.push(principal.as_uuid().into());
+        values.push(call_id.as_uuid().into());
+        let row = self
+            .db()
+            .query_one(stmt(
+                "SELECT c.current_state, p.history_hidden_at IS NOT NULL \
+                   FROM call_participants p JOIN calls c ON c.id = p.call_id \
+                  WHERE p.tenant_id = $1 AND p.application_id = $2 AND p.environment_id = $3 \
+                    AND p.principal_id = $4 AND p.call_id = $5",
+                values,
+            ))
+            .await?
+            .ok_or(CallError::NotFound)?;
+        let state: String = row.try_get_by_index(0)?;
+        let hidden: bool = row.try_get_by_index(1)?;
+        if hidden {
+            return Ok(false);
+        }
+        let state = crate::calls::state::CallState::parse(&state).ok_or(CallError::NotFound)?;
+        if !state.is_terminal() {
+            return Err(CallError::InvalidTransition {
+                state,
+                action: "HIDE_FROM_HISTORY",
+            });
+        }
+        let changed = super::enterprise::exec(
+            self.db(),
+            "UPDATE call_participants SET history_hidden_at = $3, history_hidden_reason = 'USER' \
+              WHERE call_id = $1 AND principal_id = $2 AND history_hidden_at IS NULL",
+            vec![
+                call_id.as_uuid().into(),
+                principal.as_uuid().into(),
+                self.calls.now().into(),
+            ],
+        )
+        .await?;
+        if changed > 0 {
+            crate::metrics::inc("calling_history_hidden_total", &[("reason", "USER")]);
+        }
+        Ok(changed > 0)
     }
 
     /// One page of the Calls of `scope` routed through an enterprise `destination`

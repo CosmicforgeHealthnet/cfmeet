@@ -16,10 +16,10 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 273 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.5.0 | 74 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.23.0 | 141 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.24.0 | 142 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **660** |
+| **Total** | | | **661** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -648,7 +648,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.5.
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.23.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.24.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 
@@ -725,6 +725,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.23.0**; b
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/v1/calling/history` | signaling credential | The endpoint's principal's call history | 200, 400, 401, 503 | AUTHENTICATION_FAILED, SERVICE_UNAVAILABLE, SIGNALING_CREDENTIAL_EXPIRED, VALIDATION_ERROR | `calling/http/v1.openapi.json#recoverCallHistory` |
+| DELETE | `/v1/calls/{call_id}/history` | platform credential (server-side only) | Hide a finished call from a principal's history | 204, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#hideCallFromHistory` |
 
 ### Call Invitations
 

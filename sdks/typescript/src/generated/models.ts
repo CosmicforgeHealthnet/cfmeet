@@ -2036,6 +2036,11 @@ export namespace Calling {
       params: { path: { webhook_id: string } };
       response: Webhook;
     };
+    /** DELETE /v1/calls/{call_id}/history — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    hideCallFromHistory: {
+      params: { path: { call_id: string }; query: { principalId: Uuid } };
+      response: void;
+    };
     /** POST /v1/calls/{call_id}/hold — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     holdCall: {
       params: { path: { call_id: string }; body: CommandRequest; idempotencyKey?: string };

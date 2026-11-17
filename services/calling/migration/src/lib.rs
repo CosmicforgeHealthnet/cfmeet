@@ -142,6 +142,7 @@ impl MigratorTrait for GapClosureMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
             Box::new(gap::m20261203_000052_call_host_controls::Migration),
+            Box::new(gap::m20261204_000053_call_history_visibility::Migration),
         ]
     }
 
