@@ -13,6 +13,7 @@
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority (ADR 0032) |
 //! | `CF_NUMBERING_BASE_URL` | no | Numbering (Part IV L): DCN grants; unset = DCN calls fail closed |
 //! | `CF_DEVELOPER_PLATFORM_BASE_URL` | with `CALLING_PUBLIC_EVENTS_DESTINATION` `developer-platform` / `both` | the Developer Platform's central event ingestion (`developer-event.publish`, Part VI §53) |
+//! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service (roadmap N7): Calling writes and relays its `calling.*` publications (missed call, voicemail / recording ready) to I1 (`notifications-event.publish`); unset = nothing is written or sent, and the notification-publications migration history is not required |
 //!
 //! There is no default key, no inline-key variable and no shared secret. A missing or
 //! malformed key or bundle stops the service. Error messages never contain key material.
@@ -57,6 +58,12 @@ const TARGETS: &[(&str, &str)] = &[
     (
         "CF_DEVELOPER_PLATFORM_BASE_URL",
         cf_service_auth::services::DEVELOPER_PLATFORM,
+    ),
+    // Roadmap N7: the Notification Service's I1 (notifications-event.publish) for Calling's
+    // missed-call / voicemail / recording publications (optional; unset = none written).
+    (
+        "CF_NOTIFICATIONS_BASE_URL",
+        cf_service_auth::services::NOTIFICATIONS,
     ),
 ];
 

@@ -106,3 +106,21 @@ The Hub (`services/communications`) publishes `communications.connection.request
 | `CF_NOTIFICATIONS_BASE_URL` | set: publications are written in the relationship transaction and relayed to I1, signed as `cfmeet.communications` for audience `cfmeet.notifications`. Unset (default): nothing is written or sent; the Hub behaves exactly as before |
 
 Activation needs the grant on both Notification Service replicas: receiver `cfmeet.notifications`, issuer `cfmeet.communications`, permission `notifications-event.publish`, then `CF_NOTIFICATIONS_BASE_URL` on the Hub. No coordinated-release operation does this yet. Rows: `PENDING` → `ACKED` (ACCEPTED / DUPLICATE / HELD), `DEAD` (REJECTED or a contract 4xx), `SKIPPED` (no CF Meet account, a block, a request or connection that no longer holds), `EXPIRED` (not posted within 24 h); settled rows are purged after 30 days. Retries back off from 2 s to at most 5 min.
+
+### Calling publications (`MISSED_CALLS`, `VOICEMAIL`)
+
+Calling (`services/calling`) publishes catalogue #15-#17 through its own outbox `calling_notification_publications` (migration history `calling_notification_publications_seaql_migrations`, applied by `calling-migration up` after the main history; the previous image's readiness is unchanged). Before this Calling notified no user of these facts (missed calls were derived for the call history only; voicemail / recording facts reach only customer webhooks and the Developer Platform), so there is no legacy path and no routing fence (`routingVersion` 1).
+
+| Event | Written in the transaction of | Recipients |
+|---|---|---|
+| `calling.call.participant-missed` (`callId`, `callKind`) | the Call's terminal transition | each RECIPIENT participant whose outcome is MISSED (the call-history derivation; never answered, declined or answered elsewhere) |
+| `calling.voicemail.ready` (`callId`, `voiceMessageId`) | the message becoming READY | the mailbox owners (principal, extension member, queue agents, ring-group principal members) |
+| `calling.recording.ready` (`callId`, `recordingId`) | the recording becoming READY | the principals who took part (initiator, recipients who answered or connected) |
+
+Recipients are CF Meet accounts only: `NATIVE_CF_USER` principals of a FIRST_PARTY tenant whose reference is `cfmeet-user:<uuid>`. Nothing is written for an EXTERNAL tenant; inside a FIRST_PARTY tenant a principal without an account or an inactive one is `SKIPPED` (`RECIPIENT_NOT_CF_MEET_ACCOUNT`, `RECIPIENT_INACTIVE`). Envelopes are ids only (no name, number, label, object key or media); missed calls carry a coalesce key per caller and 10-minute window.
+
+| Calling variable | Effect |
+|---|---|
+| `CF_NOTIFICATIONS_BASE_URL` | set: publications are written and relayed to I1 every second, signed as `cfmeet.calling` for audience `cfmeet.notifications`; the service refuses to start unless the notification-publications history is applied. Unset (default): nothing is written or sent; Calling behaves exactly as before |
+
+Activation needs the grant on both Notification Service replicas: receiver `cfmeet.notifications`, issuer `cfmeet.calling`, permission `notifications-event.publish`, then `CF_NOTIFICATIONS_BASE_URL` on Calling (after a Calling release that ran `calling-migration up`). The release tooling has no Calling publication activation yet. Rows: `PENDING` → `ACKED` (ACCEPTED / DUPLICATE / HELD), `DEAD` (REJECTED or a contract 4xx), `SKIPPED` (no CF Meet account, an inactive recipient, a message / recording no longer READY), `EXPIRED` (not posted within 24 h for missed calls, 72 h for voicemail / recordings); settled rows are purged after 30 days. Retries back off from 2 s to at most 5 min. Calling's incoming-call push is not wired to I3 (`NoPushTransport`; ringing reaches devices through Calling's signaling and the recovery API).

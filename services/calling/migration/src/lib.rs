@@ -224,3 +224,74 @@ pub async fn communications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait
         .collect::<Result<_, _>>()?;
     Ok(known == actual)
 }
+
+mod m20261117_000001_notification_publications;
+
+/// Notification Service roadmap N7: Calling's outbox of publications to the Notification
+/// Service (`calling_notification_publications`). A THIRD separate history for the same
+/// rollback-safety reason as the Communications one: the previous image fails closed on a
+/// migration of [`MIGRATION_TABLE`] it does not know and checks the Communications history
+/// exactly, so neither may gain this table. Never merge the histories.
+pub struct NotificationPublicationsMigrator;
+
+/// Where [`NotificationPublicationsMigrator`] records its migrations.
+pub const NOTIFICATION_PUBLICATIONS_MIGRATION_TABLE: &str =
+    "calling_notification_publications_seaql_migrations";
+
+#[async_trait::async_trait]
+impl MigratorTrait for NotificationPublicationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            m20261117_000001_notification_publications::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(NOTIFICATION_PUBLICATIONS_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// Read-only readiness of the notification-publications history: every migration of
+/// [`NotificationPublicationsMigrator`] is applied and nothing else is recorded. Required
+/// only while `CF_NOTIFICATIONS_BASE_URL` is configured (only then is the table used).
+pub async fn notification_publications_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    use sea_orm_migration::sea_orm::{DbBackend, Statement};
+    let present = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            format!(
+                "SELECT to_regclass('public.{NOTIFICATION_PUBLICATIONS_MIGRATION_TABLE}') IS NOT NULL AS present"
+            ),
+        ))
+        .await?
+        .ok_or_else(|| sea_orm_migration::sea_orm::DbErr::Custom("readiness unavailable".into()))?
+        .try_get::<bool>("", "present")?;
+    if !present {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            format!("SELECT version FROM {NOTIFICATION_PUBLICATIONS_MIGRATION_TABLE}"),
+        ))
+        .await?;
+    let known: std::collections::BTreeSet<_> = NotificationPublicationsMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_owned())
+        .collect();
+    let actual: std::collections::BTreeSet<_> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(known == actual)
+}
+
+/// `calling-migration up`: the main history, then the notification-publications one (the
+/// Communications history keeps its own binary). Both are additive.
+pub async fn up_all(
+    db: &sea_orm_migration::sea_orm::DatabaseConnection,
+) -> Result<(), sea_orm_migration::sea_orm::DbErr> {
+    Migrator::up(db, None).await?;
+    NotificationPublicationsMigrator::up(db, None).await
+}

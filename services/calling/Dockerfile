@@ -5,7 +5,8 @@
 #   docker build -f services/calling/Dockerfile -t cfmeet-calling .
 #
 # Only packages/service-auth, packages/object-storage, packages/webhooks,
-# packages/contracts and services/calling enter the build context
+# packages/notification-client, packages/contracts and services/calling enter the build
+# context
 # (services/calling/Dockerfile.dockerignore); no other service's source is copied.
 #
 # The image contains the service (`calling`), its migration runner (`calling-migration`)
@@ -23,6 +24,8 @@ COPY packages/communications-policy packages/communications-policy
 COPY packages/usage-facts packages/usage-facts
 COPY packages/object-storage packages/object-storage
 COPY packages/webhooks packages/webhooks
+# Notification Service producer client (envelope builder / validator; roadmap N7).
+COPY packages/notification-client packages/notification-client
 COPY packages/contracts packages/contracts
 COPY services/calling services/calling
 WORKDIR /src/services/calling

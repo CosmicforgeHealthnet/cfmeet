@@ -84,6 +84,28 @@ async fn main() -> anyhow::Result<()> {
         ));
     }
 
+    // Roadmap N7: publications to the Notification Service (missed call, voicemail and
+    // recording ready) only with CF_NOTIFICATIONS_BASE_URL; unset, nothing is written or
+    // sent and the notification-publications history is not required.
+    let notifications_configured = service_auth_settings
+        .targets
+        .iter()
+        .any(|(service, _)| service.as_str() == cf_service_auth::services::NOTIFICATIONS);
+    if notifications_configured
+        && !calling_migration::notification_publications_ready(&db)
+            .await
+            .map_err(|e| anyhow!("cannot read migration state ({})", summarize_db_error(&e)))?
+    {
+        return Err(anyhow!(
+            "CF_NOTIFICATIONS_BASE_URL needs the notification-publications migration history; \
+             run `calling-migration up` first"
+        ));
+    }
+    tracing::info!(
+        notification_publications = notifications_configured,
+        "notification service publications (CF_NOTIFICATIONS_BASE_URL)"
+    );
+
     // Application calling (Part C §20–§25): no fallback signaling key or provider
     // credential exists; an invalid configuration stops the service before it serves.
     let lookup = |key: &str| std::env::var(key).ok();
@@ -452,7 +474,10 @@ async fn main() -> anyhow::Result<()> {
             bus,
             push: Arc::new(NoPushTransport),
             app_config,
-            call_config: CallServiceConfig::default(),
+            call_config: CallServiceConfig {
+                notification_publications: notifications_configured,
+                ..CallServiceConfig::default()
+            },
             privacy_relay,
             numbering,
             contact_delegation,
@@ -529,6 +554,19 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    // Roadmap N7: the notification publication relay (SKIP LOCKED: every instance).
+    if notifications_configured {
+        let sink: Arc<dyn calling::notification_publications::NotificationEventSink> = Arc::new(
+            calling::notification_publications::NotificationServiceEvents::new(
+                state.service_auth.client_arc(),
+            ),
+        );
+        tokio::spawn(calling::notification_publications::run(
+            state.db.clone(),
+            sink,
+        ));
+    }
 
     // The identity projection follows the Platform Access change feed (every instance;
     // the cursor row lock serializes pages).
