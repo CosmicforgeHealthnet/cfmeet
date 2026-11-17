@@ -72,6 +72,10 @@ pub struct Privacy {
     pub direct_chat_policy: Audience,
     pub public_profile_visibility: Visibility,
     pub presence_visibility: Audience,
+    /// Gap audit S9: who may add this person to groups (CONNECTIONS or NOBODY). Optional
+    /// on update (absent: unchanged); always present when read.
+    #[serde(default)]
+    pub group_invitation_policy: Option<Audience>,
 }
 impl Default for Privacy {
     fn default() -> Self {
@@ -83,6 +87,7 @@ impl Default for Privacy {
             direct_chat_policy: Audience::Connections,
             public_profile_visibility: Visibility::Public,
             presence_visibility: Audience::Connections,
+            group_invitation_policy: Some(Audience::Connections),
         }
     }
 }
@@ -96,6 +101,8 @@ pub struct PrivacyRow {
     pub direct_chat_policy: Audience,
     pub public_profile_visibility: Visibility,
     pub presence_visibility: Audience,
+    #[serde(default)]
+    pub group_invitation_policy: Option<Audience>,
 }
 impl PrivacyRow {
     pub fn settings(&self) -> Privacy {
@@ -107,6 +114,10 @@ impl PrivacyRow {
             direct_chat_policy: self.direct_chat_policy,
             public_profile_visibility: self.public_profile_visibility,
             presence_visibility: self.presence_visibility,
+            group_invitation_policy: Some(
+                self.group_invitation_policy
+                    .unwrap_or(Audience::Connections),
+            ),
         }
     }
 }

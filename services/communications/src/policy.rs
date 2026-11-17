@@ -395,8 +395,11 @@ pub fn decide(action: Action, connected: bool, p: &Privacy) -> bool {
         Action::GroupNotification => true,
         Action::ContactRequest => p.contact_request_permissions == RequestPermission::Everyone,
         Action::PersonalActivity => false, // handled only for a verified active self above
+        // Gap audit S9: its own setting, no longer the contact-request permission.
         Action::GroupInvitation => {
-            connected && p.contact_request_permissions == RequestPermission::Everyone
+            connected
+                && p.group_invitation_policy.unwrap_or(Audience::Connections)
+                    == Audience::Connections
         }
         Action::Presence => connected && p.presence_visibility == Audience::Connections,
         Action::ProfileDiscovery => {
@@ -427,6 +430,24 @@ mod tests {
             assert!(decide(action, true, &p));
         }
     }
+    #[test]
+    fn group_invitations_follow_their_own_setting() {
+        // Gap audit S9: closing contact requests no longer closes group invitations.
+        let closed_requests = Privacy {
+            contact_request_permissions: RequestPermission::Nobody,
+            ..Privacy::default()
+        };
+        assert!(decide(Action::GroupInvitation, true, &closed_requests));
+        assert!(!decide(Action::ContactRequest, true, &closed_requests));
+        let no_groups = Privacy {
+            group_invitation_policy: Some(Audience::Nobody),
+            ..Privacy::default()
+        };
+        assert!(!decide(Action::GroupInvitation, true, &no_groups));
+        assert!(decide(Action::ContactRequest, true, &no_groups));
+        assert!(!decide(Action::GroupInvitation, false, &Privacy::default()));
+    }
+
     #[test]
     fn privacy_restrictions_stay_effective_after_connection_acceptance() {
         let p = Privacy {

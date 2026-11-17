@@ -170,19 +170,81 @@ impl MigrationTrait for NotificationPublications {
         ))
     }
 }
-/// Apply the foundation history, then the unified, device-session, timeline-realtime and
-/// notification-publications ones.
+/// Gap audit S9: the separate group-invitation privacy setting. A SIXTH separate history
+/// for the same rollback-safety reason as the others. Never merge them.
+pub struct GroupInvitationPolicyMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for GroupInvitationPolicyMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(GroupInvitationPolicy)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_group_invitation_policy_seaql_migrations").into_iden()
+    }
+}
+struct GroupInvitationPolicy;
+impl MigrationName for GroupInvitationPolicy {
+    fn name(&self) -> &str {
+        "m20261118_000001_group_invitation_policy"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for GroupInvitationPolicy {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/006_group_invitation_policy.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the S9 group-invitation history is applied.
+pub async fn group_invitation_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_group_invitation_policy_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_group_invitation_policy_seaql_migrations"
+                .to_owned(),
+        ))
+        .await?;
+    Ok(
+        rows.len() == 1
+            && rows[0].try_get::<String>("", "version")? == GroupInvitationPolicy.name(),
+    )
+}
+/// Apply the foundation history, then the unified, device-session, timeline-realtime,
+/// notification-publications and group-invitation ones.
 pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     Migrator::up(db, None).await?;
     UnifiedMigrator::up(db, None).await?;
     DeviceSessionMigrator::up(db, None).await?;
     TimelineRealtimeMigrator::up(db, None).await?;
-    NotificationPublicationsMigrator::up(db, None).await
+    NotificationPublicationsMigrator::up(db, None).await?;
+    GroupInvitationPolicyMigrator::up(db, None).await
 }
 /// Everything this image needs: the Sections 9-23 histories, the Section 14 one, the
 /// MSG-009 timeline-realtime one and the N7 notification-publications one.
 pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
-    if !timeline_ready(db).await? {
+    if !timeline_ready(db).await? || !group_invitation_ready(db).await? {
         return Ok(false);
     }
     let row = db

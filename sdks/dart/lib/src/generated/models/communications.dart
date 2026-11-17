@@ -2059,10 +2059,11 @@ class Privacy {
   const Privacy.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Privacy.create({required String contactRequestPermissions, required String directChatPolicy, required String incomingCallPolicy, required String invitationPermissions, required String presenceVisibility, required bool publicIdDiscoverable, required String publicProfileVisibility}) =>
+  factory Privacy.create({required String contactRequestPermissions, required String directChatPolicy, String? groupInvitationPolicy, required String incomingCallPolicy, required String invitationPermissions, required String presenceVisibility, required bool publicIdDiscoverable, required String publicProfileVisibility}) =>
       Privacy.fromJson(<String, Object?>{
         'contactRequestPermissions': contactRequestPermissions,
         'directChatPolicy': directChatPolicy,
+        if (groupInvitationPolicy != null) 'groupInvitationPolicy': groupInvitationPolicy,
         'incomingCallPolicy': incomingCallPolicy,
         'invitationPermissions': invitationPermissions,
         'presenceVisibility': presenceVisibility,
@@ -2076,6 +2077,9 @@ class Privacy {
   String get contactRequestPermissions => json['contactRequestPermissions']! as String;
 
   String get directChatPolicy => json['directChatPolicy']! as String;
+
+  /// Who may add this person to groups (gap audit S9; previously the contact-request permission decided). Optional on update: absent keeps the current value. Always present when read.
+  String? get groupInvitationPolicy => json['groupInvitationPolicy'] as String?;
 
   String get incomingCallPolicy => json['incomingCallPolicy']! as String;
 

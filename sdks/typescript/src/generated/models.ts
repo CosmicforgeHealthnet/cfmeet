@@ -2886,6 +2886,8 @@ export namespace Communications {
     directChatPolicy: "CONNECTIONS" | "NOBODY";
     publicProfileVisibility: "PUBLIC" | "CONNECTIONS" | "HIDDEN";
     presenceVisibility: "CONNECTIONS" | "NOBODY";
+    /** Who may add this person to groups (gap audit S9; previously the contact-request permission decided). Optional on update: absent keeps the current value. Always present when read. */
+    groupInvitationPolicy?: "CONNECTIONS" | "NOBODY";
   };
   export type PrivacyUpdate = {
     expectedVersion: number;

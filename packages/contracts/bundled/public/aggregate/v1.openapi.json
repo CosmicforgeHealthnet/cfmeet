@@ -46,7 +46,7 @@
     },
     {
       "name": "communications",
-      "description": "cfmeet.communications.http-api 1.5.0"
+      "description": "cfmeet.communications.http-api 1.6.0"
     }
   ],
   "paths": {
@@ -64262,6 +64262,14 @@
               "CONNECTIONS",
               "NOBODY"
             ]
+          },
+          "groupInvitationPolicy": {
+            "type": "string",
+            "enum": [
+              "CONNECTIONS",
+              "NOBODY"
+            ],
+            "description": "Who may add this person to groups (gap audit S9; previously the contact-request permission decided). Optional on update: absent keeps the current value. Always present when read."
           }
         },
         "required": [
