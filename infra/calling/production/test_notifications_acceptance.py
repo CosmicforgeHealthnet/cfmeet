@@ -21,11 +21,13 @@ class FakeNotifications(FakeApi):
         self.deliver, self.duplicate, self.honour, self.leak = deliver, duplicate, honour_preferences, leak
 
     def notify(self, user_id):
-        if not self.deliver or (self.honour and not self.prefs[user_id]['organizationUpdates']):
+        if not self.deliver:
             return
+        # Document 4 §7.2 rule 7: a category switched off records the in-app item silently.
+        silent = self.honour and not self.prefs[user_id]['organizationUpdates']
         for _ in range(2 if self.duplicate else 1):
             self.inbox[user_id].append({'id': str(uuid.uuid4()), 'category': 'ORGANIZATION_UPDATES',
-                                        'readAt': None, 'dismissedAt': None})
+                                        'readAt': None, 'dismissedAt': None, 'silent': silent})
 
     def __call__(self, method, url, headers, data):
         path = url[len(oa.PUBLIC):]
@@ -41,7 +43,8 @@ class FakeNotifications(FakeApi):
                     items += self.inbox[b['userId']]
                 return 200, {'items': items, 'unreadCount': 0}
             if path == '/api/v2/notifications/unread-count':
-                return 200, {'unreadCount': sum(1 for i in mine if not i['readAt'] and not i['dismissedAt'])}
+                return 200, {'unreadCount': sum(1 for i in mine if not i['readAt'] and not i['dismissedAt']
+                                                and not i['silent'])}
             if path in ('/api/v2/notifications/read', '/api/v2/notifications/dismiss'):
                 field = 'readAt' if path.endswith('read') else 'dismissedAt'
                 for i in mine:
