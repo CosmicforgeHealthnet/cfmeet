@@ -17,18 +17,15 @@ class AuthProbeSafety(unittest.TestCase):
             a.denial_shape({})
 
     def fixture(self):
-        account = {'username': 'cfmeet_accept_a_1234abcd',
-                   'email': 'cfmeet_accept_a_1234abcd@example.invalid',
-                   'userId': str(uuid.uuid4()), 'password': 'fixture-password'}
-        return account, {'user_id': account['userId']}
+        return {'username': 'cfmeet_accept_a_1234abcd', 'email': 'cfmeet_accept_a_1234abcd@example.invalid'}
 
-    def test_real_or_mismatched_accounts_are_refused_before_any_network_or_redis(self):
+    def test_real_or_existing_accounts_are_refused_before_any_network_or_redis(self):
         for changed in ({'email': 'real@example.com'}, {'username': 'real'}, {'userId': str(uuid.uuid4())}):
-            account, registration = self.fixture()
+            account = self.fixture()
             account.update(changed)
             with patch.object(a.mail, 'public') as http, patch.object(a.mail, 'redis_command') as redis:
                 with self.assertRaises(AssertionError):
-                    a.run_pending(account, registration, 'redis://fixture')
+                    a.run_pending(account, 'redis://fixture')
                 http.assert_not_called()
                 redis.assert_not_called()
 
@@ -36,7 +33,7 @@ class AuthProbeSafety(unittest.TestCase):
         for stored in ('123456', '', '00:00'):
             with patch.object(a.mail, 'redis_command', return_value=stored):
                 with self.assertRaises(AssertionError):
-                    a.controlled(None, {}, 'cfmeet_accept_a_1234abcd@example.invalid', 'otp:reset')
+                    a.controlled(None, {}, 'cfmeet_accept_a_1234abcd@example.invalid')
 
     def test_controlled_replacement_preserves_ttl_and_cannot_create_an_unissued_code(self):
         address = 'cfmeet_accept_a_1234abcd@example.invalid'
@@ -51,11 +48,11 @@ class AuthProbeSafety(unittest.TestCase):
             return 'OK' if 'XX KEEPTTL' in command else None
 
         with patch.object(a.mail, 'redis_command', redis):
-            code = a.controlled(None, {}, address, 'otp:reset')
+            code = a.controlled(None, {}, address)
         self.assertRegex(code, r'^\d{6}$')
         command, values = commands[-1]
         self.assertIn('XX KEEPTTL', command)
-        self.assertEqual(values['KEY'], a.otp.hashed_key(address, 'otp:reset'))
+        self.assertEqual(values['KEY'], a.otp.hashed_key(address, 'otp:signin'))
         salt = bytes.fromhex(values['VALUE'].split(':')[0])
         self.assertEqual(values['VALUE'], a.otp.sealed(code, salt))
 
@@ -63,9 +60,15 @@ class AuthProbeSafety(unittest.TestCase):
         secret = 'private-token-and-address@example.invalid'
         with patch.object(a.mail, 'public', return_value=(500, {'access_token': secret})):
             with self.assertRaises(AssertionError) as error:
-                a.request('POST', '/api/v1/auth/login', {})
+                a.request('POST', '/api/v1/auth/otp/verify', {})
         self.assertNotIn(secret, str(error.exception))
         self.assertIn('500', str(error.exception))
+
+
+    def test_an_issued_challenge_with_a_magic_link_is_still_a_salted_hash(self):
+        link = 'ab' * 32
+        with patch.object(a.mail, 'redis_command', side_effect=[a.otp.sealed('123456') + ':' + link, '0']):
+            a.issued(None, {}, 'cfmeet_accept_a_1234abcd@example.invalid')
 
 
 if __name__ == '__main__':

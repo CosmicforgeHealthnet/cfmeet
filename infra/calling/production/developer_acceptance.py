@@ -95,7 +95,9 @@ class Client:
 
 
 def login(account):
-    _, value = Client().call('POST', '/api/v1/auth/login', {'email': account['email'], 'password': account['password']})
+    """Passwordless sign-in of a controlled account (code replaced in Redis, VPS only)."""
+    client = Client()
+    value = app_acceptance.sign_in_via(lambda path, body: client.call('POST', path, body)[1], account)
     return value['access_token']
 
 

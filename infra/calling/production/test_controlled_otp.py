@@ -1,5 +1,5 @@
-"""N0-8: acceptance tooling writes controlled codes in exactly the Meeting Service format and
-still reads plaintext codes from the previous image."""
+"""N0-8: acceptance tooling writes controlled codes in exactly the Meeting Service format, under
+the passwordless sign-in and step-up keys, and only replaces a code that was really issued."""
 import unittest
 from unittest.mock import patch
 
@@ -16,8 +16,10 @@ class Format(unittest.TestCase):
     def test_same_format_and_keys_as_the_meeting_service(self):
         self.assertEqual(c.sealed('123456', bytes(range(16))), VECTOR_SEALED)
         self.assertEqual(c.address_digest(' Ada@Example.com '), VECTOR_DIGEST)
-        self.assertEqual(c.hashed_key('Ada@Example.com'), 'otp:verify:h:' + VECTOR_DIGEST)
-        self.assertEqual(c.legacy_key('Ada@Example.com'), 'otp:verify:ada@example.com')
+        self.assertEqual(c.hashed_key('Ada@Example.com'), 'otp:signin:h:' + VECTOR_DIGEST)
+        user = '0b6f4f4e-8f2a-4c1e-9d0b-3e2f1a0c9b7d'
+        self.assertEqual(c.step_up_key(user, 'DEACTIVATE_ACCOUNT'),
+                         'otp:stepup:h:' + c.address_digest('user:%s:deactivate_account' % user))
         code = c.new_code()
         self.assertRegex(code, r'^\d{6}$')
         self.assertNotIn(code, c.sealed(code))
@@ -50,33 +52,46 @@ class EmailAcceptance(unittest.TestCase):
         address = 'cfmeetotp@example.invalid'
         redis = FakeRedis({c.hashed_key(address): 'issued:hash'})
         with patch.object(eo, 'redis_command', redis):
-            code = eo.otp_from_redis(None, {}, address)
+            code = eo.otp_from_redis(None, {}, c.hashed_key(address))
         self.assertRegex(code, r'^\d{6}$')
         stored = redis.data[c.hashed_key(address)]
         salt, digest = stored.split(':')
         self.assertEqual(c.sealed(code, bytes.fromhex(salt)), stored, 'a valid salted hash of the code')
         self.assertNotIn(code, stored)
         self.assertFalse(any(cmd.startswith('GET') for cmd, _ in redis.commands), 'nothing read back')
+        self.assertTrue(any('KEEPTTL' in cmd for cmd, _ in redis.commands), 'the issued TTL is kept')
 
-    def test_the_previous_image_plaintext_code_is_still_read(self):
-        address = 'cfmeetotp@example.invalid'
-        redis = FakeRedis({c.legacy_key(address): '482913'})
+    def test_no_issued_code_is_reported_as_missing_and_nothing_is_created(self):
+        redis = FakeRedis({})
         with patch.object(eo, 'redis_command', redis):
-            self.assertEqual(eo.otp_from_redis(None, {}, address), '482913')
-        self.assertNotIn(c.hashed_key(address), redis.data, 'never writes the new key for the old image')
-
-    def test_no_issued_code_is_reported_as_missing(self):
-        with patch.object(eo, 'redis_command', FakeRedis({})):
-            self.assertIsNone(eo.otp_from_redis(None, {}, 'nobody@example.invalid'))
+            self.assertIsNone(eo.otp_from_redis(None, {}, c.hashed_key('nobody@example.invalid')))
+        self.assertEqual(redis.data, {})
 
 
 class AppAcceptance(unittest.TestCase):
-    def test_reader_input_carries_both_keys_and_a_sealed_controlled_code(self):
-        x = app_acceptance.controlled_input('redis://r:6379/0', 'cfmeet_accept_a_1@example.invalid')
-        self.assertEqual(x['hashed'], c.hashed_key('cfmeet_accept_a_1@example.invalid'))
-        self.assertEqual(x['legacy'], c.legacy_key('cfmeet_accept_a_1@example.invalid'))
+    def test_helper_input_carries_the_key_and_a_sealed_controlled_code(self):
+        key = c.hashed_key('cfmeet_accept_a_1@example.invalid')
+        x = app_acceptance.controlled_input('redis://r:6379/0', key)
+        self.assertEqual(x['hashed'], key)
+        self.assertNotIn('legacy', x)
         salt = bytes.fromhex(x['sealed'].split(':')[0])
         self.assertEqual(c.sealed(x['code'], salt), x['sealed'])
+        self.assertIn("'XX','KEEPTTL'", app_acceptance.REDIS_HELPER, 'only an issued code is replaced')
+
+    def test_sign_in_requests_a_code_replaces_it_and_verifies(self):
+        calls = []
+
+        def api(path, body):
+            calls.append((path, body))
+            return {'access_token': 'a', 'refresh_token': 'r', 'is_new_account': True, 'user': {'id': 'u'}}
+
+        account = {'email': 'cfmeet_accept_a_1@example.invalid'}
+        with patch.object(app_acceptance, 'api', api), \
+                patch.object(app_acceptance, 'controlled_code', return_value='012345') as controlled:
+            self.assertEqual(app_acceptance.refresh_token_for(account, 'redis://r'), 'r')
+        controlled.assert_called_once_with(c.hashed_key(account['email']), 'redis://r')
+        self.assertEqual(calls, [('otp/request', {'email': account['email']}),
+                                 ('otp/verify', {'email': account['email'], 'code': '012345'})])
 
 
 if __name__ == '__main__':

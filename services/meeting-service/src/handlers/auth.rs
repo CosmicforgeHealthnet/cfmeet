@@ -981,7 +981,7 @@ pub async fn oauth_google_callback(
 ///
 /// Completes Google sign-in when the API runs with `GOOGLE_OAUTH_TOKEN_DELIVERY=exchange_code`.
 /// The code from the callback redirect is valid once, for 60 seconds. Returns the same body as
-/// `POST /api/v1/auth/login`. Public endpoint.
+/// `POST /api/v1/auth/otp/verify` (without `is_new_account`). Public endpoint.
 #[utoipa::path(
     post,
     path = "/api/v1/auth/oauth/google/exchange",
