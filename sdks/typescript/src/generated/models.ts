@@ -7002,6 +7002,8 @@ export namespace Messaging {
   export type ClientTokenRequest = {
     deviceId: Uuid;
     ttlSeconds?: number;
+    /** First-party relays only (others: INSUFFICIENT_SCOPE). The relay's opaque reference of the VERIFIED account session the token is issued for; ending that account session (POST /v1/messaging/session-devices/revoke) ends this client session too, and no other. */
+    accountSessionRef?: string;
   };
   /** An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. */
   export type CommitRequest = {

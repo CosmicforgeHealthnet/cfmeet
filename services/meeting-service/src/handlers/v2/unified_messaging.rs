@@ -242,15 +242,44 @@ pub async fn revoke_device(
 pub async fn client_token(
     State(state): State<AppState>,
     actor: ActorContext,
-    V2Json(body): V2Json<Value>,
+    V2Json(mut body): V2Json<Value>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    relay(
-        &state,
-        &actor,
-        BridgeOperation::IssueClientToken,
-        Some(body),
-    )
-    .await
+    let um = integration(&state)?;
+    let user = verified_user(&state, &actor)?;
+    // Gap audit A11: the token is bound to the caller's own sign-in, so signing out of
+    // this browser ends it while the account's other sign-ins keep theirs. The binding
+    // is the relay's; whatever a client sends under that name is discarded.
+    let session = actor.registered().and_then(|r| r.account_session_id);
+    if let Some(map) = body.as_object_mut() {
+        map.remove("accountSessionRef");
+    }
+    let bound = match (session, body.as_object_mut()) {
+        (Some(session), Some(map)) => {
+            map.insert(
+                "accountSessionRef".into(),
+                Value::String(um.account_session_ref(session)),
+            );
+            true
+        }
+        _ => false,
+    };
+    let (mut status, mut value) = um
+        .bridge(user, BridgeOperation::IssueClientToken, Some(body.clone()))
+        .await?;
+    if bound && status == 400 {
+        // A Messaging image that predates the binding refuses the unknown field: issue
+        // the token unbound (it still ends with its device, revoke-all, or expiry).
+        if let Some(map) = body.as_object_mut() {
+            map.remove("accountSessionRef");
+        }
+        (status, value) = um
+            .bridge(user, BridgeOperation::IssueClientToken, Some(body))
+            .await?;
+    }
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+        Json(value),
+    ))
 }
 
 #[derive(Debug, Default, Deserialize)]

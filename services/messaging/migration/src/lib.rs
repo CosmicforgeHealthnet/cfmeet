@@ -42,6 +42,7 @@ mod m20261201_000029_public_event_destinations;
 mod m20261202_000030_session_devices_inbox;
 mod m20261203_000031_receipt_coalescing_timeline;
 mod m20261204_000032_application_baselines;
+mod m20261205_000033_client_session_binding;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -84,6 +85,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261202_000030_session_devices_inbox::Migration),
             Box::new(m20261203_000031_receipt_coalescing_timeline::Migration),
             Box::new(m20261204_000032_application_baselines::Migration),
+            Box::new(m20261205_000033_client_session_binding::Migration),
         ]
     }
 

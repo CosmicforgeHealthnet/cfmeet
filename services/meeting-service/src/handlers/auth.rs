@@ -664,12 +664,17 @@ pub async fn logout(
     }
 
     // Part V H §104: logging out of CF Meet also ends the account's Messaging client
-    // sessions (durable job; a Messaging outage never blocks the logout).
-    if let (Some(um), Ok(user_id)) = (
-        state.meeting.core.unified.as_ref(),
-        Uuid::parse_str(&claims.sub),
-    ) {
-        um.revoke_sessions_for_user(user_id, "LOGOUT").await;
+    // sessions (durable job; a Messaging outage never blocks the logout). Gap audit A11:
+    // a sign-in with a session id ends only its own session devices (done above through
+    // `session_ended`); only a legacy token, whose logout already ends every credential,
+    // ends every Messaging client session of the account.
+    if claims.session_id().is_none() {
+        if let (Some(um), Ok(user_id)) = (
+            state.meeting.core.unified.as_ref(),
+            Uuid::parse_str(&claims.sub),
+        ) {
+            um.revoke_sessions_for_user(user_id, "LOGOUT").await;
+        }
     }
 
     Ok(Json(MessageResponse {

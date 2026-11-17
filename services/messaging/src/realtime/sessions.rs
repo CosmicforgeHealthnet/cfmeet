@@ -212,6 +212,11 @@ pub struct IssueRequest {
     pub device_id: Uuid,
     #[serde(default)]
     pub ttl_seconds: Option<i64>,
+    /// Gap audit A11: first-party relays only. The opaque reference of the VERIFIED
+    /// account session the token is issued for; ending that account session
+    /// (`POST /v1/messaging/session-devices/revoke`) ends this client session too.
+    #[serde(default)]
+    pub account_session_ref: Option<String>,
 }
 
 /// `POST /v1/messaging/client-tokens`.
@@ -232,6 +237,16 @@ pub async fn issue_token(
         return Err(Error::validation(format!(
             "ttlSeconds must be between 60 and {max}"
         )));
+    }
+    if let Some(reference) = request.account_session_ref.as_deref() {
+        if !ctx.first_party {
+            return Err(Error::code(ErrorCode::InsufficientScope));
+        }
+        if !super::session_devices::valid_reference(reference) {
+            return Err(Error::validation(
+                "accountSessionRef must be 64 lower-case hexadecimal characters",
+            ));
+        }
     }
     crate::messages::e2ee::require_own_device(
         &state.db,
@@ -260,8 +275,9 @@ pub async fn issue_token(
     db::exec(
         &state.db,
         "INSERT INTO messaging_client_sessions (id, tenant_id, application_id, environment_id, environment_kind, \
-           service_account_id, principal_id, device_id, credential_id, scopes, created_at, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+           service_account_id, principal_id, device_id, credential_id, scopes, created_at, expires_at, \
+           account_session_sha256) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         vec![
             session_id.into(),
             ctx.scope.tenant_id.into(),
@@ -275,6 +291,7 @@ pub async fn issue_token(
             scopes.join(" ").into(),
             now.into(),
             expires.into(),
+            request.account_session_ref.clone().into(),
         ],
     )
     .await?;

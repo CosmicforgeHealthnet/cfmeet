@@ -1903,3 +1903,67 @@ async fn inbox_signals_cover_unsubscribed_and_new_conversations_without_content(
     // A principal outside every conversation hears nothing.
     other.quiet("inbox.event", Duration::from_millis(400)).await;
 }
+
+/// Gap audit A11: a client token issued by a first-party relay for one account session
+/// ends when that account session ends; the same principal's other sign-ins keep theirs.
+/// Only a first-party relay may bind a token to an account session.
+#[tokio::test]
+async fn gap_client_sessions_bound_to_an_account_session_end_only_with_it() {
+    let Some(rt) = Rt::start().await else { return };
+    let h = &rt.h;
+    let c = h.first_party(true);
+    let alice = h.member(&c, 0).await;
+    let (laptop, phone) = (session_ref(0xa1), session_ref(0xa2));
+    for binding in [&laptop, &phone] {
+        let r = h
+            .post(
+                &c,
+                Some(alice.principal),
+                "/v1/messaging/client-tokens",
+                json!({ "deviceId": alice.device_id(), "accountSessionRef": binding }),
+            )
+            .await;
+        assert!(r.status.is_success(), "{}", r.text);
+    }
+    let unbound = rt.token(&c, &alice).await;
+    let active = format!(
+        "SELECT count(*) FROM messaging_client_sessions WHERE principal_id = '{}' AND status = 'ACTIVE'",
+        alice.principal
+    );
+    assert_eq!(h.scalar(&active).await, 3);
+    let r = h
+        .post(
+            &c,
+            Some(alice.principal),
+            "/v1/messaging/session-devices/revoke",
+            json!({ "accountSessionRef": laptop }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["revokedSessions"], 1, "{}", r.text);
+    assert_eq!(h.scalar(&active).await, 2, "only the laptop sign-in ended");
+    assert!(rt.ticket_with(&unbound).await.status.is_success());
+
+    // A third-party application cannot bind tokens to account sessions.
+    let third = h.first_party(false);
+    let bob = h.member(&third, 0).await;
+    let r = h
+        .post(
+            &third,
+            Some(bob.principal),
+            "/v1/messaging/client-tokens",
+            json!({ "deviceId": bob.device_id(), "accountSessionRef": laptop }),
+        )
+        .await;
+    assert_eq!(r.code(), "INSUFFICIENT_SCOPE", "{}", r.text);
+    // A malformed reference is refused.
+    let r = h
+        .post(
+            &c,
+            Some(alice.principal),
+            "/v1/messaging/client-tokens",
+            json!({ "deviceId": alice.device_id(), "accountSessionRef": "nope" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+}

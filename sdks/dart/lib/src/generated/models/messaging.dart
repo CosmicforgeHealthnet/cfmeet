@@ -801,14 +801,18 @@ class ClientTokenRequest {
   const ClientTokenRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ClientTokenRequest.create({required Uuid deviceId, int? ttlSeconds}) =>
+  factory ClientTokenRequest.create({String? accountSessionRef, required Uuid deviceId, int? ttlSeconds}) =>
       ClientTokenRequest.fromJson(<String, Object?>{
+        if (accountSessionRef != null) 'accountSessionRef': accountSessionRef,
         'deviceId': deviceId,
         if (ttlSeconds != null) 'ttlSeconds': ttlSeconds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// First-party relays only (others: INSUFFICIENT_SCOPE). The relay's opaque reference of the VERIFIED account session the token is issued for; ending that account session (POST /v1/messaging/session-devices/revoke) ends this client session too, and no other.
+  String? get accountSessionRef => json['accountSessionRef'] as String?;
 
   Uuid get deviceId => json['deviceId']! as String;
 

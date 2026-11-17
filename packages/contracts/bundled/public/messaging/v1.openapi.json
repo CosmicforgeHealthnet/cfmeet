@@ -9349,6 +9349,11 @@
             "type": "integer",
             "minimum": 60,
             "maximum": 86400
+          },
+          "accountSessionRef": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "First-party relays only (others: INSUFFICIENT_SCOPE). The relay's opaque reference of the VERIFIED account session the token is issued for; ending that account session (POST /v1/messaging/session-devices/revoke) ends this client session too, and no other."
           }
         },
         "required": [

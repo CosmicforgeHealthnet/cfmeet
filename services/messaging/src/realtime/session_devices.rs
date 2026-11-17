@@ -55,7 +55,7 @@ pub const CAPABILITIES: &[&str] = &["REALTIME_MANAGED"];
 /// A session device lives at most this long (a client then creates a new one).
 pub const MAX_LIFETIME_HOURS: i64 = 24;
 
-fn valid_reference(r: &str) -> bool {
+pub(crate) fn valid_reference(r: &str) -> bool {
     r.len() == 64 && r.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
@@ -302,20 +302,78 @@ pub async fn revoke(
                     vec![
                         ctx2.scope.environment_id.into(),
                         principal.into(),
-                        request.account_session_ref.into(),
+                        request.account_session_ref.clone().into(),
                         now.into(),
                     ],
                 )
                 .await?;
                 let ids: Vec<Uuid> = devices.iter().map(|d| d.id).collect();
                 let sessions = revoke_device_sessions(txn, &ctx2, principal, &ids, now).await?;
-                Ok(json!({ "revokedSessionDevices": ids.len(), "revokedSessions": sessions }))
+                // Gap audit A11: client sessions of real devices issued for this account
+                // session end with it; the account's other sign-ins keep theirs.
+                let bound = revoke_bound_sessions(
+                    txn,
+                    &ctx2,
+                    principal,
+                    &request.account_session_ref,
+                    now,
+                )
+                .await?;
+                Ok(json!({
+                    "revokedSessionDevices": ids.len(),
+                    "revokedSessions": sessions + bound,
+                }))
             })
         })
         .await
         .map_err(Error::from)?;
     state.realtime.outbox_wakeup.notify_one();
     Ok(result)
+}
+
+/// Gap audit A11: revokes the ACTIVE client sessions issued for one account session (by
+/// its opaque reference) and queues the events that close their connections.
+async fn revoke_bound_sessions<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    principal: Uuid,
+    reference: &str,
+    now: DateTime<Utc>,
+) -> Result<usize> {
+    #[derive(FromQueryResult)]
+    struct Id {
+        id: Uuid,
+    }
+    let revoked: Vec<Id> = db::all(
+        txn,
+        "UPDATE messaging_client_sessions SET status = 'REVOKED', revoked_at = $4, revoked_reason = 'ACCOUNT_SESSION_ENDED' \
+         WHERE environment_id = $1 AND principal_id = $2 AND account_session_sha256 = $3 AND status = 'ACTIVE' \
+         RETURNING id",
+        vec![
+            ctx.scope.environment_id.into(),
+            principal.into(),
+            reference.into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    let request_ctx = request_context();
+    for r in &revoked {
+        outbox::enqueue(
+            txn,
+            NewEvent {
+                event_type: "messaging.client-session.revoked",
+                aggregate_type: "CLIENT_SESSION",
+                aggregate_id: r.id,
+                scope: scope_of(ctx),
+                payload: json!({ "session_id": r.id, "principal_id": principal }),
+            },
+            &request_ctx,
+            now,
+        )
+        .await?;
+    }
+    Ok(revoked.len())
 }
 
 /// Revokes every ACTIVE client session of the given session devices and queues the
