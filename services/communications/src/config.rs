@@ -34,6 +34,9 @@ pub struct Config {
     /// it nothing is published and the facade answers 503 DEPENDENCY_NOT_CONFIGURED while the
     /// switch is SERVICE (never a local write).
     pub notifications_configured: bool,
+    /// Contact-request publications (N7) are written and relayed: in production exactly when
+    /// `notifications_configured` (the same `CF_NOTIFICATIONS_BASE_URL`).
+    pub notifications_publications: bool,
 }
 fn required(k: &str) -> Result<String, String> {
     std::env::var(k)
@@ -142,6 +145,7 @@ impl Config {
             calling_configured,
             messaging_configured,
             notifications_configured,
+            notifications_publications: notifications_configured,
         })
     }
 }

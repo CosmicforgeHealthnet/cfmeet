@@ -605,12 +605,12 @@ impl Harness {
         // The previous (N7) image checks the first five histories exactly and the MSG-009 one
         // the first four; the N10 preference-authority history is separate, so both still
         // start (rollback safety).
-        assert!(communications_migration::notification_publications_ready(&db)
-            .await
-            .unwrap());
-        assert!(communications_migration::timeline_ready(&db)
-            .await
-            .unwrap());
+        assert!(
+            communications_migration::notification_publications_ready(&db)
+                .await
+                .unwrap()
+        );
+        assert!(communications_migration::timeline_ready(&db).await.unwrap());
         // The previous (Section 14) image checks foundation + unified + device-session
         // exactly; the MSG-009 history is separate, so it still starts (rollback safety).
         assert!(communications_migration::device_session_ready(&db)
@@ -698,13 +698,16 @@ impl Harness {
             ServiceId::meeting_service(),
             ServiceId::calling(),
             ServiceId::messaging(),
-            ServiceId::notifications(),
         ] {
             targets.insert(id, &format!("http://{address}")).unwrap();
         }
-        if let Some(url) = notifications_url {
-            targets.insert(ServiceId::notifications(), url).unwrap();
-        }
+        // The Notification Service: the test's fake I1 when given, else the mock (U6 / U7).
+        let notifications_target = notifications_url
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("http://{address}"));
+        targets
+            .insert(ServiceId::notifications(), &notifications_target)
+            .unwrap();
         let inbound = verifier(
             ServiceId::communications(),
             vec![
@@ -758,7 +761,8 @@ impl Harness {
                 ),
                 calling_configured: true,
                 messaging_configured: true,
-                notifications_configured: notifications_url.is_some(),
+                notifications_configured: true,
+                notifications_publications: notifications_url.is_some(),
             }),
             metrics: Arc::new(Metrics::default()),
         };

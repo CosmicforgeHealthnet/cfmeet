@@ -725,6 +725,7 @@ async fn an_unavailable_service_is_a_clear_error_and_nothing_is_written_locally(
             calling_configured: true,
             messaging_configured: true,
             notifications_configured: false,
+            notifications_publications: false,
         }),
         metrics: h.state.metrics.clone(),
     };
