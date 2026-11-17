@@ -100,6 +100,16 @@ export interface AddOrganizationTeamMemberRequest {
   userId?: string | null;
 }
 
+/**
+ * Support-assisted email change (admin only): the owner lost access to the old address
+ * and was verified by support outside the product.
+ */
+export interface AdminChangeEmailRequest {
+  new_email: string;
+  /** Why and how the owner was verified (recorded in the security audit). */
+  reason: string;
+}
+
 /** Paginated response for admin logs */
 export interface AdminLogListResponse {
   data: Array<AdminLogResponse>;
@@ -598,13 +608,6 @@ export interface BusinessOrganizationPage {
 }
 
 
-export interface ChangePasswordRequest {
-  confirm_password: string;
-  current_password: string;
-  new_password: string;
-}
-
-
 export interface ChangedResponse {
   changed: boolean;
 }
@@ -650,6 +653,13 @@ export interface CloseBreakoutRequest {
 export interface CloseBreakoutsResponse {
   breakouts: Array<BreakoutView>;
   providerEnforcement: ProviderEnforcement;
+}
+
+
+export interface CodeSentResponse {
+  /** How long the emailed code stays valid. */
+  expiresInSecs: number;
+  message: string;
 }
 
 /** Complete effective collaboration policy of a conference. */
@@ -1074,11 +1084,10 @@ export interface DataSharingProfile {
 /** Optional body of POST /api/v1/users/me/deactivate (ACC-026). */
 export interface DeactivateAccountRequest {
   /**
-   * The account's current password. Required unless the caller signed in within the
-   * re-authentication window (default 10 minutes); accounts without a password (Google
-   * sign-in) re-authenticate by signing in again.
+   * Single-use token from `POST /api/v2/me/step-up/verify` with purpose
+   * `DEACTIVATE_ACCOUNT` (a code emailed to the account's address).
    */
-  current_password?: string | null;
+  step_up_token?: string | null;
 }
 
 /**
@@ -1250,6 +1259,32 @@ export interface DuplicateMeetingSpaceRequest {
   title?: string | null;
 }
 
+
+export interface EmailChangeConfirmRequest {
+  /** The 6-digit code emailed to the NEW address. */
+  code: string;
+  newEmail: string;
+}
+
+
+export interface EmailChangeRequest {
+  newEmail: string;
+  /** From `POST /api/v2/me/step-up/verify` with purpose `CHANGE_EMAIL`. */
+  stepUpToken: string;
+}
+
+/** Undo a self-service email change with the token mailed to the previous address. */
+export interface EmailChangeRevertRequest {
+  token: string;
+}
+
+
+export interface EmailChangedResponse {
+  email: string;
+  /** Other sessions were signed out; this one stays signed in. */
+  otherSessionsEnded: boolean;
+}
+
 /** What happened to a requested invitation email. */
 export type EmailDelivery = "DISABLED" | "ACCEPTED" | "FAILED";
 
@@ -1316,11 +1351,6 @@ export type FailureKind = "AUDIO_PUBLISH" | "VIDEO_PUBLISH" | "SCREEN_SHARE_PUBL
 
 
 export type FieldRequirement = "REQUIRED" | "OPTIONAL" | "DISABLED";
-
-
-export interface ForgotPasswordRequest {
-  email: string;
-}
 
 
 export interface GenerateReportRequest {
@@ -1547,13 +1577,7 @@ export interface ListMeetingSpacesQuery {
   limit?: number | null;
 }
 
-
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-
+/** Tokens and account of a completed sign-in. */
 export interface LoginResponse {
   access_token: string;
   refresh_token: string;
@@ -2238,6 +2262,35 @@ export interface OrganizationViewer {
   status: string;
 }
 
+/** Start a passwordless sign-in (or sign-up): a one-time code is emailed. */
+export interface OtpRequest {
+  email: string;
+}
+
+/**
+ * Finish a passwordless sign-in with the magic link from the same email (the email
+ * address and token both come from the link).
+ */
+export interface OtpVerifyLinkRequest {
+  email: string;
+  token: string;
+}
+
+/** Finish a passwordless sign-in with the emailed 6-digit code. */
+export interface OtpVerifyRequest {
+  code: string;
+  email: string;
+}
+
+/** A completed passwordless sign-in. */
+export interface OtpVerifyResponse {
+  access_token: string;
+  /** True when this sign-in created the account (first sign-in with this address). */
+  is_new_account: boolean;
+  refresh_token: string;
+  user: UserInfo;
+}
+
 
 export interface OwnerTransferRequest {
   newOwnerUserId: string;
@@ -2850,26 +2903,6 @@ export interface RefreshTokenResponse {
 }
 
 
-export interface RegisterRequest {
-  confirm_password: string;
-  email: string;
-  password: string;
-  username: string;
-}
-
-
-export interface RegisterResponse {
-  email: string;
-  role: string;
-  /**
-   * `pending_verification` (spelled `pendingverification` until
-   * `ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`.
-   */
-  status: string;
-  user_id: string;
-}
-
-
 export interface RegistrationCreated {
   /**
    * Opaque admission token (shown once; only its hash is stored). Absent for an
@@ -2940,19 +2973,6 @@ export interface RescheduleConferenceRequest {
   scheduledStartAt: string;
   /** Optional optimistic-concurrency guard: the conference `version` last read. */
   version?: number | null;
-}
-
-
-export interface ResendVerificationRequest {
-  email: string;
-}
-
-
-export interface ResetPasswordRequest {
-  confirm_password: string;
-  email: string;
-  new_password: string;
-  token: string;
 }
 
 
@@ -3127,7 +3147,10 @@ export interface SendMessageRequest {
 
 /** One account session as shown to its owner. */
 export interface SessionRecord {
-  /** PASSWORD, GOOGLE or LEGACY_REFRESH (a pre-session sign-in carried forward). */
+  /**
+   * EMAIL_OTP, GOOGLE, PASSWORD (historical) or LEGACY_REFRESH (a pre-session sign-in
+   * carried forward).
+   */
   authMethod: string;
   authenticatedAt: string;
   /** Shortened User-Agent of the client that signed in. */
@@ -3226,6 +3249,28 @@ export interface StartTranscriptionRequest {
   mode?: TranscriptionModeDto | null;
   /** POST_MEETING: the READY recording to transcribe. */
   sourceRecordingId?: string | null;
+}
+
+/** What the confirmation is for; a token for one purpose never authorizes another. */
+export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL";
+
+
+export interface StepUpRequest {
+  purpose: StepUpPurpose;
+}
+
+
+export interface StepUpTokenResponse {
+  expiresInSecs: number;
+  /** Single-use token for the purpose, bound to this session. Send it with the action. */
+  stepUpToken: string;
+}
+
+
+export interface StepUpVerifyRequest {
+  /** The 6-digit code emailed to the account's current address. */
+  code: string;
+  purpose: StepUpPurpose;
 }
 
 
@@ -3508,35 +3553,17 @@ export interface UserMeResponse {
 export interface ValidationIssue {
   /**
    * Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,
-   * `password_strength`, `passwords_mismatch`.
+   * `range`.
    */
   code: string;
   /**
    * Public JSON path of the offending field, as sent by the client (honours the
-   * request's serde naming), e.g. `password`, `displayName`, `items[0].email`.
+   * request's serde naming), e.g. `email`, `displayName`, `items[0].email`.
    * `null` when the problem concerns the request as a whole.
    */
   field: string | null;
   /** Safe, human-readable message for this field. */
   message: string;
-}
-
-
-export interface VerifyEmailRequest {
-  email: string;
-  token: string;
-}
-
-
-export interface VerifyResetTokenRequest {
-  email: string;
-  token: string;
-}
-
-
-export interface VerifyResetTokenResponse {
-  message: string;
-  valid: boolean;
 }
 
 
@@ -3834,6 +3861,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/resolve/{identifier}": "v2_resolve_identifier",
   "GET /health": "health_check",
   "PATCH /api/v1/admin/users/{id}": "update_user",
+  "PATCH /api/v1/admin/users/{id}/email": "change_user_email",
   "PATCH /api/v1/participants/{participant_id}/audio": "update_audio",
   "PATCH /api/v1/participants/{participant_id}/video": "update_video",
   "PATCH /api/v1/users/me": "update_current_user",
@@ -3859,17 +3887,13 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v1/api-keys": "create_api_key",
   "POST /api/v1/api/meetings": "api_create_meeting",
   "POST /api/v1/api/meetings/{id}/join": "api_join_meeting",
-  "POST /api/v1/auth/change-password": "change_password",
-  "POST /api/v1/auth/forgot-password": "forgot_password",
-  "POST /api/v1/auth/login": "login",
+  "POST /api/v1/auth/email-change/revert": "revert_email_change",
   "POST /api/v1/auth/logout": "logout",
   "POST /api/v1/auth/oauth/google/exchange": "oauth_google_exchange",
+  "POST /api/v1/auth/otp/request": "request_otp",
+  "POST /api/v1/auth/otp/verify": "verify_otp",
+  "POST /api/v1/auth/otp/verify-link": "verify_otp_link",
   "POST /api/v1/auth/refresh": "refresh_token",
-  "POST /api/v1/auth/register": "register",
-  "POST /api/v1/auth/resend-verification": "resend_verification_email",
-  "POST /api/v1/auth/reset-password": "reset_password",
-  "POST /api/v1/auth/verify-email": "verify_email",
-  "POST /api/v1/auth/verify-reset-token": "verify_reset_token",
   "POST /api/v1/meetings": "create_meeting",
   "POST /api/v1/meetings/instant": "create_instant_meeting",
   "POST /api/v1/meetings/join/{meeting_identifier}": "join_meeting_by_identifier",
@@ -3957,8 +3981,12 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/me/device-links/{linkId}/reject": "v2_reject_device_link",
   "POST /api/v2/me/devices/current": "v2_declare_my_device",
   "POST /api/v2/me/devices/{deviceId}/revoke": "v2_revoke_my_device",
+  "POST /api/v2/me/email/change/request": "v2_request_email_change",
+  "POST /api/v2/me/email/change/verify": "v2_confirm_email_change",
   "POST /api/v2/me/sessions/revoke-all": "v2_revoke_all_my_sessions",
   "POST /api/v2/me/sessions/{sessionId}/revoke": "v2_revoke_my_session",
+  "POST /api/v2/me/step-up/request": "v2_request_step_up",
+  "POST /api/v2/me/step-up/verify": "v2_verify_step_up",
   "POST /api/v2/meeting-spaces": "v2_create_meeting_space",
   "POST /api/v2/meeting-spaces/{id}/archive": "v2_archive_meeting_space",
   "POST /api/v2/meeting-spaces/{id}/conferences": "v2_create_conference",

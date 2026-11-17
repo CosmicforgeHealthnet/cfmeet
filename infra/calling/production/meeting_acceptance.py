@@ -25,11 +25,16 @@ TIMEOUT_SECONDS = 600
 UID = 10001
 
 
-def context(run_id, accounts):
-    """The only data the client receives: the public base URL and one controlled account."""
+def context(run_id, accounts, session=None):
+    """The only data the client receives: the public base URL and one controlled account.
+    Sign-in is passwordless and the client cannot reach Redis: the account carries the refresh
+    token of a session opened here (`session(account)`), exchanged once by the client."""
+    if session is None:
+        import app_acceptance
+        session = app_acceptance.refresh_token_for
     account = accounts[0]
     return {'base': PUBLIC, 'runId': run_id,
-            'account': {'email': account['email'], 'password': account['password']}}
+            'account': {'email': account['email'], 'refreshToken': session(account)}}
 
 
 def verdict(report):

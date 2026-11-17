@@ -84,6 +84,15 @@ def accounts_for(api):
 
 
 class Acceptance(unittest.TestCase):
+    def setUp(self):
+        # Passwordless sign-in (organization_acceptance.Journey.login): the controlled code
+        # replacement needs the VPS (Redis).
+        from unittest import mock
+        import app_acceptance
+        stub = mock.patch.object(app_acceptance, 'controlled_code', lambda key, url=None: '024680')
+        stub.start()
+        self.addCleanup(stub.stop)
+
     def test_the_full_journey_passes_and_records_no_secret(self):
         api = FakeNotifications(accounts())
         checks, lines = run(api)

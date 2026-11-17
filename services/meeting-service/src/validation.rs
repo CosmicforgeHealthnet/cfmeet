@@ -41,16 +41,16 @@ const DEFAULT_MESSAGE: &str = "Invalid value";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct ValidationIssue {
     /// Public JSON path of the offending field, as sent by the client (honours the
-    /// request's serde naming), e.g. `password`, `displayName`, `items[0].email`.
+    /// request's serde naming), e.g. `email`, `displayName`, `items[0].email`.
     /// `null` when the problem concerns the request as a whole.
-    #[schema(example = "password", required = true)]
+    #[schema(example = "email", required = true)]
     pub field: Option<String>,
     /// Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,
-    /// `password_strength`, `passwords_mismatch`.
-    #[schema(example = "password_strength")]
+    /// `range`.
+    #[schema(example = "email")]
     pub code: String,
     /// Safe, human-readable message for this field.
-    #[schema(example = "Password must be between 8 and 72 characters")]
+    #[schema(example = "Invalid email address")]
     pub message: String,
 }
 

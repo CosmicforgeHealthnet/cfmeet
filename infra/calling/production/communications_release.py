@@ -112,6 +112,18 @@ def save(path, value, secret=False):
     os.chmod(path,0o400 if secret else 0o444)
     if secret: os.chown(path,10001,10001)
 
+def stage_test_accounts():
+    """The staging candidate's two fixed-code test accounts (passwordless sign-in): created
+    once with random codes, kept 0600 in the VPS work folder, configured on the candidate
+    Meeting Service only (AUTH_TEST_ACCOUNTS) and used by the staging acceptance client."""
+    path=WORK/'stage-test-accounts.private.json'
+    if not path.exists():
+        values=[{'email':'comm-stage-%s-%s@acceptance.invalid'%(x,secrets.token_hex(4)),
+                 'code':'%06d'%secrets.randbelow(10**6)} for x in 'ab']
+        WORK.mkdir(parents=True,exist_ok=True,mode=0o700)
+        p.write_private(path,json.dumps(values))
+    return json.loads(path.read_text())
+
 def env_file(path, values):
     assert all('\n' not in v and '\r' not in v for v in values.values())
     p.write_private(path,'\n'.join(k+'='+v for k,v in values.items())+'\n')
@@ -343,7 +355,10 @@ def configured(service,sha,stage,scope,db=None):
             e.update({'CFMEET_COMMUNICATION_'+k+'_ID':scope[k.lower()+'Id'] for k in ('TENANT','APPLICATION','ENVIRONMENT')})
             e.update(CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID=scope['serviceAccountId'],CFMEET_COMMUNICATION_ENVIRONMENT_KIND=scope['kind'],
                      CF_MESSAGING_BASE_URL='https://api.cfmeet.com:'+str(routes['messaging']))
-            if stage:e.update(JWT_SECRET=secrets.token_hex(32),SMTP_HOST='',EMAIL_VERIFICATION_REQUIRED='false')
+            if stage:
+                e.update(JWT_SECRET=secrets.token_hex(32),SMTP_HOST='',EMAIL_VERIFICATION_REQUIRED='false',
+                         AUTH_TEST_ACCOUNTS=','.join(a['email']+':'+a['code'] for a in stage_test_accounts()),
+                         AUTH_TEST_ACCOUNTS_ALLOW_IN_PRODUCTION='true')
         if stage and service=='calling':
             e.update(VOICEMAIL_ENABLED='false',CALL_RECORDING_ENABLED='false',CALLING_MEDIA_GATEWAY_URL='wss://api.cfmeet.com:'+str(routes['calling'])+'/v1/calling/media')
         cfg=clone(p.inspect(OWNERS[service]),name,image(service,sha),e,stage)
