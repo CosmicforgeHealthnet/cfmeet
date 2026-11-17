@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.17.0"
+      "description": "cfmeet.calling.http-api 1.18.0"
     },
     {
       "name": "privacy-relay",
@@ -36542,7 +36542,7 @@
           "calling"
         ],
         "summary": "List mailboxes",
-        "description": "Requires enterprise.config.read.",
+        "description": "Requires enterprise.config.read. Filter by owner with ownerType and / or ownerId.",
         "security": [
           {
             "calling.platformCredential": [
@@ -36583,6 +36583,30 @@
                 "ACTIVE",
                 "DISABLED"
               ]
+            }
+          },
+          {
+            "name": "ownerType",
+            "in": "query",
+            "required": false,
+            "description": "Only mailboxes of this owner kind (C16).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PRINCIPAL",
+                "EXTENSION",
+                "QUEUE",
+                "RING_GROUP"
+              ]
+            }
+          },
+          {
+            "name": "ownerId",
+            "in": "query",
+            "required": false,
+            "description": "Only mailboxes of this owner (a principal, extension, queue or ring group id of the caller's scope; any other id matches nothing) (C16).",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
             }
           }
         ],

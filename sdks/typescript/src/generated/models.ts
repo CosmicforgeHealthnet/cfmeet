@@ -2077,7 +2077,7 @@ export namespace Calling {
     };
     /** GET /v1/enterprise/voicemail/mailboxes — scope enterprise.config.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     listVoicemailMailboxes: {
-      params: { query?: { limit?: number; cursor?: string; status?: "ACTIVE" | "DISABLED" } };
+      params: { query?: { limit?: number; cursor?: string; status?: "ACTIVE" | "DISABLED"; ownerType?: "PRINCIPAL" | "EXTENSION" | "QUEUE" | "RING_GROUP"; ownerId?: Uuid } };
       response: VoicemailMailboxList;
       item: NonNullable<(VoicemailMailboxList)["mailboxes"]>[number];
     };
