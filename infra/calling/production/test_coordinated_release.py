@@ -671,6 +671,19 @@ class RestoreTest(unittest.TestCase):
         self.assertIn('pg_isready', execs[0])
 
 
+class PreReleaseRestoreTests(unittest.TestCase):
+    def test_every_release_restore_tests_the_developer_platform_database(self):
+        import inspect
+        default = inspect.signature(cr.backup).parameters['restore_labels'].default
+        self.assertEqual(default, cr.RESTORE_TEST_LABELS)
+        for label in ('meeting-service', 'organizations', 'platform-access', 'developer-platform'):
+            self.assertIn(label, default)
+        # The label is derived from the database name exactly as backup() does.
+        db = cr.SERVICES['developer-platform']['db']
+        self.assertEqual(db.removeprefix('cfmeet_').replace('_', '-'), 'developer-platform')
+        self.assertTrue(cr.RESTORE_RE.match('cfmeet-restore-test-12-3-developer-platform'))
+
+
 class SafeStderr(unittest.TestCase):
     def test_failures_name_the_step_and_never_print_credentials_or_row_values(self):
         raw = (b'pg_restore: error: could not execute query: ERROR:  duplicate key value violates unique constraint\n'

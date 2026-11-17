@@ -146,6 +146,24 @@ jobs:
         continue-on-error: true
         run: python3 scripts/contracts/web_contract_parity_report.py || true
 
+      # BLOCKING drift gate over the same report: every backend call apps/web makes must
+      # match a contract operation (UNMATCHED = 0, true on main when this gate was added).
+      # Adoption of the generated SDK and the internal/operator calls stay report-only above.
+      - name: web contract-parity drift gate (no UNMATCHED call)
+        working-directory: .
+        run: |
+          python3 scripts/contracts/web_contract_parity_report.py --json > "$RUNNER_TEMP/web-parity.json"
+          python3 - "$RUNNER_TEMP/web-parity.json" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1]))
+          unmatched = [c for c in report["calls"] if c["bucket"] == "UNMATCHED"]
+          for c in unmatched:
+              print("::error::apps/web calls %s %s (%s) but no contract operation has this path"
+                    % (c["method"], c["path"], c["sites"][0]))
+          print("web contract parity: %d calls, %d UNMATCHED" % (len(report["calls"]), len(unmatched)))
+          sys.exit(1 if unmatched else 0)
+          PY
+
   # The bundles rendered the way a reader meets them: Swagger UI (the version and SRI the
   # Meeting Service serves) in Chromium, the schema host blocked, the whole document
   # resolved by Swagger UI's own resolver, every operation rendered; a negative control

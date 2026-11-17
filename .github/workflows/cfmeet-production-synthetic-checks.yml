@@ -1,0 +1,99 @@
+name: CF Meet production synthetic checks
+
+# Backend gap audit P2: scheduled uptime / synthetic checks of production. Runs the
+# read-only public part of the `certify` operation of cfmeet-coordinated-release.yml
+# (infra/calling/production/public_certification.py) every hour, from a GitHub runner:
+#   /health, Swagger configuration and every listed OpenAPI document, CORS preflights from
+#   the web origins, TLS certificate lifetime, every public GET route of the gateway route
+#   manifest without credentials (must reject or be unrouted, never 2xx / 5xx) and every
+#   internal / operator / callback GET route (must not answer on the public host).
+#
+# STRICTLY READ-ONLY: unauthenticated GET / OPTIONS / HEAD only (the script refuses any
+# other method), no credentials, no request bodies. It registers no account, sends no
+# email, grants no scope and changes nothing in production. It uses no secret, no
+# environment, no SSH and does not take the production deployment lock, so it never
+# queues behind or ahead of a release.
+#
+# A failed check fails the run (GitHub's own scheduled-workflow failure notice reaches
+# the repository's maintainers); the full report is in the job summary and the artifact.
+# Runbook: docs/operations/monitoring-alerts.md#scheduled-synthetic-checks
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmeet-production-synthetic-checks
+  cancel-in-progress: false
+
+jobs:
+  public:
+    name: Public API and gateway synthetic checks (read-only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: The probe client refuses every non-read method (offline)
+        run: |
+          cd infra/calling/production
+          python3 - <<'PY'
+          import public_certification as pc
+          for method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+              try:
+                  pc.request('/health', method)
+              except ValueError:
+                  continue
+              raise SystemExit('public_certification.request accepted ' + method)
+          print('read-only methods only: PASS')
+          PY
+
+      - name: Public API and gateway checks
+        id: checks
+        run: python3 infra/calling/production/public_certification.py . synthetic-public.json
+
+      - name: Summary
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          path = 'synthetic-public.json'
+          if not os.path.exists(path):
+              print('### Production synthetic checks: NO RESULT (the probe did not complete)')
+              raise SystemExit(0)
+          r = json.load(open(path))
+          verdict = 'FAIL' if r['failed'] else 'PASS'
+          print('### Production synthetic checks: %s' % verdict)
+          print('')
+          print('Host `%s`, %s to %s' % (r['host'], r['startedAt'], r.get('finishedAt', '?')))
+          print('')
+          print('| Infrastructure check | Status | Result |')
+          print('|---|---:|---|')
+          for name, v in sorted(r['infrastructure'].items()):
+              print('| %s | %s | %s |' % (name, v.get('status', v.get('daysRemaining', '')), v['result']))
+          counts = {}
+          for kind in ('publicRoutes', 'internalRoutes'):
+              for route in r[kind]:
+                  counts.setdefault(kind, {}).setdefault(route['result'], 0)
+                  counts[kind][route['result']] += 1
+          print('')
+          print('Routes: ' + ', '.join('%s %s' % (k, json.dumps(v, sort_keys=True)) for k, v in counts.items()))
+          if r['failed']:
+              print('')
+              print('Failures:')
+              for item in r['failed']:
+                  print('- `%s`' % item)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-synthetic-checks-${{ github.run_id }}-${{ github.run_attempt }}
+          path: synthetic-public.json
+          if-no-files-found: ignore
+          retention-days: 14

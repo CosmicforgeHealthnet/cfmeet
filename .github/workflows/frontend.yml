@@ -124,7 +124,9 @@ jobs:
         run: node --experimental-strip-types --test tests/csp.test.mjs
 
       # Pre-existing ESLint errors were imported from rtc_frontend unchanged.
-      # Reported but non-blocking until they are fixed in a dedicated change.
+      # Reported but non-blocking until they are fixed in a dedicated change: on
+      # 2026-11-17 `npm run lint` reported 20 errors (react-hooks set-state-in-effect /
+      # purity) and 35 warnings. Remove continue-on-error once it exits 0.
       - name: lint
         continue-on-error: true
         run: npm run lint

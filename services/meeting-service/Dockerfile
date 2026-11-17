@@ -38,8 +38,9 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies and apply pending Debian security updates (like every other
+# service image; checked by .github/workflows/dependency-security.yml)
+RUN apt-get update && apt-get -y --no-install-recommends upgrade && apt-get install -y \
     ca-certificates \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*

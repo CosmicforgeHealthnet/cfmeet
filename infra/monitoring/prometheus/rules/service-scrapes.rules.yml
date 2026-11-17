@@ -1,0 +1,102 @@
+# Scrape-availability alerts for the services whose metrics listener is scraped in
+# production but whose runbooks define no metric thresholds yet (backend gap audit P3).
+#
+# The production Prometheus (infra/calling/production/monitoring_stack.py) adds a scrape
+# job named after the service only when the running container sets its *_METRICS_ADDRESS
+# listener on a non-loopback address, so `up{job="<service>"}` exists exactly for the
+# listeners that exist. Metric-specific thresholds belong to each service's runbook first
+# (docs/operations/monitoring-alerts.md, "Runbook conditions that cannot be expressed today").
+
+groups:
+  - name: service-scrapes.alerts
+    rules:
+      - alert: PlatformAccessMetricsUnavailable
+        expr: |
+          up{job="platform-access"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: platform-access
+        annotations:
+          summary: "Platform Access metrics listener does not answer"
+          description: "The Prometheus scrape of PLATFORM_ACCESS_METRICS_ADDRESS has failed for 5 minutes: the process is down or unreachable. Its readiness probe (ServiceHealthProbeFailing) tells which."
+          runbook_url: "docs/operations/monitoring-alerts.md#scrape-targets"
+
+      - alert: CallingMetricsUnavailable
+        expr: |
+          up{job="calling"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: calling
+        annotations:
+          summary: "Calling metrics listener does not answer"
+          description: "The Prometheus scrape of CALLING_METRICS_ADDRESS has failed for 5 minutes: the process is down or unreachable. Its readiness probe (ServiceHealthProbeFailing) tells which."
+          runbook_url: "docs/operations/monitoring-alerts.md#scrape-targets"
+
+      - alert: NumberingMetricsUnavailable
+        expr: |
+          up{job="numbering"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: numbering
+        annotations:
+          summary: "Numbering metrics listener does not answer"
+          description: "The Prometheus scrape of NUMBERING_METRICS_ADDRESS has failed for 5 minutes: the process is down or unreachable. Its readiness probe (ServiceHealthProbeFailing) tells which."
+          runbook_url: "docs/operations/monitoring-alerts.md#scrape-targets"
+
+      - alert: PrivacyRelayMetricsUnavailable
+        expr: |
+          up{job="privacy-relay"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: privacy-relay
+        annotations:
+          summary: "Privacy Relay metrics listener does not answer"
+          description: "The Prometheus scrape of PRIVACY_RELAY_METRICS_ADDRESS has failed for 5 minutes: the process is down or unreachable. Its readiness probe (ServiceHealthProbeFailing) tells which."
+          runbook_url: "docs/operations/monitoring-alerts.md#scrape-targets"
+
+      - alert: SmsGatewayMetricsUnavailable
+        expr: |
+          up{job="sms-gateway"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: sms-gateway
+        annotations:
+          summary: "SMS Gateway metrics listener does not answer"
+          description: "The Prometheus scrape of SMS_GATEWAY_METRICS_ADDRESS has failed for 5 minutes: the process is down or unreachable. Its readiness probe (ServiceHealthProbeFailing) tells which."
+          runbook_url: "docs/operations/monitoring-alerts.md#scrape-targets"
+
+      - alert: TelephonyMetricsUnavailable
+        expr: |
+          up{job="telephony"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: telephony
+        annotations:
+          summary: "Telephony metrics listener does not answer"
+          description: "The Prometheus scrape of TELEPHONY_METRICS_ADDRESS has failed for 5 minutes: the process is down or unreachable. Its readiness probe (ServiceHealthProbeFailing) tells which."
+          runbook_url: "docs/operations/monitoring-alerts.md#scrape-targets"
+
+      - alert: SecurityScanGatewayMetricsUnavailable
+        expr: |
+          up{job="security-scan-gateway"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          approval: documented
+          service: security-scan-gateway
+        annotations:
+          summary: "Security scan gateway metrics listener does not answer"
+          description: "The Prometheus scrape of SCAN_GATEWAY_METRICS_ADDRESS has failed for 5 minutes: the process is down or unreachable. Its readiness probe (ServiceHealthProbeFailing) tells which."
+          runbook_url: "docs/operations/monitoring-alerts.md#scrape-targets"

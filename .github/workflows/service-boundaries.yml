@@ -93,14 +93,17 @@ jobs:
 
   # SEC-016: alert rules and Alertmanager routing as code (infra/monitoring). Lives here
   # because a metric rename in services/** must re-run the metric-existence check.
-  # Official images pinned by digest; promtool / amtool only, nothing is started or
-  # deployed and no receiver is contacted.
+  # Official images pinned by digest (the same images the production stack runs,
+  # infra/calling/production/monitoring_stack.py IMAGES); config checks only, nothing
+  # is deployed and no receiver is contacted.
   monitoring-rules:
     name: monitoring alert rules
     runs-on: ubuntu-latest
     env:
       PROMETHEUS_IMAGE: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
       ALERTMANAGER_IMAGE: prom/alertmanager:v0.28.1@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba
+      BLACKBOX_IMAGE: prom/blackbox-exporter:v0.27.0@sha256:a50c4c0eda297baa1678cd4dc4712a67fdea713b832d43ce7fcc5f9bea05094d
+      SQL_EXPORTER_IMAGE: burningalchemist/sql_exporter:0.24.14@sha256:9ca0661972dbe8a31b7ebe38f9e3fe11699a1e0104a3bd887701cf9fc7d89e82
     steps:
       - uses: actions/checkout@v4
 
@@ -140,6 +143,28 @@ jobs:
         run: |
           docker run --rm -v "$PWD/infra/monitoring:/monitoring:ro" -w /monitoring \
             --entrypoint amtool "$ALERTMANAGER_IMAGE" check-config alertmanager/alertmanager.yml
+
+      # The production stack (backend gap audit P1): the configuration monitoring_stack.py
+      # deploys, rendered with every optional part present (all metrics listeners, the
+      # Meeting token, both receivers, the heartbeat exporter) plus the Alertmanager variant
+      # without receivers, each mounted at its production path. Secret files are EMPTY
+      # placeholders; the DSN names no password and nothing connects anywhere.
+      - name: production monitoring configuration (rendered) passes every tool's check
+        run: |
+          set -euo pipefail
+          (cd infra/calling/production && python3 -m unittest -v test_monitoring_stack)
+          out="$RUNNER_TEMP/monitoring-render"
+          (cd infra/calling/production && python3 monitoring_stack.py --render-example "$out")
+          docker run --rm -v "$out/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" check config /etc/prometheus/prometheus.yml
+          for variant in alertmanager alertmanager-none; do
+            docker run --rm -v "$out/$variant:/etc/alertmanager:ro" \
+              --entrypoint amtool "$ALERTMANAGER_IMAGE" check-config /etc/alertmanager/alertmanager.yml
+          done
+          docker run --rm -v "$out/blackbox:/etc/blackbox_exporter:ro" "$BLACKBOX_IMAGE" \
+            --config.file=/etc/blackbox_exporter/blackbox.yml --config.check
+          docker run --rm -v "$out/sql-exporter:/etc/sql_exporter:ro" "$SQL_EXPORTER_IMAGE" \
+            -config.file=/etc/sql_exporter/sql_exporter.yml -config.check
 
   database-isolation:
     name: per-service database roles

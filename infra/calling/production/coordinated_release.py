@@ -21,6 +21,9 @@ Operations
                                topology, whatever revisions it runs (live_certification.py).
   rollback                     restores the containers of the latest journal entry (a release
                                or one activation). Migrations are never rolled back.
+  deploy-monitoring            Prometheus, Alertmanager, blackbox and heartbeat exporters
+                               (monitoring_stack.py); also run after every successful release,
+                               where a monitoring failure is reported but never fails it.
   activate-* / org-cutover-*   separately approved activation steps (see ACTIVATIONS).
 
 Secrets (database URLs, passwords, keys) stay on the VPS: they are written only to 0600
@@ -958,7 +961,12 @@ def restore_test(dump, major, expected, run_id, label):
             emit('restoreTestCleanup', {'container': name, 'removed': False})
 
 
-def backup(sha, run_id, restore_labels=('meeting-service', 'organizations', 'platform-access')):
+# Databases whose dump is restored into a throwaway PostgreSQL before every release
+# (labels as in the backup manifest: cfmeet_developer_platform -> developer-platform).
+RESTORE_TEST_LABELS = ('meeting-service', 'organizations', 'platform-access', 'developer-platform')
+
+
+def backup(sha, run_id, restore_labels=RESTORE_TEST_LABELS):
     folder = BACKUPS / run_id
     folder.mkdir(parents=True, exist_ok=False, mode=0o700)
     os.chmod(BACKUPS, 0o700)
@@ -2576,7 +2584,7 @@ ACTIVATIONS = {
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
     + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review',
-       'notifications-acceptance')
+       'notifications-acceptance', 'deploy-monitoring')
 # The HTTPS receiver of the acceptance webhook: a public endpoint answering 204 to any POST.
 # (api.cfmeet.com itself resolves to the private TLS proxy on cfmeet-core-private, which the
 # worker's STRICT endpoint policy refuses as a private address.)
@@ -2619,6 +2627,15 @@ def run(operation, sha, run_id, confirm=''):
         provision(sha, run_id)
     elif operation == 'release':
         release_all(sha, run_id)
+        # Monitoring follows every successful release and never fails it (monitoring_stack.py).
+        import monitoring_stack
+        monitoring_stack.deploy_after_release(sys.modules[__name__], emit)
+    elif operation == 'deploy-monitoring':
+        # Prometheus, Alertmanager and the probe / heartbeat exporters only; no service changes.
+        if confirm:
+            raise RuntimeError('deploy-monitoring takes no confirmation')
+        import monitoring_stack
+        monitoring_stack.deploy(sys.modules[__name__], emit)
     elif operation == 'verify':
         verify(sha, run_id)
     elif operation == 'rollback':
