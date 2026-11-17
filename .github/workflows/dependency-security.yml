@@ -29,6 +29,8 @@ on:
       - "services/api-gateway/**"
       - "services/security-scan-gateway/**"
       - "services/notifications/**"
+      - "services/organizations/**"
+      - "services/communications/**"
       - "certification/**"
       - "scripts/sbom/**"
       - "packages/**"
@@ -51,6 +53,8 @@ on:
       - "services/api-gateway/**"
       - "services/security-scan-gateway/**"
       - "services/notifications/**"
+      - "services/organizations/**"
+      - "services/communications/**"
       - "certification/**"
       - "scripts/sbom/**"
       - "packages/**"
@@ -115,6 +119,10 @@ jobs:
           - services/api-gateway
           # The unified Notification Service (roadmap N2).
           - services/notifications
+          # Backend gap audit P10: the Organizations service and the migration guard
+          # were the two tracked lockfiles without an audit.
+          - services/organizations
+          - packages/migration-guard
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -180,13 +188,15 @@ jobs:
           name: cfmeet-backend-sbom
           path: cfmeet-backend.cdx.json
 
+  # Every production image (the 14 of cfmeet-core-images.yml / the coordinated release),
+  # built exactly as there: repository-root context, services/<service>/Dockerfile.
   image:
     name: image security (${{ matrix.service }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        service: [calling, privacy-relay, telephony, developer-platform, api-gateway, security-scan-gateway]
+        service: [platform-access, organizations, notifications, messaging, calling, communications, numbering, privacy-relay, sms-gateway, telephony, meeting-service, developer-platform, api-gateway, security-scan-gateway]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
