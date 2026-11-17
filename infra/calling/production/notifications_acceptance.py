@@ -14,12 +14,16 @@ It reuses the organization acceptance journey's three fresh, email-verified acco
   A  owner of org1 (inviter)      B  invitee / member of org1      C  outsider (owner of org2)
 
 and proves, as named checks:
-  - the invitee receives the invitation in its inbox while it is PENDING (event -> inbox);
+  - the inviter is told, in its inbox, that the invitation was accepted (event -> inbox);
+  - a membership role change reaches the member, exactly once;
   - unread count, read and dismiss work, and are idempotent;
   - another account sees nothing of it and cannot mark it read (isolation);
   - a preference switched off suppresses the next in-app notification of that category, and
-    switched on again lets it through (preferences are enforced by the service);
-  - a membership change reaches the member.
+    switched on again lets it through (preferences are enforced by the service).
+
+(`organizations.invitation.created` is not checked: invitations are addressed by email and
+Organizations knows no invitee account, so the in-app copy has no recipient; the invitee is
+reached by the invitation email.)
 
 Cleanup (archiving both organizations, restoring B's preference) always runs. Output: one JSON
 line per check (`notificationsAcceptance`) and per request (`organizationAcceptanceRequest`).
@@ -35,11 +39,11 @@ CATEGORY = 'organizationUpdates'
 
 CHECKS = (
     'accounts_and_organizations',
-    'invitee_receives_the_invitation_in_app',
+    'inviter_is_told_the_invitation_was_accepted',
+    'role_change_reaches_the_member_once',
     'unread_count_counts_it',
     'other_accounts_see_nothing_and_cannot_change_it',
     'read_and_dismiss_are_idempotent',
-    'membership_change_reaches_the_member',
     'preference_off_suppresses_and_on_restores',
 )
 
@@ -98,8 +102,8 @@ class Journey(oa.Journey):
     # --- journey -----------------------------------------------------------------------------
     def run(self):
         try:
-            for step in (self.setup, self.invitation_in_app, self.counts, self.isolation, self.read_dismiss,
-                         self.membership_change, self.preference):
+            for step in (self.setup, self.accepted_in_app, self.role_change, self.counts, self.isolation,
+                         self.read_dismiss, self.preference):
                 self.step = step.__name__
                 step()
         except Exception as error:
@@ -134,17 +138,28 @@ class Journey(oa.Journey):
         self.baseline = {p: self.org_ids(p) for p in (self.a, self.b, self.c)}
         self.ncheck('accounts_and_organizations')
 
-    def invitation_in_app(self):
-        self.unread_before = self.unread(self.b)
+    def accepted_in_app(self):
         _, inv = self.call(self.a, 'POST', self.org_path(self.org1, '/invitations'),
                            {'email': self.b.account['email'], 'role': 'MEMBER'}, expected=(201,))
-        self.token = inv.get('token')
-        self.require(self.token and inv.get('status') == 'PENDING', 'a PENDING invitation')
-        # The service delivers an invitation only while it is PENDING: accept after it arrived.
-        new = self.wait_new(self.b, self.baseline[self.b])
-        self.require(len(new) == 1, 'exactly one invitation notification (no duplicate)')
-        self.invite_item = next(iter(new))
-        self.ncheck('invitee_receives_the_invitation_in_app')
+        token = inv.get('token')
+        self.require(token and inv.get('status') == 'PENDING', 'a PENDING invitation')
+        _, membership = self.call(self.b, 'POST', '/api/v2/organization-invitations/accept', {'token': token})
+        self.require(membership.get('status') == 'ACTIVE', 'B is a member')
+        self.b.membership = membership
+        new = self.wait_new(self.a, self.baseline[self.a])
+        self.require(len(new) == 1, 'exactly one acceptance notification for the inviter')
+        self.ncheck('inviter_is_told_the_invitation_was_accepted')
+
+    def role_change(self):
+        self.unread_before = self.unread(self.b)
+        before = self.org_ids(self.b)
+        self.change_role('ADMIN')
+        new = self.wait_new(self.b, before)
+        self.sleep(10)  # a duplicate would arrive with or right after the first copy
+        new = self.org_ids(self.b) - before
+        self.require(len(new) == 1, 'exactly one role-change notification (no duplicate)')
+        self.item = next(iter(new))
+        self.ncheck('role_change_reaches_the_member_once')
 
     def counts(self):
         self.require(self.unread(self.b) == self.unread_before + 1, 'the unread count rose by one')
@@ -153,23 +168,17 @@ class Journey(oa.Journey):
     def isolation(self):
         self.require(not (self.org_ids(self.c) - self.baseline[self.c]), 'the outsider received nothing')
         # The outsider names B's item: nothing of B's changes.
-        self.call(self.c, 'POST', '/api/v2/notifications/read', {'ids': [self.invite_item]},
-                  expected=(200, 204, 404))
+        self.call(self.c, 'POST', '/api/v2/notifications/read', {'ids': [self.item]}, expected=(200, 204, 404))
         self.require(self.unread(self.b) == self.unread_before + 1, "B's item is still unread")
         self.ncheck('other_accounts_see_nothing_and_cannot_change_it')
 
     def read_dismiss(self):
         for _ in range(2):  # idempotent
-            self.call(self.b, 'POST', '/api/v2/notifications/read', {'ids': [self.invite_item]}, expected=(200, 204))
+            self.call(self.b, 'POST', '/api/v2/notifications/read', {'ids': [self.item]}, expected=(200, 204))
         self.require(self.unread(self.b) == self.unread_before, 'read lowers the unread count once')
         for _ in range(2):
-            self.call(self.b, 'POST', '/api/v2/notifications/dismiss', {'ids': [self.invite_item]},
-                      expected=(200, 204))
-        self.require(self.invite_item not in self.org_ids(self.b), 'a dismissed item leaves the inbox')
-        # B accepts now (the membership the next checks change).
-        _, membership = self.call(self.b, 'POST', '/api/v2/organization-invitations/accept', {'token': self.token})
-        self.require(membership.get('status') == 'ACTIVE', 'B is a member')
-        self.b.membership = membership
+            self.call(self.b, 'POST', '/api/v2/notifications/dismiss', {'ids': [self.item]}, expected=(200, 204))
+        self.require(self.item not in self.org_ids(self.b), 'a dismissed item leaves the inbox')
         self.ncheck('read_and_dismiss_are_idempotent')
 
     def change_role(self, role):
@@ -177,12 +186,6 @@ class Journey(oa.Journey):
         _, updated = self.call(self.a, 'PATCH', self.org_path(self.org1, '/members/' + m['id']),
                                {'expectedVersion': m['version'], 'role': role})
         self.b.membership = updated if isinstance(updated, dict) and updated.get('version') else m
-
-    def membership_change(self):
-        before = self.org_ids(self.b)
-        self.change_role('ADMIN')
-        self.wait_new(self.b, before)
-        self.ncheck('membership_change_reaches_the_member')
 
     def preference(self):
         self.set_category(self.b, False)

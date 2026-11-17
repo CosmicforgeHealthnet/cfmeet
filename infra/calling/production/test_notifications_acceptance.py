@@ -58,11 +58,11 @@ class FakeNotifications(FakeApi):
                     p['version'] += 1
                 return 200, {'version': p['version'], 'categories': {'organizationUpdates': p['organizationUpdates']}}
         status, answer = super().__call__(method, url, headers, data)
-        m = re.fullmatch(r'/api/v2/organizations/([^/]+)/(invitations|members/[^/]+)', path)
-        if m and method in ('POST', 'PATCH') and status < 300:
-            self.notify(b['userId'])
-            if method == 'PATCH':
-                answer = {'id': str(uuid.uuid4()), 'version': 2, 'status': 'ACTIVE', 'role': body.get('role')}
+        if path == '/api/v2/organization-invitations/accept' and status < 300:
+            self.notify(a['userId'])  # invitation.accepted -> the inviter
+        if re.fullmatch(r'/api/v2/organizations/([^/]+)/members/[^/]+', path) and method == 'PATCH' and status < 300:
+            self.notify(b['userId'])  # membership.role_changed -> the member
+            answer = {'id': str(uuid.uuid4()), 'version': 2, 'status': 'ACTIVE', 'role': body.get('role')}
         return status, answer
 
 
@@ -97,12 +97,12 @@ class Acceptance(unittest.TestCase):
 
     def test_no_delivery_fails_the_first_delivery_check(self):
         checks, _ = run(FakeNotifications(accounts(), deliver=False))
-        self.assertEqual(checks['invitee_receives_the_invitation_in_app'], 'FAIL')
+        self.assertEqual(checks['inviter_is_told_the_invitation_was_accepted'], 'FAIL')
         self.assertEqual(checks['unread_count_counts_it'], 'NOT_RUN')
 
     def test_a_duplicate_notification_fails(self):
         checks, _ = run(FakeNotifications(accounts(), duplicate=True))
-        self.assertEqual(checks['invitee_receives_the_invitation_in_app'], 'FAIL')
+        self.assertEqual(checks['inviter_is_told_the_invitation_was_accepted'], 'FAIL')
 
     def test_a_leak_to_another_account_fails_isolation(self):
         checks, _ = run(FakeNotifications(accounts(), leak=True))
@@ -111,7 +111,7 @@ class Acceptance(unittest.TestCase):
     def test_an_ignored_preference_fails(self):
         checks, _ = run(FakeNotifications(accounts(), honour_preferences=False))
         self.assertEqual(checks['preference_off_suppresses_and_on_restores'], 'FAIL')
-        self.assertEqual(checks['membership_change_reaches_the_member'], 'PASS')
+        self.assertEqual(checks['role_change_reaches_the_member_once'], 'PASS')
 
     def test_the_operation_is_gated_on_the_producer_and_the_routing_row(self):
         self.assertIn('notifications-acceptance', cr.OPERATIONS)

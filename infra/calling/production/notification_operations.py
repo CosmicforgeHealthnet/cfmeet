@@ -107,7 +107,7 @@ GRANTS += tuple(('activate-messaging-publications', replica, 'messaging', PUBLIC
 # in the running image's database before the switch.
 PRODUCERS = {
     'organizations': dict(operation='activate-organizations-publications', containers=('organizations',),
-                          outbox=None),
+                          outbox='organization_notification_publications'),
     'communications': dict(operation='activate-communications-publications', containers=('communications',),
                            outbox='communication_notification_publications'),
     'developer-platform': dict(operation='activate-developer-publications',
