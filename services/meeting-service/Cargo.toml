@@ -69,6 +69,12 @@ cf-service-auth = { path = "../../packages/service-auth", features = ["client"] 
 # cfmeet.notifications.event envelopes of Meeting's publications. Never the `open` feature
 # (producers seal, never open).
 cf-notification-client = { path = "../../packages/notification-client" }
+# Notification Service N12: the Account fallback key seals each CRITICAL message's legacy
+# email (XChaCha20-Poly1305; `aes-gcm` is reserved to the Contact Vault by the service
+# boundary guard) so the retained Meeting email path can send the same code when the
+# service cannot (Document 4 §9.8, §10.4). Already locked (openmls).
+chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["alloc"] }
+zeroize = { version = "1.8", features = ["derive"] }
 # Part VI §55: unified usage facts (participant minutes, recordings, artefact storage).
 cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 # Blueprint Section 16 (SEC-019): the one shared S3 SigV4 signer (artefact storage).

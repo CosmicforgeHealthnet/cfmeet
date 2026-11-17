@@ -22,8 +22,20 @@
 //!   participants `meeting-email-principal:<uuid>` with their address; the email-principal
 //!   id is derived from the normalized address, so it is stable across notices. The
 //!   person who made a change is not known here; the producer's event names them.
+//! * **X6** `POST /internal/v1/accounts/notification-route-decisions/leases`
+//!   (`claimCriticalSendLeases`, `account-route-lease.claim`) and **X7**
+//!   `POST /internal/v1/accounts/notification-route-decisions/completions`
+//!   (`completeCriticalSends`, same permission): the CRITICAL-lane fencing token of
+//!   Document 4 §9.8 (roadmap N12). Per decision id (1–100, no duplicates), each in its own
+//!   row-locked Meeting transaction ([`critical_notifications::claim_lease`],
+//!   [`critical_notifications::complete_send`]): X6 answers `GRANTED` (with `leaseUntil`,
+//!   Meeting DB clock, `leaseSeconds` 5–30), `REVOKED`, `EXPIRED` or `UNKNOWN` (also while
+//!   another lease is live: never two leases); X7 `COMPLETED`, `ALREADY_COMPLETED`,
+//!   `NO_LIVE_LEASE` or `UNKNOWN`. A repeated X7 is `ALREADY_COMPLETED`. A database
+//!   failure on one X6 decision answers `UNKNOWN` for it (503 when every one fails); on
+//!   X7 it answers 503 (completions already recorded stay).
 //!
-//! Both permissions are registry-grantable to `cfmeet.notifications` only, and the
+//! Every permission is registry-grantable to `cfmeet.notifications` only, and the
 //! receiver trust bundle is authoritative: a caller without the permission is 403, a
 //! request without a valid, request-bound service token 401. Errors use the Notification
 //! Service shape `{error:{code,message,requestId}}`.
@@ -59,7 +71,10 @@ use crate::{
     config::env_bool,
     error::ApiResult,
     models::{conference_sessions, meeting_spaces},
-    services::notifications::{self, NoticeKind},
+    services::{
+        critical_notifications,
+        notifications::{self, NoticeKind},
+    },
     state::AppState,
 };
 
@@ -68,6 +83,10 @@ pub const CONTACTS_PATH: &str = "/internal/v1/accounts/notification-contacts/res
 /// X2 `resolveConferenceRecipients` (axum route syntax).
 pub const RECIPIENTS_ROUTE: &str =
     "/internal/v1/conferences/:conference_id/notification-recipients/resolve";
+/// X6 `claimCriticalSendLeases`.
+pub const LEASES_PATH: &str = "/internal/v1/accounts/notification-route-decisions/leases";
+/// X7 `completeCriticalSends`.
+pub const COMPLETIONS_PATH: &str = "/internal/v1/accounts/notification-route-decisions/completions";
 /// Recipients answered by X2 (contract `maxItems`).
 pub const MAX_RECIPIENTS: usize = 500;
 
@@ -129,6 +148,8 @@ pub fn router(app: AppState, verifier: Arc<ServiceTokenVerifier>) -> Router {
     Router::new()
         .route(CONTACTS_PATH, post(resolve_contacts))
         .route(RECIPIENTS_ROUTE, post(resolve_recipients))
+        .route(LEASES_PATH, post(claim_leases))
+        .route(COMPLETIONS_PATH, post(complete_sends))
         .with_state(OwnerState { app, verifier })
 }
 
@@ -628,6 +649,124 @@ async fn resolve_recipients(
             unavailable(&rid)
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// X6 claimCriticalSendLeases / X7 completeCriticalSends
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LeasesRequest {
+    decision_ids: Vec<String>,
+    lease_seconds: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompletionsRequest {
+    decision_ids: Vec<String>,
+}
+
+/// The contract's decision-id list: 1–100 canonical (lower-case, hyphenated) UUIDs, no
+/// duplicates.
+fn decision_ids(raw: &[String]) -> Result<Vec<Uuid>, &'static str> {
+    if raw.is_empty() || raw.len() > critical_notifications::MAX_BATCH {
+        return Err("decisionIds must hold 1 to 100 decision ids.");
+    }
+    let mut ids = Vec::with_capacity(raw.len());
+    for value in raw {
+        let Some(id) = Uuid::parse_str(value)
+            .ok()
+            .filter(|id| &id.to_string() == value)
+        else {
+            return Err("decisionIds must be lower-case UUIDs.");
+        };
+        if ids.contains(&id) {
+            return Err("decisionIds must not repeat a decision id.");
+        }
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+async fn claim_leases(State(s): State<OwnerState>, request: Request) -> Response {
+    let (parts, raw) = request.into_parts();
+    let ctx = match authenticate(&s, &parts, InternalPermission::AccountRouteLeaseClaim).await {
+        Ok(ctx) => ctx,
+        Err(r) => return r,
+    };
+    let rid = ctx.request_id().as_str().to_string();
+    let req: LeasesRequest = match body(raw, &rid).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let ids = match decision_ids(&req.decision_ids) {
+        Ok(ids) => ids,
+        Err(message) => return validation(message, &rid),
+    };
+    if !(critical_notifications::MIN_LEASE_SECONDS..=critical_notifications::MAX_LEASE_SECONDS)
+        .contains(&req.lease_seconds)
+    {
+        return validation("leaseSeconds must be 5 to 30.", &rid);
+    }
+    let lease = std::time::Duration::from_secs(u64::from(req.lease_seconds));
+    let mut results = Vec::with_capacity(ids.len());
+    let mut failed = 0;
+    for id in ids {
+        match critical_notifications::claim_lease(&s.app.db, id, lease).await {
+            Ok(answer) => results.push(answer),
+            // Nothing was granted for this decision (its transaction rolled back): the
+            // service retries it; leases granted to the others are still reported.
+            Err(e) => {
+                tracing::error!("notification owner API: lease claim failed: {e}");
+                failed += 1;
+                results.push(critical_notifications::LeaseAnswer {
+                    decision_id: id,
+                    outcome: "UNKNOWN",
+                    lease_until: None,
+                });
+            }
+        }
+    }
+    if failed == results.len() {
+        return unavailable(&rid);
+    }
+    reply(StatusCode::OK, json!({ "results": results }))
+}
+
+async fn complete_sends(State(s): State<OwnerState>, request: Request) -> Response {
+    let (parts, raw) = request.into_parts();
+    let ctx = match authenticate(&s, &parts, InternalPermission::AccountRouteLeaseClaim).await {
+        Ok(ctx) => ctx,
+        Err(r) => return r,
+    };
+    let rid = ctx.request_id().as_str().to_string();
+    let req: CompletionsRequest = match body(raw, &rid).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let ids = match decision_ids(&req.decision_ids) {
+        Ok(ids) => ids,
+        Err(message) => return validation(message, &rid),
+    };
+    let mut results = Vec::with_capacity(ids.len());
+    let mut failed = false;
+    for id in ids {
+        match critical_notifications::complete_send(&s.app.db, id).await {
+            Ok(answer) => results.push(answer),
+            Err(e) => {
+                tracing::error!("notification owner API: completion failed: {e}");
+                failed = true;
+            }
+        }
+    }
+    // Completions already recorded stay (a retry answers ALREADY_COMPLETED); any failure
+    // is reported so the service counts and retries it.
+    if failed {
+        return unavailable(&rid);
+    }
+    reply(StatusCode::OK, json!({ "results": results }))
 }
 
 #[cfg(test)]
