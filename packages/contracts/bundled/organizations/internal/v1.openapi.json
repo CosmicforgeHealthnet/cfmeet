@@ -2172,6 +2172,17 @@
               ]
             },
             "description": "Lifecycle status filter."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Gap audit G10: case-insensitive substring of the organization name or slug (1-100 characters; LIKE wildcards match literally).",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
           }
         ],
         "responses": {

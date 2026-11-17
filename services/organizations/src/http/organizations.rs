@@ -728,6 +728,9 @@ pub struct AdminListQuery {
     pub limit: Option<i64>,
     #[serde(default)]
     pub status: Option<String>,
+    /// Gap audit G10: case-insensitive substring of the name or the slug (1-100 chars).
+    #[serde(default)]
+    pub q: Option<String>,
 }
 
 /// `GET /internal/v1/admin/organizations` — operator listing (id order, keyset cursor).
@@ -742,12 +745,32 @@ pub async fn admin_list(
         LifecycleStatus::parse(s)
             .ok_or_else(|| ApiError::validation("status must be ACTIVE, SUSPENDED or ARCHIVED"))?;
     }
+    let search = match q.q.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(t) if t.chars().count() > 100 => {
+            return Err(ApiError::validation("q must be at most 100 characters"))
+        }
+        // LIKE metacharacters are matched literally.
+        Some(t) => Some(format!(
+            "%{}%",
+            t.to_lowercase()
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        )),
+    };
     let rows: Vec<OrgRow> = db::all(
         &state.db,
         &format!(
-            "SELECT {ORG_COLUMNS} FROM organizations WHERE ($1::uuid IS NULL OR id > $1) AND ($2::text IS NULL OR lifecycle_status = $2) ORDER BY id LIMIT $3"
+            "SELECT {ORG_COLUMNS} FROM organizations WHERE ($1::uuid IS NULL OR id > $1) AND ($2::text IS NULL OR lifecycle_status = $2) \
+             AND ($4::text IS NULL OR lower(name) LIKE $4 OR lower(slug) LIKE $4) ORDER BY id LIMIT $3"
         ),
-        vec![q.cursor.into(), q.status.clone().into(), (limit + 1).into()],
+        vec![
+            q.cursor.into(),
+            q.status.clone().into(),
+            (limit + 1).into(),
+            search.into(),
+        ],
     )
     .await?;
     let more = rows.len() as i64 > limit;
