@@ -34,11 +34,22 @@ const BATCH_SIZE: u64 = 20;
 
 pub struct MeetingAutoStartWorker {
     db: DatabaseConnection,
+    /// Gap audit M9: keeps the v2 view of each changed meeting current.
+    mirror: Option<std::sync::Arc<crate::services::compat::CompatService>>,
 }
 
 impl MeetingAutoStartWorker {
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db }
+        Self { db, mirror: None }
+    }
+
+    /// Gap audit M9: mirror each meeting this worker changes into its v2 view.
+    pub fn with_mirror(
+        mut self,
+        compat: std::sync::Arc<crate::services::compat::CompatService>,
+    ) -> Self {
+        self.mirror = Some(compat);
+        self
     }
 
     /// Start the worker loop — runs until shutdown signal
@@ -155,6 +166,9 @@ impl MeetingAutoStartWorker {
         txn.commit()
             .await
             .map_err(|e| format!("Failed to commit auto-start: {}", e))?;
+        if let Some(compat) = &self.mirror {
+            compat.mirror_legacy_write(meeting_id).await;
+        }
 
         tracing::info!(
             "Auto-started meeting {} ({}) at scheduled start time",
@@ -178,8 +192,14 @@ impl MeetingAutoStartWorkerHandle {
 }
 
 /// Spawn the meeting auto-start worker as a background task
-pub fn spawn_meeting_auto_start_worker(db: DatabaseConnection) -> MeetingAutoStartWorkerHandle {
-    let worker = MeetingAutoStartWorker::new(db);
+pub fn spawn_meeting_auto_start_worker(
+    db: DatabaseConnection,
+    mirror: Option<std::sync::Arc<crate::services::compat::CompatService>>,
+) -> MeetingAutoStartWorkerHandle {
+    let mut worker = MeetingAutoStartWorker::new(db);
+    if let Some(m) = mirror {
+        worker = worker.with_mirror(m);
+    }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 

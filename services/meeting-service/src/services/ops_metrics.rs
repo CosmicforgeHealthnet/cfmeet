@@ -104,6 +104,7 @@ counters!(
     organizations_shadow_failures,
     organizations_shadow_skipped,
     organizations_authority_failures,
+    organization_access_unscoped,
     organizations_relay_unavailable,
     organizations_projection_upserts,
     organizations_projection_failures,

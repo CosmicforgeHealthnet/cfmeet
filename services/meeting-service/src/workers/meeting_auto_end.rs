@@ -51,12 +51,27 @@ pub struct MeetingAutoEndWorker {
     db: DatabaseConnection,
     /// Gap audit M7: the provider whose legacy room is terminated when a meeting ends.
     rtc: Option<std::sync::Arc<dyn crate::services::rtc_provider::RtcProvider>>,
+    /// Gap audit M9: keeps the v2 view of each changed meeting current.
+    mirror: Option<std::sync::Arc<crate::services::compat::CompatService>>,
 }
 
 impl MeetingAutoEndWorker {
     /// Create a new MeetingAutoEndWorker
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db, rtc: None }
+        Self {
+            db,
+            rtc: None,
+            mirror: None,
+        }
+    }
+
+    /// Gap audit M9: mirror each meeting this worker changes into its v2 view.
+    pub fn with_mirror(
+        mut self,
+        compat: std::sync::Arc<crate::services::compat::CompatService>,
+    ) -> Self {
+        self.mirror = Some(compat);
+        self
     }
 
     /// Also terminate each ended meeting's media room through `rtc`.
@@ -214,6 +229,9 @@ impl MeetingAutoEndWorker {
         txn.commit()
             .await
             .map_err(|e| format!("Failed to commit auto-end: {}", e))?;
+        if let Some(compat) = &self.mirror {
+            compat.mirror_legacy_write(meeting_id).await;
+        }
         if let Some(rtc) = &self.rtc {
             crate::services::legacy_media::terminate(
                 rtc.as_ref(),
@@ -256,11 +274,15 @@ impl MeetingAutoEndWorkerHandle {
 pub fn spawn_meeting_auto_end_worker(
     db: DatabaseConnection,
     rtc: Option<std::sync::Arc<dyn crate::services::rtc_provider::RtcProvider>>,
+    mirror: Option<std::sync::Arc<crate::services::compat::CompatService>>,
 ) -> MeetingAutoEndWorkerHandle {
-    let worker = match rtc {
+    let mut worker = match rtc {
         Some(rtc) => MeetingAutoEndWorker::new(db).with_rtc(rtc),
         None => MeetingAutoEndWorker::new(db),
     };
+    if let Some(m) = mirror {
+        worker = worker.with_mirror(m);
+    }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 

@@ -687,6 +687,8 @@ pub async fn delete_meeting(
         ));
     }
 
+    // Gap audit M9: the v2 view of the meeting goes first.
+    state.meeting.compat.retire_legacy(id).await;
     // Delete meeting
     Meetings::delete_by_id(id).exec(&state.db).await?;
 
@@ -1040,6 +1042,8 @@ async fn join_meeting_internal(
         }))),
     };
     session_log.insert(&state.db).await?;
+    // Gap audit M9: the v2 view follows the join (start, participants).
+    state.meeting.compat.mirror_legacy_write(meeting.id).await;
 
     // Generate LiveKit join token
     // Room name is the meeting identifier (human-friendly code)

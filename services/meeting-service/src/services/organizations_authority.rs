@@ -161,6 +161,30 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     ("PATCH", "/internal/v1/admin/organizations/{}"),
     // Operator recovery: appoint an owner (platform administrators only).
     ("POST", "/internal/v1/admin/organizations/{}/owners"),
+    // Gap audit G10: operator provisioning, service bindings and event delivery, reached
+    // only through the platform-administrator endpoints of `handlers::v2::organizations`.
+    (
+        "POST",
+        "/internal/v1/admin/organizations/{}/provisioning/retry",
+    ),
+    (
+        "GET",
+        "/internal/v1/admin/organizations/{}/scopes/primary/service-bindings/calling",
+    ),
+    (
+        "GET",
+        "/internal/v1/admin/organizations/{}/scopes/primary/service-bindings/messaging",
+    ),
+    (
+        "POST",
+        "/internal/v1/admin/organizations/{}/scopes/primary/service-bindings/calling/rotate",
+    ),
+    (
+        "POST",
+        "/internal/v1/admin/organizations/{}/scopes/primary/service-bindings/messaging/rotate",
+    ),
+    ("GET", "/internal/v1/admin/event-delivery"),
+    ("POST", "/internal/v1/admin/event-delivery/replay"),
 ];
 
 /// `true` only for an exact [`RELAY_ROUTES`] match.
@@ -673,6 +697,11 @@ pub struct EffectiveOrganizationPolicy {
     pub meetings_enabled: bool,
     pub messaging_enabled: bool,
     pub calling_enabled: bool,
+    /// Gap audit G6: whether colleague search may surface the organization's members
+    /// (`memberDirectory.searchable`; true when absent).
+    pub directory_searchable: bool,
+    /// Gap audit G6: the organization's retention hint in days (`null`: none).
+    pub retention_hint_days: Option<i64>,
 }
 
 impl EffectiveOrganizationPolicy {
@@ -688,6 +717,12 @@ impl EffectiveOrganizationPolicy {
             meetings_enabled: features["meetings"].as_bool()?,
             messaging_enabled: features["messaging"].as_bool()?,
             calling_enabled: features["calling"].as_bool()?,
+            directory_searchable: v["constraints"]["memberDirectory"]["searchable"]
+                .as_bool()
+                .unwrap_or(true),
+            retention_hint_days: v["constraints"]["retentionHintDays"]
+                .as_i64()
+                .filter(|d| *d > 0),
         })
     }
 }
@@ -1591,9 +1626,40 @@ pub async fn authoritative_colleagues(
     actor: &RegisteredActor,
     organizations: &[Uuid],
 ) -> Vec<Uuid> {
+    colleagues(authority, actor, organizations, false).await
+}
+
+/// Gap audit G6: the colleagues colleague SEARCH may surface: as
+/// [`authoritative_colleagues`], minus every organization whose policy turns its member
+/// directory's search off (`memberDirectory.searchable = false`). An unreadable policy
+/// counts as not searchable (fail closed for discovery only).
+pub async fn searchable_colleagues(
+    authority: &OrganizationsAuthority,
+    actor: &RegisteredActor,
+    organizations: &[Uuid],
+) -> Vec<Uuid> {
+    colleagues(authority, actor, organizations, true).await
+}
+
+async fn colleagues(
+    authority: &OrganizationsAuthority,
+    actor: &RegisteredActor,
+    organizations: &[Uuid],
+    search: bool,
+) -> Vec<Uuid> {
     let acting = ActingUser::of(actor);
     let mut people = BTreeSet::new();
     for org in organizations.iter().take(50) {
+        if search {
+            match authority.effective_policy(*org, &acting).await {
+                Ok(p) if p.directory_searchable => {}
+                Ok(_) => continue,
+                Err(_) => {
+                    tracing::warn!(organization_id = %org, "organization policy unavailable; omitted from colleague search");
+                    continue;
+                }
+            }
+        }
         match authority.members(*org, Some(&acting)).await {
             Ok(members) => people.extend(
                 members
@@ -1717,10 +1783,18 @@ mod tests {
                 Method::PUT,
                 format!("/internal/v1/organizations/{id}/policies"),
             ),
-            // Operator provisioning and service bindings stay outside the relay.
+            // Operator bindings are only read or rotated, never replaced or removed.
             (
-                Method::POST,
-                format!("/internal/v1/admin/organizations/{id}/provisioning/retry"),
+                Method::PUT,
+                format!(
+                    "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling"
+                ),
+            ),
+            (
+                Method::GET,
+                format!(
+                    "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/hub"
+                ),
             ),
             (
                 Method::GET,

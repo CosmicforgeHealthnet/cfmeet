@@ -38,6 +38,7 @@ mod m20261112_000001_email_delivery_and_presence;
 mod m20261115_000001_account_devices;
 mod m20261116_000001_notification_fence;
 mod m20261117_000001_account_passwordless;
+mod m20261118_000001_case_insensitive_identity;
 
 pub mod phase2_backfill;
 
@@ -261,6 +262,7 @@ impl MigratorTrait for AccountSecurityMigrator {
             Box::new(m20261106_000001_account_security::Migration),
             Box::new(m20261115_000001_account_devices::Migration),
             Box::new(m20261117_000001_account_passwordless::Migration),
+            Box::new(m20261118_000001_case_insensitive_identity::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {

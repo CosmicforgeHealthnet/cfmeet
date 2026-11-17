@@ -60,6 +60,37 @@ class ActivityPage {
   Map<String, Object?> toJson() => json;
 }
 
+class AddContactsToCall {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddContactsToCall.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddContactsToCall.create({required String clientRequestId, required int expectedVersion, required String invitingParticipantId, required List<String> targetContactIds}) =>
+      AddContactsToCall.fromJson(<String, Object?>{
+        'clientRequestId': clientRequestId,
+        'expectedVersion': expectedVersion,
+        'invitingParticipantId': invitingParticipantId,
+        'targetContactIds': targetContactIds,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Idempotency anchor: a retry returns the same result.
+  String get clientRequestId => json['clientRequestId']! as String;
+
+  /// The call's current version.
+  int get expectedVersion => (json['expectedVersion']! as num).toInt();
+
+  /// The caller's own participant id in the call.
+  String get invitingParticipantId => json['invitingParticipantId']! as String;
+
+  /// Contact ids (GET /api/v2/communications/contacts) of CONNECTED contacts.
+  List<String> get targetContactIds => (json['targetContactIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
 class BackendCapability {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const BackendCapability.fromJson(this.json);
@@ -881,6 +912,37 @@ class ContactRequest {
   String get state => json['state']! as String;
 
   int get version => (json['version']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class ContactsAddedToCall {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ContactsAddedToCall.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ContactsAddedToCall.create({required List<String> addedContactIds, Map<String, Object?>? call, required String callId, required bool replayed, required int schemaVersion}) =>
+      ContactsAddedToCall.fromJson(<String, Object?>{
+        'addedContactIds': addedContactIds,
+        if (call != null) 'call': call,
+        'callId': callId,
+        'replayed': replayed,
+        'schemaVersion': schemaVersion,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<String> get addedContactIds => (json['addedContactIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  /// Calling's call summary (state, version).
+  Map<String, Object?>? get call => json['call'] == null ? null : json['call']! as Map<String, Object?>;
+
+  String get callId => json['callId']! as String;
+
+  bool get replayed => json['replayed']! as bool;
+
+  int get schemaVersion => (json['schemaVersion']! as num).toInt();
 
   Map<String, Object?> toJson() => json;
 }

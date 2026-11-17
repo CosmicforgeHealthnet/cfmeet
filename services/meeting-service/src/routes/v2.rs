@@ -526,6 +526,26 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(organizations::appoint_organization_owner),
         )
         .route(
+            "/admin/organizations/:id/provisioning/retry",
+            post(organizations::admin_retry_organization_provisioning),
+        )
+        .route(
+            "/admin/organizations/:id/service-bindings/:service",
+            get(organizations::admin_get_organization_service_binding),
+        )
+        .route(
+            "/admin/organizations/:id/service-bindings/:service/rotate",
+            post(organizations::admin_rotate_organization_service_binding),
+        )
+        .route(
+            "/admin/organization-event-delivery",
+            get(organizations::admin_organization_event_delivery),
+        )
+        .route(
+            "/admin/organization-event-delivery/replay",
+            post(organizations::admin_replay_organization_events),
+        )
+        .route(
             "/organizations",
             post(organizations::create_business_organization),
         )
@@ -711,6 +731,14 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/me/email/change/verify",
             post(crate::handlers::v2::account_identity::confirm_email_change),
+        )
+        .route(
+            "/admin/identity-duplicates",
+            get(crate::handlers::v2::account_sessions::admin_identity_duplicates),
+        )
+        .route(
+            "/admin/identity-duplicates/enforce",
+            post(crate::handlers::v2::account_sessions::admin_enforce_identity_uniqueness),
         )
         .route(
             "/admin/users/:user_id/sessions/revoke",

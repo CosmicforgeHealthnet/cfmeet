@@ -1,6 +1,6 @@
 use crate::validation::ValidateRequest;
 use axum::{extract::State, http::HeaderMap, Json};
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
 use crate::{
@@ -427,11 +427,7 @@ async fn find_or_create_account(state: &AppState, email: &str) -> ApiResult<(use
     }
     let mut username = random_username();
     for _ in 0..4 {
-        let taken = Users::find()
-            .filter(users::Column::Username.eq(&username))
-            .one(&txn)
-            .await?
-            .is_some();
+        let taken = security::username_taken(&txn, &username, None).await?;
         if !taken {
             break;
         }
@@ -1163,11 +1159,7 @@ async fn unique_username(state: &AppState, name: &str, email: &str) -> ApiResult
         } else {
             format!("{base}_{}", rand::thread_rng().gen_range(1000..1_000_000))
         };
-        let taken = Users::find()
-            .filter(users::Column::Username.eq(&candidate))
-            .one(&state.db)
-            .await?
-            .is_some();
+        let taken = security::username_taken(&state.db, &candidate, None).await?;
         if !taken {
             return Ok(candidate);
         }

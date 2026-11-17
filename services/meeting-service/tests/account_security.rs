@@ -756,3 +756,80 @@ async fn wrong_sign_in_codes_are_audited_for_existing_accounts() {
     }
     assert_eq!(seen, 1);
 }
+
+/// Gap audit A17: usernames differ by more than case; the database enforces
+/// case-insensitive uniqueness of emails and usernames, and administrators see the report.
+#[tokio::test]
+async fn identities_are_unique_regardless_of_case() {
+    let app = app_with_redis!();
+    let a = format!(
+        "caseA-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let id = email_user(&app, &a, "active").await;
+    // The same address in another case cannot become a second account.
+    let dup = app
+        .db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO users (id, username, email, auth_type, role, status, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'local', 'user', 'active'::user_status, now(), now())",
+            [
+                Uuid::new_v4().into(),
+                format!("u_{}", &Uuid::new_v4().simple().to_string()[..10]).into(),
+                a.to_uppercase().into(),
+            ],
+        ))
+        .await;
+    assert!(dup.is_err(), "case-only duplicate email accepted");
+    let name: String = app
+        .db
+        .conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT username FROM users WHERE id = $1",
+            [id.into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "username")
+        .unwrap();
+    assert!(backend::services::account_security::username_taken(
+        &app.db.conn,
+        &name.to_uppercase(),
+        None
+    )
+    .await
+    .unwrap());
+    assert!(!backend::services::account_security::username_taken(
+        &app.db.conn,
+        &name.to_uppercase(),
+        Some(id)
+    )
+    .await
+    .unwrap());
+    let admin = app.admin("identity-admin").await;
+    let (s, v) = app
+        .get(
+            "/api/v2/admin/identity-duplicates",
+            Auth::Bearer(&admin.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["email"]["enforced"], true, "{v}");
+    assert_eq!(v["username"]["enforced"], true, "{v}");
+    let (s, v) = app
+        .post(
+            "/api/v2/admin/identity-duplicates/enforce",
+            Auth::Bearer(&admin.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = app
+        .get("/api/v2/admin/identity-duplicates", Auth::None)
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}

@@ -432,6 +432,15 @@ async fn colleague_scope(
     state: &AppState,
     actor: &ActorContext,
 ) -> crate::services::unified_messaging::relay::ColleagueScope {
+    colleague_scope_for(state, actor, false).await
+}
+
+/// Gap audit G6: `search` applies each organization's `memberDirectory.searchable`.
+async fn colleague_scope_for(
+    state: &AppState,
+    actor: &ActorContext,
+    search: bool,
+) -> crate::services::unified_messaging::relay::ColleagueScope {
     use crate::services::unified_messaging::relay::ColleagueScope;
     match (
         state
@@ -442,6 +451,14 @@ async fn colleague_scope(
             .filter(|a| a.is_authoritative()),
         actor.registered(),
     ) {
+        (Some(authority), Some(user)) if search => ColleagueScope::Users(
+            crate::services::organizations_authority::searchable_colleagues(
+                authority,
+                user,
+                &actor.verified_organizations,
+            )
+            .await,
+        ),
         (Some(authority), Some(user)) => ColleagueScope::Users(
             crate::services::organizations_authority::authoritative_colleagues(
                 authority,
@@ -481,8 +498,12 @@ pub async fn directory(
     let um = integration(&state)?;
     let user = verified_user(&state, &actor)?;
     Ok(Json(
-        um.directory(user, &colleague_scope(&state, &actor).await, q.q.as_deref())
-            .await?,
+        um.directory(
+            user,
+            &colleague_scope_for(&state, &actor, true).await,
+            q.q.as_deref(),
+        )
+        .await?,
     ))
 }
 

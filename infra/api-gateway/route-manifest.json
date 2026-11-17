@@ -4,9 +4,9 @@
   "classes": {
     "EXCLUDED": 149,
     "INTERNAL_SERVICE": 33,
-    "OPERATOR_ADMIN": 41,
+    "OPERATOR_ADMIN": 48,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 585,
+    "PUBLIC_CUSTOMER": 586,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -83,6 +83,19 @@
       "protocol": "REST",
       "upstream": "cfmeet.meeting-service",
       "upstreamPath": "/api/v2/communications/calls/{callId}/context",
+      "auth": [
+        "MEETING_SESSION"
+      ],
+      "forwardHeaders": []
+    },
+    {
+      "id": "communications.addContactsToCall",
+      "domain": "communications",
+      "method": "POST",
+      "pattern": "/api/v2/communications/calls/{callId}/participants",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/communications/calls/{callId}/participants",
       "auth": [
         "MEETING_SESSION"
       ],
@@ -9948,6 +9961,14 @@
     {
       "domain": "communications",
       "contract": "cfmeet.communications.http-api",
+      "operationId": "addContactsToCall",
+      "method": "POST",
+      "path": "/api/v2/communications/calls/{callId}/participants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "contract": "cfmeet.communications.http-api",
       "operationId": "listContactLists",
       "method": "GET",
       "path": "/api/v2/communications/contact-lists",
@@ -11608,6 +11629,38 @@
     {
       "domain": "meetings",
       "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_admin_identity_duplicates",
+      "method": "GET",
+      "path": "/api/v2/admin/identity-duplicates",
+      "class": "OPERATOR_ADMIN"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_admin_identity_duplicates_enforce",
+      "method": "POST",
+      "path": "/api/v2/admin/identity-duplicates/enforce",
+      "class": "OPERATOR_ADMIN"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_admin_organization_event_delivery",
+      "method": "GET",
+      "path": "/api/v2/admin/organization-event-delivery",
+      "class": "OPERATOR_ADMIN"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_admin_replay_organization_events",
+      "method": "POST",
+      "path": "/api/v2/admin/organization-event-delivery/replay",
+      "class": "OPERATOR_ADMIN"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
       "operationId": "v2_admin_list_organizations",
       "method": "GET",
       "path": "/api/v2/admin/organizations",
@@ -11635,6 +11688,30 @@
       "operationId": "v2_appoint_organization_owner",
       "method": "POST",
       "path": "/api/v2/admin/organizations/{id}/owners",
+      "class": "OPERATOR_ADMIN"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_admin_retry_organization_provisioning",
+      "method": "POST",
+      "path": "/api/v2/admin/organizations/{id}/provisioning/retry",
+      "class": "OPERATOR_ADMIN"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_admin_get_organization_service_binding",
+      "method": "GET",
+      "path": "/api/v2/admin/organizations/{id}/service-bindings/{service}",
+      "class": "OPERATOR_ADMIN"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_admin_rotate_organization_service_binding",
+      "method": "POST",
+      "path": "/api/v2/admin/organizations/{id}/service-bindings/{service}/rotate",
       "class": "OPERATOR_ADMIN"
     },
     {

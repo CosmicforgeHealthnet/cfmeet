@@ -382,6 +382,13 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/me/sessions/revoke-all"),
         ("post", "/api/v2/me/sessions/revoke-others"),
         ("post", "/api/v2/admin/users/{userId}/sessions/revoke"),
+        ("get", "/api/v2/admin/identity-duplicates"),
+        ("post", "/api/v2/admin/identity-duplicates/enforce"),
+        ("post", "/api/v2/admin/organizations/{id}/provisioning/retry"),
+        ("get", "/api/v2/admin/organizations/{id}/service-bindings/{service}"),
+        ("post", "/api/v2/admin/organizations/{id}/service-bindings/{service}/rotate"),
+        ("get", "/api/v2/admin/organization-event-delivery"),
+        ("post", "/api/v2/admin/organization-event-delivery/replay"),
         ("post", "/api/v2/me/sessions/{sessionId}/revoke"),
         ("get", "/api/v2/admin/audit-events"),
         // Blueprint Section 9 — personal account profile

@@ -2718,6 +2718,234 @@
         ]
       }
     },
+    "/api/v2/admin/identity-duplicates": {
+      "get": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Report case-only duplicate accounts (platform administrators)",
+        "description": "Gap audit A17: emails and usernames are unique regardless of case. The database enforces\nit once no case-only duplicates remain; this lists the account ids of each duplicate\ngroup (no addresses) and whether each rule is enforced yet.",
+        "operationId": "v2_admin_identity_duplicates",
+        "responses": {
+          "200": {
+            "description": "Report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityDuplicatesReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/identity-duplicates/enforce": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Enforce case-insensitive uniqueness where possible (platform administrators)",
+        "description": "Gap audit A17: creates each unique index whose field has no case-only duplicates left\n(idempotent) and returns the resulting report.",
+        "operationId": "v2_admin_identity_duplicates_enforce",
+        "responses": {
+          "200": {
+            "description": "Report after enforcement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityDuplicatesReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organization-event-delivery": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization event delivery status (platform administrators).",
+        "description": "Gap audit G10: pending, failing and dead-lettered organization events per consumer.",
+        "operationId": "v2_admin_organization_event_delivery",
+        "responses": {
+          "200": {
+            "description": "Delivery status (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organization-event-delivery/replay": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Replay dead-lettered organization events (platform administrators).",
+        "description": "Gap audit G10: returns dead-lettered rows (all, one consumer's, or listed events) to\nPENDING with a fresh attempt budget. Audited by Organizations.",
+        "operationId": "v2_admin_replay_organization_events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayOrganizationEventsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Replayed (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/admin/organizations": {
       "get": {
         "tags": [
@@ -3046,6 +3274,281 @@
           },
           "503": {
             "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{id}/provisioning/retry": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Retry an organization's provisioning (platform administrators).",
+        "description": "Gap audit G10: re-runs the provisioning of an organization whose technical scope is not\nREADY (for example after a Platform Access outage). Archived organizations are refused.\nRequires a platform administrator and an authoritative Organizations Service.",
+        "operationId": "v2_admin_retry_organization_provisioning",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provisioning state (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Retry accepted (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{id}/service-bindings/{service}": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Read an organization's service binding (platform administrators).",
+        "description": "Gap audit G10: the Calling or Messaging binding of the organization's primary scope\n(ids, source, verification and credential expiry; never a secret).",
+        "operationId": "v2_admin_get_organization_service_binding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "description": "calling or messaging",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / not bound / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{id}/service-bindings/{service}/rotate": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Rotate an organization's service-binding credential (platform administrators).",
+        "description": "Gap audit G10: Platform Access issues a successor credential for the AUTOMATIC binding\n(the predecessor is revoked) and Organizations records it (audited).",
+        "operationId": "v2_admin_rotate_organization_service_binding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "description": "calling or messaging",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rotated binding (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / not bound / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED / operator binding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations or Platform Access unreachable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -18135,7 +18638,7 @@
           "Organizations (v2)"
         ],
         "summary": "Change a member's role or status.",
-        "description": "Changes the role (OWNER, ADMIN, MANAGER, MEMBER, GUEST) or status (ACTIVE, SUSPENDED, REMOVED)\nof one membership. The path's member segment is the membership `id` from the member list.\n`expectedVersion` must be the membership's current `version`. The Organizations Service\nenforces the role rules: OWNERs manage anyone, ADMINs manage MANAGER, MEMBER and GUEST\nmemberships, nobody raises their own role, and the last OWNER cannot be removed or demoted\n(LAST_OWNER). Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "description": "Changes the role (OWNER, ADMIN, MANAGER, MEMBER, GUEST) or status (ACTIVE, SUSPENDED, REMOVED)\nof one membership. The path's member segment is the member's user id (as on PUT) or the\nmembership `id` from the member list.\n`expectedVersion` must be the membership's current `version`. The Organizations Service\nenforces the role rules: OWNERs manage anyone, ADMINs manage MANAGER, MEMBER and GUEST\nmemberships, nobody raises their own role, and the last OWNER cannot be removed or demoted\n(LAST_OWNER). Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
         "operationId": "v2_update_organization_membership",
         "parameters": [
           {
@@ -18151,7 +18654,7 @@
           {
             "name": "userId",
             "in": "path",
-            "description": "Membership id (the `id` of a member list item)",
+            "description": "The member: their user id (as on PUT) or the membership id (the `id` of a member list item)",
             "required": true,
             "schema": {
               "type": "string",
@@ -24855,6 +25358,22 @@
           }
         }
       },
+      "IdentityDuplicatesReport": {
+        "type": "object",
+        "description": "Gap audit A17: the case-insensitive uniqueness report.",
+        "required": [
+          "email",
+          "username"
+        ],
+        "properties": {
+          "email": {
+            "$ref": "#/components/schemas/IdentityUniqueness"
+          },
+          "username": {
+            "$ref": "#/components/schemas/IdentityUniqueness"
+          }
+        }
+      },
       "IdentityType": {
         "type": "string",
         "enum": [
@@ -24865,6 +25384,31 @@
           "SERVICE",
           "BOT"
         ]
+      },
+      "IdentityUniqueness": {
+        "type": "object",
+        "description": "Gap audit A17: case-insensitive uniqueness of one identity field.",
+        "required": [
+          "enforced",
+          "duplicateGroups"
+        ],
+        "properties": {
+          "duplicateGroups": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "description": "Accounts that differ only by case, grouped (at most 100 groups); empty when none."
+          },
+          "enforced": {
+            "type": "boolean",
+            "description": "True when the database enforces it (the unique index exists)."
+          }
+        }
       },
       "InstantMeetingApiResponse": {
         "type": "object",
@@ -29657,6 +30201,26 @@
           "reason": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReplayOrganizationEventsRequest": {
+        "type": "object",
+        "description": "Gap audit G10: which dead-lettered organization events to replay.",
+        "properties": {
+          "destination": {
+            "type": "string",
+            "description": "One consumer's dead letters only (for example `cfmeet.meeting-service`).",
+            "nullable": true
+          },
+          "eventIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Only these events (at most 500); empty: every dead letter (of the destination)."
           }
         },
         "additionalProperties": false

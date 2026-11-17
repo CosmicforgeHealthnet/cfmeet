@@ -348,3 +348,101 @@ async fn gap_legacy_surface_is_deprecated_ends_its_room_and_hides_private_detail
         "{terminated:?}"
     );
 }
+
+/// Gap audit M9: deleting a legacy meeting retires its v2 view, and the auto-start job
+/// mirrors the start into the v2 conference.
+#[tokio::test]
+async fn gap_v2_view_follows_legacy_delete_and_auto_start() {
+    let Some(app) = app_with(LegacyMeetingCreateMode::Mirror).await else {
+        return;
+    };
+    let host = app.user("gapmirror").await;
+    let (s, _, v) = raw(
+        &app,
+        Method::POST,
+        "/api/v1/meetings",
+        &host.token,
+        json!({ "title": "to delete", "start_time": future_local(), "timezone": "Africa/Lagos" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let gone: Uuid = v["data"]["id"].as_str().unwrap().parse().unwrap();
+    let space: Uuid = {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        app.db
+            .conn
+            .query_one(Statement::from_string(
+                DbBackend::Postgres,
+                format!("SELECT id FROM meeting_spaces WHERE legacy_meeting_id = '{gone}'"),
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get("", "id")
+            .unwrap()
+    };
+    let (s, _, v) = raw(
+        &app,
+        Method::DELETE,
+        &format!("/api/v1/meetings/{gone}"),
+        &host.token,
+        Value::Null,
+    )
+    .await;
+    assert!(s.is_success(), "{v}");
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM meeting_spaces WHERE id = '{space}' AND status = 'DELETED'"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_sessions WHERE meeting_space_id = '{space}' AND status = 'CANCELLED'"
+        ))
+        .await,
+        1
+    );
+
+    // Auto-start: the legacy start reaches the v2 conference.
+    let (s, _, v) = raw(
+        &app,
+        Method::POST,
+        "/api/v1/meetings",
+        &host.token,
+        json!({ "title": "auto start", "start_time": future_local(), "timezone": "Africa/Lagos" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let due: Uuid = v["data"]["id"].as_str().unwrap().parse().unwrap();
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE meetings SET start_time = now() - interval '1 minute' WHERE id = '{due}'"
+        ))
+        .await
+        .unwrap();
+    let before = app
+        .scalar(&format!(
+            "SELECT count(*) FROM conference_sessions WHERE legacy_meeting_id = '{due}' AND status = 'CREATED'"
+        ))
+        .await;
+    assert_eq!(before, 1);
+    let started = backend::workers::MeetingAutoStartWorker::new(app.db.conn.clone())
+        .with_mirror(std::sync::Arc::new(
+            backend::services::compat::CompatService::new(app.state.meeting.core.clone()),
+        ))
+        .process_batch()
+        .await
+        .unwrap();
+    assert!(started >= 1);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_sessions WHERE legacy_meeting_id = '{due}' AND status = 'CREATED'"
+        ))
+        .await,
+        0,
+        "the mirrored conference left CREATED"
+    );
+}

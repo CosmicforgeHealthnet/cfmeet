@@ -15,11 +15,11 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 273 |
-| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.4.0 | 73 |
+| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.5.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 135 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **653** |
+| **Total** | | | **654** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -505,7 +505,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 
 ## Communications Hub (contacts, CF Meet ID / QR, timeline, activity)
 
-Contract `packages/contracts/communications/http/v1.openapi.json` version **1.4.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
+Contract `packages/contracts/communications/http/v1.openapi.json` version **1.5.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
 
 ### Calls
 
@@ -513,6 +513,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.4.
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/communications/calls/history` | account session | Call history with public counterpart identities | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#listCommunicationsCallHistory` |
 | GET | `/api/v2/communications/calls/{callId}/context` | account session | One call, for a participant | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsCallContext` |
+| POST | `/api/v2/communications/calls/{callId}/participants` | account session | Add connected contacts to a running call | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#addContactsToCall` |
 | POST | `/api/v2/communications/contacts/{contactId}/calls` | account session | Start a voice or video call with an accepted contact | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#startContactCall` |
 | POST | `/api/v2/communications/conversations/{conversationId}/calls` | account session | Start a voice or video call from a conversation | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#startConversationCall` |
 

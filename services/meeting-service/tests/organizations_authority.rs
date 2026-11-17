@@ -4679,3 +4679,131 @@ async fn gap_an_ex_member_keeps_no_owner_control_of_organization_spaces() {
     .await;
     assert_eq!(s, StatusCode::OK, "{m}");
 }
+
+/// Gap audit G10: platform administrators reach provisioning retry, service bindings
+/// (read / rotate) and organization event delivery (status / replay) through the API;
+/// everyone else is refused before Organizations is called.
+#[tokio::test]
+async fn gap_operator_routes_reach_organizations_for_platform_admins_only() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let user = app.user("not-operator").await;
+    let admin = app.admin("operator").await;
+    let org = fake.add_org("operator-acme", &[(user.id, "OWNER")]);
+    let ok = json!({ "schemaVersion": 1, "ok": true });
+    let calls = [
+        (
+            Method::POST,
+            format!("/api/v2/admin/organizations/{org}/provisioning/retry"),
+            format!("/internal/v1/admin/organizations/{org}/provisioning/retry"),
+            None,
+        ),
+        (
+            Method::GET,
+            format!("/api/v2/admin/organizations/{org}/service-bindings/calling"),
+            format!("/internal/v1/admin/organizations/{org}/scopes/primary/service-bindings/calling"),
+            None,
+        ),
+        (
+            Method::POST,
+            format!("/api/v2/admin/organizations/{org}/service-bindings/messaging/rotate"),
+            format!("/internal/v1/admin/organizations/{org}/scopes/primary/service-bindings/messaging/rotate"),
+            None,
+        ),
+        (
+            Method::GET,
+            "/api/v2/admin/organization-event-delivery".to_string(),
+            "/internal/v1/admin/event-delivery".to_string(),
+            None,
+        ),
+        (
+            Method::POST,
+            "/api/v2/admin/organization-event-delivery/replay".to_string(),
+            "/internal/v1/admin/event-delivery/replay".to_string(),
+            Some(json!({ "destination": "cfmeet.meeting-service", "eventIds": [] })),
+        ),
+    ];
+    for (method, public, internal, body) in calls {
+        fake.script(method.as_str(), &internal, 200, ok.clone());
+        let body = body.or(if method == Method::POST {
+            Some(json!({}))
+        } else {
+            None
+        });
+        let (s, _) = app
+            .call(
+                method.clone(),
+                &public,
+                Auth::Bearer(&user.token),
+                body.clone(),
+            )
+            .await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "{public}");
+        let (s, v) = app
+            .call(method.clone(), &public, Auth::Bearer(&admin.token), body)
+            .await;
+        assert_eq!(s, StatusCode::OK, "{public}: {v}");
+        let r = fake.last(method.as_str(), &internal);
+        assert_eq!(r.acting_user, Some(admin.id.to_string()), "{public}");
+    }
+    // Only Calling and Messaging bindings exist.
+    let (s, _) = app
+        .call(
+            Method::GET,
+            &format!("/api/v2/admin/organizations/{org}/service-bindings/hub"),
+            Auth::Bearer(&admin.token),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // Search reaches the operator list.
+    let (s, _) = app
+        .call(
+            Method::GET,
+            "/api/v2/admin/organizations?q=acme",
+            Auth::Bearer(&admin.token),
+            None,
+        )
+        .await;
+    assert!(s.is_success());
+    let r = fake.last("GET", "/internal/v1/admin/organizations");
+    assert!(
+        r.query.as_deref().unwrap_or_default().contains("q=acme"),
+        "{:?}",
+        r.query
+    );
+}
+
+/// Gap audit G18: PATCH names the member by user id (as PUT does) or by membership id.
+#[tokio::test]
+async fn gap_membership_patch_accepts_the_members_user_id() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("patch-owner").await;
+    let member = app.user("patch-member").await;
+    let org = fake.add_org("patch-acme", &[(owner.id, "OWNER"), (member.id, "MEMBER")]);
+    let membership = fake.state.members.lock().unwrap()[&org]
+        .iter()
+        .find(|m| m["userId"] == json!(member.id))
+        .unwrap()["id"]
+        .clone();
+    let (s, v) = app
+        .call(
+            Method::PATCH,
+            &format!("/api/v2/organizations/{org}/members/{}", member.id),
+            Auth::Bearer(&owner.token),
+            Some(json!({ "role": "MANAGER", "expectedVersion": 1 })),
+        )
+        .await;
+    assert!(s.is_success(), "{s} {v}");
+    let r = fake.last(
+        "PATCH",
+        &format!(
+            "/internal/v1/organizations/{org}/members/{}",
+            membership.as_str().unwrap()
+        ),
+    );
+    assert_eq!(r.acting_user, Some(owner.id.to_string()));
+}

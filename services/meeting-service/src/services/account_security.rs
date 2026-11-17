@@ -374,6 +374,24 @@ pub async fn open_session_by_reference(
     Ok(None)
 }
 
+/// Gap audit A17: whether `name` is taken by another account, regardless of case
+/// (`Alice` and `alice` are one username).
+pub async fn username_taken<C: ConnectionTrait>(
+    db: &C,
+    name: &str,
+    except: Option<Uuid>,
+) -> ApiResult<bool> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS x FROM users WHERE LOWER(username) = LOWER($1) \
+               AND ($2::uuid IS NULL OR id <> $2) LIMIT 1",
+            [name.into(), except.into()],
+        ))
+        .await?
+        .is_some())
+}
+
 /// Gap audit A13: tells the account owner of a security event by email (best effort:
 /// queued in the durable email ledger; a failure is logged, never returned). Accounts
 /// without a deliverable address (guests) get nothing.
@@ -398,6 +416,77 @@ pub async fn notify_security(
     {
         tracing::warn!(%user_id, notice = notice.key(), "security notice not queued: {e}");
     }
+}
+
+/// Gap audit A17: case-insensitive uniqueness of one identity field.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityUniqueness {
+    /// True when the database enforces it (the unique index exists).
+    pub enforced: bool,
+    /// Accounts that differ only by case, grouped (at most 100 groups); empty when none.
+    pub duplicate_groups: Vec<Vec<Uuid>>,
+}
+
+/// Gap audit A17: the case-insensitive uniqueness report.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityDuplicatesReport {
+    pub email: IdentityUniqueness,
+    pub username: IdentityUniqueness,
+}
+
+pub async fn identity_report<C: ConnectionTrait>(db: &C) -> ApiResult<IdentityDuplicatesReport> {
+    let mut out = Vec::new();
+    for (column, index) in [
+        ("email", "uq_users_email_lower"),
+        ("username", "uq_users_username_lower"),
+    ] {
+        let enforced = db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 AS x FROM pg_indexes WHERE tablename = 'users' AND indexname = $1",
+                [index.into()],
+            ))
+            .await?
+            .is_some();
+        let rows = db
+            .query_all(Statement::from_string(
+                DbBackend::Postgres,
+                format!(
+                    "SELECT array_agg(id ORDER BY created_at) AS ids FROM users \
+                      GROUP BY LOWER({column}) HAVING count(*) > 1 LIMIT 100"
+                ),
+            ))
+            .await?;
+        let mut groups = Vec::new();
+        for r in rows {
+            groups.push(r.try_get::<Vec<Uuid>>("", "ids")?);
+        }
+        out.push(IdentityUniqueness {
+            enforced,
+            duplicate_groups: groups,
+        });
+    }
+    let username = out.pop().expect("two fields");
+    let email = out.pop().expect("two fields");
+    Ok(IdentityDuplicatesReport { email, username })
+}
+
+/// Gap audit A17: creates each case-insensitive unique index whose field has no
+/// case-only duplicates left (idempotent).
+pub async fn enforce_identity_uniqueness<C: ConnectionTrait>(db: &C) -> ApiResult<()> {
+    db.execute(Statement::from_string(
+        DbBackend::Postgres,
+        "SELECT ensure_case_insensitive_identity()",
+    ))
+    .await?;
+    Ok(())
+}
+
+/// Whether an account with this id exists.
+pub async fn user_exists<C: ConnectionTrait>(db: &C, user_id: Uuid) -> ApiResult<bool> {
+    Ok(users::Entity::find_by_id(user_id).one(db).await?.is_some())
 }
 
 /// Gap audit A21: whether `session_id` is one of the user's sessions (open or ended),

@@ -1396,8 +1396,22 @@ export interface HandRaiseResponse {
   raisedAt?: string | null;
 }
 
+/** Gap audit A17: the case-insensitive uniqueness report. */
+export interface IdentityDuplicatesReport {
+  email: IdentityUniqueness;
+  username: IdentityUniqueness;
+}
+
 
 export type IdentityType = "REGISTERED_USER" | "INVITED_EXTERNAL" | "GUEST" | "PHONE" | "SERVICE" | "BOT";
+
+/** Gap audit A17: case-insensitive uniqueness of one identity field. */
+export interface IdentityUniqueness {
+  /** Accounts that differ only by case, grouped (at most 100 groups); empty when none. */
+  duplicateGroups: Array<Array<string>>;
+  /** True when the database enforces it (the unique index exists). */
+  enforced: boolean;
+}
 
 /** API response wrapper for instant meeting */
 export interface InstantMeetingApiResponse {
@@ -3014,6 +3028,14 @@ export interface RemoveParticipantRequest {
   reason?: string | null;
 }
 
+/** Gap audit G10: which dead-lettered organization events to replay. */
+export interface ReplayOrganizationEventsRequest {
+  /** One consumer's dead letters only (for example `cfmeet.meeting-service`). */
+  destination?: string | null;
+  /** Only these events (at most 500); empty: every dead letter (of the destination). */
+  eventIds?: Array<string>;
+}
+
 
 export interface RescheduleConferenceRequest {
   /**
@@ -3845,7 +3867,10 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/admin/audit-events": "v2_admin_list_account_audit_events",
   "GET /api/v2/admin/chat-migration": "v2_chat_migration_status",
   "GET /api/v2/admin/compat/legacy-meetings/{id}/shadow": "v2_shadow_compare",
+  "GET /api/v2/admin/identity-duplicates": "v2_admin_identity_duplicates",
+  "GET /api/v2/admin/organization-event-delivery": "v2_admin_organization_event_delivery",
   "GET /api/v2/admin/organizations": "v2_admin_list_organizations",
+  "GET /api/v2/admin/organizations/{id}/service-bindings/{service}": "v2_admin_get_organization_service_binding",
   "GET /api/v2/conferences/{id}": "v2_get_conference",
   "GET /api/v2/conferences/{id}/artifacts": "v2_list_artifacts",
   "GET /api/v2/conferences/{id}/artifacts/{artifactId}": "v2_get_artifact",
@@ -3963,8 +3988,12 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/admin/chat-migration/parity-runs": "v2_chat_migration_parity",
   "POST /api/v2/admin/chat-migration/transitions": "v2_chat_migration_transition",
   "POST /api/v2/admin/compat/backfill": "v2_run_backfill",
+  "POST /api/v2/admin/identity-duplicates/enforce": "v2_admin_identity_duplicates_enforce",
+  "POST /api/v2/admin/organization-event-delivery/replay": "v2_admin_replay_organization_events",
   "POST /api/v2/admin/organizations": "v2_create_organization",
   "POST /api/v2/admin/organizations/{id}/owners": "v2_appoint_organization_owner",
+  "POST /api/v2/admin/organizations/{id}/provisioning/retry": "v2_admin_retry_organization_provisioning",
+  "POST /api/v2/admin/organizations/{id}/service-bindings/{service}/rotate": "v2_admin_rotate_organization_service_binding",
   "POST /api/v2/admin/users/{userId}/sessions/revoke": "v2_admin_revoke_user_sessions",
   "POST /api/v2/conferences/{id}/artifacts/reports": "v2_generate_report",
   "POST /api/v2/conferences/{id}/artifacts/{artifactId}/access": "v2_artifact_access",

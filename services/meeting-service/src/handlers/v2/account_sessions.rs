@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
+use crate::services::account_security::IdentityDuplicatesReport;
+
 use super::V2Path;
 use crate::{
     error::{ApiError, ApiResult, ErrorCode},
@@ -340,12 +342,7 @@ pub async fn admin_revoke_user_sessions(
             "reason must be 1-500 characters",
         ));
     }
-    use sea_orm::EntityTrait;
-    if crate::models::users::Entity::find_by_id(user_id)
-        .one(&state.db)
-        .await?
-        .is_none()
-    {
+    if !security::user_exists(&state.db, user_id).await? {
         return Err(ApiError::domain(ErrorCode::UserNotFound, "User not found"));
     }
     let revoked = security::revoke_all(&state.db, user_id, RevokeReason::AdminRevoked).await?;
@@ -365,6 +362,60 @@ pub async fn admin_revoke_user_sessions(
     Ok(Json(AccountSessionRevokeResponse {
         revoked_count: revoked,
     }))
+}
+
+fn require_platform_admin(actor: &ActorContext) -> ApiResult<()> {
+    if !actor.require_registered()?.platform_admin {
+        return Err(ApiError::domain(
+            ErrorCode::PermissionDenied,
+            "Platform administrator required",
+        ));
+    }
+    Ok(())
+}
+
+/// Report case-only duplicate accounts (platform administrators)
+///
+/// Gap audit A17: emails and usernames are unique regardless of case. The database enforces
+/// it once no case-only duplicates remain; this lists the account ids of each duplicate
+/// group (no addresses) and whether each rule is enforced yet.
+#[utoipa::path(
+    get, path = "/api/v2/admin/identity-duplicates", tag = "Account sessions (v2)", operation_id = "v2_admin_identity_duplicates",
+    responses(
+        (status = 200, description = "Report", body = IdentityDuplicatesReport),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn admin_identity_duplicates(
+    State(state): State<AppState>,
+    actor: ActorContext,
+) -> ApiResult<Json<IdentityDuplicatesReport>> {
+    require_platform_admin(&actor)?;
+    Ok(Json(security::identity_report(&state.db).await?))
+}
+
+/// Enforce case-insensitive uniqueness where possible (platform administrators)
+///
+/// Gap audit A17: creates each unique index whose field has no case-only duplicates left
+/// (idempotent) and returns the resulting report.
+#[utoipa::path(
+    post, path = "/api/v2/admin/identity-duplicates/enforce", tag = "Account sessions (v2)", operation_id = "v2_admin_identity_duplicates_enforce",
+    responses(
+        (status = 200, description = "Report after enforcement", body = IdentityDuplicatesReport),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn admin_enforce_identity_uniqueness(
+    State(state): State<AppState>,
+    actor: ActorContext,
+) -> ApiResult<Json<IdentityDuplicatesReport>> {
+    require_platform_admin(&actor)?;
+    security::enforce_identity_uniqueness(&state.db).await?;
+    Ok(Json(security::identity_report(&state.db).await?))
 }
 
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]

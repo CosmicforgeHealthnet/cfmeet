@@ -2287,6 +2287,16 @@ export namespace Communications {
     data: Array<TimelineEntry>;
     nextCursor: string | null;
   };
+  export type AddContactsToCall = {
+    /** Contact ids (GET /api/v2/communications/contacts) of CONNECTED contacts. */
+    targetContactIds: Array<string>;
+    /** The caller's own participant id in the call. */
+    invitingParticipantId: string;
+    /** The call's current version. */
+    expectedVersion: number;
+    /** Idempotency anchor: a retry returns the same result. */
+    clientRequestId: string;
+  };
   export type BackendCapability = {
     available: boolean;
     reason: "AVAILABLE" | "DISABLED" | "DEVICE_SECURITY_SETUP_REQUIRED" | "BACKEND_UNAVAILABLE" | "ACCOUNT_INACTIVE";
@@ -2490,6 +2500,14 @@ export namespace Communications {
     version: number;
     expiresAt?: string;
     relationship?: RelationshipState;
+  };
+  export type ContactsAddedToCall = {
+    schemaVersion: 1;
+    callId: string;
+    /** Calling's call summary (state, version). */
+    call?: { [key: string]: unknown };
+    addedContactIds: Array<string>;
+    replayed: boolean;
   };
   export type ContactsPage = {
     schemaVersion: 1;
@@ -2946,6 +2964,11 @@ export namespace Communications {
     addContactListMember: {
       params: { path: { listId: string; contactId: string }; idempotencyKey?: string };
       response: ContactListMembership;
+    };
+    /** POST /api/v2/communications/calls/{callId}/participants; auth MEETING_SESSION; retry IDEMPOTENT */
+    addContactsToCall: {
+      params: { path: { callId: string }; body: AddContactsToCall; idempotencyKey?: string };
+      response: ContactsAddedToCall;
     };
     /** PUT /api/v2/communications/contacts/{contactId}/favorite; auth MEETING_SESSION; retry IDEMPOTENT */
     addFavoriteContact: {

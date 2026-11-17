@@ -306,12 +306,22 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Start meeting auto-end worker (always runs)
-    let _meeting_auto_end_worker =
-        spawn_meeting_auto_end_worker(db.clone(), Some(state.meeting.core.rtc.clone()));
+    let _meeting_auto_end_worker = spawn_meeting_auto_end_worker(
+        db.clone(),
+        Some(state.meeting.core.rtc.clone()),
+        Some(std::sync::Arc::new(
+            backend::services::compat::CompatService::new(state.meeting.core.clone()),
+        )),
+    );
     tracing::info!("✅ Meeting auto-end worker started");
 
     // Start meeting auto-start worker (always runs)
-    let _meeting_auto_start_worker = spawn_meeting_auto_start_worker(db.clone());
+    let _meeting_auto_start_worker = spawn_meeting_auto_start_worker(
+        db.clone(),
+        Some(std::sync::Arc::new(
+            backend::services::compat::CompatService::new(state.meeting.core.clone()),
+        )),
+    );
     tracing::info!("✅ Meeting auto-start worker started");
 
     // Phase 2 meeting domain workers (v2 conferences only; legacy workers above keep

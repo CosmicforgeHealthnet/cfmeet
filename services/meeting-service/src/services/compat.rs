@@ -181,6 +181,30 @@ impl CompatService {
         }
     }
 
+    /// Gap audit M9: a legacy meeting is about to be deleted: its v2 space is marked
+    /// DELETED and its unstarted occurrences CANCELLED first, so the v2 view never keeps a
+    /// meeting the legacy surface no longer has. Best effort (logged), like the mirror.
+    pub async fn retire_legacy(&self, legacy_meeting_id: Uuid) {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        let sql = "WITH s AS (UPDATE meeting_spaces SET status = 'DELETED', updated_at = now() \
+                     WHERE legacy_meeting_id = $1 AND status <> 'DELETED' RETURNING id) \
+                   UPDATE conference_sessions c SET status = 'CANCELLED', termination_reason = 'CANCELLED', \
+                          cancelled_at = now(), cancelled_by = 'system:legacy-deleted', updated_at = now() \
+                     FROM s WHERE c.meeting_space_id = s.id AND c.status IN ('CREATED','PREPARING','WAITING')";
+        if let Err(e) = self
+            .core
+            .db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                sql,
+                [legacy_meeting_id.into()],
+            ))
+            .await
+        {
+            tracing::warn!(%legacy_meeting_id, "retiring the v2 view of a deleted legacy meeting failed: {e}");
+        }
+    }
+
     /// Run the idempotent backfill (all legacy meetings, or one).
     pub async fn backfill(&self, legacy_meeting_id: Option<Uuid>) -> ApiResult<BackfillReport> {
         let txn = self.core.db.begin().await?;
