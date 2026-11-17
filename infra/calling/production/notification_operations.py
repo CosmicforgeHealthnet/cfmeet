@@ -573,6 +573,23 @@ FENCE_ROUTABLE.update({
     ('meeting-service', category): dict(publications='activate-critical-lane', service_channels=('EMAIL',),
                                         service_category=category)
     for category in CRITICAL_ORDER})
+# The sign-in email carries a magic link the service builds from NOTIFICATIONS_APP_URL; NEW
+# would send a different link unless it equals the Meeting Service's APP_URL.
+FENCE_ROUTABLE[('meeting-service', 'AUTH_VERIFICATION')]['same_app_url'] = True
+SERVICE_DEFAULT_APP_URL = 'https://cfmeet.com'
+MEETING_DEFAULT_APP_URL = 'http://localhost:3000'
+
+
+def app_url(value, default):
+    return (value or default).rstrip('/')
+
+
+def app_urls(cr):
+    """{container: APP_URL} of the Meeting Service and both service replicas (defaults applied)."""
+    urls = {'meeting-service': app_url(cr.env_of('meeting-service').get('APP_URL'), MEETING_DEFAULT_APP_URL)}
+    for replica in REPLICAS:
+        urls[replica] = app_url(cr.env_of(replica).get('NOTIFICATIONS_APP_URL'), SERVICE_DEFAULT_APP_URL)
+    return urls
 FENCE_MODES = {'legacy-only': 'LEGACY_ONLY', 'shadow': 'SHADOW', 'fenced-old': 'FENCED_OLD', 'fenced-new': 'FENCED_NEW'}
 # FENCED_NEW routes every new decision NEW (canary 100); the canary percentage is not a
 # workflow input (confirm accepts letters and hyphens only).
@@ -650,6 +667,10 @@ def fence_gate(service, category, mode, before, facts):
         if missing:
             return ('FENCED_NEW would skip the legacy path while the Notification Service does not deliver %s on %s; '
                     'activate those routing rows first' % (spec['service_category'], ', '.join(missing)))
+        urls = facts.get('app_urls') or {}
+        if spec.get('same_app_url') and len(set(urls.values())) != 1:
+            return ('FENCED_NEW would send magic links to a different web app: APP_URL %s; '
+                    'run activate-critical-lane again on this release' % json.dumps(urls, sort_keys=True))
     return None
 
 
@@ -671,7 +692,8 @@ def activate_fence(cr, sha, run_id, confirm):
     facts = dict(protocol=routing_protocol(cr, service),
                  publications_done=bool(spec) and cr.done(spec['publications']),
                  service_modes=service_modes(cr, spec['service_category']) if mode == 'FENCED_NEW' else {},
-                 done=tuple(op for op in spec.get('new_requires', ()) if cr.done(op)))
+                 done=tuple(op for op in spec.get('new_requires', ()) if cr.done(op)),
+                 app_urls=app_urls(cr) if mode == 'FENCED_NEW' and spec.get('same_app_url') else {})
     refusal = fence_gate(service, category, mode, before['mode'], facts)
     if refusal:
         raise RuntimeError('Routing fence gate: ' + refusal + '; nothing changed')
@@ -980,6 +1002,9 @@ def activate_critical_lane(cr, sha, run_id, confirm):
     require_fence_protocol(cr, 'meeting-service')
     deny_owner_routes_publicly(cr)
     key = fallback_key(cr)
+    meeting_app_url = app_urls(cr)['meeting-service']
+    if not meeting_app_url.startswith('https://'):
+        raise RuntimeError('The Meeting Service APP_URL is not an https URL; nothing changed')
 
     def post():
         health = meeting_health(cr)
@@ -989,9 +1014,12 @@ def activate_critical_lane(cr, sha, run_id, confirm):
                                % (health.get('criticalFallbackKey'), health.get('routingProtocol')))
         cr.emit('criticalLane', {'criticalFallbackKey': True, 'routingProtocol': health['routingProtocol']})
 
+    # The service builds the sign-in magic link from NOTIFICATIONS_APP_URL: the same web app.
     cr.apply_activation('activate-critical-lane', sha, run_id,
                         [('meeting-service', {'CF_ACCOUNT_FALLBACK_KEY_FILE': CRITICAL_FALLBACK_TARGET},
-                          {'mounts': [(key, CRITICAL_FALLBACK_TARGET)]})], post=post)
+                          {'mounts': [(key, CRITICAL_FALLBACK_TARGET)]})]
+                        + [(replica, {'NOTIFICATIONS_APP_URL': meeting_app_url}, {}) for replica in REPLICAS],
+                        post=post)
 
 
 # --- N9: push --------------------------------------------------------------------------------

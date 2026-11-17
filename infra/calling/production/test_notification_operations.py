@@ -776,6 +776,44 @@ class CriticalLane(unittest.TestCase):
         import base64
         self.assertEqual(len(base64.b64decode(first)), 32)
 
+    def test_sign_in_codes_go_new_only_with_the_meeting_app_url(self):
+        facts = dict(protocol=2, publications_done=True, service_modes={'EMAIL': 'ACTIVE'}, done=())
+        same = {'meeting-service': 'https://cfmeet.com', 'notifications': 'https://cfmeet.com',
+                'notifications-2': 'https://cfmeet.com'}
+        self.assertIsNone(no.fence_gate('meeting-service', 'AUTH_VERIFICATION', 'FENCED_NEW', 'SHADOW',
+                                        dict(facts, app_urls=same)))
+        other = dict(same, **{'notifications-2': 'https://app.example.com'})
+        self.assertIn('magic links', no.fence_gate('meeting-service', 'AUTH_VERIFICATION', 'FENCED_NEW', 'SHADOW',
+                                                   dict(facts, app_urls=other)))
+        # The device categories carry no link.
+        self.assertIsNone(no.fence_gate('meeting-service', 'SECURITY_DEVICE_STEP_UP', 'FENCED_NEW', 'SHADOW',
+                                        dict(facts, app_urls=other)))
+
+    def test_the_lane_gives_both_replicas_the_meeting_app_url(self):
+        from unittest import mock
+
+        class Fake:
+            env = {'meeting-service': {'APP_URL': 'https://cfmeet.com/'}, 'notifications': {}, 'notifications-2': {}}
+            done = staticmethod(lambda op: True)
+            require_release = staticmethod(lambda sha: None)
+
+            def env_of(self, name):
+                return self.env[name]
+
+            def apply_activation(self, op, sha, run_id, changes, post=None):
+                self.changes = changes
+        fake = Fake()
+        with mock.patch.object(no, 'require_fence_protocol'), mock.patch.object(no, 'deny_owner_routes_publicly'), \
+                mock.patch.object(no, 'fallback_key', return_value='/k'):
+            no.activate_critical_lane(fake, 'a' * 40, '1-1', '')
+        replicas = {name: env for name, env, _ in fake.changes if name in no.REPLICAS}
+        self.assertEqual(replicas, {r: {'NOTIFICATIONS_APP_URL': 'https://cfmeet.com'} for r in no.REPLICAS})
+        fake.env['meeting-service'] = {}
+        with mock.patch.object(no, 'require_fence_protocol'), mock.patch.object(no, 'deny_owner_routes_publicly'), \
+                mock.patch.object(no, 'fallback_key', return_value='/k'):
+            with self.assertRaisesRegex(RuntimeError, 'https'):
+                no.activate_critical_lane(fake, 'a' * 40, '1-1', '')
+
 
 
 class Push(unittest.TestCase):
