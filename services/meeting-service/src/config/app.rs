@@ -106,7 +106,11 @@ pub const MIN_JWT_SECRET_BYTES: usize = 32;
 /// `APP_ENV` explicitly names a development environment (unset = production-like).
 pub fn is_development_env(app_env: Option<&str>) -> bool {
     matches!(
-        app_env.unwrap_or_default().trim().to_ascii_lowercase().as_str(),
+        app_env
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
         "dev" | "development" | "local" | "test"
     )
 }

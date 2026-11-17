@@ -178,7 +178,9 @@ async fn email_change_proves_both_mailboxes_and_can_be_undone() {
 
     // This session stays; the other one ended.
     assert_eq!(
-        app.get("/api/v2/me/sessions", Auth::Bearer(&access)).await.0,
+        app.get("/api/v2/me/sessions", Auth::Bearer(&access))
+            .await
+            .0,
         StatusCode::OK
     );
     assert_eq!(
@@ -231,7 +233,9 @@ async fn email_change_proves_both_mailboxes_and_can_be_undone() {
         1
     );
     assert_eq!(
-        app.get("/api/v2/me/sessions", Auth::Bearer(&access)).await.0,
+        app.get("/api/v2/me/sessions", Auth::Bearer(&access))
+            .await
+            .0,
         StatusCode::UNAUTHORIZED
     );
     let (s, _) = app
@@ -376,7 +380,9 @@ async fn support_changes_an_email_with_an_audited_admin_call() {
     assert_eq!(v["data"]["email"], new.as_str());
     // Every session ended; both addresses were told; the change is audited.
     assert_eq!(
-        app.get("/api/v2/me/sessions", Auth::Bearer(&access)).await.0,
+        app.get("/api/v2/me/sessions", Auth::Bearer(&access))
+            .await
+            .0,
         StatusCode::UNAUTHORIZED
     );
     let notice = latest_text(&app, "email-changed:old:", &user.email).await;

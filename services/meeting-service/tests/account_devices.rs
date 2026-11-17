@@ -18,7 +18,6 @@ use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-
 macro_rules! app_with_redis {
     () => {{
         if !require_test_redis() {

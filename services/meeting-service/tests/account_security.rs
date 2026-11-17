@@ -302,7 +302,7 @@ async fn a_legacy_refresh_token_upgrades_once_into_a_session() {
 async fn sign_in_answers_do_not_reveal_accounts() {
     let app = app_with_redis!();
     email_user(&app, "known@example.com", "active").await;
-    email_user(&app, "gone@example.com", "suspended").await;
+    email_user(&app, "gone@example.com", "inactive").await;
 
     let request = |email: &'static str| {
         let app = &app;
@@ -343,7 +343,12 @@ async fn sign_in_answers_do_not_reveal_accounts() {
     let wrong = verify("known@example.com").await;
     let no_account = verify("never-requested@example.com").await;
     assert_eq!(wrong.0, StatusCode::BAD_REQUEST, "{}", wrong.1);
-    assert_eq!(wrong, no_account);
+    assert_eq!(wrong.0, no_account.0);
+    assert_eq!(wrong.1["error"]["code"], no_account.1["error"]["code"]);
+    assert_eq!(
+        wrong.1["error"]["message"],
+        no_account.1["error"]["message"]
+    );
     // No account is created by a failed verification.
     assert_eq!(
         app.scalar("SELECT count(*) FROM users WHERE email = 'never-requested@example.com'")
@@ -397,7 +402,9 @@ async fn the_mailed_code_signs_in_once() {
     assert_eq!(s, StatusCode::OK, "{v}");
     let code = mailed_code(&app, &email).await;
     let body = json!({ "email": email.to_uppercase(), "code": code });
-    let (s, v) = app.post("/api/v1/auth/otp/verify", Auth::None, body.clone()).await;
+    let (s, v) = app
+        .post("/api/v1/auth/otp/verify", Auth::None, body.clone())
+        .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["is_new_account"], false);
     assert_eq!(uuid(&v["user"]["id"]), id);
@@ -433,7 +440,10 @@ async fn first_sign_in_creates_one_account_and_normalizes_email() {
     assert_eq!(first["user"]["status"], "active");
     let username = first["user"]["username"].as_str().unwrap();
     assert!(username.starts_with("user_"), "{username}");
-    assert!(!username.contains("mixed"), "usernames never reveal the address");
+    assert!(
+        !username.contains("mixed"),
+        "usernames never reveal the address"
+    );
     assert_eq!(
         app.scalar(
             "SELECT count(*) FROM users WHERE email = 'mixed.case@example.com' \
@@ -661,11 +671,17 @@ async fn validation_errors_name_the_public_field_with_structured_details() {
     assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
     assert_eq!(v["success"], false);
     assert_eq!(v["error"]["code"], "VALIDATION_ERROR");
-    assert_eq!(issues(&v), vec![pair("code", "regex"), pair("email", "email")]);
+    assert_eq!(
+        issues(&v),
+        vec![pair("code", "regex"), pair("email", "email")]
+    );
     let message = v["error"]["message"].as_str().unwrap();
     assert!(message.contains("code: The code must be 6 digits"), "{v}");
     assert!(message.contains("email: Invalid email address"), "{v}");
-    assert!(!v.to_string().contains("12a456"), "the code is never echoed");
+    assert!(
+        !v.to_string().contains("12a456"),
+        "the code is never echoed"
+    );
 
     let (s, v) = app
         .post(

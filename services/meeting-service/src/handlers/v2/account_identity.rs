@@ -2,7 +2,6 @@
 //! sign-in: the email address is the credential).
 
 use axum::{extract::State, http::HeaderMap, Json};
-use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -87,10 +86,7 @@ async fn signed_in(
     headers: &HeaderMap,
 ) -> ApiResult<(users::Model, uuid::Uuid)> {
     let registered = actor.require_registered()?;
-    let user = users::Entity::find_by_id(registered.user_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| ApiError::Unauthorized("Account is unavailable".into()))?;
+    let user = step_up::account(state, registered.user_id).await?;
     // Step-up tokens are bound to a session: pre-session tokens sign in again first.
     let session = current_session(state, headers).ok_or_else(step_up::step_up_required)?;
     Ok((user, session))

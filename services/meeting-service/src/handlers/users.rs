@@ -211,4 +211,3 @@ pub async fn deactivate_account(
         message: "Account deactivated successfully".to_string(),
     }))
 }
-

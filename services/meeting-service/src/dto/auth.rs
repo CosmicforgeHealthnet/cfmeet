@@ -10,8 +10,7 @@ use validator::Validate;
 static OTP_CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]{6}$").unwrap());
 
 // Magic-link token: 64 lower-case hex characters.
-static LINK_TOKEN_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[0-9a-f]{64}$").unwrap());
+static LINK_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{64}$").unwrap());
 
 /// Start a passwordless sign-in (or sign-up): a one-time code is emailed.
 #[derive(Debug, Deserialize, Validate, ToSchema)]

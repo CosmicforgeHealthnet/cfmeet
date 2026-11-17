@@ -93,7 +93,11 @@ pub async fn request(state: &AppState, user: &users::Model, new_email: &str) -> 
         .check_send_rate(&subject, OtpType::EmailChange)
         .await?;
     if find_user_by_email(&state.db, &new_email).await?.is_some() {
-        if let Err(e) = state.email_service.send_email_in_use_notice(&new_email).await {
+        if let Err(e) = state
+            .email_service
+            .send_email_in_use_notice(&new_email)
+            .await
+        {
             tracing::warn!("email-in-use notice not queued: {e}");
         }
     } else {
@@ -183,9 +187,13 @@ pub async fn confirm(
         user.id,
         "email-changed",
     )?;
-    let ended =
-        security::revoke_others(&txn, user.id, current_session, RevokeReason::CredentialsChanged)
-            .await?;
+    let ended = security::revoke_others(
+        &txn,
+        user.id,
+        current_session,
+        RevokeReason::CredentialsChanged,
+    )
+    .await?;
     txn.commit().await?;
 
     for session_id in &ended {

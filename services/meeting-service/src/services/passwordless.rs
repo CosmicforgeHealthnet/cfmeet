@@ -91,7 +91,11 @@ impl TestAccounts {
 /// `102.89.x.x` / `2001:db8:x:x`: enough to recognise a network, not to locate a person.
 pub fn mask_address(address: &str) -> String {
     if address.contains(':') {
-        let parts: Vec<&str> = address.split(':').filter(|p| !p.is_empty()).take(2).collect();
+        let parts: Vec<&str> = address
+            .split(':')
+            .filter(|p| !p.is_empty())
+            .take(2)
+            .collect();
         format!("{}:x:x", parts.join(":"))
     } else {
         let parts: Vec<&str> = address.split('.').take(2).collect();
@@ -148,7 +152,10 @@ mod tests {
 
     #[test]
     fn test_accounts_are_refused_in_production_unless_explicitly_allowed() {
-        assert!(TestAccounts::from_lookup(&lookup(&[])).unwrap().codes.is_empty());
+        assert!(TestAccounts::from_lookup(&lookup(&[]))
+            .unwrap()
+            .codes
+            .is_empty());
         let prod = TestAccounts::from_lookup(&lookup(&[("AUTH_TEST_ACCOUNTS", "r@x.com:246810")]));
         assert!(prod.is_err(), "unset APP_ENV is production-like");
         let prod = TestAccounts::from_lookup(&lookup(&[
@@ -166,16 +173,22 @@ mod tests {
         assert_eq!(allowed.check("r@x.com", "246811"), Some(false));
         assert_eq!(allowed.check("other@x.com", "246810"), None);
         assert!(allowed.is_test_account("r@x.com"));
-        assert!(!format!("{allowed:?}").contains("246810"), "codes never printed");
+        assert!(
+            !format!("{allowed:?}").contains("246810"),
+            "codes never printed"
+        );
     }
 
     #[test]
     fn malformed_test_account_entries_are_refused() {
-        for raw in ["r@x.com", "r@x.com:12345", "r@x.com:abcdef", "nobody:123456"] {
-            let pairs: &'static [(&'static str, &'static str)] = Box::leak(Box::new([
-                ("APP_ENV", "test"),
-                ("AUTH_TEST_ACCOUNTS", raw),
-            ]));
+        for raw in [
+            "r@x.com",
+            "r@x.com:12345",
+            "r@x.com:abcdef",
+            "nobody:123456",
+        ] {
+            let pairs: &'static [(&'static str, &'static str)] =
+                Box::leak(Box::new([("APP_ENV", "test"), ("AUTH_TEST_ACCOUNTS", raw)]));
             assert!(TestAccounts::from_lookup(&lookup(pairs)).is_err(), "{raw}");
         }
         let ok = TestAccounts::from_lookup(&lookup(&[

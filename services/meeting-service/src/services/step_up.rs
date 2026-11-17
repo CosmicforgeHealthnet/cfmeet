@@ -50,11 +50,23 @@ fn subject(user_id: Uuid, purpose: StepUpPurpose) -> String {
 }
 
 fn token_key(token: &str) -> String {
-    format!("stepup:token:{}", hex::encode(Sha256::digest(token.as_bytes())))
+    format!(
+        "stepup:token:{}",
+        hex::encode(Sha256::digest(token.as_bytes()))
+    )
 }
 
 fn binding(user_id: Uuid, session_id: Uuid, purpose: StepUpPurpose) -> String {
     format!("{user_id}:{session_id}:{}", purpose.as_str())
+}
+
+/// The signed-in account (v2 handlers stay thin transport and never query entities).
+pub async fn account(state: &AppState, user_id: Uuid) -> ApiResult<users::Model> {
+    use sea_orm::EntityTrait;
+    users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::Unauthorized("Account is unavailable".into()))
 }
 
 /// `403 REAUTHENTICATION_REQUIRED`: the action needs a fresh step-up confirmation.
@@ -66,7 +78,11 @@ pub fn step_up_required() -> ApiError {
 }
 
 /// Email a step-up code to the account's current address (at most 5 per 15 minutes).
-pub async fn request(state: &AppState, user: &users::Model, purpose: StepUpPurpose) -> ApiResult<()> {
+pub async fn request(
+    state: &AppState,
+    user: &users::Model,
+    purpose: StepUpPurpose,
+) -> ApiResult<()> {
     let subject = subject(user.id, purpose);
     state
         .otp_service
@@ -81,7 +97,9 @@ pub async fn request(state: &AppState, user: &users::Model, purpose: StepUpPurpo
         .email_service
         .send_step_up_code(&user.email, &user.username, &code, purpose.action())
         .await?;
-    crate::services::ops_metrics::inc(&crate::services::ops_metrics::OPS_METRICS.auth_step_up_requested);
+    crate::services::ops_metrics::inc(
+        &crate::services::ops_metrics::OPS_METRICS.auth_step_up_requested,
+    );
     Ok(())
 }
 
@@ -112,7 +130,9 @@ pub async fn verify(
             Some(STEP_UP_TOKEN_TTL_SECS),
         )
         .await?;
-    crate::services::ops_metrics::inc(&crate::services::ops_metrics::OPS_METRICS.auth_step_up_issued);
+    crate::services::ops_metrics::inc(
+        &crate::services::ops_metrics::OPS_METRICS.auth_step_up_issued,
+    );
     Ok(token)
 }
 

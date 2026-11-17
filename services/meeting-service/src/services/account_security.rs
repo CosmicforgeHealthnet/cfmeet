@@ -761,7 +761,11 @@ pub async fn revoke_others<C: ConnectionTrait>(
             DbBackend::Postgres,
             "UPDATE account_sessions SET revoked_at = now(), revoke_reason = $3 \
              WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL RETURNING id",
-            [user_id.into(), keep_session_id.into(), reason.as_str().into()],
+            [
+                user_id.into(),
+                keep_session_id.into(),
+                reason.as_str().into(),
+            ],
         ))
         .await?;
     rows.into_iter()

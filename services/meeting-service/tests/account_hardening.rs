@@ -504,7 +504,11 @@ async fn deactivation_requires_a_step_up_code() {
         assert!(s.is_client_error());
     }
     let (s, _) = login(&app, "deact@example.com").await;
-    assert_eq!(s, StatusCode::FORBIDDEN, "a deactivated account cannot sign in");
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "a deactivated account cannot sign in"
+    );
 
     // Administrator reactivation is the reverse path, and it is audited.
     let admin = app.admin("reactivator").await;

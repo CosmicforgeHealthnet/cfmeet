@@ -87,11 +87,19 @@ impl OtpService {
     }
 
     fn attempts_key(&self, subject: &str, otp_type: OtpType) -> String {
-        format!("{}:attempts:h:{}", otp_type.key_prefix(), email_key(subject))
+        format!(
+            "{}:attempts:h:{}",
+            otp_type.key_prefix(),
+            email_key(subject)
+        )
     }
 
     fn send_rate_key(&self, subject: &str, otp_type: OtpType) -> String {
-        format!("{}:send_rate:h:{}", otp_type.key_prefix(), email_key(subject))
+        format!(
+            "{}:send_rate:h:{}",
+            otp_type.key_prefix(),
+            email_key(subject)
+        )
     }
 
     /// Store a code (salted hash only), replacing any pending challenge of this type.
@@ -113,7 +121,11 @@ impl OtpService {
             value.push_str(&hex::encode(Sha256::digest(token.as_bytes())));
         }
         self.redis
-            .set(&self.otp_key(subject, otp_type), &value, Some(CODE_TTL_SECS))
+            .set(
+                &self.otp_key(subject, otp_type),
+                &value,
+                Some(CODE_TTL_SECS),
+            )
             .await
     }
 
@@ -159,7 +171,8 @@ impl OtpService {
             return Ok(OtpCheck::Missing);
         };
         if code_matches(&stored, code) {
-            self.consume(subject, otp_type, &attempts_key, &stored).await
+            self.consume(subject, otp_type, &attempts_key, &stored)
+                .await
         } else {
             Ok(OtpCheck::Wrong)
         }
@@ -177,14 +190,20 @@ impl OtpService {
             return Ok(OtpCheck::Missing);
         };
         if link_matches(&stored, token) {
-            self.consume(subject, otp_type, &attempts_key, &stored).await
+            self.consume(subject, otp_type, &attempts_key, &stored)
+                .await
         } else {
             Ok(OtpCheck::Wrong)
         }
     }
 
     /// Verify a code: `true` only for a match (which consumes the challenge).
-    pub async fn verify_code(&self, subject: &str, code: &str, otp_type: OtpType) -> ApiResult<bool> {
+    pub async fn verify_code(
+        &self,
+        subject: &str,
+        code: &str,
+        otp_type: OtpType,
+    ) -> ApiResult<bool> {
         Ok(self.check(subject, code, otp_type).await? == OtpCheck::Valid)
     }
 

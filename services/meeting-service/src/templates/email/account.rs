@@ -57,7 +57,12 @@ pub fn sign_in_code_email(
         })
         .unwrap_or_default();
     let link_text = link
-        .map(|url| format!("\n\nOr sign in with one click on this device:\n{}", plain(url)))
+        .map(|url| {
+            format!(
+                "\n\nOr sign in with one click on this device:\n{}",
+                plain(url)
+            )
+        })
         .unwrap_or_default();
     let html = format!(
         "{}{}{}{link_html}{}{}",
@@ -186,7 +191,8 @@ pub fn email_changed_old_address_email(
 /// Sent to the NEW address once it is the account's address.
 pub fn email_changed_new_address_email(username: &str) -> EmailTemplate {
     let (hi_html, hi_text) = greeting(username);
-    let msg = "This is now the email address of your CF Meet account. Use it to sign in from now on.";
+    let msg =
+        "This is now the email address of your CF Meet account. Use it to sign in from now on.";
     EmailTemplate {
         html: wrap_html(
             "Email address updated",
@@ -197,11 +203,17 @@ pub fn email_changed_new_address_email(username: &str) -> EmailTemplate {
 }
 
 /// Security alert: a sign-in from a device not seen on this account recently.
-pub fn new_sign_in_email(username: &str, details: &RequestDetails, sessions_url: &str) -> EmailTemplate {
+pub fn new_sign_in_email(
+    username: &str,
+    details: &RequestDetails,
+    sessions_url: &str,
+) -> EmailTemplate {
     let (hi_html, hi_text) = greeting(username);
     let what = format!(
         "Your CF Meet account was just signed in to from a new device. {}",
-        details.sentence().replacen("Requested on", "Signed in on", 1)
+        details
+            .sentence()
+            .replacen("Requested on", "Signed in on", 1)
     );
     let html = format!(
         "{hi_html}{}{}{}",
@@ -281,7 +293,12 @@ mod tests {
 
     #[test]
     fn security_emails_render() {
-        let s = step_up_code_email("<b>Ada</b>", "654321", "10 minutes", "deactivate your account");
+        let s = step_up_code_email(
+            "<b>Ada</b>",
+            "654321",
+            "10 minutes",
+            "deactivate your account",
+        );
         assert!(s.html.contains("654321") && s.html.contains("&lt;b&gt;Ada"));
         assert!(s.text.contains("deactivate your account"));
         let old = email_changed_old_address_email(
@@ -294,9 +311,15 @@ mod tests {
         assert!(old.text.contains("n***@example.com") && old.text.contains("undo?token=x"));
         let support = email_changed_old_address_email("Ada", "n***@e.com", "t", None, "7 days");
         assert!(support.text.contains("CF Meet support") && !support.text.contains("Undo"));
-        assert!(email_change_code_email("Ada", "111222", "10 minutes").text.contains("111222"));
-        assert!(email_in_use_notice_email().text.contains("nothing was changed"));
-        assert!(email_changed_new_address_email("Ada").text.contains("sign in"));
+        assert!(email_change_code_email("Ada", "111222", "10 minutes")
+            .text
+            .contains("111222"));
+        assert!(email_in_use_notice_email()
+            .text
+            .contains("nothing was changed"));
+        assert!(email_changed_new_address_email("Ada")
+            .text
+            .contains("sign in"));
         let n = new_sign_in_email("Ada", &details(), "https://meet.example/settings/sessions");
         assert!(n.text.contains("Signed in on 2026-11-17 14:02"));
         assert!(n.html.contains("settings/sessions"));
