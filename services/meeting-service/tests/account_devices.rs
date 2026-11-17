@@ -1186,3 +1186,93 @@ async fn a_new_device_reads_and_cancels_its_own_link_request() {
         StatusCode::GONE
     );
 }
+
+/// Gap audit A5: a password-only (undeclared) sign-in cannot end a trusted device's
+/// sign-in nor sign out everywhere; it can still end itself, and the trusted device can
+/// end it.
+#[tokio::test]
+async fn gap_a_password_only_sign_in_cannot_end_trusted_devices() {
+    let app = app_with_redis!();
+    let e = email();
+    password_user(&app, &e).await;
+    let mut web = Device::web();
+    let (s, v) = sign_in(&app, &e, &mut web).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["device"]["trust"], "TRUSTED");
+    let (legacy, _, legacy_session) = legacy_sign_in(&app, &e).await;
+
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/sessions/{}/revoke", web.session),
+            Auth::Bearer(&legacy),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(code(&v), "DEVICE_NOT_TRUSTED");
+    let (s, v) = app
+        .post(
+            "/api/v2/me/sessions/revoke-all",
+            Auth::Bearer(&legacy),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(code(&v), "DEVICE_NOT_TRUSTED");
+    assert_eq!(me(&app, &web).await, StatusCode::OK);
+
+    // The trusted device ends the password-only sign-in.
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/sessions/{legacy_session}/revoke"),
+            Auth::Bearer(&web.access),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&legacy)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // A password-only sign-in may always end itself.
+    let (legacy2, _, legacy2_session) = legacy_sign_in(&app, &e).await;
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/sessions/{legacy2_session}/revoke"),
+            Auth::Bearer(&legacy2),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+}
+
+/// Gap audit A10: a sign-in past its absolute lifetime is recorded EXPIRED by the sweep.
+#[tokio::test]
+async fn gap_expired_sign_ins_are_swept() {
+    let app = app_with_redis!();
+    let e = email();
+    password_user(&app, &e).await;
+    let (_access, _, session) = legacy_sign_in(&app, &e).await;
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET authenticated_at = now() - interval '31 days', \
+             absolute_expires_at = now() - interval '1 minute' WHERE id = $1",
+            [session.into()],
+        ))
+        .await
+        .unwrap();
+    let ended = backend::services::account_security::sweep_expired_sessions(&app.state)
+        .await
+        .unwrap();
+    assert!(ended >= 1);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE id = '{session}' AND revoke_reason = 'EXPIRED' AND revoked_at IS NOT NULL"
+        ))
+        .await,
+        1
+    );
+}

@@ -110,6 +110,9 @@ impl OtpService {
             .await?;
 
         if attempts > MAX_OTP_ATTEMPTS {
+            // Gap audit A8: the code is burned, not only paused: a new one must be
+            // requested (sent to the real owner), so one code never takes more guesses.
+            self.burn(email, otp_type).await?;
             return Err(ApiError::TooManyRequests(
                 "Too many verification attempts. Please try again later.".to_string(),
             ));
@@ -135,8 +138,22 @@ impl OtpService {
                 self.redis.del(&attempts_key).await?;
                 Ok(true)
             }
-            None => Ok(false),
+            None => {
+                if attempts >= MAX_OTP_ATTEMPTS {
+                    self.burn(email, otp_type).await?;
+                }
+                Ok(false)
+            }
         }
+    }
+
+    /// Gap audit A8: invalidates the current code (and any code of the previous image).
+    async fn burn(&self, email: &str, otp_type: OtpType) -> ApiResult<()> {
+        self.redis.del(&self.otp_key(email, otp_type)).await?;
+        self.redis
+            .del(&self.legacy_otp_key(email, otp_type))
+            .await?;
+        Ok(())
     }
 
     /// N0-9: checks a code WITHOUT consuming it, under the same attempt counter as
@@ -149,6 +166,7 @@ impl OtpService {
             .incr_with_ttl(&attempts_key, RATE_LIMIT_TTL_SECS)
             .await?;
         if attempts > MAX_OTP_ATTEMPTS {
+            self.burn(email, otp_type).await?;
             return Err(ApiError::TooManyRequests(
                 "Too many verification attempts. Please try again later.".to_string(),
             ));
@@ -158,7 +176,7 @@ impl OtpService {
             .redis
             .get(&self.legacy_otp_key(email, otp_type))
             .await?;
-        Ok(match (hashed, legacy) {
+        let ok = match (hashed, legacy) {
             (Some(stored), _) => code_matches(&stored, code),
             (None, Some(stored)) => constant_time_eq(stored.as_bytes(), code.as_bytes()),
             (None, None) => {
@@ -166,7 +184,11 @@ impl OtpService {
                 let _ = code_matches(&seal_code(code), code);
                 false
             }
-        })
+        };
+        if !ok && attempts >= MAX_OTP_ATTEMPTS {
+            self.burn(email, otp_type).await?;
+        }
+        Ok(ok)
     }
 
     /// Check if an OTP exists

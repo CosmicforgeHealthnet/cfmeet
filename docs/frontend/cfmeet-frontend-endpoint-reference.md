@@ -66,8 +66,8 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/me/sessions` | account session | List my sessions | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_sessions` |
-| POST | `/api/v2/me/sessions/revoke-all` | account session | Sign out everywhere | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_revoke_all_my_sessions` |
-| POST | `/api/v2/me/sessions/{sessionId}/revoke` | account session | Sign out one session | 200, 401, 404 | AUTHENTICATION_REQUIRED, SESSION_NOT_FOUND | `openapi/meeting-service.json#v2_revoke_my_session` |
+| POST | `/api/v2/me/sessions/revoke-all` | account session | Sign out everywhere | 200, 401, 403 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_revoke_all_my_sessions` |
+| POST | `/api/v2/me/sessions/{sessionId}/revoke` | account session | Sign out one session | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED, SESSION_NOT_FOUND | `openapi/meeting-service.json#v2_revoke_my_session` |
 
 ### Artifacts (v2)
 

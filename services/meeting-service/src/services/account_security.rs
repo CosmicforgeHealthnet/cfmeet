@@ -668,6 +668,13 @@ pub async fn rotate_session(
         .await?;
         txn.commit().await?;
         tracing::warn!(%session_id, "refresh token reuse detected; session revoked");
+        // Gap audit A10: a stolen refresh token ends the sign-in everywhere, including the
+        // Hub, Messaging and Calling credentials tied to it (best effort; durable events).
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user.id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of a reused sign-in failed: {e}");
+        }
         return Err(ApiError::Unauthorized(
             "This session has ended. Please sign in again.".into(),
         ));
@@ -689,6 +696,36 @@ pub async fn rotate_session(
         session_id,
         next,
     )
+}
+
+/// Gap audit A10: sign-ins past their absolute lifetime are recorded EXPIRED and their
+/// end is fanned out like any other (Hub, Messaging and Calling credentials of the sign-in
+/// end with it). Bounded per call; multi-instance safe (`SKIP LOCKED`).
+pub async fn sweep_expired_sessions(state: &AppState) -> ApiResult<u64> {
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = 'EXPIRED' \
+              WHERE id IN (SELECT id FROM account_sessions \
+                            WHERE revoked_at IS NULL AND absolute_expires_at <= now() \
+                            ORDER BY absolute_expires_at LIMIT 200 FOR UPDATE SKIP LOCKED) \
+              RETURNING id, user_id",
+            [],
+        ))
+        .await?;
+    let mut ended = 0;
+    for row in rows {
+        let session_id: Uuid = row.try_get("", "id")?;
+        let user_id: Uuid = row.try_get("", "user_id")?;
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user_id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of an expired sign-in failed: {e}");
+        }
+        ended += 1;
+    }
+    Ok(ended)
 }
 
 /// Revoke one of the user's sessions. `false` if it was not open or not theirs.

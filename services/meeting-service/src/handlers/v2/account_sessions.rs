@@ -116,6 +116,7 @@ pub async fn list_my_sessions(
     responses(
         (status = 200, description = "Revoked (or already ended)", body = AccountSessionRevokeResponse),
         (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "DEVICE_NOT_TRUSTED (ending a trusted device's sign-in from a sign-in that is not on a trusted device)", body = ErrorEnvelope),
         (status = 404, description = "SESSION_NOT_FOUND", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
@@ -134,6 +135,28 @@ pub async fn revoke_my_session(
         return Err(ApiError::domain(
             ErrorCode::SessionNotFound,
             "Session not found",
+        ));
+    }
+    // Gap audit A5: a password-only (or undeclared) sign-in may end its own session and
+    // other unclassified sign-ins, but never a sign-in of a TRUSTED device: that needs the
+    // caller to be on a trusted device of the account too.
+    if Some(session_id) != user.account_session_id
+        && crate::services::account_devices::session_belongs_to_trusted_device(
+            &state.db,
+            user.user_id,
+            session_id,
+        )
+        .await?
+        && !crate::services::account_devices::session_on_trusted_device(
+            &state.db,
+            user.user_id,
+            user.account_session_id,
+        )
+        .await?
+    {
+        return Err(ApiError::domain(
+            ErrorCode::DeviceNotTrusted,
+            "Ending a trusted device's sign-in needs a trusted device of this account",
         ));
     }
     let revoked = security::revoke_session(
@@ -168,6 +191,7 @@ pub async fn revoke_my_session(
     responses(
         (status = 200, description = "Every session ended", body = AccountSessionRevokeResponse),
         (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "DEVICE_NOT_TRUSTED (the account has a trusted device and this sign-in is not on one)", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
 )]
@@ -177,6 +201,21 @@ pub async fn revoke_all_my_sessions(
 ) -> ApiResult<Json<AccountSessionRevokeResponse>> {
     let user = actor.require_registered()?;
     let user_id = user.user_id;
+    // Gap audit A5: signing out everywhere ends every trusted device's sign-in; once the
+    // account has a trusted device, only a trusted device may do it.
+    if crate::services::account_devices::has_trusted_device(&state.db, user_id).await?
+        && !crate::services::account_devices::session_on_trusted_device(
+            &state.db,
+            user_id,
+            user.account_session_id,
+        )
+        .await?
+    {
+        return Err(ApiError::domain(
+            ErrorCode::DeviceNotTrusted,
+            "Signing out everywhere needs a trusted device of this account once it has one",
+        ));
+    }
     let revoked = security::revoke_all(&state.db, user_id, RevokeReason::LogoutAll).await?;
     security::record_event(
         &state.db,

@@ -230,6 +230,24 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Gap audit A10: sign-ins past their absolute lifetime end everywhere (once a minute).
+    {
+        let sweep_state = state.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                tick.tick().await;
+                match backend::services::account_security::sweep_expired_sessions(&sweep_state)
+                    .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!("ended {n} expired account sign-in(s)"),
+                    Err(e) => tracing::warn!("expired sign-in sweep deferred: {e}"),
+                }
+            }
+        });
+    }
+
     // Unified email delivery: the durable ledger lives in its own additive history.
     if !migration::lifecycle_delivery_ready(&state.db)
         .await

@@ -216,20 +216,24 @@ pub async fn verify_email(
     limit_by_client(&state, &headers, "verify-email", 30, 15 * 60).await?;
     let invalid = || ApiError::BadRequest("Invalid or expired verification code".to_string());
 
+    // Gap audit A7: the code is checked first, under the address's attempt counter, so an
+    // unknown address and an existing one answer identically (400, then 429) and probing
+    // reveals nothing. A valid code exists only for an account it was sent to.
+    let is_valid = state
+        .otp_service
+        .verify_code(
+            &payload.email.trim().to_lowercase(),
+            &payload.token,
+            OtpType::Verification,
+        )
+        .await?;
+    if !is_valid {
+        return Err(invalid());
+    }
     let user = security::find_user_by_email(&state.db, &payload.email)
         .await?
         .ok_or_else(invalid)?;
     if user.status != users::UserStatus::PendingVerification {
-        return Err(invalid());
-    }
-
-    // Verify token from Redis (includes rate limiting and auto-deletion on success)
-    let is_valid = state
-        .otp_service
-        .verify_code(&user.email, &payload.token, OtpType::Verification)
-        .await?;
-
-    if !is_valid {
         return Err(invalid());
     }
 
@@ -852,20 +856,23 @@ pub async fn reset_password(
     limit_by_client(&state, &headers, "reset-password", 30, 15 * 60).await?;
     let invalid = || ApiError::BadRequest("Invalid or expired reset code".to_string());
 
+    // Gap audit A7: as for verify-email, the code is checked before the account is looked
+    // up (same counter, same answers for unknown and existing addresses).
+    let is_valid = state
+        .otp_service
+        .verify_code(
+            &payload.email.trim().to_lowercase(),
+            &payload.token,
+            OtpType::PasswordReset,
+        )
+        .await?;
+    if !is_valid {
+        return Err(invalid());
+    }
     let user = security::find_user_by_email(&state.db, &payload.email)
         .await?
         .ok_or_else(invalid)?;
     if user.auth_type != users::AuthType::Local {
-        return Err(invalid());
-    }
-
-    // Verify token from Redis (includes rate limiting and auto-deletion on success)
-    let is_valid = state
-        .otp_service
-        .verify_code(&user.email, &payload.token, OtpType::PasswordReset)
-        .await?;
-
-    if !is_valid {
         return Err(invalid());
     }
 

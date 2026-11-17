@@ -11908,6 +11908,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (the account has a trusted device and this sign-in is not on one)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -11950,6 +11960,16 @@
           },
           "401": {
             "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (ending a trusted device's sign-in from a sign-in that is not on a trusted device)",
             "content": {
               "application/json": {
                 "schema": {
