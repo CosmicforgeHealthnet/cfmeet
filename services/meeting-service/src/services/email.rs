@@ -14,8 +14,8 @@ use crate::error::ApiResult;
 use crate::services::email_delivery::{self, category, Enqueued, NewEmail};
 use crate::templates::email::{
     email_change_code_email, email_changed_new_address_email, email_changed_old_address_email,
-    email_in_use_notice_email, new_sign_in_email, notification_email, sign_in_code_email,
-    step_up_code_email, welcome_email, EmailTemplate, RequestDetails,
+    email_in_use_notice_email, new_sign_in_email, notification_email, security_notice_email,
+    sign_in_code_email, step_up_code_email, welcome_email, EmailTemplate, RequestDetails,
 };
 
 /// Every one-time code is valid 10 minutes (`services::otp::CODE_TTL_SECS`).
@@ -220,6 +220,29 @@ impl EmailService {
         .map(|e| e.id)
     }
 
+    /// Gap audit A13: one security notice (`dedupe` makes a retried event send once).
+    pub async fn send_security_notice(
+        &self,
+        to_email: &str,
+        username: &str,
+        notice: SecurityNotice,
+        dedupe: &str,
+    ) -> ApiResult<Uuid> {
+        let sessions_url = format!("{}/settings/sessions", self.app_url.trim_end_matches('/'));
+        let (subject, what) = notice.text();
+        self.enqueue_template(
+            category::NOTIFICATION,
+            Some(format!("security-notice:{}:{dedupe}", notice.key())),
+            to_email,
+            Some(username),
+            subject,
+            security_notice_email(username, subject, what, &sessions_url),
+            Some(Utc::now() + Duration::days(2)),
+        )
+        .await
+        .map(|e| e.id)
+    }
+
     /// Welcome email (once per account).
     pub async fn send_welcome_email(
         &self,
@@ -382,5 +405,58 @@ mod passwordless_tests {
         assert_eq!(mask_email("nadia@example.com"), "n***@example.com");
         assert_eq!(mask_email("broken"), "***");
         assert_eq!(url_encode("a+b@x.com"), "a%2Bb%40x.com");
+    }
+}
+
+/// Gap audit A13: security events the account owner is told of by email.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecurityNotice {
+    /// A Google identity was linked to the account.
+    GoogleLinked,
+    /// A replayed refresh token ended a sign-in (a copy of it was used elsewhere).
+    RefreshTokenReuse,
+    /// Every sign-in of the account was ended.
+    SignedOutEverywhere,
+    /// The account was deactivated.
+    Deactivated,
+    /// The first device of the account became trusted (gap audit A6).
+    FirstDeviceTrusted,
+}
+
+impl SecurityNotice {
+    pub fn key(self) -> &'static str {
+        match self {
+            SecurityNotice::GoogleLinked => "google-linked",
+            SecurityNotice::RefreshTokenReuse => "refresh-reuse",
+            SecurityNotice::SignedOutEverywhere => "signed-out-everywhere",
+            SecurityNotice::Deactivated => "deactivated",
+            SecurityNotice::FirstDeviceTrusted => "first-device-trusted",
+        }
+    }
+
+    /// Subject and the one-sentence account of what happened.
+    pub fn text(self) -> (&'static str, &'static str) {
+        match self {
+            SecurityNotice::GoogleLinked => (
+                "Google sign-in was added to your CF Meet account",
+                "A Google account was just linked to your CF Meet account, so it can now be used to sign in.",
+            ),
+            SecurityNotice::RefreshTokenReuse => (
+                "A CF Meet sign-in was ended for your protection",
+                "A saved sign-in of your CF Meet account was used from two places at once, which can mean it was copied. We ended that sign-in.",
+            ),
+            SecurityNotice::SignedOutEverywhere => (
+                "You were signed out of CF Meet everywhere",
+                "Every sign-in of your CF Meet account was just ended, on every device.",
+            ),
+            SecurityNotice::Deactivated => (
+                "Your CF Meet account was deactivated",
+                "Your CF Meet account was just deactivated and every sign-in was ended. Contact support if you did not do this.",
+            ),
+            SecurityNotice::FirstDeviceTrusted => (
+                "A device is now trusted on your CF Meet account",
+                "The first device of your CF Meet account was just set up as a trusted device. Trusted devices can approve new devices and sign out others.",
+            ),
+        }
     }
 }

@@ -1245,6 +1245,16 @@ async fn oauth_google_callback_inner(
             .session(issued.session_id),
     )
     .await;
+    // Gap audit A13: linking Google to an existing account is a new way in.
+    if matches!(event, "GOOGLE_LINKED" | "GOOGLE_CLAIMED_UNVERIFIED_ACCOUNT") {
+        security::notify_security(
+            state,
+            user.id,
+            crate::services::email::SecurityNotice::GoogleLinked,
+            &issued.session_id.to_string(),
+        )
+        .await;
+    }
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("LOGIN", Outcome::Success)

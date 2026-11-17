@@ -81,8 +81,8 @@ impl RevokeReason {
 /// Runtime policy read once from the environment (no secret values).
 #[derive(Debug, Clone)]
 pub struct AuthPolicy {
-    /// `exchange_code` (one-time code, ACC-005) or `legacy_query` (tokens in the redirect
-    /// URL, kept only until the live web client adopts the exchange endpoint).
+    /// `exchange_code` (one-time code, ACC-005; the default) or `legacy_query` (tokens in
+    /// the redirect URL; explicit opt-in only).
     pub google_token_delivery: GoogleTokenDelivery,
     /// Require the browser-binding cookie set by the OAuth start redirect.
     pub google_browser_binding: bool,
@@ -90,9 +90,9 @@ pub struct AuthPolicy {
     /// `x-real-ip`). Unset: per-address limits are off (the proxy address would be shared).
     pub client_ip_header: Option<axum::http::HeaderName>,
     /// ACC-022: the `status` string of the v1 sign-in responses (register, login, Google
-    /// sign-in/exchange, `GET/PATCH /api/v1/users/me`). `ACCOUNT_STATUS_FORMAT=canonical`
-    /// returns the contract value (`pending_verification`); the default `legacy` keeps the
-    /// historical `pendingverification` spelling until every deployed client accepts both.
+    /// sign-in/exchange, `GET/PATCH /api/v1/users/me`). By default the contract value
+    /// (`pending_verification`); `ACCOUNT_STATUS_FORMAT=legacy` keeps the historical
+    /// `pendingverification` spelling (explicit opt-in only; both clients accept both).
     /// Admin APIs and `/api/v2/me/profile` always use the canonical value.
     pub status_format: AccountStatusFormat,
     /// ACC-026: self-deactivation needs a step-up confirmation (an emailed code, see
@@ -186,8 +186,10 @@ impl AuthPolicy {
             .to_ascii_lowercase()
             .as_str()
         {
-            "exchange_code" => GoogleTokenDelivery::ExchangeCode,
-            _ => GoogleTokenDelivery::LegacyQuery,
+            // Gap audit A3: the one-time exchange code is the default (both first-party
+            // clients redeem it); tokens in the redirect URL only on explicit opt-in.
+            "legacy_query" => GoogleTokenDelivery::LegacyQuery,
+            _ => GoogleTokenDelivery::ExchangeCode,
         };
         let google_browser_binding = !matches!(
             get("GOOGLE_OAUTH_BROWSER_BINDING")
@@ -207,8 +209,10 @@ impl AuthPolicy {
             .to_ascii_lowercase()
             .as_str()
         {
-            "canonical" => AccountStatusFormat::Canonical,
-            _ => AccountStatusFormat::Legacy,
+            // Gap audit A18: the contract spelling is the default (both first-party clients
+            // accept both); the historical `pendingverification` only on explicit opt-in.
+            "legacy" => AccountStatusFormat::Legacy,
+            _ => AccountStatusFormat::Canonical,
         };
         let deactivation_requires_reauth = !matches!(
             get("ACCOUNT_DEACTIVATION_REQUIRE_REAUTH")
@@ -368,6 +372,32 @@ pub async fn open_session_by_reference(
         }
     }
     Ok(None)
+}
+
+/// Gap audit A13: tells the account owner of a security event by email (best effort:
+/// queued in the durable email ledger; a failure is logged, never returned). Accounts
+/// without a deliverable address (guests) get nothing.
+pub async fn notify_security(
+    state: &AppState,
+    user_id: Uuid,
+    notice: crate::services::email::SecurityNotice,
+    dedupe: &str,
+) {
+    let user = match users::Entity::find_by_id(user_id).one(&state.db).await {
+        Ok(Some(u)) if u.role != users::UserRole::Guest && !u.email.trim().is_empty() => u,
+        Ok(_) => return,
+        Err(e) => {
+            tracing::warn!(%user_id, "security notice skipped: {e}");
+            return;
+        }
+    };
+    if let Err(e) = state
+        .email_service
+        .send_security_notice(&user.email, &user.username, notice, dedupe)
+        .await
+    {
+        tracing::warn!(%user_id, notice = notice.key(), "security notice not queued: {e}");
+    }
 }
 
 /// Gap audit A21: whether `session_id` is one of the user's sessions (open or ended),
@@ -771,6 +801,13 @@ pub async fn rotate_session(
         {
             tracing::error!(%session_id, "fan-out of a reused sign-in failed: {e}");
         }
+        notify_security(
+            state,
+            user.id,
+            crate::services::email::SecurityNotice::RefreshTokenReuse,
+            &session_id.to_string(),
+        )
+        .await;
         return Err(ApiError::Unauthorized(
             "This session has ended. Please sign in again.".into(),
         ));
@@ -1333,9 +1370,16 @@ mod tests {
     }
 
     #[test]
-    fn account_status_format_is_legacy_until_switched() {
+    fn account_status_format_is_canonical_unless_legacy_is_chosen() {
         use crate::models::users::UserStatus;
-        let legacy = AuthPolicy::from_lookup(|_| None).status_format;
+        assert_eq!(
+            AuthPolicy::from_lookup(|_| None).status_format,
+            AccountStatusFormat::Canonical
+        );
+        let legacy = AuthPolicy::from_lookup(|k| {
+            (k == "ACCOUNT_STATUS_FORMAT").then(|| " Legacy ".to_string())
+        })
+        .status_format;
         assert_eq!(legacy, AccountStatusFormat::Legacy);
         assert_eq!(
             legacy.render(&UserStatus::PendingVerification),
@@ -1362,9 +1406,20 @@ mod tests {
     }
 
     #[test]
-    fn policy_defaults_keep_live_client_compatibility_and_bind_browsers() {
+    fn policy_defaults_use_the_exchange_code_and_bind_browsers() {
         let p = AuthPolicy::from_lookup(|_| None);
-        assert_eq!(p.google_token_delivery, GoogleTokenDelivery::LegacyQuery);
+        assert_eq!(p.google_token_delivery, GoogleTokenDelivery::ExchangeCode);
+        assert_eq!(p.status_format, AccountStatusFormat::Canonical);
+        let legacy = AuthPolicy::from_lookup(|k| match k {
+            "GOOGLE_OAUTH_TOKEN_DELIVERY" => Some("legacy_query".into()),
+            "ACCOUNT_STATUS_FORMAT" => Some("legacy".into()),
+            _ => None,
+        });
+        assert_eq!(
+            legacy.google_token_delivery,
+            GoogleTokenDelivery::LegacyQuery
+        );
+        assert_eq!(legacy.status_format, AccountStatusFormat::Legacy);
         assert!(p.google_browser_binding);
         assert!(p.client_ip_header.is_none());
         let p = AuthPolicy::from_lookup(|k| match k {

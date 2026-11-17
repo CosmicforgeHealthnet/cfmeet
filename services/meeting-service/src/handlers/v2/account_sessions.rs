@@ -220,6 +220,13 @@ pub async fn revoke_all_my_sessions(
             .detail(serde_json::json!({ "sessionsEnded": revoked })),
     )
     .await?;
+    security::notify_security(
+        &state,
+        user_id,
+        crate::services::email::SecurityNotice::SignedOutEverywhere,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+    .await;
     // Existing account-level fan-out: Communications epoch + Hub event, Messaging sessions.
     crate::services::communications::record_logout(&state, user_id).await?;
     let _ = crate::services::communications::deliver_due(&state).await;

@@ -1423,3 +1423,35 @@ async fn gap_open_sign_ins_are_capped_and_old_sessions_stay_revocable() {
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
 }
+
+async fn notices(app: &TestApp, email: &str, kind: &str) -> i64 {
+    app.scalar(&format!(
+        "SELECT count(*) FROM email_deliveries WHERE idempotency_key LIKE 'security-notice:{kind}:%' \
+          AND recipient_hash = encode(sha256(convert_to('{email}', 'UTF8')), 'hex')"
+    ))
+    .await
+}
+
+/// Gap audit A6/A13: the owner is told when the first device becomes trusted and when the
+/// account is signed out everywhere; an untrusted second device is not announced as trusted.
+#[tokio::test]
+async fn gap_security_notices_are_queued() {
+    let app = app_with_redis!();
+    let e = email();
+    password_user(&app, &e).await;
+    let mut web = Device::web();
+    sign_in(&app, &e, &mut web).await;
+    assert_eq!(notices(&app, &e, "first-device-trusted").await, 1);
+    let mut second = Device::web();
+    sign_in(&app, &e, &mut second).await;
+    assert_eq!(notices(&app, &e, "first-device-trusted").await, 1);
+    let (s, v) = app
+        .post(
+            "/api/v2/me/sessions/revoke-all",
+            Auth::Bearer(&web.access),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(notices(&app, &e, "signed-out-everywhere").await, 1);
+}
