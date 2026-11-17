@@ -3101,9 +3101,17 @@ async fn cfmeet_first_party_baseline_enables_attachments_for_cfmeet_only() {
     assert!(o.json["applicationBaseline"].is_null(), "{}", o.text);
     assert_eq!(o.json["effective"]["attachments"]["enabled"], false);
     // Gap audit S6: secure backups are on for CF Meet only.
-    assert_eq!(v.json["effective"]["backups"]["enabled"], true, "{}", v.text);
+    assert_eq!(
+        v.json["effective"]["backups"]["enabled"], true,
+        "{}",
+        v.text
+    );
     assert_eq!(v.json["effective"]["backups"]["retainCount"], 2);
-    assert_eq!(o.json["effective"]["backups"]["enabled"], false, "{}", o.text);
+    assert_eq!(
+        o.json["effective"]["backups"]["enabled"], false,
+        "{}",
+        o.text
+    );
 
     // Upload + scan + download for a member of a CF Meet conversation.
     let (conv, people) = e.managed_group(&cfmeet, 2).await;

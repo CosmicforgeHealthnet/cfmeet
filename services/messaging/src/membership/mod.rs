@@ -1051,6 +1051,13 @@ pub async fn transfer_ownership(
                 }
                 let owner = conversation.owner_principal_id;
                 if let Some(acting) = admin.principal_id() {
+                    // A non-member learns nothing about the conversation (no oracle).
+                    if !access::membership(txn, conversation_id, acting, false)
+                        .await?
+                        .is_some_and(|m| m.is_active())
+                    {
+                        return Err(Error::code(ErrorCode::NotFound));
+                    }
                     if acting != owner {
                         return Err(Error::reason(
                             ErrorCode::PrincipalNotAuthorized,

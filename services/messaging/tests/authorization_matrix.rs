@@ -991,6 +991,11 @@ fn ops() -> Vec<Op> {
         Op { method: M::DELETE, template: "/v1/conversations/{conversationId}/bans/{principalId}", scopes: MANAGE, acting: AM, res: ADMIN,
              req: |f| r(format!("/v1/conversations/{}/bans/{}", f.conv, f.banned), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // Gap audit S3: only the owner hands the conversation over.
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/owner", scopes: MANAGE, acting: AM, res: ADMIN,
+             req: |f| r(format!("/v1/conversations/{}/owner", f.conv), Some(f.owner.principal),
+                        Some(json!({ "principalId": f.member2 }))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
         // --------------------------------------------------------------- messages
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/messages", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages", f.conv), Some(f.owner.principal), None),

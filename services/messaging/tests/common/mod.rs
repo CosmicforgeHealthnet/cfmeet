@@ -136,6 +136,9 @@ async fn template(admin: &str) -> String {
             messaging_migration::NotificationFenceMigrator::up(&tmpl, None)
                 .await
                 .expect("routing fence migrations apply");
+            messaging_migration::GapClosureMigrator::up(&tmpl, None)
+                .await
+                .expect("gap-closure migrations apply");
             tmpl.close().await.ok();
             name
         })
