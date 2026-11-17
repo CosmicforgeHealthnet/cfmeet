@@ -23,6 +23,20 @@ pub async fn run_maintenance(state: AppState, interval: std::time::Duration) {
         if let Err(e) = crate::devices::key_package_maintenance(&state).await {
             tracing::warn!(error = %e, "device stock maintenance pass failed");
         }
+        // Gap audit S8: PRIVATE_E2EE groups still waiting, after 15 minutes, for a
+        // member's commit that removes a removed member's devices (they accept only
+        // commits meanwhile), so an alert can fire instead of the group staying silent.
+        match crate::db::scalar_i64(
+            &state.db,
+            "SELECT count(DISTINCT conversation_id) FROM messaging_mls_pending_removals \
+              WHERE created_at < now() - interval '15 minutes'",
+            vec![],
+        )
+        .await
+        {
+            Ok(n) => crate::metrics::gauge("messaging_mls_rekey_stalled_conversations", n),
+            Err(e) => tracing::warn!(error = %e, "MLS re-key backlog check failed"),
+        }
         if last_push_retention.is_none_or(|t| t.elapsed() >= PUSH_RETENTION_EVERY) {
             last_push_retention = Some(std::time::Instant::now());
             if let Err(e) =
