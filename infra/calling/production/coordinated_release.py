@@ -2569,6 +2569,8 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, 'developer-platform')),
     'activate-meeting-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
         sys.modules[__name__], sha, run_id, 'meeting-service')),
+    'activate-calling-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'calling')),
     # Notification Service N10: preference copy + catch-up, then the Hub facade switch.
     'activate-preference-copy': ((), lambda sha, run_id, confirm: notif_ops.activate_preference_copy(
         sys.modules[__name__], sha, run_id, confirm)),

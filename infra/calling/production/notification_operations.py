@@ -116,6 +116,9 @@ PRODUCERS = {
     'developer-platform': dict(operation='activate-developer-publications',
                                containers=('developer-platform', 'developer-platform-worker'),
                                outbox='devplat_notification_publications'),
+    # Missed call / voicemail ready / recording ready (no legacy user notice; FIRST_PARTY tenants only).
+    'calling': dict(operation='activate-calling-publications', containers=('calling',),
+                    outbox='calling_notification_publications'),
     # MEETING_INVITATION / MEETING_NOTIFICATION / ORGANIZATION_INVITATION through the fence.
     'meeting-service': dict(operation='activate-meeting-publications', containers=('meeting-service',),
                             outbox='meeting_notification_publications', sealing=True),
