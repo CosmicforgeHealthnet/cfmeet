@@ -1272,6 +1272,55 @@ pub struct OrganizationLifecycleRequest {
 pub struct OrganizationInvitationList {
     /// Invitations (masked invitee email; never a token).
     pub items: Vec<OrganizationInvitation>,
+    /// The cursor of the next page; absent or null on the last page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// `POST /api/v2/admin/organizations/{id}/owners` (platform administrators).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppointOrganizationOwnerRequest {
+    /// The account that becomes an ACTIVE OWNER.
+    pub user_id: Uuid,
+    /// Why the administrator intervenes (1–500 characters; recorded in the organization's
+    /// audit history).
+    pub reason: String,
+}
+
+/// The organization an invitation for the signed-in account comes from.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InvitingOrganization {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+}
+
+/// A pending invitation addressed to the signed-in account.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MyOrganizationInvitation {
+    pub id: Uuid,
+    pub organization_id: Uuid,
+    /// The inviting organization (absent only if it could not be read).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<InvitingOrganization>,
+    /// The role the invitation offers: ADMIN, MANAGER, MEMBER or GUEST.
+    pub role: String,
+    /// Always PENDING in this list.
+    pub status: String,
+    pub invitee_email_hint: String,
+    pub invited_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Pending invitations addressed to the signed-in account (newest first, at most 100).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MyOrganizationInvitationList {
+    pub items: Vec<MyOrganizationInvitation>,
 }
 
 /// Who performed an audited organization change.

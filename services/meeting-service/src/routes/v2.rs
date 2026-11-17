@@ -518,6 +518,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             patch(organizations::update_organization),
         )
         .route(
+            "/admin/organizations/:id/owners",
+            post(organizations::appoint_organization_owner),
+        )
+        .route(
             "/organizations",
             post(organizations::create_business_organization),
         )
@@ -643,6 +647,18 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(organizations::decline_organization_invitation),
         )
         .route("/me/organizations", get(organizations::my_organizations))
+        .route(
+            "/me/organization-invitations",
+            get(organizations::my_organization_invitations),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/accept",
+            post(organizations::accept_my_organization_invitation),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/decline",
+            post(organizations::decline_my_organization_invitation),
+        )
         // Blueprint Section 8: workspace context (per request; no switch endpoint)
         .route(
             "/me/workspaces",

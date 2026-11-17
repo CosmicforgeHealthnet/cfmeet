@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 268 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 271 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.4.0 | 73 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 135 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **648** |
+| **Total** | | | **651** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -308,11 +308,14 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/api/v2/me/organization-invitations` | account session | My pending organization invitations. | 200, 404, 503 | FEATURE_DISABLED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_my_organization_invitations` |
 | GET | `/api/v2/me/organizations` | account session | Organizations the caller verifiably belongs to. | 200, 401, 503 | AUTHENTICATION_REQUIRED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_my_organizations` |
 | GET | `/api/v2/me/workspaces` | account session | List the caller's workspaces (Personal and organizations). | 200, 400, 401, 503 | AUTHENTICATION_REQUIRED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_my_workspaces` |
 | GET | `/api/v2/me/workspaces/{workspaceId}/capabilities` | account session | Capabilities of one workspace, derived by the server. | 200, 401, 404, 503 | AUTHENTICATION_REQUIRED, ORGANIZATION_NOT_FOUND, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_my_workspace_capabilities` |
 | POST | `/api/v2/organization-invitations/accept` | account session | Accept an organization invitation. | 200, 403, 404, 410, 503 | FEATURE_DISABLED, INVITATION_INVALID, INVITE_EXPIRED, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_accept_organization_invitation` |
 | POST | `/api/v2/organization-invitations/decline` | account session | Decline an organization invitation. | 200, 404, 410, 503 | FEATURE_DISABLED, INVITATION_INVALID, INVITE_EXPIRED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_decline_organization_invitation` |
+| POST | `/api/v2/organization-invitations/{invitationId}/accept` | account session | Accept one of my organization invitations. | 200, 404, 409, 410, 503 | FEATURE_DISABLED, INVITATION_INVALID, INVITE_EXPIRED, ORGANIZATION_ARCHIVED, ORGANIZATION_SUSPENDED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_accept_my_organization_invitation` |
+| POST | `/api/v2/organization-invitations/{invitationId}/decline` | account session | Decline one of my organization invitations. | 200, 404, 410, 503 | FEATURE_DISABLED, INVITATION_INVALID, INVITE_EXPIRED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_decline_my_organization_invitation` |
 | POST | `/api/v2/organizations` | account session | Create a business organization (the caller becomes OWNER). | 201, 400, 401, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, IDEMPOTENCY_CONFLICT, RATE_LIMITED, SERVICE_UNAVAILABLE, SLUG_TAKEN, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_business_organization` |
 | GET | `/api/v2/organizations/{id}` | account session | Get a business organization. | 200, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_get_business_organization` |
 | PATCH | `/api/v2/organizations/{id}` | account session | Update a business organization's name, slug or profile. | 200, 400, 403, 404, 409, 503 | FEATURE_DISABLED, ORGANIZATION_ARCHIVED, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, SERVICE_UNAVAILABLE, SLUG_TAKEN, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_update_business_organization` |

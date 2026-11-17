@@ -66,8 +66,9 @@ pub const ACTING_USER_VERIFIED_EMAIL_HEADER: &str = "x-cf-acting-user-verified-e
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 /// Concurrent background shadow comparisons; beyond this a comparison is skipped.
 const SHADOW_CONCURRENCY: usize = 8;
-/// Member-list pages read for one organization (200 per page).
-const MAX_MEMBER_PAGES: usize = 10;
+/// Upper bound on member-list pages read for one organization (200 per page, i.e.
+/// 50,000 members). Larger organizations get an explicit error, never a truncated list.
+const MAX_MEMBER_PAGES: usize = 250;
 
 /// Which store answers organization questions (`ORGANIZATIONS_AUTHORITY_MODE`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +120,10 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     ),
     ("POST", "/internal/v1/organization-invitations/accept"),
     ("POST", "/internal/v1/organization-invitations/decline"),
+    // In-product invitations: the acting user's pending invitations, answered by id.
+    ("GET", "/internal/v1/organization-invitations/mine"),
+    ("POST", "/internal/v1/organization-invitations/{}/accept"),
+    ("POST", "/internal/v1/organization-invitations/{}/decline"),
     ("POST", "/internal/v1/organizations/{}/suspend"),
     ("POST", "/internal/v1/organizations/{}/reactivate"),
     ("POST", "/internal/v1/organizations/{}/archive"),
@@ -154,6 +159,8 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     ("GET", "/internal/v1/admin/organizations"),
     ("POST", "/internal/v1/admin/organizations"),
     ("PATCH", "/internal/v1/admin/organizations/{}"),
+    // Operator recovery: appoint an owner (platform administrators only).
+    ("POST", "/internal/v1/admin/organizations/{}/owners"),
 ];
 
 /// `true` only for an exact [`RELAY_ROUTES`] match.
@@ -1025,7 +1032,11 @@ impl OrganizationsAuthority {
                 _ => return Ok(out),
             }
         }
-        Ok(out)
+        // Never answer with a silently truncated list (membership decisions read it).
+        tracing::error!(%organization, "organization member list exceeds the supported size");
+        Err(AuthorityError::Unavailable(Unavailable(
+            "organization member list exceeds the supported size",
+        )))
     }
 
     /// `GET /internal/v1/users/{userId}/organizations` for the acting user.

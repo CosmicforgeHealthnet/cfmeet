@@ -2756,6 +2756,27 @@
     },
     {
       "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/organization-invitations",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organization-invitations/{invitationId}/accept",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organization-invitations/{invitationId}/decline",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/organizations/{id}/suspend",
       "class": "EXCLUDED",

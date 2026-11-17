@@ -377,6 +377,58 @@ pub async fn update_organization(
     Ok(Json(org(&o)))
 }
 
+/// Appoint an organization owner (platform administrators).
+///
+/// Recovers an organization that lost its owner, for example because the only owner's account
+/// was deactivated: makes `userId` an ACTIVE OWNER (an existing membership is promoted, otherwise
+/// one is created). The reason is recorded in the organization's audit history. Archived
+/// organizations are refused. Requires a platform administrator bearer token and an authoritative
+/// Organizations Service.
+#[utoipa::path(
+    post, path = "/api/v2/admin/organizations/{id}/owners", tag = "Organizations (v2)", operation_id = "v2_appoint_organization_owner",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    request_body = AppointOrganizationOwnerRequest,
+    responses(
+        (status = 200, description = "The appointed OWNER membership", body = BusinessOrganizationMembership),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE (Organizations unreachable)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn appoint_organization_owner(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+    V2Json(req): V2Json<AppointOrganizationOwnerRequest>,
+) -> ApiResult<Response> {
+    let authority = require_authoritative(&state)?;
+    let user = actor.require_registered()?;
+    if !user.platform_admin {
+        return Err(permission_denied("Platform administrator role required"));
+    }
+    let acting = ActingUser::of(user);
+    let reply = authority
+        .send(
+            &Call::new(
+                Method::POST,
+                format!("/internal/v1/admin/organizations/{id}/owners"),
+            )
+            .actor(&acting)
+            .body(json!({ "userId": req.user_id, "reason": req.reason }))
+            .idempotency_key(idempotency_key(&headers)?),
+        )
+        .await
+        .map_err(|_| unavailable())?;
+    if !reply.is_success() {
+        return Err(relayed_error(&reply));
+    }
+    Ok(relayed_success(reply))
+}
+
 /// ORG-006 member-list paging: `limit` (1–200, default 50 when only `cursor` is given) and
 /// `cursor` (the previous page's `X-Next-Cursor`). `None` when neither is given: the whole
 /// list, exactly as before paging existed. Other query parameters are ignored, as before.
@@ -1081,9 +1133,13 @@ async fn address_invitee(
     let Some(obj) = document.and_then(Value::as_object_mut) else {
         return Ok(None);
     };
-    // The display hint is the server's (CF Meet ID invitations), never a client's.
+    // The display hint and the resolved account are the server's (CF Meet ID
+    // invitations), never a client's.
     if obj.remove("inviteeHint").is_some() {
         return Err(validation("inviteeHint is not a request field"));
+    }
+    if obj.remove("inviteeUserId").is_some() {
+        return Err(validation("inviteeUserId is not a request field"));
     }
     let (kind, identifier) = match (obj.remove("identifierType"), obj.remove("identifier")) {
         (None, None) => {
@@ -1117,14 +1173,17 @@ async fn address_invitee(
             }
             let authority = require_authoritative(state)?;
             let user = relay_actor(actor)?;
-            let acting = ActingUser::of(user);
-            let members = authority
-                .members(organization, Some(&acting))
+            // Direct membership lookups (never the whole member list: it needs
+            // `members.read` and does not scale). Organizations re-checks the role and the
+            // policy (`managersMayInvite`) when it creates the invitation.
+            let mine = authority
+                .resolve_memberships(user.user_id)
                 .await
                 .map_err(authority_error)?;
-            let may_invite = members.iter().any(|m| {
-                m.user_id == user.user_id
+            let may_invite = mine.iter().any(|m| {
+                m.organization_id == organization
                     && m.status == "ACTIVE"
+                    && m.organization_status == "ACTIVE"
                     && INVITING_ROLES.contains(&m.role.as_str())
             });
             if !may_invite {
@@ -1140,10 +1199,14 @@ async fn address_invitee(
             )
             .await?
             .ok_or_else(invitee_not_found)?;
+            let invitee_memberships = authority
+                .resolve_memberships(invitee.user_id)
+                .await
+                .map_err(authority_error)?;
             if invitee.is_self
-                || members
+                || invitee_memberships
                     .iter()
-                    .any(|m| m.user_id == invitee.user_id && m.status != "REMOVED")
+                    .any(|m| m.organization_id == organization)
             {
                 return Err(already_member());
             }
@@ -1156,6 +1219,9 @@ async fn address_invitee(
                 "inviteeHint".into(),
                 json!(format!("CF Meet ID {identifier}")),
             );
+            // The account is known: the invitee sees and answers the invitation in the
+            // product (`GET /api/v2/me/organization-invitations`), not only by email.
+            obj.insert("inviteeUserId".into(), json!(invitee.user_id));
             Ok(Some(Addressed::CfMeetId(identifier)))
         }
         _ => Err(validation("identifierType must be EMAIL or CF_MEET_ID")),
@@ -1179,13 +1245,13 @@ async fn refuse_member_email(
     else {
         return Ok(());
     };
-    let acting = ActingUser::of(user);
-    let Ok(members) = authority.members(organization, Some(&acting)).await else {
+    let _ = user;
+    let Ok(memberships) = authority.resolve_memberships(account).await else {
         return Ok(());
     };
-    if members
+    if memberships
         .iter()
-        .any(|m| m.user_id == account && m.status != "REMOVED")
+        .any(|m| m.organization_id == organization)
     {
         return Err(already_member());
     }
@@ -1201,10 +1267,12 @@ async fn refuse_member_email(
     get, path = "/api/v2/organizations/{id}/invitations", tag = "Organizations (v2)", operation_id = "v2_list_organization_invitations",
     params(
         ("id" = Uuid, Path, description = "Organization id"),
-        ("status" = Option<String>, Query, description = "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED"),
+        ("status" = Option<String>, Query, description = "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED (a PENDING invitation past its expiry counts as EXPIRED)"),
+        ("cursor" = Option<String>, Query, description = "The previous page's `nextCursor` (opaque)"),
+        ("limit" = Option<i64>, Query, description = "Page size 1–200 (default 50 when paging; 200 when neither `limit` nor `cursor` is given)"),
     ),
     responses(
-        (status = 200, description = "Invitations", body = OrganizationInvitationList),
+        (status = 200, description = "Invitations (newest first) and `nextCursor` while more remain", body = OrganizationInvitationList),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
         (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
@@ -1227,7 +1295,7 @@ pub async fn list_organization_invitations(
             headers: &headers,
             body: None,
             raw_query: query.as_deref(),
-            allowed_query: &["status"],
+            allowed_query: &["status", "cursor", "limit"],
         },
     )
     .await
@@ -1303,6 +1371,124 @@ pub async fn accept_organization_invitation(
         Relay {
             method: Method::POST,
             path: "/internal/v1/organization-invitations/accept".into(),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// My pending organization invitations.
+///
+/// Lists the PENDING, unexpired invitations addressed to the signed-in account: those sent to
+/// its CF Meet ID and those sent to its verified email address. Each item names the
+/// organization, the offered role and the expiry; answer one with
+/// `POST /api/v2/organization-invitations/{invitationId}/accept` or `.../decline`, without
+/// the emailed link. Newest first, at most 100. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    get, path = "/api/v2/me/organization-invitations", tag = "Organizations (v2)", operation_id = "v2_my_organization_invitations",
+    responses(
+        (status = 200, description = "Pending invitations for the signed-in account", body = MyOrganizationInvitationList),
+        (status = 404, description = "FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn my_organization_invitations(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::GET,
+            path: "/internal/v1/organization-invitations/mine".into(),
+            headers: &headers,
+            body: None,
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Accept one of my organization invitations.
+///
+/// Joins the organization with the invitation's role. The invitation must be addressed to the
+/// signed-in account (its CF Meet ID or its verified email); anyone else gets
+/// INVITATION_INVALID, exactly as for an unknown id. An invitation whose sender has since lost
+/// the right to invite is revoked (INVITATION_INVALID). An expired invitation answers
+/// INVITE_EXPIRED. Returns FEATURE_DISABLED until the Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organization-invitations/{invitationId}/accept", tag = "Organizations (v2)", operation_id = "v2_accept_my_organization_invitation",
+    params(("invitationId" = Uuid, Path, description = "Invitation id (from `GET /api/v2/me/organization-invitations`)")),
+    request_body(content = Object, content_type = "application/json", description = "Optional empty JSON object"),
+    responses(
+        (status = 200, description = "Membership created by the invitation", body = BusinessOrganizationMembership),
+        (status = 404, description = "INVITATION_INVALID / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 409, description = "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED", body = ErrorEnvelope),
+        (status = 410, description = "INVITE_EXPIRED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn accept_my_organization_invitation(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(invitation_id): V2Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::POST,
+            path: format!("/internal/v1/organization-invitations/{invitation_id}/accept"),
+            headers: &headers,
+            body: Some(&body),
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
+}
+
+/// Decline one of my organization invitations.
+///
+/// Declines a PENDING invitation addressed to the signed-in account (its CF Meet ID or its
+/// verified email); anyone else gets INVITATION_INVALID. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    post, path = "/api/v2/organization-invitations/{invitationId}/decline", tag = "Organizations (v2)", operation_id = "v2_decline_my_organization_invitation",
+    params(("invitationId" = Uuid, Path, description = "Invitation id (from `GET /api/v2/me/organization-invitations`)")),
+    request_body(content = Object, content_type = "application/json", description = "Optional empty JSON object"),
+    responses(
+        (status = 200, description = "Declined invitation", body = OrganizationInvitation),
+        (status = 404, description = "INVITATION_INVALID / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 410, description = "INVITE_EXPIRED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn decline_my_organization_invitation(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(invitation_id): V2Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::POST,
+            path: format!("/internal/v1/organization-invitations/{invitation_id}/decline"),
             headers: &headers,
             body: Some(&body),
             raw_query: None,
@@ -1469,6 +1655,10 @@ pub async fn archive_business_organization(
         ("id" = Uuid, Path, description = "Organization id"),
         ("before" = Option<i64>, Query, description = "Return events older than this sequence number"),
         ("limit" = Option<i64>, Query, description = "1–200 (default 50)"),
+        ("action" = Option<String>, Query, description = "Only this action, e.g. `membership.updated`"),
+        ("actorUserId" = Option<Uuid>, Query, description = "Only changes made by this user"),
+        ("from" = Option<String>, Query, description = "Inclusive lower bound (RFC 3339)"),
+        ("to" = Option<String>, Query, description = "Exclusive upper bound (RFC 3339)"),
     ),
     responses(
         (status = 200, description = "Audit events, newest first", body = OrganizationAuditEventPage),
@@ -1494,7 +1684,7 @@ pub async fn list_organization_audit_events(
             headers: &headers,
             body: None,
             raw_query: query.as_deref(),
-            allowed_query: &["before", "limit"],
+            allowed_query: &["before", "limit", "action", "actorUserId", "from", "to"],
         },
     )
     .await

@@ -410,6 +410,16 @@ async fn fake_handler(
             ok(json!({ "membership": member_doc(Uuid::new_v4(), Uuid::new_v4(), "MEMBER") }))
         }
         ("POST", ["organization-invitations", "decline"]) => ok(json!({ "status": "DECLINED" })),
+        ("GET", ["organization-invitations", "mine"]) => ok(json!({ "items": [] })),
+        ("POST", ["organization-invitations", _, "accept"]) => {
+            ok(member_doc(Uuid::new_v4(), Uuid::new_v4(), "MEMBER"))
+        }
+        ("POST", ["organization-invitations", _, "decline"]) => ok(json!({ "status": "DECLINED" })),
+        ("POST", ["admin", "organizations", o, "owners"]) => ok(member_doc(
+            id(o),
+            id(body["userId"].as_str().unwrap()),
+            "OWNER",
+        )),
         ("POST", ["organizations", o, action @ ("suspend" | "reactivate" | "archive")]) => {
             let status = match *action {
                 "suspend" => "SUSPENDED",
@@ -816,6 +826,16 @@ fn first_party_routes(o: Uuid, m: Uuid, i: Uuid) -> Vec<(Method, String, Option<
             Method::POST,
             "/api/v2/organization-invitations/decline".into(),
             Some(json!({ "token": "orginv_fake_token" })),
+        ),
+        (
+            Method::POST,
+            format!("/api/v2/organization-invitations/{i}/accept"),
+            Some(json!({})),
+        ),
+        (
+            Method::POST,
+            format!("/api/v2/organization-invitations/{i}/decline"),
+            Some(json!({})),
         ),
         (
             Method::POST,
@@ -4471,8 +4491,8 @@ async fn session3_invitations_by_email_or_cf_meet_id_never_disclose_the_invitee(
     assert!(v.get("email").is_none());
     assert_eq!(
         fake.last("POST", &internal).body,
-        json!({ "email": target.email.to_lowercase(), "role": "MEMBER", "inviteeHint": "CF Meet ID cfm-target" }),
-        "Organizations receives the verified-email address and the non-disclosing hint"
+        json!({ "email": target.email.to_lowercase(), "role": "MEMBER", "inviteeHint": "CF Meet ID cfm-target", "inviteeUserId": target.id }),
+        "Organizations receives the verified-email address, the non-disclosing hint and the resolved account"
     );
     let asked = seen.lock().unwrap().last().cloned().unwrap();
     assert_eq!(asked["cfMeetId"], "cfm-target");
@@ -4521,4 +4541,141 @@ async fn session3_invitations_by_email_or_cf_meet_id_never_disclose_the_invitee(
         "{s}"
     );
     assert_eq!(seen.lock().unwrap().len(), lookups);
+}
+
+#[tokio::test]
+async fn gap_my_invitations_relay_and_admin_owner_recovery() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let user = app.user("my-invitations").await;
+    let admin = app.admin("owner-recovery").await;
+    let org = fake.add_org("recovery-acme", &[(user.id, "MEMBER")]);
+
+    // The signed-in account's own pending invitations, read as that account.
+    let (s, v) = app
+        .call(
+            Method::GET,
+            "/api/v2/me/organization-invitations",
+            Auth::Bearer(&user.token),
+            None,
+        )
+        .await;
+    assert!(s.is_success(), "{s} {v}");
+    let r = fake.last("GET", "/internal/v1/organization-invitations/mine");
+    assert_eq!(r.acting_user, Some(user.id.to_string()));
+
+    // A client can never name the invitee account itself.
+    let (s, v) = app
+        .post(
+            format!("/api/v2/organizations/{org}/invitations"),
+            Auth::Bearer(&user.token),
+            json!({ "email": "x@example.com", "role": "MEMBER", "inviteeUserId": Uuid::new_v4() }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+
+    // Owner recovery is for platform administrators only, with a reason.
+    let path = format!("/api/v2/admin/organizations/{org}/owners");
+    let body = json!({ "userId": user.id, "reason": "owner account deactivated" });
+    let (s, _) = app
+        .call(
+            Method::POST,
+            &path,
+            Auth::Bearer(&user.token),
+            Some(body.clone()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, v) = app
+        .call(
+            Method::POST,
+            &path,
+            Auth::Bearer(&admin.token),
+            Some(body.clone()),
+        )
+        .await;
+    assert!(s.is_success(), "{s} {v}");
+    assert_eq!(v["role"], "OWNER");
+    let r = fake.last(
+        "POST",
+        &format!("/internal/v1/admin/organizations/{org}/owners"),
+    );
+    assert_eq!(r.body, body);
+    assert_eq!(r.acting_user, Some(admin.id.to_string()));
+}
+
+#[tokio::test]
+async fn gap_an_ex_member_keeps_no_owner_control_of_organization_spaces() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("g4-owner").await;
+    let employee = app.user("g4-employee").await;
+    let org = fake.add_org("g4-acme", &[(owner.id, "OWNER"), (employee.id, "MEMBER")]);
+    let (s, v) = create_org_space(
+        &app,
+        &employee,
+        org,
+        json!({ "title": "Weekly", "accessPolicy": "ORGANIZATION_ONLY" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let space = uuid(&v["id"]);
+    let personal = app
+        .create_space(&employee, json!({ "title": "Mine" }))
+        .await;
+    let patch = |who: &User, id: Uuid, version: i64, title: &str| {
+        let (app, token, title) = (&app, who.token.clone(), title.to_string());
+        async move {
+            app.call(
+                Method::PATCH,
+                &format!("/api/v2/meeting-spaces/{id}"),
+                Auth::Bearer(&token),
+                Some(json!({ "version": version, "title": title })),
+            )
+            .await
+        }
+    };
+    let (s, v) = patch(
+        &employee,
+        space,
+        v["version"].as_i64().unwrap(),
+        "Weekly (edited)",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    // The employee leaves the organization: their ownership of its space ends with it.
+    fake.set_memberships(employee.id, vec![]);
+    let (s, e) = patch(
+        &employee,
+        space,
+        v["version"].as_i64().unwrap(),
+        "Still mine?",
+    )
+    .await;
+    assert_eq!(
+        (s, code(&e)),
+        (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+        "{e}"
+    );
+    // Their personal meetings are untouched...
+    let (s, p) = patch(
+        &employee,
+        uuid(&personal["id"]),
+        personal["version"].as_i64().unwrap(),
+        "Mine (edited)",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    // ...and the organization's managers keep oversight of the space.
+    let (s, m) = patch(
+        &owner,
+        space,
+        v["version"].as_i64().unwrap(),
+        "Weekly (owner)",
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{m}");
 }

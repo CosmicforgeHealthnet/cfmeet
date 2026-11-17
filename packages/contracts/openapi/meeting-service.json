@@ -3053,6 +3053,105 @@
         ]
       }
     },
+    "/api/v2/admin/organizations/{id}/owners": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Appoint an organization owner (platform administrators).",
+        "description": "Recovers an organization that lost its owner, for example because the only owner's account\nwas deactivated: makes `userId` an ACTIVE OWNER (an existing membership is promoted, otherwise\none is created). The reason is recorded in the organization's audit history. Archived\norganizations are refused. Requires a platform administrator bearer token and an authoritative\nOrganizations Service.",
+        "operationId": "v2_appoint_organization_owner",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppointOrganizationOwnerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The appointed OWNER membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}": {
       "get": {
         "tags": [
@@ -11462,6 +11561,53 @@
         ]
       }
     },
+    "/api/v2/me/organization-invitations": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "My pending organization invitations.",
+        "description": "Lists the PENDING, unexpired invitations addressed to the signed-in account: those sent to\nits CF Meet ID and those sent to its verified email address. Each item names the\norganization, the offered role and the expiry; answer one with\n`POST /api/v2/organization-invitations/{invitationId}/accept` or `.../decline`, without\nthe emailed link. Newest first, at most 100. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_my_organization_invitations",
+        "responses": {
+          "200": {
+            "description": "Pending invitations for the signed-in account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyOrganizationInvitationList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/me/organizations": {
       "get": {
         "tags": [
@@ -15853,6 +15999,176 @@
         ]
       }
     },
+    "/api/v2/organization-invitations/{invitationId}/accept": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Accept one of my organization invitations.",
+        "description": "Joins the organization with the invitation's role. The invitation must be addressed to the\nsigned-in account (its CF Meet ID or its verified email); anyone else gets\nINVITATION_INVALID, exactly as for an unknown id. An invitation whose sender has since lost\nthe right to invite is revoked (INVITATION_INVALID). An expired invitation answers\nINVITE_EXPIRED. Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_accept_my_organization_invitation",
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "description": "Invitation id (from `GET /api/v2/me/organization-invitations`)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional empty JSON object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Membership created by the invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "INVITATION_INVALID / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITE_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organization-invitations/{invitationId}/decline": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Decline one of my organization invitations.",
+        "description": "Declines a PENDING invitation addressed to the signed-in account (its CF Meet ID or its\nverified email); anyone else gets INVITATION_INVALID. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_decline_my_organization_invitation",
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "description": "Invitation id (from `GET /api/v2/me/organization-invitations`)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional empty JSON object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Declined invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationInvitation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "INVITATION_INVALID / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITE_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations": {
       "post": {
         "tags": [
@@ -16253,6 +16569,47 @@
             "schema": {
               "type": "integer",
               "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Only this action, e.g. `membership.updated`",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "actorUserId",
+            "in": "query",
+            "description": "Only changes made by this user",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive lower bound (RFC 3339)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Exclusive upper bound (RFC 3339)",
+            "required": false,
+            "schema": {
+              "type": "string",
               "nullable": true
             }
           }
@@ -16835,17 +17192,38 @@
           {
             "name": "status",
             "in": "query",
-            "description": "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED",
+            "description": "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED (a PENDING invitation past its expiry counts as EXPIRED)",
             "required": false,
             "schema": {
               "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's `nextCursor` (opaque)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size 1–200 (default 50 when paging; 200 when neither `limit` nor `cursor` is given)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
               "nullable": true
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Invitations",
+            "description": "Invitations (newest first) and `nextCursor` while more remain",
             "content": {
               "application/json": {
                 "schema": {
@@ -20724,6 +21102,26 @@
           }
         }
       },
+      "AppointOrganizationOwnerRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/admin/organizations/{id}/owners` (platform administrators).",
+        "required": [
+          "userId",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why the administrator intervenes (1–500 characters; recorded in the organization's\naudit history)."
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The account that becomes an ACTIVE OWNER."
+          }
+        },
+        "additionalProperties": false
+      },
       "ApproveLinkRequest": {
         "type": "object",
         "required": [
@@ -24106,6 +24504,27 @@
           "REVOKED"
         ]
       },
+      "InvitingOrganization": {
+        "type": "object",
+        "description": "The organization an invitation for the signed-in account comes from.",
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        }
+      },
       "JoinConferenceRequest": {
         "type": "object",
         "properties": {
@@ -25456,6 +25875,76 @@
           }
         }
       },
+      "MyOrganizationInvitation": {
+        "type": "object",
+        "description": "A pending invitation addressed to the signed-in account.",
+        "required": [
+          "id",
+          "organizationId",
+          "role",
+          "status",
+          "inviteeEmailHint",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invitedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "inviteeEmailHint": {
+            "type": "string"
+          },
+          "organization": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InvitingOrganization"
+              }
+            ],
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "description": "The role the invitation offers: ADMIN, MANAGER, MEMBER or GUEST."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always PENDING in this list."
+          }
+        }
+      },
+      "MyOrganizationInvitationList": {
+        "type": "object",
+        "description": "Pending invitations addressed to the signed-in account (newest first, at most 100).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MyOrganizationInvitation"
+            }
+          }
+        }
+      },
       "MyOrganizationResponse": {
         "type": "object",
         "required": [
@@ -25697,6 +26186,11 @@
               "$ref": "#/components/schemas/OrganizationInvitation"
             },
             "description": "Invitations (masked invitee email; never a token)."
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "The cursor of the next page; absent or null on the last page.",
+            "nullable": true
           }
         }
       },
