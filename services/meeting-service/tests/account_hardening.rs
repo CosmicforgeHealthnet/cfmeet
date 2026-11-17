@@ -769,3 +769,29 @@ async fn reference_reconciliation_reports_local_invariant_breaks_without_repairi
         .unwrap();
     assert_eq!(n, 1);
 }
+
+/// Gap audit A23: a kicked v1 guest's token stops working at once (not at expiry).
+#[tokio::test]
+async fn a_kicked_guest_loses_api_access_at_once() {
+    let app = app_with_redis!();
+    let host = app.user("kickhost2").await;
+    let (meeting, _, participant) = legacy_meeting_with_guest(&app, &host).await;
+    let guest = app
+        .state
+        .jwt_service
+        .generate_access_token(participant, "guest")
+        .unwrap();
+    let path = format!("/api/v1/meetings/{meeting}/participants");
+    let (before, v) = app.get(&path, Auth::Bearer(&guest)).await;
+    assert_ne!(before, StatusCode::UNAUTHORIZED, "{v}");
+    let (s, v) = app
+        .post(
+            &format!("/api/v1/participants/{participant}/kick"),
+            Auth::Bearer(&host.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (after, _) = app.get(&path, Auth::Bearer(&guest)).await;
+    assert_eq!(after, StatusCode::UNAUTHORIZED);
+}

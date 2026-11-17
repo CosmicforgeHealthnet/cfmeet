@@ -713,3 +713,46 @@ async fn validation_errors_name_the_public_field_with_structured_details() {
         "title: Title must be between 1 and 200 characters"
     );
 }
+
+/// Gap audit A24: a wrong sign-in code for an existing account is audited (off the request
+/// path); an unknown address leaves no event.
+#[tokio::test]
+async fn wrong_sign_in_codes_are_audited_for_existing_accounts() {
+    let app = app_with_redis!();
+    let email = format!(
+        "wrongcode-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..10]
+    );
+    let id = email_user(&app, &email, "active").await;
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": email }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let code = mailed_code(&app, &email).await;
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/otp/verify",
+            Auth::None,
+            json!({ "email": email, "code": wrong }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let sql = format!(
+        "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' \
+          AND event_type = 'SIGN_IN_CODE' AND outcome = 'FAILURE'"
+    );
+    let mut seen = 0;
+    for _ in 0..50 {
+        seen = app.scalar(&sql).await;
+        if seen > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(seen, 1);
+}

@@ -184,7 +184,7 @@ pub async fn verify_otp(
                 .otp_service
                 .check(&email, &payload.code, OtpType::SignIn)
                 .await;
-            settle_check(outcome)?;
+            settle_check(&state, &email, "CODE", outcome)?;
             false
         }
     };
@@ -224,15 +224,38 @@ pub async fn verify_otp_link(
         .otp_service
         .check_link(&email, &payload.token, OtpType::SignIn)
         .await;
-    settle_check(outcome)?;
+    settle_check(&state, &email, "LINK", outcome)?;
     inc(&OM.auth_magic_link_verified);
     complete_sign_in(&state, &headers, &email, "LINK", false)
         .await
         .map(Json)
 }
 
-/// Map a code/link check to the uniform answers (and count it).
-fn settle_check(outcome: ApiResult<OtpCheck>) -> ApiResult<()> {
+/// Map a code/link check to the uniform answers (and count it). Gap audit A24: a wrong
+/// code and a lock-out are audited for an existing account, off the request path so the
+/// answer's timing never depends on whether the account exists.
+fn settle_check(
+    state: &AppState,
+    email: &str,
+    via: &'static str,
+    outcome: ApiResult<OtpCheck>,
+) -> ApiResult<()> {
+    let audit = |outcome: Outcome, reason: &'static str| {
+        let db = state.db.clone();
+        let email = email.to_owned();
+        tokio::spawn(async move {
+            if let Ok(Some(user)) = security::find_user_by_email(&db, &email).await {
+                security::record_event_best_effort(
+                    &db,
+                    SecurityEvent::new("SIGN_IN_CODE", outcome)
+                        .user(user.id)
+                        .actor(ActorKind::Anonymous, None)
+                        .detail(serde_json::json!({ "via": via, "reason": reason })),
+                )
+                .await;
+            }
+        });
+    };
     match outcome {
         Ok(OtpCheck::Valid) => Ok(()),
         Ok(OtpCheck::Missing) => {
@@ -241,10 +264,12 @@ fn settle_check(outcome: ApiResult<OtpCheck>) -> ApiResult<()> {
         }
         Ok(OtpCheck::Wrong) => {
             inc(&OM.auth_otp_wrong);
+            audit(Outcome::Failure, "WRONG_CODE");
             Err(ApiError::BadRequest(INVALID_CODE.to_string()))
         }
         Err(e @ ApiError::TooManyRequests(_)) => {
             inc(&OM.auth_otp_locked);
+            audit(Outcome::Denied, "TOO_MANY_ATTEMPTS");
             Err(e)
         }
         Err(e) => Err(e),
