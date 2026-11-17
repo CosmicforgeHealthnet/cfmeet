@@ -958,7 +958,12 @@ def restore_test(dump, major, expected, run_id, label):
             emit('restoreTestCleanup', {'container': name, 'removed': False})
 
 
-def backup(sha, run_id, restore_labels=('meeting-service', 'organizations', 'platform-access')):
+# Databases whose dump is restored into a throwaway PostgreSQL before every release
+# (labels as in the backup manifest: cfmeet_developer_platform -> developer-platform).
+RESTORE_TEST_LABELS = ('meeting-service', 'organizations', 'platform-access', 'developer-platform')
+
+
+def backup(sha, run_id, restore_labels=RESTORE_TEST_LABELS):
     folder = BACKUPS / run_id
     folder.mkdir(parents=True, exist_ok=False, mode=0o700)
     os.chmod(BACKUPS, 0o700)
