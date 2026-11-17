@@ -60,8 +60,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Load email configuration (unified email delivery). A selected provider with missing or
     // malformed settings stops startup (fail closed): mail must never be silently dropped.
-    let email_config = EmailConfig::from_env()
-        .unwrap_or_else(|e| panic!("email configuration error: {e}"));
+    let email_config =
+        EmailConfig::from_env().unwrap_or_else(|e| panic!("email configuration error: {e}"));
     tracing::info!(
         "✅ Email configuration loaded (provider: {}, sender: {})",
         email_config.provider.as_str(),

@@ -120,6 +120,10 @@ counters!(
     email_complained,
     email_webhook_rejected,
     email_webhook_duplicates,
+    // Notification Service N5: provider events for messages the Notification Service sent,
+    // handed on to it (counts only).
+    email_webhook_forwarded,
+    email_webhook_forward_failures,
     // Notification Service N0: lease renewal (S-8), bounce / complaint suppression (S-12)
     // and invalid meeting-notice recipients that no longer block the others (S-11).
     email_lease_lost,

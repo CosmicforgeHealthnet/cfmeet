@@ -1275,6 +1275,10 @@ def safe_defaults():
     # (activate-personal-encryption), and only with the release record mounted (checked below).
     if done('activate-personal-encryption'):
         rules['messaging']['MESSAGING_E2EE_DEVICES_ENABLED'] = (None, 'false', 'true')
+    # The Notification Service's own Resend provider (activate-notifications-email).
+    if done('activate-notifications-email'):
+        for name in ('notifications', 'notifications-2'):
+            rules[name]['NOTIFICATIONS_EMAIL_PROVIDER'] = (None, '', 'none', 'resend')
     return rules
 
 
@@ -2551,6 +2555,9 @@ ACTIVATIONS = {
     # Notification Service N7b: Messaging publishes message wake-ups to I1 (shadow first).
     'activate-messaging-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_messaging_publications(
         sys.modules[__name__], sha, run_id, confirm)),
+    # Notification Service N5 / N11: Resend as the service's own provider (VPS credentials).
+    'activate-notifications-email': (('activate-resend-email',), lambda sha, run_id, confirm:
+                                     notif_ops.activate_email(sys.modules[__name__], sha, run_id, confirm)),
     # Document 4 §9.6: one producer fence row per run, LEGACY_ONLY <-> SHADOW only, reversible.
     'activate-notification-fence': ((), lambda sha, run_id, confirm: notif_ops.activate_fence(
         sys.modules[__name__], sha, run_id, confirm)),

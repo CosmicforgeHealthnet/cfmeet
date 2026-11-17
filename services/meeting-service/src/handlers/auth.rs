@@ -333,10 +333,9 @@ pub async fn login(
     // sign-in. Checked only after a correct password, so it reveals nothing to others.
     if state.require_email_verification
         && user.status == users::UserStatus::PendingVerification
-        && state.auth_policy.login_requires_verified_email(
-            user.created_at.and_utc(),
-            chrono::Utc::now(),
-        )
+        && state
+            .auth_policy
+            .login_requires_verified_email(user.created_at.and_utc(), chrono::Utc::now())
     {
         security::record_event_best_effort(
             &state.db,
