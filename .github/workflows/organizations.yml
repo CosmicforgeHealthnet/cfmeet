@@ -123,6 +123,8 @@ jobs:
         run: cargo test --locked --test policies
       - name: Provisioning saga — fake Platform Access, every certified failure mode (Section 7)
         run: cargo test --locked --test provisioning
+      - name: In-product invitations, inviter-backed invitations, operator owner recovery
+        run: cargo test --locked --test invitations_in_product
       - name: cargo test (whole workspace)
         run: cargo test --workspace --no-fail-fast --locked
 
