@@ -4655,6 +4655,11 @@ export namespace Meetings {
     /** Already in the requested state (idempotent retry). */
     unchanged: Array<string>;
   };
+  /** `POST /api/v2/registrations/cancel` request: the registration's admission token. */
+  export type CancelOwnRegistrationRequest = {
+    /** The admission token returned when registering (`reg_…`). */
+    token: string;
+  };
   export type ChangedResponse = {
     changed: boolean;
   };
@@ -6068,6 +6073,11 @@ export namespace Meetings {
     v2CancelConference: {
       params: { path: { id: string } };
       response: ConferenceActionResponse;
+    };
+    /** POST /api/v2/registrations/cancel; auth ANONYMOUS; retry NO_RETRY */
+    v2CancelOwnRegistration: {
+      params: { body: CancelOwnRegistrationRequest };
+      response: RegistrationView;
     };
     /** DELETE /api/v2/meeting-spaces/{id}/registrations/{registrationId}; auth MEETING_SESSION; retry IDEMPOTENT */
     v2CancelRegistration: {

@@ -279,6 +279,8 @@ pub struct FakeRtc {
     pub other_calls: AtomicUsize,
     /// SEC-009: `(room, media identity, reason)` of every provider removal.
     pub removed: std::sync::Mutex<Vec<(String, String, String)>>,
+    /// Gap audit M7: `(room, reason)` of every provider room termination.
+    pub terminated: std::sync::Mutex<Vec<(String, String)>>,
     pub fail_issue: std::sync::atomic::AtomicBool,
     pub last_permissions: std::sync::Mutex<Option<MediaPermissions>>,
 }
@@ -296,8 +298,12 @@ impl RtcProvider for FakeRtc {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
         Ok(None)
     }
-    async fn terminate_room(&self, _r: &RtcRoomRef, _reason: &str) -> RtcResult<()> {
+    async fn terminate_room(&self, r: &RtcRoomRef, reason: &str) -> RtcResult<()> {
         self.other_calls.fetch_add(1, Ordering::SeqCst);
+        self.terminated
+            .lock()
+            .unwrap()
+            .push((r.room_name.clone(), reason.to_string()));
         Ok(())
     }
     async fn issue_join_credentials(

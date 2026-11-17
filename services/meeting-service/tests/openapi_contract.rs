@@ -415,6 +415,19 @@ fn every_v2_route_is_documented() {
             "delete",
             "/api/v2/notifications/devices/{accountDeviceId}/push",
         ),
+        // Backend gap closure: in-product organization invitations, operator owner
+        // recovery and the registrant's own cancellation.
+        ("get", "/api/v2/me/organization-invitations"),
+        (
+            "post",
+            "/api/v2/organization-invitations/{invitationId}/accept",
+        ),
+        (
+            "post",
+            "/api/v2/organization-invitations/{invitationId}/decline",
+        ),
+        ("post", "/api/v2/admin/organizations/{id}/owners"),
+        ("post", "/api/v2/registrations/cancel"),
     ];
     for (method, path) in expected {
         assert!(

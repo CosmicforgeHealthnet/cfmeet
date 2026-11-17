@@ -318,6 +318,17 @@ export interface ApiKeyResponse {
   used_count: number;
 }
 
+/** `POST /api/v2/admin/organizations/{id}/owners` (platform administrators). */
+export interface AppointOrganizationOwnerRequest {
+  /**
+   * Why the administrator intervenes (1–500 characters; recorded in the organization's
+   * audit history).
+   */
+  reason: string;
+  /** The account that becomes an ACTIVE OWNER. */
+  userId: string;
+}
+
 
 export interface ApproveLinkRequest {
   /** The 6-digit code shown on the new device (typed or scanned from its QR code). */
@@ -595,6 +606,12 @@ export interface BusinessOrganizationPage {
   items: Array<BusinessOrganization>;
   /** Pass as `cursor` for the next page; null on the last page. */
   nextCursor?: string | null;
+}
+
+/** `POST /api/v2/registrations/cancel` request: the registration's admission token. */
+export interface CancelOwnRegistrationRequest {
+  /** The admission token returned when registering (`reg_…`). */
+  token: string;
 }
 
 
@@ -1401,6 +1418,13 @@ export interface InvitationResponse {
 
 export type InvitationStatus = "ACTIVE" | "REVOKED";
 
+/** The organization an invitation for the signed-in account comes from. */
+export interface InvitingOrganization {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 
 export interface JoinConferenceRequest {
   /** Part F: explicit consents granted before admission (see the pre-join contract). */
@@ -1846,6 +1870,26 @@ export interface MyCollaborationState {
   videoLocked: boolean;
 }
 
+/** A pending invitation addressed to the signed-in account. */
+export interface MyOrganizationInvitation {
+  createdAt: string;
+  expiresAt: string;
+  id: string;
+  invitedBy?: string | null;
+  inviteeEmailHint: string;
+  organization?: InvitingOrganization | null;
+  organizationId: string;
+  /** The role the invitation offers: ADMIN, MANAGER, MEMBER or GUEST. */
+  role: string;
+  /** Always PENDING in this list. */
+  status: string;
+}
+
+/** Pending invitations addressed to the signed-in account (newest first, at most 100). */
+export interface MyOrganizationInvitationList {
+  items: Array<MyOrganizationInvitation>;
+}
+
 
 export interface MyOrganizationResponse {
   organization: OrganizationResponse;
@@ -1930,6 +1974,8 @@ export interface OrganizationInvitation {
 export interface OrganizationInvitationList {
   /** Invitations (masked invitee email; never a token). */
   items: Array<OrganizationInvitation>;
+  /** The cursor of the next page; absent or null on the last page. */
+  nextCursor?: string | null;
 }
 
 /** `POST /api/v2/organization-invitations/accept` and `/decline`. */
@@ -3797,6 +3843,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/me/device-links/{linkId}": "v2_get_device_link",
   "GET /api/v2/me/device-policy": "v2_get_my_device_policy",
   "GET /api/v2/me/devices": "v2_list_my_devices",
+  "GET /api/v2/me/organization-invitations": "v2_my_organization_invitations",
   "GET /api/v2/me/organizations": "v2_my_organizations",
   "GET /api/v2/me/profile": "v2_get_my_profile",
   "GET /api/v2/me/security-events": "v2_list_my_security_events",
@@ -3887,6 +3934,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/admin/chat-migration/transitions": "v2_chat_migration_transition",
   "POST /api/v2/admin/compat/backfill": "v2_run_backfill",
   "POST /api/v2/admin/organizations": "v2_create_organization",
+  "POST /api/v2/admin/organizations/{id}/owners": "v2_appoint_organization_owner",
   "POST /api/v2/conferences/{id}/artifacts/reports": "v2_generate_report",
   "POST /api/v2/conferences/{id}/artifacts/{artifactId}/access": "v2_artifact_access",
   "POST /api/v2/conferences/{id}/backstage": "v2_enter_backstage",
@@ -3982,6 +4030,8 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/notifications/read": "v2_notifications_mark_read",
   "POST /api/v2/organization-invitations/accept": "v2_accept_organization_invitation",
   "POST /api/v2/organization-invitations/decline": "v2_decline_organization_invitation",
+  "POST /api/v2/organization-invitations/{invitationId}/accept": "v2_accept_my_organization_invitation",
+  "POST /api/v2/organization-invitations/{invitationId}/decline": "v2_decline_my_organization_invitation",
   "POST /api/v2/organizations": "v2_create_business_organization",
   "POST /api/v2/organizations/{id}/archive": "v2_archive_business_organization",
   "POST /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_post",
@@ -3997,6 +4047,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/teams": "v2_create_organization_team",
   "POST /api/v2/organizations/{id}/teams/{teamId}/archive": "v2_archive_organization_team",
   "POST /api/v2/organizations/{id}/teams/{teamId}/members": "v2_add_organization_team_member",
+  "POST /api/v2/registrations/cancel": "v2_cancel_own_registration",
   "PUT /api/v1/meetings/{id}": "update_meeting",
   "PUT /api/v2/meeting-spaces/{id}/recurrence": "v2_set_recurrence",
   "PUT /api/v2/meeting-spaces/{id}/recurrence/exceptions": "v2_set_recurrence_exception",

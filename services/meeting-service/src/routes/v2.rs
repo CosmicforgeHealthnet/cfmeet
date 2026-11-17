@@ -419,6 +419,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(specialized::list_registrations).post(specialized::register),
         )
         .route(
+            "/registrations/cancel",
+            post(specialized::cancel_own_registration),
+        )
+        .route(
             "/meeting-spaces/:id/registrations/:rid",
             get(specialized::get_registration).delete(specialized::cancel_registration),
         )

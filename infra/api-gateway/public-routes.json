@@ -2541,6 +2541,12 @@
     },
     {
       "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/registrations/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
       "method": "DELETE",
       "path": "/api/v2/meeting-spaces/{id}/registrations/{registrationId}",
       "class": "PUBLIC_CUSTOMER"

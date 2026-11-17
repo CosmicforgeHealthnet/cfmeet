@@ -237,3 +237,38 @@ pub async fn leave_backstage(
 ) -> ApiResult<Json<BackstageResponse>> {
     Ok(Json(state.meeting.backstage.leave(&actor, id).await?))
 }
+
+/// `POST /api/v2/registrations/cancel` request: the registration's admission token.
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CancelOwnRegistrationRequest {
+    /// The admission token returned when registering (`reg_…`).
+    pub token: String,
+}
+
+/// Cancel my own registration (with its admission token).
+///
+/// The registrant cancels their webinar / town-hall registration with the admission token they
+/// received when registering; no sign-in is needed. The token is revoked so it can no longer be used
+/// to join. An unknown, used-up or revoked token answers REGISTRATION_NOT_FOUND; cancelling an
+/// already-cancelled registration returns it unchanged. (A signed-in account whose verified email
+/// is the registered address can also simply register again: it reclaims the registration and gets
+/// a fresh token.)
+#[utoipa::path(
+    post, path = "/api/v2/registrations/cancel", tag = "Registrations (v2)", operation_id = "v2_cancel_own_registration",
+    request_body = CancelOwnRegistrationRequest,
+    responses(
+        (status = 200, description = "Cancelled", body = RegistrationView),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 404, description = "REGISTRATION_NOT_FOUND", body = ErrorEnvelope),
+    ),
+    security(())
+)]
+pub async fn cancel_own_registration(
+    State(state): State<AppState>,
+    V2Json(req): V2Json<CancelOwnRegistrationRequest>,
+) -> ApiResult<Json<RegistrationView>> {
+    Ok(Json(
+        state.meeting.registrations.cancel_own(&req.token).await?,
+    ))
+}

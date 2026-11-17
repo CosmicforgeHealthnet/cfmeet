@@ -32,7 +32,9 @@ pub async fn get_me(
 ///
 /// Returns the participants currently ADMITTED to the conference, ordered by admission time.
 /// Available to admitted participants and to the space owner and members; other callers (including
-/// waiting, denied, removed or banned participants) get PERMISSION_DENIED.
+/// waiting, denied, removed or banned participants) get PERMISSION_DENIED. A VIEWER (a webinar or
+/// town-hall attendee) sees only the people running the session (presenters and above) and
+/// themselves, never the other attendees.
 #[utoipa::path(
     get, path = "/api/v2/conferences/{id}/participants", tag = "Participants (v2)", operation_id = "v2_list_participants",
     params(("id" = Uuid, Path, description = "Conference id")),

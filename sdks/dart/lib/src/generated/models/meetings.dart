@@ -834,6 +834,26 @@ class BulkAdmissionResponse {
   Map<String, Object?> toJson() => json;
 }
 
+/// `POST /api/v2/registrations/cancel` request: the registration's admission token.
+class CancelOwnRegistrationRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const CancelOwnRegistrationRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory CancelOwnRegistrationRequest.create({required String token}) =>
+      CancelOwnRegistrationRequest.fromJson(<String, Object?>{
+        'token': token,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The admission token returned when registering (`reg_…`).
+  String get token => json['token']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 class ChangedResponse {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const ChangedResponse.fromJson(this.json);

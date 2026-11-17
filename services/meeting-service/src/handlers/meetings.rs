@@ -1130,6 +1130,7 @@ pub async fn end_meeting(
 
     let now = now_utc();
 
+    let room_name = meeting.meeting_identifier.clone();
     // Update meeting status to ended
     let mut meeting_update: meetings::ActiveModel = meeting.into();
     meeting_update.status = Set(MeetingStatus::Ended);
@@ -1169,6 +1170,14 @@ pub async fn end_meeting(
         }))),
     };
     session_log.insert(&state.db).await?;
+    // Gap audit M7: the media room ends with the meeting (participants are disconnected).
+    crate::services::legacy_media::terminate(
+        state.meeting.core.rtc.as_ref(),
+        id,
+        &room_name,
+        "LEGACY_MEETING_ENDED",
+    )
+    .await;
     // Section 16 (MTG-017): refresh the v2 mirror (default mode; best effort).
     state.meeting.compat.mirror_legacy_write(id).await;
 
@@ -1232,6 +1241,9 @@ pub async fn join_meeting_by_identifier(
 
 use crate::dto::{PublicMeetingInfoApiResponse, PublicMeetingInfoResponse};
 
+/// The title the unauthenticated public lookup shows for a private meeting.
+pub const PRIVATE_MEETING_TITLE: &str = "Private meeting";
+
 /// Get public meeting info by meeting identifier
 ///
 /// This endpoint allows the hosted UI to fetch meeting details before joining.
@@ -1264,12 +1276,23 @@ pub async fn get_public_meeting_info(
             ))
         })?;
 
+    // Gap audit M16: this route is unauthenticated, so a private meeting discloses only
+    // what its join page needs (the start for a countdown, the status and the join link),
+    // never its title or end, like the v2 summary view.
     let response = PublicMeetingInfoResponse {
         meeting_identifier: meeting.meeting_identifier.clone(),
-        title: meeting.title,
+        title: if meeting.is_private {
+            PRIVATE_MEETING_TITLE.to_string()
+        } else {
+            meeting.title
+        },
         is_private: meeting.is_private,
         start_time: format_utc(meeting.start_time),
-        end_time: format_utc_opt(meeting.end_time),
+        end_time: if meeting.is_private {
+            None
+        } else {
+            format_utc_opt(meeting.end_time)
+        },
         status: format_status(&meeting.status),
         join_url: state.join_url(&meeting.meeting_identifier),
     };

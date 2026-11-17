@@ -49,12 +49,23 @@ const BATCH_SIZE: u64 = 20;
 /// Background worker for auto-ending meetings
 pub struct MeetingAutoEndWorker {
     db: DatabaseConnection,
+    /// Gap audit M7: the provider whose legacy room is terminated when a meeting ends.
+    rtc: Option<std::sync::Arc<dyn crate::services::rtc_provider::RtcProvider>>,
 }
 
 impl MeetingAutoEndWorker {
     /// Create a new MeetingAutoEndWorker
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db }
+        Self { db, rtc: None }
+    }
+
+    /// Also terminate each ended meeting's media room through `rtc`.
+    pub fn with_rtc(
+        mut self,
+        rtc: std::sync::Arc<dyn crate::services::rtc_provider::RtcProvider>,
+    ) -> Self {
+        self.rtc = Some(rtc);
+        self
     }
 
     /// Start the worker loop
@@ -203,6 +214,15 @@ impl MeetingAutoEndWorker {
         txn.commit()
             .await
             .map_err(|e| format!("Failed to commit auto-end: {}", e))?;
+        if let Some(rtc) = &self.rtc {
+            crate::services::legacy_media::terminate(
+                rtc.as_ref(),
+                meeting_id,
+                &meeting_identifier,
+                "LEGACY_MEETING_AUTO_ENDED",
+            )
+            .await;
+        }
 
         tracing::info!(
             "Auto-ended meeting {} ({}) at scheduled end time",
@@ -233,8 +253,14 @@ impl MeetingAutoEndWorkerHandle {
 /// Spawn the meeting auto-end worker as a background task
 ///
 /// Returns a handle for shutdown.
-pub fn spawn_meeting_auto_end_worker(db: DatabaseConnection) -> MeetingAutoEndWorkerHandle {
-    let worker = MeetingAutoEndWorker::new(db);
+pub fn spawn_meeting_auto_end_worker(
+    db: DatabaseConnection,
+    rtc: Option<std::sync::Arc<dyn crate::services::rtc_provider::RtcProvider>>,
+) -> MeetingAutoEndWorkerHandle {
+    let worker = match rtc {
+        Some(rtc) => MeetingAutoEndWorker::new(db).with_rtc(rtc),
+        None => MeetingAutoEndWorker::new(db),
+    };
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 

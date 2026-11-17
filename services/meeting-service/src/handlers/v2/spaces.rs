@@ -38,6 +38,7 @@ use crate::{
         (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 409, description = "IDEMPOTENCY_CONFLICT", body = ErrorEnvelope),
+        (status = 429, description = "RATE_LIMITED (per-account creation budget)", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
 )]
@@ -47,6 +48,12 @@ pub async fn create_meeting_space(
     headers: HeaderMap,
     V2JsonDigest(req, digest): V2JsonDigest<CreateMeetingSpaceRequest>,
 ) -> ApiResult<Response> {
+    crate::services::creation_limits::spend(
+        &state,
+        &actor,
+        crate::services::creation_limits::SPACES,
+    )
+    .await?;
     let idempotency = match idempotency_key(&headers)? {
         Some(key) => IdempotencyRequest::new(&actor, "v2_create_meeting_space", &key, digest)?,
         None => None,
@@ -327,6 +334,7 @@ pub async fn transfer_owner(
     responses(
         (status = 201, description = "Created", body = InstantMeetingResponse),
         (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 429, description = "RATE_LIMITED (per-account creation budget)", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
 )]
@@ -335,6 +343,12 @@ pub async fn create_instant_meeting(
     actor: ActorContext,
     V2OptionalJson(req): V2OptionalJson<InstantMeetingRequest>,
 ) -> ApiResult<(StatusCode, Json<InstantMeetingResponse>)> {
+    crate::services::creation_limits::spend(
+        &state,
+        &actor,
+        crate::services::creation_limits::INSTANT_MEETINGS,
+    )
+    .await?;
     let (space, conference) = state.meeting.spaces.create_instant(&actor, req).await?;
     let view = state.meeting.spaces.view_of(&actor, space).await?;
     Ok((

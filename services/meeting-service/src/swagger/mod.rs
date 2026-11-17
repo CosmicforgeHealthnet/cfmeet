@@ -305,6 +305,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::specialized::list_registrations,
         crate::handlers::v2::specialized::get_registration,
         crate::handlers::v2::specialized::cancel_registration,
+        crate::handlers::v2::specialized::cancel_own_registration,
         crate::handlers::v2::specialized::enter_backstage,
         crate::handlers::v2::specialized::leave_backstage,
         crate::handlers::v2::quality::submit_samples,
@@ -312,6 +313,7 @@ use utoipa::OpenApi;
     ),
     components(
         schemas(
+            crate::handlers::v2::specialized::CancelOwnRegistrationRequest,
             // Auth schemas
             crate::dto::RegisterRequest,
             crate::dto::RegisterResponse,

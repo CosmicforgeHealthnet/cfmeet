@@ -1672,3 +1672,132 @@ async fn h_e2e_18_no_clinical_payload_persisted() {
     assert!(!list.to_string().contains("SECRET"));
     no_clinical_payload(&app).await;
 }
+
+/// Gap audit M4: an address is not held by whoever registered it first. The account whose
+/// verified email it is reclaims the registration (the squatter's token is revoked) and
+/// gets a fresh token; a registrant cancels their own registration with its token.
+#[tokio::test]
+async fn gap_registration_is_reclaimed_by_the_verified_owner_and_self_cancelled() {
+    use sea_orm::ConnectionTrait;
+    let app = app!();
+    let owner = app.user("owner").await;
+    let (sid, _) = live(&app, &owner, webinar()).await;
+    let (s, v) = set_profile(
+        &app,
+        &owner,
+        sid,
+        json!({ "registration": { "email": "REQUIRED" } }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    // Someone registers another person's address first.
+    let (s, squatted) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Not Kim", "email": "kim@example.com" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{squatted}");
+    // An anonymous repeat is still refused (the address is taken)...
+    let (s, _) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Kim", "email": "kim@example.com" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    // ...but the verified owner of the address reclaims it.
+    let kim = app.user_with_email("kim", "kim@example.com").await;
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE users SET email_verified_at = now() WHERE id = '{}'",
+            kim.id
+        ))
+        .await
+        .unwrap();
+    let (s, mine) = app
+        .post(
+            format!("/api/v2/meeting-spaces/{sid}/registrations"),
+            Auth::Bearer(&kim.token),
+            json!({ "displayName": "Kim", "email": "kim@example.com" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{mine}");
+    assert_ne!(mine["admissionToken"], squatted["admissionToken"]);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM webinar_registrations WHERE id = '{}' AND status = 'CANCELLED' AND cancelled_by = 'self:reclaimed-by-verified-owner'",
+            squatted["registrationId"].as_str().unwrap()
+        ))
+        .await,
+        1
+    );
+    // The squatter's token no longer cancels anything; the owner's does, once.
+    let (s, _) = app
+        .post(
+            "/api/v2/registrations/cancel",
+            Auth::None,
+            json!({ "token": "reg_definitely-not-a-token" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, cancelled) = app
+        .post(
+            "/api/v2/registrations/cancel",
+            Auth::None,
+            json!({ "token": mine["admissionToken"] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{cancelled}");
+    assert_eq!(cancelled["status"], "CANCELLED");
+    let (s, again) = app
+        .post(
+            "/api/v2/registrations/cancel",
+            Auth::None,
+            json!({ "token": mine["admissionToken"] }),
+        )
+        .await;
+    assert_eq!(
+        (s, again["status"].as_str()),
+        (StatusCode::OK, Some("CANCELLED"))
+    );
+}
+
+/// Gap audit M5: a webinar attendee (VIEWER) sees the people running the session and
+/// themselves in the roster, never the other attendees.
+#[tokio::test]
+async fn gap_viewers_do_not_see_other_attendees_in_the_roster() {
+    let app = app!();
+    let owner = app.user("owner").await;
+    let (_, cid) = live(&app, &owner, webinar()).await;
+    let host = join_user(&app, cid, &owner).await;
+    connect(&app, cid, &host).await;
+    let a = attendee(&app, cid, "Attendee A").await;
+    let b = attendee(&app, cid, "Attendee B").await;
+    assert_eq!(role_of(&app, a.participant_id).await, "VIEWER");
+    let (s, list) = app
+        .get(format!("/api/v2/conferences/{cid}/participants"), a.auth())
+        .await;
+    assert_eq!(s, StatusCode::OK, "{list}");
+    let ids: Vec<String> = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(ids.contains(&a.participant_id.to_string()), "themselves");
+    assert!(ids.contains(&host.participant_id.to_string()), "the host");
+    assert!(
+        !ids.contains(&b.participant_id.to_string()),
+        "never another attendee"
+    );
+    // The host still sees everyone.
+    let (_, all) = app
+        .get(
+            format!("/api/v2/conferences/{cid}/participants"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert!(all.as_array().unwrap().len() >= 3, "{all}");
+}

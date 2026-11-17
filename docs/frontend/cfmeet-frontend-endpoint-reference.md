@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 271 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 272 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.4.0 | 73 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 135 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **651** |
+| **Total** | | | **652** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -165,7 +165,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | POST | `/api/v2/conferences/{id}/unlock` | account session; participant token | Unlock a live conference. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_unlock_conference` |
 | GET | `/api/v2/me/conferences` | account session | List the caller's occurrences across meeting spaces (agenda / calendar range). | 200, 400, 401, 403 | AUTHENTICATION_REQUIRED, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_my_conferences` |
 | GET | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only) | List occurrences of a meeting space (members only). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_conferences` |
-| POST | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only) | Create a one-time scheduled conference occurrence. | 201, 400, 403, 409 | CONFERENCE_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_conference` |
+| POST | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only) | Create a one-time scheduled conference occurrence. | 201, 400, 403, 409, 429 | CONFERENCE_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_conference` |
 
 ### Consent (v2)
 
@@ -234,9 +234,9 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
-| POST | `/api/v2/instant-meetings` | account session; platform credential (server-side only) | Instant meeting: creates a meeting space and a LIVE conference atomically. | 201, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_create_instant_meeting` |
+| POST | `/api/v2/instant-meetings` | account session; platform credential (server-side only) | Instant meeting: creates a meeting space and a LIVE conference atomically. | 201, 401, 429 | AUTHENTICATION_REQUIRED, RATE_LIMITED | `openapi/meeting-service.json#v2_create_instant_meeting` |
 | GET | `/api/v2/meeting-spaces` | account session; platform credential (server-side only) | List meeting spaces the caller owns or is a member of. | 200, 400, 401 | AUTHENTICATION_REQUIRED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_meeting_spaces` |
-| POST | `/api/v2/meeting-spaces` | account session; platform credential (server-side only) | Create a meeting space. The owner is always the authenticated caller. | 201, 400, 401, 403, 409 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_meeting_space` |
+| POST | `/api/v2/meeting-spaces` | account session; platform credential (server-side only) | Create a meeting space. The owner is always the authenticated caller. | 201, 400, 401, 403, 409, 429 | AUTHENTICATION_REQUIRED, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_meeting_space` |
 | GET | `/api/v2/meeting-spaces/{id}` | optional / public; account session; platform credential (server-side only) | Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code. | 200, 401, 404 | AUTHENTICATION_REQUIRED, MEETING_NOT_FOUND | `openapi/meeting-service.json#v2_get_meeting_space` |
 | PATCH | `/api/v2/meeting-spaces/{id}` | account session; platform credential (server-side only) | Update a meeting space (optimistic concurrency via `version`). | 200, 403, 409 | MEETING_VERSION_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_update_meeting_space` |
 | POST | `/api/v2/meeting-spaces/{id}/archive` | account session; platform credential (server-side only) | Soft-archive a meeting space (owner only). History is preserved. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_archive_meeting_space` |
@@ -441,6 +441,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | POST | `/api/v2/meeting-spaces/{id}/registrations` | optional / public; account session | Register for a webinar / town hall (public when the profile enables registration). | 200, 201, 400, 404, 409, 429 | RATE_LIMITED, REGISTRATION_CLOSED, REGISTRATION_DISABLED, REGISTRATION_DUPLICATE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_register` |
 | DELETE | `/api/v2/meeting-spaces/{id}/registrations/{registrationId}` | account session | Cancel a registration (revokes its admission token). | 200, 403, 404 | PERMISSION_DENIED, REGISTRATION_NOT_FOUND | `openapi/meeting-service.json#v2_cancel_registration` |
 | GET | `/api/v2/meeting-spaces/{id}/registrations/{registrationId}` | account session | One registration (organizer view). | 200, 403, 404 | PERMISSION_DENIED, REGISTRATION_NOT_FOUND | `openapi/meeting-service.json#v2_get_registration` |
+| POST | `/api/v2/registrations/cancel` | optional / public | Cancel my own registration (with its admission token). | 200, 400, 404 | REGISTRATION_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_cancel_own_registration` |
 
 ### Scheduling (v2)
 

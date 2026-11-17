@@ -6254,7 +6254,7 @@
           "Participants (v2)"
         ],
         "summary": "Admitted participants (roster).",
-        "description": "Returns the participants currently ADMITTED to the conference, ordered by admission time.\nAvailable to admitted participants and to the space owner and members; other callers (including\nwaiting, denied, removed or banned participants) get PERMISSION_DENIED.",
+        "description": "Returns the participants currently ADMITTED to the conference, ordered by admission time.\nAvailable to admitted participants and to the space owner and members; other callers (including\nwaiting, denied, removed or banned participants) get PERMISSION_DENIED. A VIEWER (a webinar or\ntown-hall attendee) sees only the people running the session (presenters and above) and\nthemselves, never the other attendees.",
         "operationId": "v2_list_participants",
         "parameters": [
           {
@@ -10631,6 +10631,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -12270,6 +12280,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -12694,6 +12714,16 @@
           },
           "409": {
             "description": "IDEMPOTENCY_CONFLICT / CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
             "content": {
               "application/json": {
                 "schema": {
@@ -20136,6 +20166,61 @@
         ]
       }
     },
+    "/api/v2/registrations/cancel": {
+      "post": {
+        "tags": [
+          "Registrations (v2)"
+        ],
+        "summary": "Cancel my own registration (with its admission token).",
+        "description": "The registrant cancels their webinar / town-hall registration with the admission token they\nreceived when registering; no sign-in is needed. The token is revoked so it can no longer be used\nto join. An unknown, used-up or revoked token answers REGISTRATION_NOT_FOUND; cancelling an\nalready-cancelled registration returns it unchanged. (A signed-in account whose verified email\nis the registered address can also simply register again: it reclaims the registration and gets\na fresh token.)",
+        "operationId": "v2_cancel_own_registration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelOwnRegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "REGISTRATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/api/v2/resolve/{identifier}": {
       "get": {
         "tags": [
@@ -22024,6 +22109,20 @@
             "nullable": true
           }
         }
+      },
+      "CancelOwnRegistrationRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/registrations/cancel` request: the registration's admission token.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The admission token returned when registering (`reg_…`)."
+          }
+        },
+        "additionalProperties": false
       },
       "ChangePasswordRequest": {
         "type": "object",

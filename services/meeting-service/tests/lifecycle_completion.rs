@@ -1,4 +1,4 @@
-//! Final production completion: empty instant conferences end after 10 minutes, archiving
+//! Final production completion: empty instant (and unscheduled) conferences end after 10 minutes, archiving
 //! a meeting space ends its LIVE conferences, and the archived-space invariant is repaired.
 //!
 //! Mock LiveKit provider (real `LiveKitProvider` against the in-process RoomService), so
@@ -203,23 +203,74 @@ async fn a_join_racing_the_sweeper_resets_the_interval() {
 }
 
 /// Scheduled conferences keep their own lifecycle (scheduled end + grace): the empty
-/// instant-conference rule does not apply to them.
+/// rule does not apply to them.
 #[tokio::test]
 async fn scheduled_conferences_are_not_subject_to_the_empty_rule() {
     let app = app!();
     let owner = app.user("host").await;
-    let (_, cid) = app
-        .live_conference(
+    let space = app
+        .create_space(
             &owner,
             json!({ "title": "Board", "accessPolicy": "PUBLIC" }),
         )
         .await;
+    let start = Utc::now() + Duration::minutes(1);
+    let (s, c) = app
+        .post(
+            &format!(
+                "/api/v2/meeting-spaces/{}/conferences",
+                space["id"].as_str().unwrap()
+            ),
+            Auth::Bearer(&owner.token),
+            json!({ "scheduledStartAt": start, "scheduledEndAt": start + Duration::hours(2) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{c}");
+    let cid = uuid(&c["id"]);
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/conferences/{cid}/start"),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
     let r = sweeper(&app)
         .tick(Utc::now() + Duration::minutes(45))
         .await
         .unwrap();
     assert_eq!((r.checked, r.ended), (0, 0), "{r:?}");
     assert_eq!(conference_status(&app, cid).await, "LIVE");
+}
+
+/// Gap audit M1: a LIVE conference without a scheduled end (started without a schedule)
+/// has nothing else that would ever end it; once nobody is in it for the timeout it is
+/// ended exactly like an instant one, instead of staying LIVE (and re-creating its
+/// provider room) for ever.
+#[tokio::test]
+async fn an_unscheduled_live_conference_everyone_left_is_ended() {
+    let app = app!();
+    let owner = app.user("host").await;
+    let (_, cid) = app
+        .live_conference(
+            &owner,
+            json!({ "title": "Ad hoc", "accessPolicy": "PUBLIC" }),
+        )
+        .await;
+    let sweeper = sweeper(&app);
+    let r = sweeper
+        .tick(Utc::now() + Duration::minutes(9))
+        .await
+        .unwrap();
+    assert_eq!((r.checked, r.ended), (1, 0), "{r:?}");
+    assert_eq!(conference_status(&app, cid).await, "LIVE");
+    let r = sweeper
+        .tick(Utc::now() + Duration::minutes(11))
+        .await
+        .unwrap();
+    assert_eq!(r.ended, 1, "{r:?}");
+    assert_eq!(conference_status(&app, cid).await, "ENDED");
+    assert_eq!(termination_reason(&app, cid).await, "EMPTY_TIMEOUT");
 }
 
 /// Archiving ends the LIVE conference immediately, even with someone connected: the
