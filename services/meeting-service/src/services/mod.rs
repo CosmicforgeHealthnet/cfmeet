@@ -8,6 +8,7 @@ pub mod email;
 pub mod email_change;
 pub mod email_delivery;
 pub mod livekit;
+pub mod mfa;
 pub mod otp;
 pub mod passwordless;
 pub mod rate_limiter;

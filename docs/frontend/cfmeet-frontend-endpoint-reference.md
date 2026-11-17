@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 275 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 280 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.20.0 | 137 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **659** |
+| **Total** | | | **664** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -69,6 +69,10 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | GET | `/api/v2/me/data-export` | account session | Export my personal data | 200, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_export_my_data` |
 | POST | `/api/v2/me/email/change/request` | account session | Start an email change | 200, 400, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_email_change` |
 | POST | `/api/v2/me/email/change/verify` | account session | Confirm an email change | 200, 400, 401, 409, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_email_change` |
+| GET | `/api/v2/me/mfa` | account session | My two-step sign-in state | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_mfa` |
+| POST | `/api/v2/me/mfa/disable` | account session | Turn two-step sign-in off | 204, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_disable_my_mfa` |
+| POST | `/api/v2/me/mfa/totp/confirm` | account session | Enable the authenticator app | 200, 400, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_my_totp` |
+| POST | `/api/v2/me/mfa/totp/setup` | account session | Start enrolling an authenticator app | 200, 401, 403, 409 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_setup_my_totp` |
 | POST | `/api/v2/me/step-up/request` | account session | Request a step-up code | 200, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_step_up` |
 | POST | `/api/v2/me/step-up/verify` | account session | Verify a step-up code | 200, 400, 401, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_verify_step_up` |
 
@@ -98,6 +102,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 |---|---|---|---|---|---|---|
 | POST | `/api/v1/auth/email-change/revert` | none (public) | Undo an email change | 200, 400, 409, 429 | — | `openapi/meeting-service.json#revert_email_change` |
 | POST | `/api/v1/auth/logout` | account session | Logout user | 200, 401 | — | `openapi/meeting-service.json#logout` |
+| POST | `/api/v1/auth/mfa/verify` | none (public) | Finish a sign-in with the second factor | 200, 400, 429 | — | `openapi/meeting-service.json#verify_mfa` |
 | GET | `/api/v1/auth/oauth/google` | none (public) | Initiate Google OAuth flow | 303, 500 | — | `openapi/meeting-service.json#oauth_google_init` |
 | GET | `/api/v1/auth/oauth/google/callback` | none (public) | Google OAuth callback handler | 303 | — | `openapi/meeting-service.json#oauth_google_callback` |
 | POST | `/api/v1/auth/oauth/google/exchange` | none (public) | Exchange a one-time Google sign-in code for tokens | 200, 400 | — | `openapi/meeting-service.json#oauth_google_exchange` |

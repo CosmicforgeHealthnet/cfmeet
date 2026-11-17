@@ -741,6 +741,44 @@
         ]
       }
     },
+    "/api/v1/auth/mfa/verify": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Finish a sign-in with the second factor",
+        "description": "Gap audit A1: when an account has an authenticator app, `POST /api/v1/auth/otp/verify` (and\n`/otp/verify-link`) answer `401 MFA_REQUIRED` with a one-time `mfaTicket` (valid 5 minutes)\ninstead of tokens. Send it here with the 6-digit code from the authenticator app, or one of\nthe account's recovery codes; the answer is then exactly that of a completed sign-in. A wrong\ncode gets 400; after 5 attempts the ticket is destroyed (429: sign in again).",
+        "operationId": "verify_mfa",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtpVerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired code or ticket"
+          },
+          "429": {
+            "description": "Too many attempts"
+          }
+        }
+      }
+    },
     "/api/v1/auth/oauth/google": {
       "get": {
         "tags": [
@@ -12308,6 +12346,217 @@
           },
           "429": {
             "description": "Too many attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/mfa": {
+      "get": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "My two-step sign-in state",
+        "description": "Gap audit A1: whether an authenticator app is enabled and how many unused recovery codes\nremain.",
+        "operationId": "v2_get_my_mfa",
+        "responses": {
+          "200": {
+            "description": "{totpEnabled, recoveryCodesRemaining}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/mfa/disable": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Turn two-step sign-in off",
+        "description": "Gap audit A1: removes the authenticator and its recovery codes after a `DISABLE_MFA` step-up\n(an emailed code). The account's address receives a security email.",
+        "operationId": "v2_disable_my_mfa",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaDisableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Turned off"
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - missing, wrong, used or expired step-up token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/mfa/totp/confirm": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Enable the authenticator app",
+        "description": "Gap audit A1: confirms the enrolment with a current 6-digit code and returns 10 single-use\nrecovery codes (shown once). From now on every sign-in also needs a code. The account's\naddress receives a security email.",
+        "operationId": "v2_confirm_my_totp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaRecoveryCodes"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - the token has no session; sign in again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/mfa/totp/setup": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Start enrolling an authenticator app",
+        "description": "Gap audit A1: returns a new secret (and its `otpauth://` URI for a QR code). Nothing changes\nat sign-in until `POST /api/v2/me/mfa/totp/confirm` with a current code. 409 when an\nauthenticator is already enabled.",
+        "operationId": "v2_setup_my_totp",
+        "responses": {
+          "200": {
+            "description": "Secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaSetupResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - the token has no session; sign in again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already enabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -25315,6 +25564,7 @@
           "DEVICE_DECLARATION_REFUSED",
           "DEVICE_DECLARATION_REQUIRED",
           "DEVICE_NOT_FOUND",
+          "MFA_REQUIRED",
           "USER_NOT_FOUND",
           "DEVICE_KEY_IN_USE",
           "DEVICE_LINK_INVALID",
@@ -26859,6 +27109,85 @@
             "format": "uuid"
           }
         }
+      },
+      "MfaConfirmRequest": {
+        "type": "object",
+        "description": "Gap audit A1: a code from the authenticator app.",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MfaDisableRequest": {
+        "type": "object",
+        "description": "Gap audit A1: the confirmation of turning two-step sign-in off.",
+        "required": [
+          "stepUpToken"
+        ],
+        "properties": {
+          "stepUpToken": {
+            "type": "string",
+            "description": "A step-up token for purpose `DISABLE_MFA`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MfaRecoveryCodes": {
+        "type": "object",
+        "description": "Gap audit A1: the recovery codes (shown once).",
+        "required": [
+          "recoveryCodes"
+        ],
+        "properties": {
+          "recoveryCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MfaSetupResponse": {
+        "type": "object",
+        "description": "Gap audit A1: the authenticator enrolment secret (shown once).",
+        "required": [
+          "secret",
+          "otpauthUri"
+        ],
+        "properties": {
+          "otpauthUri": {
+            "type": "string",
+            "description": "The `otpauth://` URI to show as a QR code."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The base32 secret for manual entry."
+          }
+        }
+      },
+      "MfaVerifyRequest": {
+        "type": "object",
+        "description": "Gap audit A1: the second factor of a parked sign-in.",
+        "required": [
+          "mfaTicket",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "A 6-digit authenticator code, or a recovery code (`xxxxx-xxxxx`)."
+          },
+          "mfaTicket": {
+            "type": "string",
+            "description": "The `mfaTicket` of the `401 MFA_REQUIRED` answer."
+          }
+        },
+        "additionalProperties": false
       },
       "MigrationStatusView": {
         "type": "object",
@@ -31166,7 +31495,8 @@
         "enum": [
           "DEACTIVATE_ACCOUNT",
           "CHANGE_EMAIL",
-          "DELETE_ACCOUNT"
+          "DELETE_ACCOUNT",
+          "DISABLE_MFA"
         ]
       },
       "StepUpRequest": {

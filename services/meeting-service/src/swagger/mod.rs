@@ -16,6 +16,7 @@ use utoipa::OpenApi;
         crate::handlers::auth::request_otp,
         crate::handlers::auth::verify_otp,
         crate::handlers::auth::verify_otp_link,
+        crate::handlers::auth::verify_mfa,
         crate::handlers::auth::refresh_token,
         crate::handlers::auth::logout,
         crate::handlers::auth::revert_email_change,
@@ -276,6 +277,10 @@ use utoipa::OpenApi;
         crate::handlers::v2::account_identity::verify_step_up,
         crate::handlers::v2::account_identity::export_my_data,
         crate::handlers::v2::account_identity::delete_my_account,
+        crate::handlers::v2::account_identity::get_my_mfa,
+        crate::handlers::v2::account_identity::setup_my_totp,
+        crate::handlers::v2::account_identity::confirm_my_totp,
+        crate::handlers::v2::account_identity::disable_my_mfa,
         crate::handlers::v2::account_identity::request_email_change,
         crate::handlers::v2::account_identity::confirm_email_change,
         crate::handlers::v2::account_devices::get_device_policy,
@@ -330,6 +335,7 @@ use utoipa::OpenApi;
             crate::dto::OtpRequest,
             crate::dto::OtpVerifyRequest,
             crate::dto::OtpVerifyLinkRequest,
+            crate::handlers::auth::MfaVerifyRequest,
             crate::dto::OtpVerifyResponse,
             crate::dto::EmailChangeRevertRequest,
             crate::dto::LoginResponse,
@@ -634,6 +640,10 @@ use utoipa::OpenApi;
             crate::handlers::v2::account_sessions::SecurityEventPage,
             crate::handlers::v2::account_identity::StepUpRequest,
             crate::handlers::v2::account_identity::DeleteAccountRequest,
+            crate::handlers::v2::account_identity::MfaSetupResponse,
+            crate::handlers::v2::account_identity::MfaConfirmRequest,
+            crate::handlers::v2::account_identity::MfaRecoveryCodes,
+            crate::handlers::v2::account_identity::MfaDisableRequest,
             crate::handlers::v2::account_identity::StepUpVerifyRequest,
             crate::handlers::v2::account_identity::CodeSentResponse,
             crate::handlers::v2::account_identity::StepUpTokenResponse,
@@ -1523,8 +1533,8 @@ mod tests {
     use super::*;
 
     /// Served `/api-docs/messaging.json` (the public Messaging bundle, PLT-006).
-    const SERVED_MESSAGING_OPERATIONS: usize = 97;
-    const SERVED_MESSAGING_NATIVE: usize = 72;
+    const SERVED_MESSAGING_OPERATIONS: usize = 98;
+    const SERVED_MESSAGING_NATIVE: usize = 73;
 
     fn peer(name: &str) -> &'static str {
         PEER_DOCS

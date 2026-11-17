@@ -833,3 +833,140 @@ async fn identities_are_unique_regardless_of_case() {
         .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 }
+
+async fn verify_with_code(app: &TestApp, email: &str) -> (StatusCode, Value) {
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": email }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let code = mailed_code(app, email).await;
+    app.post(
+        "/api/v1/auth/otp/verify",
+        Auth::None,
+        json!({ "email": email, "code": code }),
+    )
+    .await
+}
+
+/// Gap audit A1: an authenticator app is enrolled with a current code; sign-in then needs
+/// it (or a single-use recovery code); a code's time step is accepted once; turning it off
+/// needs a DISABLE_MFA step-up.
+#[tokio::test]
+async fn an_authenticator_app_guards_sign_in() {
+    use backend::services::mfa;
+    let app = app_with_redis!();
+    let email = format!(
+        "mfa-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..10]
+    );
+    let id = email_user(&app, &email, "active").await;
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let access = v["access_token"].as_str().unwrap().to_string();
+
+    let (s, setup) = app
+        .post(
+            "/api/v2/me/mfa/totp/setup",
+            Auth::Bearer(&access),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{setup}");
+    assert!(setup["otpauthUri"]
+        .as_str()
+        .unwrap()
+        .starts_with("otpauth://totp/"));
+    let secret = mfa::base32_decode(setup["secret"].as_str().unwrap()).unwrap();
+    // Not on until confirmed: sign-in still answers tokens.
+    let (s, _) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/totp/confirm",
+            Auth::Bearer(&access),
+            json!({ "code": "000000" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let step = mfa::step_now();
+    let (s, v) = app
+        .post(
+            "/api/v2/me/mfa/totp/confirm",
+            Auth::Bearer(&access),
+            json!({ "code": mfa::code_at(&secret, step) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let recovery: Vec<String> = serde_json::from_value(v["recoveryCodes"].clone()).unwrap();
+    assert_eq!(recovery.len(), 10);
+    let (_, status) = app.get("/api/v2/me/mfa", Auth::Bearer(&access)).await;
+    assert_eq!(status["totpEnabled"], true);
+
+    // Sign-in now stops at the second factor.
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
+    assert_eq!(code(&v), "MFA_REQUIRED");
+    let ticket = v["error"]["mfaTicket"].as_str().unwrap().to_string();
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": "123456" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // The code used to confirm (same step) is not accepted again; a recovery code works once.
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": mfa::code_at(&secret, step) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": recovery[0] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["access_token"].is_string());
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let ticket = v["error"]["mfaTicket"].as_str().unwrap().to_string();
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": recovery[0] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "a recovery code is single use");
+
+    // Turning it off needs the step-up.
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/disable",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": "x" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let token = app.step_up_token(&access, id, "DISABLE_MFA").await;
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/disable",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": token }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK);
+}

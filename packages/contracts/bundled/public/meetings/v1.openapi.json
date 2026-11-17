@@ -13266,6 +13266,7 @@
           "DEVICE_DECLARATION_REFUSED",
           "DEVICE_DECLARATION_REQUIRED",
           "DEVICE_NOT_FOUND",
+          "MFA_REQUIRED",
           "USER_NOT_FOUND",
           "DEVICE_KEY_IN_USE",
           "DEVICE_LINK_INVALID",

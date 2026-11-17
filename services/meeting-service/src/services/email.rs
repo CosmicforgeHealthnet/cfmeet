@@ -423,6 +423,10 @@ pub enum SecurityNotice {
     FirstDeviceTrusted,
     /// The account was deleted (gap audit A2).
     Deleted,
+    /// Two-step sign-in was turned on (gap audit A1).
+    MfaEnabled,
+    /// Two-step sign-in was turned off (gap audit A1).
+    MfaDisabled,
 }
 
 impl SecurityNotice {
@@ -434,6 +438,8 @@ impl SecurityNotice {
             SecurityNotice::Deactivated => "deactivated",
             SecurityNotice::FirstDeviceTrusted => "first-device-trusted",
             SecurityNotice::Deleted => "deleted",
+            SecurityNotice::MfaEnabled => "mfa-enabled",
+            SecurityNotice::MfaDisabled => "mfa-disabled",
         }
     }
 
@@ -463,6 +469,14 @@ impl SecurityNotice {
             SecurityNotice::Deleted => (
                 "Your CF Meet account was deleted",
                 "Your CF Meet account was just deleted: your profile and sign-ins were removed and this address is no longer linked to it. Contact support at once if you did not do this.",
+            ),
+            SecurityNotice::MfaEnabled => (
+                "Two-step sign-in was turned on for your CF Meet account",
+                "Signing in to your CF Meet account now also needs a code from your authenticator app (or a recovery code).",
+            ),
+            SecurityNotice::MfaDisabled => (
+                "Two-step sign-in was turned off for your CF Meet account",
+                "Signing in to your CF Meet account no longer needs a code from your authenticator app.",
             ),
         }
     }

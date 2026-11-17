@@ -184,6 +184,8 @@ pub enum ErrorCode {
     DeviceDeclarationRequired,
     /// Multi-device policy: the device does not exist or is not the caller's.
     DeviceNotFound,
+    /// Gap audit A1: the sign-in needs the account's second factor (see `mfaTicket`).
+    MfaRequired,
     /// Gap audit A20: an administrator named an account that does not exist.
     UserNotFound,
     /// Multi-device policy: the device key is already bound to another live device.
@@ -314,6 +316,7 @@ impl ErrorCode {
             ErrorCode::DeviceDeclarationRequired => "DEVICE_DECLARATION_REQUIRED",
             ErrorCode::DeviceNotFound => "DEVICE_NOT_FOUND",
             ErrorCode::UserNotFound => "USER_NOT_FOUND",
+            ErrorCode::MfaRequired => "MFA_REQUIRED",
             ErrorCode::DeviceKeyInUse => "DEVICE_KEY_IN_USE",
             ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
@@ -428,7 +431,7 @@ impl ErrorCode {
             ErrorCode::OrganizationPolicyRestricted
             | ErrorCode::ReauthenticationRequired
             | ErrorCode::EmailVerificationRequired => StatusCode::FORBIDDEN,
-            ErrorCode::DeviceProofInvalid => StatusCode::UNAUTHORIZED,
+            ErrorCode::DeviceProofInvalid | ErrorCode::MfaRequired => StatusCode::UNAUTHORIZED,
             ErrorCode::DeviceReplacementPending
             | ErrorCode::DeviceNotTrusted
             | ErrorCode::DeviceDeclarationRequired => StatusCode::FORBIDDEN,
@@ -485,6 +488,11 @@ pub enum ApiError {
     /// Phase 2 semantic domain error with a stable public code.
     #[error("{code:?}: {message}")]
     Domain { code: ErrorCode, message: String },
+
+    /// Gap audit A1: `401 MFA_REQUIRED` with the one-time `mfaTicket` that
+    /// `POST /api/v1/auth/mfa/verify` redeems with the second factor.
+    #[error("MFA_REQUIRED")]
+    MfaRequired { ticket: String },
 
     /// `RATE_LIMITED` with retry semantics (`Retry-After` header + body field).
     #[error("RATE_LIMITED: {message}")]
@@ -545,6 +553,18 @@ impl IntoResponse for ApiError {
             )
                 .into_response();
         }
+        if let ApiError::MfaRequired { ticket } = self {
+            let body = Json(json!({
+                "success": false,
+                "error": {
+                    "code": ErrorCode::MfaRequired.as_str(),
+                    "message": "Enter the code from your authenticator app to finish signing in",
+                    "requestId": current_request_id(),
+                    "mfaTicket": ticket,
+                }
+            }));
+            return (StatusCode::UNAUTHORIZED, body).into_response();
+        }
         if let ApiError::InvalidFields { message, details } = self {
             let body = Json(json!({
                 "success": false,
@@ -593,7 +613,9 @@ impl IntoResponse for ApiError {
                 (StatusCode::TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS", msg)
             }
             ApiError::Domain { code, message } => (code.status(), code.as_str(), message),
-            ApiError::RateLimited { .. } | ApiError::InvalidFields { .. } => {
+            ApiError::RateLimited { .. }
+            | ApiError::InvalidFields { .. }
+            | ApiError::MfaRequired { .. } => {
                 unreachable!("handled above")
             }
         };
@@ -786,6 +808,7 @@ mod tests {
             ErrorCode::DeviceKeyInUse,
             ErrorCode::DeviceLinkInvalid,
             ErrorCode::UserNotFound,
+            ErrorCode::MfaRequired,
         ];
         for c in all {
             let s = c.as_str();

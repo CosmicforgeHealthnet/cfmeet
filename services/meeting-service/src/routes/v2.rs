@@ -733,6 +733,22 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::account_identity::delete_my_account),
         )
         .route(
+            "/me/mfa",
+            get(crate::handlers::v2::account_identity::get_my_mfa),
+        )
+        .route(
+            "/me/mfa/totp/setup",
+            post(crate::handlers::v2::account_identity::setup_my_totp),
+        )
+        .route(
+            "/me/mfa/totp/confirm",
+            post(crate::handlers::v2::account_identity::confirm_my_totp),
+        )
+        .route(
+            "/me/mfa/disable",
+            post(crate::handlers::v2::account_identity::disable_my_mfa),
+        )
+        .route(
             "/me/email/change/request",
             post(crate::handlers::v2::account_identity::request_email_change),
         )

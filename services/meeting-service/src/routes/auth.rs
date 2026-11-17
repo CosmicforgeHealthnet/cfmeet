@@ -11,6 +11,7 @@ pub fn auth_routes() -> Router<AppState> {
         .route("/otp/request", post(auth::request_otp))
         .route("/otp/verify", post(auth::verify_otp))
         .route("/otp/verify-link", post(auth::verify_otp_link))
+        .route("/mfa/verify", post(auth::verify_mfa))
         .route("/refresh", post(auth::refresh_token))
         .route("/logout", post(auth::logout))
         .route("/email-change/revert", post(auth::revert_email_change))

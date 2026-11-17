@@ -300,3 +300,160 @@ pub async fn delete_my_account(
     crate::services::account_erasure::erase(&state, user.id, Some(session)).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
+
+/// Gap audit A1: the authenticator enrolment secret (shown once).
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MfaSetupResponse {
+    /// The base32 secret for manual entry.
+    pub secret: String,
+    /// The `otpauth://` URI to show as a QR code.
+    pub otpauth_uri: String,
+}
+
+/// Gap audit A1: a code from the authenticator app.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MfaConfirmRequest {
+    pub code: String,
+}
+
+/// Gap audit A1: the recovery codes (shown once).
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MfaRecoveryCodes {
+    pub recovery_codes: Vec<String>,
+}
+
+/// Gap audit A1: the confirmation of turning two-step sign-in off.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MfaDisableRequest {
+    /// A step-up token for purpose `DISABLE_MFA`.
+    pub step_up_token: String,
+}
+
+/// My two-step sign-in state
+///
+/// Gap audit A1: whether an authenticator app is enabled and how many unused recovery codes
+/// remain.
+#[utoipa::path(
+    get, path = "/api/v2/me/mfa", tag = "Account security (v2)", operation_id = "v2_get_my_mfa",
+    responses(
+        (status = 200, description = "{totpEnabled, recoveryCodesRemaining}", body = Object),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_my_mfa(
+    State(state): State<AppState>,
+    actor: ActorContext,
+) -> ApiResult<Json<serde_json::Value>> {
+    let user = actor.require_registered()?;
+    Ok(Json(
+        crate::services::mfa::status(&state.db, user.user_id).await?,
+    ))
+}
+
+/// Start enrolling an authenticator app
+///
+/// Gap audit A1: returns a new secret (and its `otpauth://` URI for a QR code). Nothing changes
+/// at sign-in until `POST /api/v2/me/mfa/totp/confirm` with a current code. 409 when an
+/// authenticator is already enabled.
+#[utoipa::path(
+    post, path = "/api/v2/me/mfa/totp/setup", tag = "Account security (v2)", operation_id = "v2_setup_my_totp",
+    responses(
+        (status = 200, description = "Secret", body = MfaSetupResponse),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "REAUTHENTICATION_REQUIRED - the token has no session; sign in again", body = ErrorEnvelope),
+        (status = 409, description = "Already enabled", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn setup_my_totp(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+) -> ApiResult<Json<MfaSetupResponse>> {
+    let (user, _) = signed_in(&state, &actor, &headers).await?;
+    let (secret, otpauth_uri) =
+        crate::services::mfa::setup(&state.db, user.id, &user.username).await?;
+    Ok(Json(MfaSetupResponse {
+        secret,
+        otpauth_uri,
+    }))
+}
+
+/// Enable the authenticator app
+///
+/// Gap audit A1: confirms the enrolment with a current 6-digit code and returns 10 single-use
+/// recovery codes (shown once). From now on every sign-in also needs a code. The account's
+/// address receives a security email.
+#[utoipa::path(
+    post, path = "/api/v2/me/mfa/totp/confirm", tag = "Account security (v2)", operation_id = "v2_confirm_my_totp",
+    request_body = MfaConfirmRequest,
+    responses(
+        (status = 200, description = "Enabled", body = MfaRecoveryCodes),
+        (status = 400, description = "Invalid or expired code", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "REAUTHENTICATION_REQUIRED - the token has no session; sign in again", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn confirm_my_totp(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Json(req): V2Json<MfaConfirmRequest>,
+) -> ApiResult<Json<MfaRecoveryCodes>> {
+    let (user, _) = signed_in(&state, &actor, &headers).await?;
+    let recovery_codes = crate::services::mfa::confirm(&state.db, user.id, &req.code).await?;
+    crate::services::account_security::notify_security(
+        &state,
+        user.id,
+        crate::services::email::SecurityNotice::MfaEnabled,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+    .await;
+    Ok(Json(MfaRecoveryCodes { recovery_codes }))
+}
+
+/// Turn two-step sign-in off
+///
+/// Gap audit A1: removes the authenticator and its recovery codes after a `DISABLE_MFA` step-up
+/// (an emailed code). The account's address receives a security email.
+#[utoipa::path(
+    post, path = "/api/v2/me/mfa/disable", tag = "Account security (v2)", operation_id = "v2_disable_my_mfa",
+    request_body = MfaDisableRequest,
+    responses(
+        (status = 204, description = "Turned off"),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "REAUTHENTICATION_REQUIRED - missing, wrong, used or expired step-up token", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn disable_my_mfa(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Json(req): V2Json<MfaDisableRequest>,
+) -> ApiResult<axum::http::StatusCode> {
+    let (user, session) = signed_in(&state, &actor, &headers).await?;
+    step_up::consume(
+        &state,
+        user.id,
+        Some(session),
+        StepUpPurpose::DisableMfa,
+        Some(req.step_up_token.as_str()),
+    )
+    .await?;
+    crate::services::mfa::disable(&state.db, user.id).await?;
+    crate::services::account_security::notify_security(
+        &state,
+        user.id,
+        crate::services::email::SecurityNotice::MfaDisabled,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+    .await;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}

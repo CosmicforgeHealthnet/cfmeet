@@ -231,6 +231,67 @@ pub async fn verify_otp_link(
         .map(Json)
 }
 
+/// Finish a sign-in with the second factor
+///
+/// Gap audit A1: when an account has an authenticator app, `POST /api/v1/auth/otp/verify` (and
+/// `/otp/verify-link`) answer `401 MFA_REQUIRED` with a one-time `mfaTicket` (valid 5 minutes)
+/// instead of tokens. Send it here with the 6-digit code from the authenticator app, or one of
+/// the account's recovery codes; the answer is then exactly that of a completed sign-in. A wrong
+/// code gets 400; after 5 attempts the ticket is destroyed (429: sign in again).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/mfa/verify",
+    tag = "Authentication",
+    request_body = MfaVerifyRequest,
+    responses(
+        (status = 200, description = "Signed in", body = OtpVerifyResponse),
+        (status = 400, description = "Invalid or expired code or ticket"),
+        (status = 429, description = "Too many attempts"),
+    )
+)]
+pub async fn verify_mfa(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<MfaVerifyRequest>,
+) -> ApiResult<Json<OtpVerifyResponse>> {
+    limit_by_client(&state, &headers, "mfa-verify", 30, 15 * 60).await?;
+    let pending = crate::services::mfa::redeem(&state, &payload.mfa_ticket, &payload.code).await?;
+    let user = Users::find_by_id(pending.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Invalid or expired code".into()))?;
+    if disabled(&user) {
+        return Err(ApiError::Forbidden(
+            "Account has been deactivated".to_string(),
+        ));
+    }
+    let via: &'static str = match pending.via.as_str() {
+        "LINK" => "LINK",
+        "GOOGLE" => "GOOGLE",
+        _ => "CODE",
+    };
+    finish_sign_in(
+        &state,
+        &headers,
+        user,
+        pending.created,
+        via,
+        pending.test_account,
+    )
+    .await
+    .map(Json)
+}
+
+/// Gap audit A1: the second factor of a parked sign-in.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MfaVerifyRequest {
+    /// The `mfaTicket` of the `401 MFA_REQUIRED` answer.
+    pub mfa_ticket: String,
+    /// A 6-digit authenticator code, or a recovery code (`xxxxx-xxxxx`).
+    pub code: String,
+}
+
 /// Map a code/link check to the uniform answers (and count it). Gap audit A24: a wrong
 /// code and a lock-out are audited for an existing account, off the request path so the
 /// answer's timing never depends on whether the account exists.
@@ -317,6 +378,29 @@ async fn complete_sign_in(
         crate::services::account_profile::mark_email_verified(&state.db, user.id).await?;
     }
 
+    // Gap audit A1: an account with an authenticator finishes with the second factor.
+    if !test_account && crate::services::mfa::enabled(&state.db, user.id).await? {
+        let pending = crate::services::mfa::Pending {
+            user_id: user.id,
+            via: via.to_string(),
+            created,
+            test_account,
+        };
+        return Err(crate::services::mfa::challenge(state, &pending).await?);
+    }
+    finish_sign_in(state, headers, user, created, via, test_account).await
+}
+
+/// The sign-in after every proof (address, and second factor when enabled): session,
+/// audit and the security emails that apply.
+async fn finish_sign_in(
+    state: &AppState,
+    headers: &HeaderMap,
+    user: users::Model,
+    created: bool,
+    via: &str,
+    test_account: bool,
+) -> ApiResult<OtpVerifyResponse> {
     let label = security::client_label(headers);
     let issued =
         security::start_session(state, &user, AuthMethod::EmailOtp, None, label.clone()).await?;
@@ -946,6 +1030,18 @@ pub async fn oauth_google_callback(
     let (user, issued) =
         match oauth_google_callback_inner(&state, &headers, code, state_value, binding).await {
             Ok(done) => done,
+            Err(ApiError::MfaRequired { ticket }) => {
+                // Gap audit A1: the web app finishes with POST /api/v1/auth/mfa/verify.
+                return with_cookie(
+                    Redirect::to(&format!(
+                        "{}/google/callback?mfa_ticket={}",
+                        frontend_url,
+                        urlencoding::encode(&ticket)
+                    ))
+                    .into_response(),
+                    &clear,
+                );
+            }
             Err(e) => {
                 let reason = match &e {
                     ApiError::Forbidden(_) => "account_disabled",
@@ -1244,6 +1340,16 @@ async fn oauth_google_callback_inner(
     .map_err(|reason| ApiError::Unauthorized(format!("ID token rejected: {reason}")))?;
 
     let (user, event) = resolve_google_account(state, &identity).await?;
+    // Gap audit A1: Google proves the address, not the second factor.
+    if crate::services::mfa::enabled(&state.db, user.id).await? {
+        let pending = crate::services::mfa::Pending {
+            user_id: user.id,
+            via: "GOOGLE".into(),
+            created: false,
+            test_account: false,
+        };
+        return Err(crate::services::mfa::challenge(state, &pending).await?);
+    }
     let issued = security::start_session(
         state,
         &user,
