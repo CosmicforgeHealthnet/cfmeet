@@ -585,6 +585,23 @@ async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
     } else {
         cf_communications_policy::Action::GroupNotification
     };
+    // Gap audit S10: a recipient mentioned in a MANAGED message passes a "mentions only"
+    // preference (mentions are recorded only for MANAGED text, never inferred).
+    let mentioned = match job.event_payload["message_id"]
+        .as_str()
+        .and_then(|s| Uuid::parse_str(s).ok())
+    {
+        Some(message) => {
+            db::scalar_i64(
+                &state.db,
+                "SELECT count(*) FROM messaging_message_mentions WHERE message_id = $1 AND principal_id = $2",
+                vec![message.into(), job.recipient_principal_id.into()],
+            )
+            .await?
+                > 0
+        }
+        None => false,
+    };
     match client
         .check(
             scope,
@@ -595,6 +612,7 @@ async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
                 credential_issued_at: None,
                 credential_principal_id: None,
                 conversation_id: Some(job.conversation_id),
+                mentioned: mentioned.then_some(true),
             },
         )
         .await

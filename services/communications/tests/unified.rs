@@ -1191,6 +1191,36 @@ async fn private_owner_and_operator_routes_are_scoped_deduplicated_and_audited()
             .unwrap()
             .allowed
     );
+    // A mention does not break through a MUTED chat.
+    in_chat.mentioned = Some(true);
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &in_chat)
+            .await
+            .unwrap()
+            .allowed
+    );
+    // Gap audit S10: "mentions only" suppresses ordinary messages but lets a mention through.
+    let mentions_chat = conversation(&h, "DIRECT", &[&a, &b], 1);
+    h.state.put_conversation_preferences(&h.delegated(&b.account), &b.profile, mentions_chat, json!({"expectedVersion":0,"notifications":"MENTIONS","mutedUntil":null,"mediaAutoDownload":"WIFI"}), Uuid::new_v4()).await.unwrap();
+    let mut mention = check(Action::MessageNotification, &a.profile, &b.profile);
+    mention.conversation_id = Some(mentions_chat);
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &mention)
+            .await
+            .unwrap()
+            .allowed
+    );
+    mention.mentioned = Some(true);
+    assert!(
+        h.state
+            .check_policy(&h.scope, &mention)
+            .await
+            .unwrap()
+            .allowed
+    );
+    in_chat.mentioned = None;
     in_chat.conversation_id = Some(other_chat);
     assert!(
         h.state

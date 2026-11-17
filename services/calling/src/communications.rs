@@ -92,6 +92,7 @@ impl AppCallService {
                         credential_issued_at: None,
                         credential_principal_id: None,
                         conversation_id: None,
+                        mentioned: None,
                     },
                 )
                 .await
@@ -182,6 +183,7 @@ impl AppCallService {
                         credential_issued_at: own.map(|x| x.1),
                         credential_principal_id: own.map(|x| x.0),
                         conversation_id: None,
+                        mentioned: None,
                     },
                 )
                 .await

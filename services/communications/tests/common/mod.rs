@@ -827,5 +827,6 @@ pub fn check(
         credential_issued_at: None,
         credential_principal_id: None,
         conversation_id: None,
+        mentioned: None,
     }
 }
