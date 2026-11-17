@@ -1131,6 +1131,28 @@ class CallPolicyList {
   Map<String, Object?> toJson() => json;
 }
 
+/// C8: per-participant aggregates of the quality samples of a Call (participants without samples are absent).
+class CallQualitySummary {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const CallQualitySummary.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory CallQualitySummary.create({required Uuid callId, required List<Map<String, Object?>> participants}) =>
+      CallQualitySummary.fromJson(<String, Object?>{
+        'callId': callId,
+        'participants': participants,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get callId => json['callId']! as String;
+
+  List<Map<String, Object?>> get participants => (json['participants']! as List<Object?>).map((e) => e! as Map<String, Object?>).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// A recording of ONE canonical Call. Integrity metadata only: never an object-storage key, a bucket, a stored URL, a telephone number or a provider identity (media through media-access).
 class CallRecording {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -3412,6 +3434,84 @@ class PublishIvrVersionRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// C8: one client measurement of a session's media path over a short window ending now. Bounded and finite; the server computes the estimated MOS.
+class QualitySampleRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const QualitySampleRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory QualitySampleRequest.create({int? intervalSeconds, required num jitterMs, required num packetLossPercent, required num rttMs}) =>
+      QualitySampleRequest.fromJson(<String, Object?>{
+        if (intervalSeconds != null) 'intervalSeconds': intervalSeconds,
+        'jitterMs': jitterMs,
+        'packetLossPercent': packetLossPercent,
+        'rttMs': rttMs,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Length of the observation window.
+  int? get intervalSeconds => (json['intervalSeconds'] as num?)?.toInt();
+
+  /// Interarrival jitter in milliseconds.
+  num get jitterMs => json['jitterMs']! as num;
+
+  /// Lost packets in percent of expected packets.
+  num get packetLossPercent => json['packetLossPercent']! as num;
+
+  /// Round-trip time in milliseconds.
+  num get rttMs => json['rttMs']! as num;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C8: the stored sample (values rounded to two decimals) with the server-computed estimated MOS (simplified ITU-T G.107 E-model, 1.0-4.5).
+class QualitySampleResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const QualitySampleResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory QualitySampleResult.create({required Uuid callId, required num jitterMs, required num mosEstimate, required String observedFrom, required String observedTo, required num packetLossPercent, required Uuid participantId, required Uuid qualityRecordId, required num rttMs, required Uuid sessionId}) =>
+      QualitySampleResult.fromJson(<String, Object?>{
+        'callId': callId,
+        'jitterMs': jitterMs,
+        'mosEstimate': mosEstimate,
+        'observedFrom': observedFrom,
+        'observedTo': observedTo,
+        'packetLossPercent': packetLossPercent,
+        'participantId': participantId,
+        'qualityRecordId': qualityRecordId,
+        'rttMs': rttMs,
+        'sessionId': sessionId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get callId => json['callId']! as String;
+
+  num get jitterMs => json['jitterMs']! as num;
+
+  num get mosEstimate => json['mosEstimate']! as num;
+
+  String get observedFrom => json['observedFrom']! as String;
+
+  String get observedTo => json['observedTo']! as String;
+
+  num get packetLossPercent => json['packetLossPercent']! as num;
+
+  Uuid get participantId => json['participantId']! as String;
+
+  Uuid get qualityRecordId => json['qualityRecordId']! as String;
+
+  num get rttMs => json['rttMs']! as num;
+
+  Uuid get sessionId => json['sessionId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// A call queue. waiting is the number of active entries now.
 class Queue {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -5467,7 +5567,7 @@ class WebhookDeliveryList {
   Map<String, Object?> toJson() => json;
 }
 
-/// One of: call.requested, call.incoming, call.ringing, call.ring_cancelled, call.accepted, call.declined, call.cancelled, call.answered, call.connected, call.route_changed, call.held, call.resumed, call.transfer_started, call.transferred, call.transfer_failed, call.ended, call.failed, call.no_answer, call.busy, call.answered_elsewhere, call.invitation_expired, voicemail.received, voicemail.ready, …
+/// One of: call.requested, call.incoming, call.ringing, call.ring_cancelled, call.accepted, call.declined, call.cancelled, call.answered, call.connected, call.route_changed, call.held, call.resumed, call.transfer_started, call.transferred, call.transfer_failed, call.ended, call.failed, call.no_answer, call.busy, call.answered_elsewhere, call.invitation_expired, call.kind_changed, …
 typedef WebhookEventType = String;
 
 class WebhookList {

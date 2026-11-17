@@ -28,6 +28,7 @@ mod invite;
 pub mod media;
 mod privacy;
 pub mod public;
+pub mod quality;
 mod ringing;
 mod screen_share;
 mod transfer;

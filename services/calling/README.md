@@ -564,7 +564,12 @@ set-credential | set-principal`). Two axes (ADR 0028 §70):
   default; every configured parent is also an aggregate ceiling (a service-account
   ceiling across all of its credentials, …).
 * **PRINCIPAL** — an independent ceiling of a server-resolved principal, shared by every
-  credential, service account and device acting for it.
+  credential, service account and device acting for it. Call creation is limited per
+  initiating principal even when nothing is configured (C9):
+  `CALLING_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE` (default 60, `0` = off) applies when
+  the principal has no configured request rate (`platform_admin limits set-principal
+  --requests-per-minute` overrides it, higher or lower); a refusal is 429 with
+  `Retry-After` and a deduplicated `limit.exceeded` notice.
 
 An operation must satisfy every applicable ceiling (plus the environment's spend
 policy); the broadest exhausted level is reported. Telecom spend defaults to zero and is
@@ -675,7 +680,12 @@ app refusals.
   (answered / declined / busy / no_answer / cancelled / failed / timeout),
   `calling_media_admissions_total{source,result,reason}`, `calling_media_reconnects_total`.
   No jitter / RTT / packet loss is invented; the end-of-call quality summary records the
-  admitted sessions, reconnects and connected participants Calling observed.
+  admitted sessions, reconnects and connected participants Calling observed. Clients
+  report what they measured (C8): `POST /v1/calls/{id}/sessions/{session_id}/quality-samples`
+  (jitter ms, packet loss %, RTT ms; finite and bounded; at most 720 samples per live
+  session) stores an immutable quality record of that session with a server-computed
+  estimated MOS (simplified E-model, 1.0–4.5); `GET /v1/calls/{id}/quality` aggregates
+  them per participant; `calling_quality_samples_total{call_kind}`.
 * **Correlation** — `calls.correlation_id` keeps the creating request's correlation id;
   Calling's own later commands for the Call (worker / event-driven transitions,
   TERMINATE / BRIDGE / ANSWER / PROMPT to Telephony, usage) carry it, and worker / event

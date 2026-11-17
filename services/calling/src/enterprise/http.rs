@@ -34,8 +34,8 @@ use super::{
     },
     ring_groups::{RingGroupChange, RingGroupSettings, RingStrategy},
     voicemail::{
-        MailboxChange, MailboxOwnerType, MailboxSettings, MessageFilter, MessageState, ReadState,
-        VoicemailRequester,
+        MailboxChange, MailboxOwnerFilter, MailboxOwnerType, MailboxSettings, MessageFilter,
+        MessageState, ReadState, VoicemailRequester,
     },
     AdminActor, PageRequest,
 };
@@ -1722,10 +1722,23 @@ async fn list_mailboxes(
     query: Result<Query<Vec<(String, String)>>, QueryRejection>,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::ENTERPRISE_CONFIG_READ)?;
-    let q = QueryParams::parse(query, &["limit", "cursor", "status"])?;
+    let q = QueryParams::parse(
+        query,
+        &["limit", "cursor", "status", "ownerType", "ownerId"],
+    )?;
+    let owner = MailboxOwnerFilter {
+        owner_type: q
+            .get("ownerType")
+            .map(|v| {
+                MailboxOwnerType::parse(v)
+                    .ok_or(CallingError::Validation("The ownerType filter is invalid."))
+            })
+            .transpose()?,
+        owner_id: q.uuid("ownerId")?,
+    };
     let page = state
         .enterprise
-        .list_mailboxes(CallScope::of_platform(&ctx), q.status()?, &q.page()?)
+        .list_mailboxes(CallScope::of_platform(&ctx), q.status()?, owner, &q.page()?)
         .await?;
     Ok(ok(page))
 }

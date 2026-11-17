@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 33,
     "OPERATOR_ADMIN": 48,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 586,
+    "PUBLIC_CUSTOMER": 588,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -3552,6 +3552,20 @@
       "requiredScope": "calls.write"
     },
     {
+      "id": "calling.getCallQuality",
+      "domain": "calling",
+      "method": "GET",
+      "pattern": "/v1/calls/{call_id}/quality",
+      "protocol": "REST",
+      "upstream": "cfmeet.calling",
+      "upstreamPath": "/v1/calls/{call_id}/quality",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "calls.read"
+    },
+    {
       "id": "calling.listRecordingAuthorizations",
       "domain": "calling",
       "method": "GET",
@@ -3671,6 +3685,20 @@
       "protocol": "REST",
       "upstream": "cfmeet.calling",
       "upstreamPath": "/v1/calls/{call_id}/sessions/{session_id}/media-credentials",
+      "auth": [
+        "PLATFORM_CREDENTIAL"
+      ],
+      "forwardHeaders": [],
+      "requiredScope": "calls.write"
+    },
+    {
+      "id": "calling.recordCallQualitySample",
+      "domain": "calling",
+      "method": "POST",
+      "pattern": "/v1/calls/{call_id}/sessions/{session_id}/quality-samples",
+      "protocol": "REST",
+      "upstream": "cfmeet.calling",
+      "upstreamPath": "/v1/calls/{call_id}/sessions/{session_id}/quality-samples",
       "auth": [
         "PLATFORM_CREDENTIAL"
       ],
@@ -9105,6 +9133,14 @@
     {
       "domain": "calling",
       "contract": "cfmeet.calling.http-api",
+      "operationId": "getCallQuality",
+      "method": "GET",
+      "path": "/v1/calls/{call_id}/quality",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "contract": "cfmeet.calling.http-api",
       "operationId": "listRecordingAuthorizations",
       "method": "GET",
       "path": "/v1/calls/{call_id}/recording-authorizations",
@@ -9172,6 +9208,14 @@
       "operationId": "issueSessionMediaCredential",
       "method": "POST",
       "path": "/v1/calls/{call_id}/sessions/{session_id}/media-credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "contract": "cfmeet.calling.http-api",
+      "operationId": "recordCallQualitySample",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/sessions/{session_id}/quality-samples",
       "class": "PUBLIC_CUSTOMER"
     },
     {

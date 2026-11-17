@@ -309,6 +309,31 @@ export namespace Calling {
     /** Opaque keyset cursor of the next page; null on the last page. */
     nextCursor: string | null;
   };
+  /** C8: per-participant aggregates of the quality samples of a Call (participants without samples are absent). */
+  export type CallQualitySummary = {
+    callId: Uuid;
+    participants: Array<{
+        participantId: Uuid;
+        sampleCount: number;
+        jitterMs: {
+          avg: number;
+          max: number;
+        };
+        packetLossPercent: {
+          avg: number;
+          max: number;
+        };
+        rttMs: {
+          avg: number;
+          max: number;
+        };
+        mosEstimate: {
+          avg: number;
+          min: number;
+        };
+        lastObservedAt: string;
+      }>;
+  };
   /** A recording of ONE canonical Call. Integrity metadata only: never an object-storage key, a bucket, a stored URL, a telephone number or a provider identity (media through media-access). */
   export type CallRecording = {
     recordingId: Uuid;
@@ -968,6 +993,30 @@ export namespace Calling {
   export type PublishIvrVersionRequest = {
     graph: IvrGraph;
   };
+  /** C8: one client measurement of a session's media path over a short window ending now. Bounded and finite; the server computes the estimated MOS. */
+  export type QualitySampleRequest = {
+    /** Interarrival jitter in milliseconds. */
+    jitterMs: number;
+    /** Lost packets in percent of expected packets. */
+    packetLossPercent: number;
+    /** Round-trip time in milliseconds. */
+    rttMs: number;
+    /** Length of the observation window. */
+    intervalSeconds?: number;
+  };
+  /** C8: the stored sample (values rounded to two decimals) with the server-computed estimated MOS (simplified ITU-T G.107 E-model, 1.0-4.5). */
+  export type QualitySampleResult = {
+    qualityRecordId: Uuid;
+    callId: Uuid;
+    sessionId: Uuid;
+    participantId: Uuid;
+    jitterMs: number;
+    packetLossPercent: number;
+    rttMs: number;
+    mosEstimate: number;
+    observedFrom: string;
+    observedTo: string;
+  };
   /** A call queue. waiting is the number of active entries now. */
   export type Queue = {
     queueId: Uuid;
@@ -1579,7 +1628,7 @@ export namespace Calling {
     data: Array<WebhookDelivery>;
     nextCursor: string | null;
   };
-  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired";
+  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "call.kind_changed" | "call.screen_share_started" | "call.screen_share_stopped" | "call.participant_added" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.started" | "recording.stopped" | "recording.failed" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired";
   export type WebhookList = {
     data: Array<Webhook>;
     nextCursor: string | null;
@@ -1652,7 +1701,14 @@ export namespace Calling {
     };
     /** POST /v1/calls/{call_id}/abuse-reports — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     createAbuseReport: {
-      params: { path: { call_id: string }; body: { [key: string]: unknown } };
+      params: { path: { call_id: string }; body: {
+          /** The reporting principal (a participant of the call). */
+          principalId: Uuid;
+          category: "UNWANTED" | "HARASSMENT" | "SPAM" | "FRAUD_SUSPECTED" | "OTHER";
+          commentCode?: string;
+          /** C5: the reported participant. Derived by the server in a two-party call (naming it there must name the other party); in a call of more than two people the reporter names it, and it must be another participant of that call (else 400, nothing stored). */
+          reportedPrincipalId?: Uuid;
+        } };
       response: { [key: string]: unknown };
     };
     /** POST /v1/blocks — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
@@ -1834,6 +1890,11 @@ export namespace Calling {
     getCallActions: {
       params: { path: { call_id: string } };
       response: AvailableActions;
+    };
+    /** GET /v1/calls/{call_id}/quality — scope calls.read; auth PLATFORM_CREDENTIAL; retry SAFE */
+    getCallQuality: {
+      params: { path: { call_id: string } };
+      response: CallQualitySummary;
     };
     /** GET /v1/enterprise/recordings/{recording_id} — scope enterprise.recording.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     getCallRecording: {
@@ -2077,7 +2138,7 @@ export namespace Calling {
     };
     /** GET /v1/enterprise/voicemail/mailboxes — scope enterprise.config.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     listVoicemailMailboxes: {
-      params: { query?: { limit?: number; cursor?: string; status?: "ACTIVE" | "DISABLED" } };
+      params: { query?: { limit?: number; cursor?: string; status?: "ACTIVE" | "DISABLED"; ownerType?: "PRINCIPAL" | "EXTENSION" | "QUEUE" | "RING_GROUP"; ownerId?: Uuid } };
       response: VoicemailMailboxList;
       item: NonNullable<(VoicemailMailboxList)["mailboxes"]>[number];
     };
@@ -2108,6 +2169,11 @@ export namespace Calling {
     publishIvrVersion: {
       params: { path: { ivr_flow_id: string }; body: PublishIvrVersionRequest };
       response: IvrFlowVersion;
+    };
+    /** POST /v1/calls/{call_id}/sessions/{session_id}/quality-samples — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    recordCallQualitySample: {
+      params: { path: { call_id: string; session_id: string }; body: QualitySampleRequest };
+      response: QualitySampleResult;
     };
     /** POST /v1/calls/{call_id}/recording-consent — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     recordRecordingConsent: {
