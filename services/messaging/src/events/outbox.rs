@@ -432,3 +432,49 @@ impl OutboxPublisher {
         }
     }
 }
+
+/// Gap audit S5: published events older than [`event_retention_days`] are removed in
+/// bounded batches, so conversation metadata does not outlive retention, disappearing
+/// messages and erasure. Kept: events still owed to a webhook relay or a pending push,
+/// events of conversations under an ACTIVE legal hold, and each conversation's newest
+/// event (replay then sees the pruned window and answers `syncRequired`). Settled relay
+/// rows of pruned events go with them. Multi-instance safe (`SKIP LOCKED`).
+pub async fn prune_published(
+    db: &DatabaseConnection,
+    now: DateTime<Utc>,
+    retention_days: i64,
+    batch: i64,
+) -> Result<u64, DbErr> {
+    let cutoff = now - chrono::Duration::days(retention_days);
+    let sql = "WITH doomed AS ( \
+          SELECT e.id FROM messaging_outbox_events e \
+           WHERE e.status = 'PUBLISHED' AND e.occurred_at < $1 \
+             AND NOT EXISTS (SELECT 1 FROM messaging_webhook_relay w WHERE w.event_id = e.id AND w.status = 'PENDING') \
+             AND NOT EXISTS (SELECT 1 FROM messaging_push_jobs j WHERE j.event_id = e.id AND j.status = 'PENDING') \
+             AND (e.conversation_id IS NULL OR ( \
+                   NOT EXISTS (SELECT 1 FROM messaging_legal_holds h WHERE h.status = 'ACTIVE' \
+                                 AND h.conversation_id = e.conversation_id) \
+                   AND e.conversation_event_sequence < (SELECT max(x.conversation_event_sequence) \
+                         FROM messaging_outbox_events x WHERE x.conversation_id = e.conversation_id))) \
+           ORDER BY e.occurred_at LIMIT $2 FOR UPDATE OF e SKIP LOCKED), \
+        relays AS (DELETE FROM messaging_webhook_relay w USING doomed d WHERE w.event_id = d.id) \
+        DELETE FROM messaging_outbox_events e USING doomed d WHERE e.id = d.id";
+    let res = db
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            sql,
+            [cutoff.into(), batch.into()],
+        ))
+        .await?;
+    Ok(res.rows_affected())
+}
+
+/// Gap audit S5: days published events are kept (`MESSAGING_EVENT_RETENTION_DAYS`,
+/// default 90, at least 7).
+pub fn event_retention_days() -> i64 {
+    std::env::var("MESSAGING_EVENT_RETENTION_DAYS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .unwrap_or(90)
+        .max(7)
+}

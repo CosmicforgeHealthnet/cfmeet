@@ -31,6 +31,19 @@ pub async fn run_maintenance(state: AppState, interval: std::time::Duration) {
             {
                 tracing::warn!(error = %e, "push job retention pass failed");
             }
+            // Gap audit S5: published events past their retention.
+            match crate::events::outbox::prune_published(
+                &state.db,
+                state.now(),
+                crate::events::outbox::event_retention_days(),
+                crate::realtime::push::PURGE_BATCH,
+            )
+            .await
+            {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(pruned = n, "conversation events past retention pruned"),
+                Err(e) => tracing::warn!(error = %e, "event retention pass failed"),
+            }
             // Notification Service N7: overdue and settled routing publications.
             if let Err(e) = crate::notification_publications::maintain(
                 &state,

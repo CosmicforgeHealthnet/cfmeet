@@ -1392,3 +1392,67 @@ async fn group_ownership_transfers_and_the_owner_can_leave() {
     assert_eq!(owner_of(&v), json!(owner), "{}", v.text);
     let _ = b;
 }
+
+/// Gap audit S5: published events past retention are pruned (each conversation keeps its
+/// newest event), and replay from before the retained window asks for a resync.
+#[tokio::test]
+async fn old_conversation_events_are_pruned_and_replay_asks_for_resync() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    for text in ["one", "two", "three"] {
+        let r = h
+            .post(
+                &c,
+                Some(people[0]),
+                &format!("/v1/conversations/{cid}/messages"),
+                json!({ "clientMessageId": Uuid::new_v4(), "text": text }),
+            )
+            .await;
+        assert!(r.status.is_success(), "{}", r.text);
+    }
+    let in_conv =
+        format!("SELECT count(*) FROM messaging_outbox_events WHERE conversation_id = '{cid}'");
+    let total = h.scalar(&in_conv).await;
+    assert!(total >= 4, "{total}");
+    use sea_orm::ConnectionTrait;
+    h.db.conn
+        .execute_unprepared(&format!(
+            "UPDATE messaging_outbox_events SET status = 'PUBLISHED', published_at = now(), \
+             occurred_at = now() - interval '100 days' WHERE conversation_id = '{cid}'"
+        ))
+        .await
+        .unwrap();
+    // An event still owed to the webhook relay is kept; settle the relay first.
+    h.db.conn
+        .execute_unprepared(
+            "UPDATE messaging_webhook_relay SET status = 'RELAYED', relayed_at = now()",
+        )
+        .await
+        .unwrap();
+    let pruned =
+        messaging::events::outbox::prune_published(&h.state.db, chrono::Utc::now(), 90, 1000)
+            .await
+            .unwrap();
+    assert_eq!(pruned as i64, total - 1);
+    assert_eq!(h.scalar(&in_conv).await, 1, "the newest event is kept");
+    let r = h
+        .get(
+            &c,
+            Some(people[1]),
+            &format!("/v1/conversations/{cid}/events?after=0"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["syncRequired"], true, "{}", r.text);
+    // Within retention nothing goes.
+    assert_eq!(
+        messaging::events::outbox::prune_published(&h.state.db, chrono::Utc::now(), 365, 1000)
+            .await
+            .unwrap(),
+        0
+    );
+}
