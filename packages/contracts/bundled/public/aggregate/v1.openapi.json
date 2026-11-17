@@ -62196,7 +62196,8 @@
               "null"
             ],
             "minLength": 1,
-            "maxLength": 120
+            "maxLength": 120,
+            "description": "The group's title for MANAGED conversations. Always null for PRIVATE_E2EE conversations (personal end-to-end encrypted chats): the server never holds their metadata; clients show the title they decrypt locally (gap audit S16)."
           },
           "avatarRef": {
             "type": [
@@ -63634,7 +63635,8 @@
               "null"
             ],
             "minLength": 1,
-            "maxLength": 255
+            "maxLength": 255,
+            "description": "The sanitized file name for MANAGED attachments. Always null for PRIVATE_E2EE attachments: the name travels inside the encrypted message and is shown from the client's decrypted copy (gap audit S16)."
           },
           "mediaType": {
             "type": [

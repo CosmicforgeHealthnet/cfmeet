@@ -578,6 +578,7 @@ class CommonGroup {
 
   String? get securityProfile => json['securityProfile'] as String?;
 
+  /// The group's title for MANAGED conversations. Always null for PRIVATE_E2EE conversations (personal end-to-end encrypted chats): the server never holds their metadata; clients show the title they decrypt locally (gap audit S16).
   String? get title => json['title'] as String?;
 
   Map<String, Object?> toJson() => json;
@@ -1683,6 +1684,7 @@ class MediaItem {
 
   Map<String, Object?>? get download => json['download'] == null ? null : json['download']! as Map<String, Object?>;
 
+  /// The sanitized file name for MANAGED attachments. Always null for PRIVATE_E2EE attachments: the name travels inside the encrypted message and is shown from the client's decrypted copy (gap audit S16).
   String? get fileName => json['fileName'] as String?;
 
   String? get kind => json['kind'] as String?;

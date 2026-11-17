@@ -2485,6 +2485,7 @@ export namespace Communications {
     conversationId: string;
     contextClass: "GROUP";
     securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null;
+    /** The group's title for MANAGED conversations. Always null for PRIVATE_E2EE conversations (personal end-to-end encrypted chats): the server never holds their metadata; clients show the title they decrypt locally (gap audit S16). */
     title?: string | null;
     avatarRef?: string | null;
     memberCount?: number | null;
@@ -2762,6 +2763,7 @@ export namespace Communications {
     createdAt?: string;
     securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null;
     kind?: "IMAGE" | "DOCUMENT" | "FILE" | "VOICE_NOTE" | "VIDEO" | null;
+    /** The sanitized file name for MANAGED attachments. Always null for PRIVATE_E2EE attachments: the name travels inside the encrypted message and is shown from the client's decrypted copy (gap audit S16). */
     fileName?: string | null;
     mediaType?: string | null;
     metadataLocation?: "SERVER" | "ENCRYPTED_DESCRIPTOR" | null;
