@@ -29,6 +29,8 @@ COPY packages/object-storage packages/object-storage
 COPY packages/scan-gateway-contract packages/scan-gateway-contract
 # Push transport (APNs / FCM / Web Push adapters; Notification Service roadmap N4).
 COPY packages/push-transport packages/push-transport
+# Notification Service producer client (envelope builder / validator; roadmap N7).
+COPY packages/notification-client packages/notification-client
 COPY packages/contracts/messaging packages/contracts/messaging
 COPY services/messaging services/messaging
 WORKDIR /src/services/messaging

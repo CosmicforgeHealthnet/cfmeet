@@ -388,6 +388,25 @@ async fn main() -> anyhow::Result<()> {
         webhook_sinks,
         config.workers.interval,
     ));
+    // Notification Service N7: the relay of Messaging's publications (shadow copies in
+    // SHADOW, publications of NEW decisions) to I1. Off unless the service is configured:
+    // the routing mode alone decides what is enqueued, and nothing is ever sent without it.
+    if has_target(cf_service_auth::services::NOTIFICATIONS) {
+        tokio::spawn(messaging::notification_publications::run(
+            state.clone(),
+            Arc::new(
+                messaging::notification_publications::NotificationServiceEvents::new(
+                    state.service_auth.client(),
+                ),
+            ),
+            config.workers.interval,
+        ));
+        tracing::info!("notification publications are relayed to the Notification Service");
+    } else {
+        tracing::info!(
+            "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"
+        );
+    }
     tokio::spawn(messaging::conversations::service::run_expiry(
         state.clone(),
         config.conversations.expiry_interval,
