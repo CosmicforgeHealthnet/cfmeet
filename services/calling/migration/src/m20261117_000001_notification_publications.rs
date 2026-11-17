@@ -107,10 +107,14 @@ impl MigrationTrait for Migration {
         Ok(())
     }
 
-    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
-        Err(DbErr::Custom(
-            "Calling notification publications are additive and forward-only; retain data on application rollback"
-                .into(),
-        ))
+    /// Only for the destructive development / test subcommands (`down`, `fresh`, `refresh`,
+    /// `reset`), which the SEC-015 guard refuses in production: the main history's rollback
+    /// drops `calls` and `platform_principals`, which this table references, so this history
+    /// is rolled back first. An application rollback never runs it (data is retained).
+    async fn down(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared("DROP TABLE IF EXISTS calling_notification_publications;")
+            .await?;
+        Ok(())
     }
 }

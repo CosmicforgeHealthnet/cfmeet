@@ -251,7 +251,7 @@ jobs:
                tablename LIKE 'platform\_%' OR tablename LIKE 'call\_%' OR tablename IN ('calls', \
                'calling_outbox_events', 'calling_seaql_migrations', 'calling_incidents', \
                'calling_block_rules', 'calling_abuse_windows', 'calling_abuse_reports', 'calling_orphan_objects', \
-               'calling_retention_holds', 'calling_retention_audit') OR tablename LIKE 'enterprise\_%' \
+               'calling_retention_holds', 'calling_retention_audit', 'calling_notification_publications', 'calling_notification_publications_seaql_migrations') OR tablename LIKE 'enterprise\_%' \
                OR tablename LIKE 'voicemail\_%' OR tablename LIKE 'webhook\_%')")" = "0"
 
       # Part K §120: the REAL Calling migrations apply as the least-privilege migrator role,

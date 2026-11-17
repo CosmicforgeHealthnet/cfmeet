@@ -29,5 +29,20 @@ async fn main() {
         println!("Calling migrations applied (main and notification-publications histories)");
         return;
     }
+    // The destructive subcommands roll back the main history, whose tables the
+    // notification-publications history references: roll that one back first (the SEC-015
+    // guard above already refused these outside a non-production APP_ENV).
+    if matches!(
+        args.first().map(String::as_str),
+        Some("down" | "fresh" | "refresh" | "reset")
+    ) {
+        let url = std::env::var("DATABASE_URL").expect("DATABASE_URL is set");
+        let db = sea_orm_migration::sea_orm::Database::connect(url)
+            .await
+            .expect("Calling migration database connection failed");
+        calling_migration::NotificationPublicationsMigrator::reset(&db)
+            .await
+            .expect("Calling notification-publications rollback failed");
+    }
     cli::run_cli(calling_migration::Migrator).await;
 }
