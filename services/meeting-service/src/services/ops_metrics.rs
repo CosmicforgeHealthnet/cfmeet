@@ -129,6 +129,11 @@ counters!(
     email_lease_lost,
     email_suppressed,
     meeting_notification_invalid_recipients,
+    notification_publications_acked,
+    notification_publications_dead,
+    notification_publications_retried,
+    notification_publications_expired,
+    notification_publications_unpublishable,
     // Final completion: conference lifecycle (empty instant conferences, archive).
     conferences_empty_ended,
     conferences_archive_ended,

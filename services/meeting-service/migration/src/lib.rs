@@ -37,6 +37,7 @@ mod m20261110_000001_organization_integration;
 mod m20261112_000001_email_delivery_and_presence;
 mod m20261115_000001_account_devices;
 mod m20261116_000001_notification_fence;
+mod m20261117_000001_notification_publications;
 
 pub mod phase2_backfill;
 
@@ -408,12 +409,18 @@ pub async fn lifecycle_delivery_ready<C: sea_orm_migration::sea_orm::ConnectionT
 /// routing state, route decisions, the CRITICAL outbox and the legacy-table guard triggers
 /// (inert in `LEGACY_ONLY`). A SEPARATE additive history so the previously deployed image
 /// still starts after it is applied (rollback safety); the image does not require it at
-/// startup and reports `routingProtocol` only once it is applied.
+/// startup and reports `routingProtocol` only once it is applied. Second migration (N7 /
+/// N11): Meeting's publications of its STANDARD categories to the Notification Service.
 pub struct NotificationFenceMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for NotificationFenceMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261116_000001_notification_fence::Migration)]
+        vec![
+            Box::new(m20261116_000001_notification_fence::Migration),
+            // N7 / N11: Meeting's publications of its STANDARD categories to the
+            // Notification Service (+ the RECIPIENT_LIMIT / UNPUBLISHABLE reasons).
+            Box::new(m20261117_000001_notification_publications::Migration),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new("notification_fence_migrations").into_iden()

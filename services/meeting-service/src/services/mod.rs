@@ -34,6 +34,7 @@ pub mod meeting_space;
 pub mod membership;
 pub mod notification_fence;
 pub mod notification_owner;
+pub mod notification_publications;
 pub mod notification_relay;
 pub mod notifications;
 pub mod ops_metrics;

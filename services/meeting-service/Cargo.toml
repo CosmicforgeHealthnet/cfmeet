@@ -65,6 +65,10 @@ url = "2"
 # Part V H: signed internal service calls to Platform Access and Messaging (no service
 # credential ever reaches a browser or mobile client).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Notification Service producer client (roadmap N7/N11): builds, seals and validates the
+# cfmeet.notifications.event envelopes of Meeting's publications. Never the `open` feature
+# (producers seal, never open).
+cf-notification-client = { path = "../../packages/notification-client" }
 # Part VI §55: unified usage facts (participant minutes, recordings, artefact storage).
 cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 # Blueprint Section 16 (SEC-019): the one shared S3 SigV4 signer (artefact storage).
