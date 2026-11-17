@@ -66,7 +66,9 @@ async fn sync(h: &Harness, items: Vec<Value>) -> Vec<Value> {
     r.expect(200)["results"].as_array().unwrap().clone()
 }
 
-/// Captures every log line written while the guard lives (current-thread runtime).
+/// Captures every log line of the test process. Installed once as the global subscriber: a
+/// thread-local `set_default` subscriber races with tracing's per-callsite interest cache
+/// while other tests of this binary run in parallel, and could miss lines.
 #[derive(Clone, Default)]
 struct Captured(Arc<Mutex<Vec<u8>>>);
 
@@ -81,16 +83,26 @@ impl Write for Captured {
 }
 
 impl Captured {
-    fn install(&self) -> tracing::subscriber::DefaultGuard {
-        let writer = self.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::TRACE)
-            .with_writer(move || writer.clone())
-            .finish();
-        tracing::subscriber::set_default(subscriber)
+    fn global() -> &'static Captured {
+        static LOGS: std::sync::OnceLock<Captured> = std::sync::OnceLock::new();
+        LOGS.get_or_init(|| {
+            let logs = Captured::default();
+            let writer = logs.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_writer(move || writer.clone())
+                .finish();
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("the only global subscriber of this test binary");
+            logs
+        })
     }
-    fn text(&self) -> String {
-        String::from_utf8_lossy(&self.0.lock().unwrap()).to_string()
+    fn len(&self) -> usize {
+        self.0.lock().unwrap().len()
+    }
+    /// Everything logged since `from` (by any test of this binary: a stricter secret check).
+    fn text_since(&self, from: usize) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()[from..]).to_string()
     }
 }
 
@@ -99,8 +111,8 @@ async fn the_copy_is_idempotent_and_never_echoes_logs_or_stores_handles_in_clear
     let Some(h) = Harness::new().await else {
         return;
     };
-    let logs = Captured::default();
-    let _guard = logs.install();
+    let logs = Captured::global();
+    let from = logs.len();
     let (d1, d2) = (Uuid::new_v4(), Uuid::new_v4());
     let secret_a = "local-handle-SECRET-aaaa-0001";
     let secret_b = "local-handle-SECRET-bbbb-0002";
@@ -164,8 +176,7 @@ async fn the_copy_is_idempotent_and_never_echoes_logs_or_stores_handles_in_clear
         vec![item(d1, Some(&alice()), "WEB_PUSH", Some(secret_a), true)],
     )
     .await;
-    drop(_guard);
-    let text = logs.text();
+    let text = logs.text_since(from);
     assert!(text.contains("internal permission denied"), "{text}");
     assert!(
         !text.contains("SECRET"),
