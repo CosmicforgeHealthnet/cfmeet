@@ -14,6 +14,7 @@ Authority rules: [ADR 0056](../../../docs/decisions/0056-first-party-organizatio
 | `organization_invitations` | SHA-256 token digest, normalized email (binding only; never in events, audit or logs), role, status, expiry |
 | `organization_audit_events` | append-only audit (actor kind, user, calling service, request / correlation ids) |
 | `organization_outbox` | transactional outbox (event envelopes without email, token or profile text) |
+| `organization_notification_publications` | Notification Service relay state (roadmap N7): per source outbox event and recipient chunk, the ids-only `cfmeet.notifications.event` envelope (account references and ids, never email, token or name), state, attempts, expiry; written only while `CF_NOTIFICATIONS_BASE_URL` is set, purged 30 days after settling |
 | `organization_idempotency_records` | stored responses for `Idempotency-Key` replay (never a token) |
 | `organization_service_nonces` | first use of each service token (replay refusal) |
 | `organization_import_runs` | migration import receipts |

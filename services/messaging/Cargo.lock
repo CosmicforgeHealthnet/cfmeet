@@ -478,6 +478,20 @@ name = "cf-migration-guard"
 version = "0.1.0"
 
 [[package]]
+name = "cf-notification-client"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hpke",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "cf-object-storage"
 version = "0.1.0"
 dependencies = [
@@ -1669,6 +1683,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "hpke"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f512e325a1a71bf3273fb9b7fc9e5d96dac136fb4a95d0e6637001b12ea3e09"
+dependencies = [
+ "aead 0.6.1",
+ "aes-gcm",
+ "curve25519-dalek 5.0.0",
+ "getrandom 0.4.3",
+ "hkdf 0.13.0",
+ "hybrid-array",
+ "rand_core 0.10.1",
+ "sha2 0.11.1",
+ "subtle",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
 name = "hpke-rs"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2537,6 +2570,7 @@ dependencies = [
  "base64 0.22.1",
  "cf-communications-policy",
  "cf-messaging-crypto",
+ "cf-notification-client",
  "cf-object-storage",
  "cf-push-transport",
  "cf-scan-gateway-contract",

@@ -24,6 +24,14 @@
 //!
 //! Every transition is recorded in `devplat_production_access_transitions` and the
 //! tenant activity history.
+//!
+//! The Developer Platform itself sends no email about a decision: today the operator
+//! console (release tooling) asks the Meeting Service to email the applicant after an
+//! audited approve / reject. On the explicit `notification-service` route
+//! (`DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE`, with
+//! `CF_NOTIFICATIONS_BASE_URL`) the decision transaction instead enqueues
+//! `developer-platform.production-access.decided` for the Notification Service
+//! ([`crate::notification_publications`]); the operator-console email must then be off.
 
 use axum::http::StatusCode;
 use chrono::{DateTime, Duration, Utc};
@@ -39,6 +47,7 @@ use super::{
 use crate::{
     domain::{rbac::Action, RequestContext},
     http::error::{ApiError, ErrorCode},
+    notification_publications,
     platform_access::{DelegationActor, DelegationCall},
     state::AppState,
 };
@@ -489,6 +498,17 @@ pub async fn submit(
             json!({ "capabilities": caps, "policy": "AUTOMATIC" }),
         )
         .await?;
+        if state.notifications.production_access {
+            let p = notification_publications::production_access_decided(
+                id,
+                tenant_id,
+                project_id,
+                "APPROVED",
+                caller.request.correlation_id.as_str(),
+                now,
+            );
+            notification_publications::enqueue(&txn, &p, now).await?;
+        }
     }
     let v = view(&txn, id, true).await?;
     txn.commit().await?;
@@ -907,6 +927,35 @@ fn reason(d: &Decision, default: &str) -> Result<String, ApiError> {
     }
 }
 
+/// Notification Service N7 / N11: enqueues `developer-platform.production-access.decided`
+/// in the decision's transaction, only on the explicit `notification-service` route (with
+/// `CF_NOTIFICATIONS_BASE_URL`). On the default `legacy` route nothing is written: the
+/// operator-console email (Meeting Service `developer-access-decision`) stays the only
+/// notice, so the applicant is never notified twice.
+async fn publish_decision<C: ConnectionTrait>(
+    state: &AppState,
+    txn: &C,
+    id: Uuid,
+    r: &Request,
+    decision: &'static str,
+    request: &RequestContext,
+) -> Result<(), ApiError> {
+    if !state.notifications.production_access {
+        return Ok(());
+    }
+    let now = Utc::now();
+    let p = notification_publications::production_access_decided(
+        id,
+        r.tenant_id,
+        r.application_id,
+        decision,
+        request.correlation_id.as_str(),
+        now,
+    );
+    notification_publications::enqueue(txn, &p, now).await?;
+    Ok(())
+}
+
 /// Runs an operator command. `operator_user` is the reviewing operator's CF Meet user id
 /// (`x-cf-operator-user-id`): a member of the requesting organization can never decide.
 pub async fn operator_decide(
@@ -1011,6 +1060,7 @@ pub async fn operator_decide(
                 json!({ "capabilities": caps, "policy": "OPERATOR" }),
             )
             .await?;
+            publish_decision(state, &txn, id, &r, "APPROVED", request).await?;
             txn.commit().await?;
         }
         OperatorCommand::Reject => {
@@ -1037,6 +1087,7 @@ pub async fn operator_decide(
                 json!({ "reasonCode": code }),
             )
             .await?;
+            publish_decision(state, &txn, id, &r, "REJECTED", request).await?;
             txn.commit().await?;
         }
         OperatorCommand::Suspend | OperatorCommand::Reinstate => {

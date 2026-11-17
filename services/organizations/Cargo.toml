@@ -25,6 +25,8 @@ path = "src/bin/organizations-import.rs"
 organizations-migration = { path = "migration" }
 # Shared internal service authentication protocol (packages/, never another service).
 cf-service-auth = { path = "../../packages/service-auth", features = ["client"] }
+# Notification Service producer client (envelope builder / validator; roadmap N7).
+cf-notification-client = { path = "../../packages/notification-client" }
 tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
 sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono", "with-json"] }
 axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "original-uri", "query", "matched-path"] }

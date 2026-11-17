@@ -135,17 +135,83 @@ impl MigrationTrait for TimelineRealtime {
         ))
     }
 }
-/// Apply the foundation history, then the unified, device-session and timeline-realtime
-/// ones.
+/// Notification Service roadmap N7: the Hub's outbox of publications to the Notification
+/// Service (`communication_notification_publications`). A FIFTH separate history for the
+/// same rollback-safety reason as the others: the previous image checks exactly the
+/// foundation, unified, device-session and timeline-realtime histories. Never merge them.
+pub struct NotificationPublicationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for NotificationPublicationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(NotificationPublications)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_notification_publications_seaql_migrations").into_iden()
+    }
+}
+struct NotificationPublications;
+impl MigrationName for NotificationPublications {
+    fn name(&self) -> &str {
+        "m20261117_000001_notification_publications"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for NotificationPublications {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/005_notification_publications.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Apply the foundation history, then the unified, device-session, timeline-realtime and
+/// notification-publications ones.
 pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     Migrator::up(db, None).await?;
     UnifiedMigrator::up(db, None).await?;
     DeviceSessionMigrator::up(db, None).await?;
-    TimelineRealtimeMigrator::up(db, None).await
+    TimelineRealtimeMigrator::up(db, None).await?;
+    NotificationPublicationsMigrator::up(db, None).await
 }
-/// Everything this image needs: the Sections 9-23 histories, the Section 14 one and the
-/// MSG-009 timeline-realtime one.
+/// Everything this image needs: the Sections 9-23 histories, the Section 14 one, the
+/// MSG-009 timeline-realtime one and the N7 notification-publications one.
 pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    if !timeline_ready(db).await? {
+        return Ok(false);
+    }
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_notification_publications_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_notification_publications_seaql_migrations"
+                .to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1
+        && rows[0].try_get::<String>("", "version")? == NotificationPublications.name())
+}
+/// Readiness the previous (MSG-009) image checks: foundation, unified, device-session and
+/// timeline-realtime histories exactly.
+pub async fn timeline_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     if !device_session_ready(db).await? {
         return Ok(false);
     }

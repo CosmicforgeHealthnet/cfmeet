@@ -33,6 +33,7 @@ Messaging service bindings of each organization (ADR 0058 Amendment A2; off by d
 | `src/import.rs` | export format, checksum, import, reconciliation |
 | `src/store.rs` | rows, audit / history / outbox writers |
 | `src/outbox.rs`, `src/worker.rs` | outbox lease protocol (delivery disabled), maintenance loop |
+| `src/notification_publications.rs` | Notification Service producer (roadmap N7): `organizations.*` catalogue envelopes from the committed outbox record rows to I1; only with `CF_NOTIFICATIONS_BASE_URL` |
 | `migration/` | own migration history (`organizations_seaql_migrations`) |
 | `src/bin/organizations-import.rs` | operator import CLI |
 | `docs/` | [API](docs/API.md), [operations](docs/OPERATIONS.md), [data ownership](docs/DATA_OWNERSHIP.md) |

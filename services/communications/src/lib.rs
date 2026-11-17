@@ -12,6 +12,7 @@ pub mod internal;
 pub mod invites;
 pub mod meetings;
 pub mod model;
+pub mod notification_publications;
 pub mod owners;
 pub mod policy;
 pub mod preferences;

@@ -304,5 +304,289 @@ class Fence(unittest.TestCase):
         self.assertIn('messaging_notification_fence_seaql_migrations', catalog)
 
 
+
+class FakeProducerCr(FakeCr):
+    """FakeCr whose Messaging database answers the fence row / outbox queries and whose
+    readiness and probes are scripted."""
+
+    def __init__(self, rows, protocol=1, done=(), statuses=(), outbox=True, service=None):
+        super().__init__(rows)
+        service_rows = json.dumps(service or {})
+        self.done_ops, self.statuses = set(done), list(statuses)
+        self.activations, self.checked, self.probed = [], [], []
+        outer = self
+        ready = json.dumps({'status': 'ok', 'routingProtocol': protocol} if protocol else {'status': 'ok'})
+
+        class Release(FakeRelease):
+            def db_sql(self, db, sql):
+                if 'to_regclass' in sql:
+                    self.sql.append((db, sql))
+                    return 't' if outbox else 'f'
+                if 'json_object_agg' in sql:
+                    self.sql.append((db, sql))
+                    return service_rows
+                return FakeRelease.db_sql(self, db, sql)
+        self.release = Release(rows)
+
+        class P:
+            NET = 'net'
+
+            @staticmethod
+            def run(*args):
+                if args[-1].startswith('http://127.0.0.1'):
+                    return ready
+                outer.probed.append(args[-1])
+                return outer.statuses.pop(0)
+        self.p = P()
+        self.PROBE_IMAGE = 'curl'
+
+    def done(self, op):
+        return op in self.done_ops
+
+    def tls_route_present(self, port):
+        self.checked.append(('tls', port))
+
+    def private_url(self, port):
+        return 'https://api.cfmeet.com:%d' % port
+
+    def has_signing_identity(self, name):
+        self.checked.append(('signing', name))
+
+    def apply_activation(self, operation, sha, run_id, changes, post=None):
+        self.activations.append((operation, changes))
+        post()
+
+
+class MessagingPublications(unittest.TestCase):
+    def test_publish_is_granted_to_messaging_on_both_replicas_only(self):
+        granted = [(r, i, p) for op, r, i, p in cr.GRANTS if op == 'activate-messaging-publications']
+        self.assertEqual(sorted(granted), [('notifications', 'messaging', ('notifications-event.publish',)),
+                                           ('notifications-2', 'messaging', ('notifications-event.publish',))])
+        workflow = (cr.Path(__file__).resolve().parents[3] / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        for op in ('activate-messaging-publications', 'activate-notification-fence'):
+            self.assertIn(op, cr.OPERATIONS)
+            self.assertIn(op, workflow)
+
+    def test_messaging_gets_the_private_route_after_i1_and_its_outbox_are_proven(self):
+        fake = FakeProducerCr([], statuses=['401', '401'])
+        no.activate_messaging_publications(fake, 'a' * 40, '42-1', '')
+        [(operation, changes)] = fake.activations
+        self.assertEqual(operation, 'activate-messaging-publications')
+        self.assertEqual(changes, [('messaging', {'CF_NOTIFICATIONS_BASE_URL': 'https://api.cfmeet.com:8456'})])
+        self.assertEqual(fake.probed, ['https://api.cfmeet.com:8456/internal/v1/notification-events'] * 2)
+        self.assertIn(('signing', 'messaging'), fake.checked)
+        self.assertEqual(fake.release.sql[-1][0], 'cfmeet_messaging')
+
+    def test_publications_are_refused_without_i1_the_fence_or_the_outbox(self):
+        for kwargs in (dict(statuses=['404']), dict(statuses=['401'], protocol=None),
+                       dict(statuses=['401'], outbox=False)):
+            fake = FakeProducerCr([], **kwargs)
+            with self.assertRaises(RuntimeError):
+                no.activate_messaging_publications(fake, 'a' * 40, '42-1', '')
+            self.assertEqual(fake.activations, [])
+
+
+class ProducerFence(unittest.TestCase):
+    DONE = ('activate-messaging-publications',)
+
+    def test_confirm_names_one_producer_row(self):
+        self.assertEqual(no.parse_fence('messaging-message-wakeups-shadow'), ('messaging', 'MESSAGE_WAKEUPS', 'SHADOW'))
+        self.assertEqual(no.parse_fence('meeting-service-auth-verification-legacy-only'),
+                         ('meeting-service', 'AUTH_VERIFICATION', 'LEGACY_ONLY'))
+        self.assertEqual(no.parse_fence('messaging-message-wakeups-fenced-new'),
+                         ('messaging', 'MESSAGE_WAKEUPS', 'FENCED_NEW'))
+        self.assertEqual(no.parse_fence('messaging-message-wakeups-fenced-old'),
+                         ('messaging', 'MESSAGE_WAKEUPS', 'FENCED_OLD'))
+        for bad in ('', 'messaging-message-wakeups-fenced', 'messaging-message-wakeups-active',
+                    'calling-x-shadow', 'messaging-shadow', 'messaging_message-wakeups-shadow'):
+            with self.assertRaises(RuntimeError):
+                no.parse_fence(bad)
+        self.assertRegex('messaging-message-wakeups-legacy-only', r'^[a-z,-]{0,120}$')
+
+    def test_shadow_is_journaled_on_the_messaging_database_and_undone(self):
+        fake = FakeProducerCr([{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE)
+        no.activate_fence(fake, 'a' * 40, '42-1', 'messaging-message-wakeups-shadow')
+        entry = fake.journal[-1]
+        self.assertEqual(entry['status'], 'done')
+        self.assertEqual(entry['notificationFence'], dict(service='messaging', category='MESSAGE_WAKEUPS',
+                                                          before='LEGACY_ONLY', after='SHADOW', version=2))
+        db, update = fake.release.sql[-1]
+        self.assertEqual(db, 'cfmeet_messaging')
+        self.assertIn("UPDATE messaging_notification_routing_state SET mode = 'SHADOW', canary_percent = 0", update)
+        self.assertIn('AND routing_version = 1', update)
+        no.undo_fence(fake, entry['notificationFence'], '43-1')
+        self.assertIn("mode = 'LEGACY_ONLY'", fake.release.sql[-1][1])
+        self.assertEqual(fake.emitted[-1][0], 'notificationFenceRestored')
+
+    def test_gates_refuse_and_change_nothing(self):
+        cases = [
+            # Meeting has no producer code recording decisions: SHADOW would block its legacy emails.
+            (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE), 'meeting-service-auth-verification-shadow'),
+            # The publication activation must come first.
+            (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}]), 'messaging-message-wakeups-shadow'),
+            # A pre-fence image.
+            (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE, protocol=None),
+             'messaging-message-wakeups-shadow'),
+            # NEW only after SHADOW / FENCED_OLD.
+            (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE), 'messaging-message-wakeups-fenced-new'),
+            # NEW only while the service delivers the category's channel (else a NEW decision is lost).
+            (dict(rows=[{'mode': 'SHADOW', 'version': 2}], done=self.DONE, service={'PUSH': 'SHADOW'}),
+             'messaging-message-wakeups-fenced-new'),
+        ]
+        for kwargs, confirm in cases:
+            rows = kwargs.pop('rows')
+            fake = FakeProducerCr(rows, **kwargs)
+            with self.assertRaisesRegex(RuntimeError, 'Routing fence gate'):
+                no.activate_fence(fake, 'a' * 40, '42-1', confirm)
+            self.assertFalse([q for _, q in fake.release.sql if q.startswith('WITH u AS (UPDATE')], confirm)
+            self.assertEqual(fake.journal, [])
+
+    def test_fenced_new_routes_everything_new_once_the_service_delivers(self):
+        fake = FakeProducerCr([{'mode': 'SHADOW', 'version': 2}], done=self.DONE, service={'PUSH': 'ACTIVE'})
+        no.activate_fence(fake, 'a' * 40, '42-1', 'messaging-message-wakeups-fenced-new')
+        self.assertEqual(fake.journal[-1]['notificationFence']['after'], 'FENCED_NEW')
+        update = [q for _, q in fake.release.sql if q.startswith('WITH u AS (UPDATE')][-1]
+        self.assertIn("mode = 'FENCED_NEW', canary_percent = 100", update)
+        no.undo_fence(fake, fake.journal[-1]['notificationFence'], '43-1')
+        self.assertIn("mode = 'SHADOW', canary_percent = 0", fake.release.sql[-1][1])
+
+    def test_back_to_legacy_only_from_any_mode_needs_no_prerequisite(self):
+        fake = FakeProducerCr([{'mode': 'FENCED_NEW', 'version': 4}], protocol=None)
+        no.activate_fence(fake, 'a' * 40, '42-1', 'messaging-message-wakeups-legacy-only')
+        self.assertEqual(fake.journal[-1]['notificationFence']['before'], 'FENCED_NEW')
+
+    def test_back_to_legacy_only_needs_no_prerequisite(self):
+        fake = FakeProducerCr([{'mode': 'SHADOW', 'version': 2}], protocol=None)
+        no.activate_fence(fake, 'a' * 40, '42-1', 'messaging-message-wakeups-legacy-only')
+        self.assertEqual(fake.journal[-1]['notificationFence']['after'], 'LEGACY_ONLY')
+
+    def test_rollback_restores_a_fence_entry(self):
+        src = (cr.Path(__file__).resolve().parent / 'coordinated_release.py').read_text()
+        self.assertIn("e.get('notificationFence')", src)
+        self.assertIn("notif_ops.undo_fence(", src)
+
+
+
+class Diagnostics(unittest.TestCase):
+    def test_counts_only_from_messaging_and_the_service(self):
+        seen = []
+
+        class Release:
+            @staticmethod
+            def db_sql(db, sql):
+                seen.append((db, sql))
+                return '{"ok": 1}'
+
+        class Fake:
+            SERVICES = cr.SERVICES
+            release = Release
+            emitted = []
+
+            def emit(self, kind, value):
+                self.emitted.append((kind, value))
+        fake = Fake()
+        out = no.notification_diagnostics(fake)
+        self.assertEqual(out, {'messaging': {'ok': 1}, 'notifications': {'ok': 1}})
+        self.assertEqual([db for db, _ in seen], ['cfmeet_messaging', 'cfmeet_notifications'])
+        for _, sql in seen:
+            self.assertTrue(sql.startswith('SELECT json_build_object('))
+            for forbidden in ('envelope', 'event_id', 'recipient', 'INSERT', 'UPDATE', 'DELETE'):
+                self.assertNotIn(forbidden, sql)
+        self.assertEqual(fake.emitted[-1][0], 'notificationDiagnostics')
+        src = (cr.Path(__file__).resolve().parent / 'coordinated_release.py').read_text()
+        self.assertIn('notif_ops.notification_diagnostics(sys.modules[__name__])', src)
+
+
+
+class NotificationsEmail(unittest.TestCase):
+    """activate-notifications-email: the VPS Resend files, never printed, on both replicas."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = cr.Path(tempfile.mkdtemp())
+        (self.dir / 'resend-api-key').write_text('re_' + 'A' * 30 + '\n')
+        (self.dir / 'resend-webhook-secret').write_text('whsec_' + 'B' * 32 + '\n')
+
+    def fake(self, statuses, done=('activate-resend-email',)):
+        fake = FakeProducerCr([], done=done, statuses=statuses)
+        written = []
+        directory = self.dir
+
+        class P:
+            NET = 'net'
+            SECRETS = directory
+
+            @staticmethod
+            def write_private(path, data):
+                written.append(path)
+                path.write_text(data)
+
+            run = fake.p.run
+        fake.p = P
+        fake.written = written
+        return fake
+
+    def run_activation(self, fake):
+        from unittest import mock
+        with mock.patch.object(no, 'check_root_secret'), mock.patch('os.chown'):
+            no.activate_email(fake, 'a' * 40, '42-1', '')
+
+    def test_both_replicas_get_the_provider_and_service_owned_copies(self):
+        fake = self.fake(['404', '401'])
+        self.run_activation(fake)
+        [(operation, changes)] = fake.activations
+        self.assertEqual(operation, 'activate-notifications-email')
+        self.assertEqual([name for name, _, _ in changes], ['notifications', 'notifications-2'])
+        for _, env, extra in changes:
+            self.assertEqual(env['NOTIFICATIONS_EMAIL_PROVIDER'], 'resend')
+            self.assertEqual(env['NOTIFICATIONS_RESEND_API_KEY_FILE'], '/run/secrets/resend-api-key')
+            self.assertEqual(env['NOTIFICATIONS_RESEND_WEBHOOK_SECRET_FILE'], '/run/secrets/resend-webhook-secret')
+            self.assertEqual(env['NOTIFICATIONS_EMAIL_FROM'], 'CF Meet <no-reply@cfmeet.com>')
+            self.assertEqual(sorted(t for _, t in extra['mounts']),
+                             ['/run/secrets/resend-api-key', '/run/secrets/resend-webhook-secret'])
+            for source, _ in extra['mounts']:
+                self.assertTrue(source.name.startswith('notifications-resend-'))
+                self.assertEqual(oct(source.stat().st_mode & 0o777), '0o400')
+            # No secret value in the overrides (files only).
+            self.assertFalse(any('AAAA' in v or 'BBBB' in v for v in env.values()))
+        # The emitted record names no value either.
+        self.assertNotIn('AAAA', json.dumps(fake.emitted))
+        self.assertEqual(fake.probed, ['https://api.cfmeet.com:8456/api/v1/notifications/provider-events/resend'] * 2)
+
+    def test_refused_without_e1_or_when_the_callback_is_not_configured_afterwards(self):
+        fake = self.fake(['404'], done=())
+        with self.assertRaisesRegex(RuntimeError, 'E1'):
+            self.run_activation(fake)
+        self.assertEqual(fake.activations, [])
+        fake = self.fake(['404', '404'])
+        with self.assertRaisesRegex(RuntimeError, 'after activation'):
+            self.run_activation(fake)
+
+    def test_original_files_must_be_root_only_and_well_formed(self):
+        from unittest import mock
+        import os
+        import stat as st
+        good = os.stat_result((st.S_IFREG | 0o400, 0, 0, 1, 0, 0, 10, 0, 0, 0))
+        loose = os.stat_result((st.S_IFREG | 0o644, 0, 0, 1, 0, 0, 10, 0, 0, 0))
+        other = os.stat_result((st.S_IFREG | 0o400, 0, 0, 1, 1000, 0, 10, 0, 0, 0))
+        key = self.dir / 'resend-api-key'
+        with mock.patch('os.lstat', return_value=good):
+            no.check_root_secret(key, no.SECRET_FORMS['resend-api-key'])
+            with self.assertRaisesRegex(RuntimeError, 'expected form'):
+                no.check_root_secret(key, no.SECRET_FORMS['resend-webhook-secret'])
+        for bad in (loose, other):
+            with mock.patch('os.lstat', return_value=bad), self.assertRaisesRegex(RuntimeError, 'root-owned'):
+                no.check_root_secret(key, no.SECRET_FORMS['resend-api-key'])
+
+    def test_verify_accepts_resend_only_after_the_activation(self):
+        from unittest import mock
+        with mock.patch.object(cr, 'done', return_value=False):
+            self.assertNotIn('resend', cr.safe_defaults()['notifications']['NOTIFICATIONS_EMAIL_PROVIDER'])
+        with mock.patch.object(cr, 'done', side_effect=lambda op: op == 'activate-notifications-email'):
+            for name in ('notifications', 'notifications-2'):
+                self.assertIn('resend', cr.safe_defaults()[name]['NOTIFICATIONS_EMAIL_PROVIDER'])
+        self.assertIn('activate-notifications-email', cr.OPERATIONS)
+
+
 if __name__ == '__main__':
     unittest.main()

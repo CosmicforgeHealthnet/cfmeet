@@ -2,6 +2,7 @@
 *
 !packages/service-auth
 !packages/migration-guard
+!packages/notification-client
 !packages/contracts/organizations
 !services/organizations
 

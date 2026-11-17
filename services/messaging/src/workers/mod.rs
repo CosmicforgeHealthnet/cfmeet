@@ -1,6 +1,7 @@
 //! Periodic maintenance owned by Messaging (each pass bounded and idempotent; safe on
 //! several instances): expired realtime tickets, history transfers, expired KeyPackages,
-//! low-stock device alerts and the retention of finished push jobs. Retention, purge and
+//! low-stock device alerts and the retention of finished push jobs (and of settled
+//! notification publications). Retention, purge and
 //! attachment lifecycle workers are added by their modules.
 
 use crate::state::AppState;
@@ -29,6 +30,15 @@ pub async fn run_maintenance(state: AppState, interval: std::time::Duration) {
                     .await
             {
                 tracing::warn!(error = %e, "push job retention pass failed");
+            }
+            // Notification Service N7: overdue and settled routing publications.
+            if let Err(e) = crate::notification_publications::maintain(
+                &state,
+                crate::realtime::push::PURGE_BATCH,
+            )
+            .await
+            {
+                tracing::warn!(error = %e, "notification publication maintenance pass failed");
             }
         }
         tokio::time::sleep(interval).await;

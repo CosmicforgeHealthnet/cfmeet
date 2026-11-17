@@ -445,6 +445,8 @@ pub struct Harness {
     pub operator: Arc<ServiceTokenSigner>,
     /// The Notification Service: `communications-restrictions.read` only (X4).
     pub notifications: Arc<ServiceTokenSigner>,
+    /// The Hub's own signing key (what a receiver's trust bundle grants).
+    pub hub_key: PublicJwk,
     admin: DatabaseConnection,
     name: String,
     server: tokio::task::JoinHandle<()>,
@@ -455,6 +457,10 @@ impl Harness {
         self.server.abort();
     }
     pub async fn new() -> Self {
+        Self::with_notifications(None).await
+    }
+    /// A harness whose Hub has `CF_NOTIFICATIONS_BASE_URL` set to `notifications_url`.
+    pub async fn with_notifications(notifications_url: Option<&str>) -> Self {
         let url = std::env::var("TEST_DATABASE_URL").expect(
             "PostgreSQL acceptance tests require TEST_DATABASE_URL; there is no implicit skip",
         );
@@ -490,8 +496,12 @@ impl Harness {
         assert!(communications_migration::foundation_ready(&db)
             .await
             .unwrap());
+        // The previous (MSG-009) image checks the four earlier histories exactly; the N7
+        // history is separate, so it still starts (rollback safety).
+        assert!(communications_migration::timeline_ready(&db).await.unwrap());
         assert!(communications_migration::ready(&db).await.unwrap());
         let hub = signer(ServiceId::communications(), key("hub-test"));
+        let hub_key = hub.public_jwk();
         let account_signer = signer(ServiceId::meeting_service(), key("account-test"));
         let calling_signer = signer(ServiceId::calling(), key("calling-test"));
         let operator = signer(ServiceId::operator_console(), key("operator-test"));
@@ -559,6 +569,9 @@ impl Harness {
         ] {
             targets.insert(id, &format!("http://{address}")).unwrap();
         }
+        if let Some(url) = notifications_url {
+            targets.insert(ServiceId::notifications(), url).unwrap();
+        }
         let inbound = verifier(
             ServiceId::communications(),
             vec![
@@ -609,6 +622,7 @@ impl Harness {
                 ),
                 calling_configured: true,
                 messaging_configured: true,
+                notifications_configured: notifications_url.is_some(),
             }),
             metrics: Arc::new(Metrics::default()),
         };
@@ -629,6 +643,7 @@ impl Harness {
             calling_signer,
             operator,
             notifications,
+            hub_key,
             admin,
             name,
             server,

@@ -9,6 +9,7 @@
 !packages/object-storage
 !packages/scan-gateway-contract
 !packages/push-transport
+!packages/notification-client
 !packages/contracts/messaging
 !services/messaging
 

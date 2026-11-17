@@ -1,6 +1,7 @@
 use crate::{
     error::{Error, Result},
     model::*,
+    notification_publications::{self, ConnectionNotice, Notice},
     store::{execute, one, rows},
     State,
 };
@@ -97,6 +98,21 @@ impl State {
             .audit(&txn, p, "CONNECTION_REQUESTED", Some(id), json!({}))
             .await?;
         self.store.event(&txn,p,"communications.connection.requested",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":target.principal_id,"state":"REQUEST_PENDING"})).await?;
+        // Roadmap N7: the addressee's notification, in this transaction (only with
+        // CF_NOTIFICATIONS_BASE_URL; blocked / privacy-refused requests never get here).
+        notification_publications::enqueue(
+            self,
+            &txn,
+            Notice {
+                notice: ConnectionNotice::Requested,
+                request_id: id,
+                connection_id: pair.id,
+                connection_version: pair.version + 1,
+                actor: p,
+                recipient: &target,
+            },
+        )
+        .await?;
         self.store
             .relationship_changed(&txn, &[p.id, target.id], pair.id, pair.version + 1)
             .await?;
@@ -209,6 +225,23 @@ impl State {
             )
             .await?;
         self.store.event(&txn,p,&format!("communications.connection.{}",relationship.to_lowercase()),pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":other.principal_id,"state":relationship})).await?;
+        if action == "accept" {
+            // Roadmap N7: the requester learns the addressee accepted (only with
+            // CF_NOTIFICATIONS_BASE_URL; a blocked pair was refused above).
+            notification_publications::enqueue(
+                self,
+                &txn,
+                Notice {
+                    notice: ConnectionNotice::Connected,
+                    request_id: id,
+                    connection_id: pair.id,
+                    connection_version: pair.version + 1,
+                    actor: p,
+                    recipient: &other,
+                },
+            )
+            .await?;
+        }
         self.store
             .relationship_changed(&txn, &[p.id, other.id], pair.id, pair.version + 1)
             .await?;

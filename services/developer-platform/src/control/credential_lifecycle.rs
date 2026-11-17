@@ -25,6 +25,14 @@
 //! `SERVICE` event per notice in the same transaction. A crash between the outbox write
 //! and the notice row is harmless: the next sweep re-publishes the same source event id,
 //! which the outbox recognizes (no second delivery), then records the notice.
+//!
+//! These webhooks go to CUSTOMER endpoints; the Developer Platform sends no email or
+//! in-app notice of its own. With the Notification Service configured
+//! (`CF_NOTIFICATIONS_BASE_URL`, route `DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE`),
+//! [`notification_sweep_once`] additionally publishes the same notices to the
+//! organization's owners and admins (`developer-platform.credential.*`), over every
+//! environment of the platform's projects, through its own outbox
+//! ([`crate::notification_publications`]); the webhook sweep is unchanged.
 
 use std::time::Duration as StdDuration;
 
@@ -258,6 +266,102 @@ async fn already_notified<C: ConnectionTrait>(
         .is_some())
 }
 
+/// The credentials Platform Access reports for `environment_id` (every service account's),
+/// `None` when it could not answer at all. A partial answer counts as unavailable and
+/// still yields the credentials read.
+async fn environment_credentials(
+    platform: &dyn PlatformAccessPort,
+    environment_id: Uuid,
+    correlation: &CorrelationId,
+    report: &mut SweepReport,
+) -> Option<Vec<Value>> {
+    let Some(accounts) = list(
+        platform,
+        DelegationCall::ListServiceAccounts { environment_id },
+        "serviceAccounts",
+        correlation,
+    )
+    .await
+    else {
+        report.unavailable += 1;
+        return None;
+    };
+    let mut credentials = Vec::new();
+    let mut complete = true;
+    for sa in &accounts {
+        let Some(service_account_id) = uuid_of(sa, "id") else {
+            report.inconsistent += 1;
+            continue;
+        };
+        match list(
+            platform,
+            DelegationCall::ListCredentials {
+                environment_id,
+                service_account_id,
+            },
+            "credentials",
+            correlation,
+        )
+        .await
+        {
+            Some(c) => credentials.extend(c),
+            None => complete = false,
+        }
+    }
+    if !complete {
+        report.unavailable += 1;
+    }
+    Some(credentials)
+}
+
+/// A notice due for one credential of an environment.
+struct Due<'a> {
+    credential_id: Uuid,
+    service_account_id: Uuid,
+    state: &'a str,
+    expires_at: DateTime<Utc>,
+    notice: Notice,
+}
+
+/// The notice due for credential view `c` of `scope` at `now`, if any (counted in
+/// `report`: examined, inconsistent).
+fn due<'a>(
+    c: &'a Value,
+    (tenant_id, application_id, environment_id): (Uuid, Uuid, Uuid),
+    settings: &CredentialLifecycleSettings,
+    now: DateTime<Utc>,
+    report: &mut SweepReport,
+) -> Option<Due<'a>> {
+    report.examined += 1;
+    let (Some(credential_id), Some(service_account_id), Some(expires_at)) = (
+        uuid_of(c, "id"),
+        uuid_of(c, "serviceAccountId"),
+        time(c, "expiresAt"),
+    ) else {
+        report.inconsistent += 1;
+        return None;
+    };
+    if uuid_of(c, "environmentId") != Some(environment_id)
+        || uuid_of(c, "tenantId") != Some(tenant_id)
+        || uuid_of(c, "applicationId") != Some(application_id)
+    {
+        report.inconsistent += 1;
+        return None;
+    }
+    let state = c
+        .get("effectiveState")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let notice = classify(state, expires_at, time(c, "createdAt"), settings, now)?;
+    Some(Due {
+        credential_id,
+        service_account_id,
+        state,
+        expires_at,
+        notice,
+    })
+}
+
 /// One sweep over the subscribed environments at `now` (normally the webhook clock).
 pub async fn sweep_once(
     webhooks: &WebhookService,
@@ -268,84 +372,30 @@ pub async fn sweep_once(
     let db = webhooks.db();
     let mut report = SweepReport::default();
     let correlation = CorrelationId::generate();
-    for (tenant_id, application_id, environment_id) in
-        subscribed(db, settings.max_environments).await?
-    {
+    for scope in subscribed(db, settings.max_environments).await? {
         report.environments += 1;
-        let Some(accounts) = list(
-            platform,
-            DelegationCall::ListServiceAccounts { environment_id },
-            "serviceAccounts",
-            &correlation,
-        )
-        .await
+        let Some(credentials) =
+            environment_credentials(platform, scope.2, &correlation, &mut report).await
         else {
-            report.unavailable += 1;
             continue;
         };
-        let mut credentials = Vec::new();
-        let mut complete = true;
-        for sa in &accounts {
-            let Some(service_account_id) = uuid_of(sa, "id") else {
-                report.inconsistent += 1;
-                continue;
-            };
-            match list(
-                platform,
-                DelegationCall::ListCredentials {
-                    environment_id,
-                    service_account_id,
-                },
-                "credentials",
-                &correlation,
-            )
-            .await
-            {
-                Some(c) => credentials.extend(c),
-                None => complete = false,
-            }
-        }
-        if !complete {
-            report.unavailable += 1;
-        }
         for c in &credentials {
-            report.examined += 1;
-            let (Some(id), Some(service_account_id), Some(expires_at)) = (
-                uuid_of(c, "id"),
-                uuid_of(c, "serviceAccountId"),
-                time(c, "expiresAt"),
-            ) else {
-                report.inconsistent += 1;
+            let Some(d) = due(c, scope, settings, now, &mut report) else {
                 continue;
             };
-            if uuid_of(c, "environmentId") != Some(environment_id)
-                || uuid_of(c, "tenantId") != Some(tenant_id)
-                || uuid_of(c, "applicationId") != Some(application_id)
-            {
-                report.inconsistent += 1;
-                continue;
-            }
-            let state = c
-                .get("effectiveState")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let Some(notice) = classify(state, expires_at, time(c, "createdAt"), settings, now)
-            else {
-                continue;
-            };
-            if already_notified(db, id, &notice, expires_at).await? {
+            if already_notified(db, d.credential_id, &d.notice, d.expires_at).await? {
                 report.deduplicated += 1;
                 continue;
             }
             let deliveries = notify(
                 webhooks,
                 &correlation,
-                (tenant_id, application_id, environment_id),
-                id,
-                service_account_id,
-                state,
-                expires_at,
-                &notice,
+                scope,
+                d.credential_id,
+                d.service_account_id,
+                d.state,
+                d.expires_at,
+                &d.notice,
                 now,
             )
             .await?;
@@ -355,6 +405,67 @@ pub async fn sweep_once(
                     report.deliveries += d;
                 }
                 None => report.deduplicated += 1,
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// The worker schedule key of [`notification_sweep_once`].
+pub const NOTIFICATION_JOB: &str = "credential-notifications";
+
+/// Notification Service N7 / N11: one sweep at `now` over the environments of the
+/// Developer Platform's (non-archived) projects — whether or not they subscribe to
+/// webhooks — enqueuing `developer-platform.credential.expiring-soon` / `.expired` for
+/// the organization's owners and admins
+/// ([`crate::notification_publications::credential_notice`]). Same lead times, lookback
+/// and environment bound as the webhook sweep, independent of it (its own deterministic
+/// event ids: a notice is published at most once). `notified`: publications enqueued;
+/// `deduplicated`: already enqueued earlier; `deliveries` stays 0.
+pub async fn notification_sweep_once<C: ConnectionTrait>(
+    db: &C,
+    platform: &dyn PlatformAccessPort,
+    settings: &CredentialLifecycleSettings,
+    now: DateTime<Utc>,
+) -> Result<SweepReport, ApiError> {
+    let mut report = SweepReport::default();
+    let correlation = CorrelationId::generate();
+    let environments = db
+        .query_all(stmt(
+            "SELECT e.tenant_id, e.application_id, e.environment_id FROM devplat_environment_profiles e \
+               JOIN devplat_project_profiles p ON p.application_id = e.application_id \
+              WHERE p.status <> 'ARCHIVED' ORDER BY e.environment_id LIMIT $1",
+            vec![(settings.max_environments as i64).into()],
+        ))
+        .await?;
+    for r in &environments {
+        let scope: (Uuid, Uuid, Uuid) = (
+            r.try_get("", "tenant_id")?,
+            r.try_get("", "application_id")?,
+            r.try_get("", "environment_id")?,
+        );
+        report.environments += 1;
+        let Some(credentials) =
+            environment_credentials(platform, scope.2, &correlation, &mut report).await
+        else {
+            continue;
+        };
+        for c in &credentials {
+            let Some(d) = due(c, scope, settings, now, &mut report) else {
+                continue;
+            };
+            let publication = crate::notification_publications::credential_notice(
+                scope,
+                d.credential_id,
+                &d.notice,
+                d.expires_at,
+                correlation.as_str(),
+                now,
+            );
+            if crate::notification_publications::enqueue(db, &publication, now).await? {
+                report.notified += 1;
+            } else {
+                report.deduplicated += 1;
             }
         }
     }

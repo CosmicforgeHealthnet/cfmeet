@@ -4,6 +4,8 @@ COPY packages/service-auth packages/service-auth
 # SEC-015 destructive migration subcommand guard (path dependency of the migration crate).
 COPY packages/migration-guard packages/migration-guard
 COPY packages/communications-policy packages/communications-policy
+# Notification Service producer client (envelope builder / validator; roadmap N7).
+COPY packages/notification-client packages/notification-client
 COPY services/communications services/communications
 WORKDIR /src/services/communications
 RUN cargo build --release --locked --bin communications \

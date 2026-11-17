@@ -10,9 +10,14 @@
 //! `messaging_push_jobs` refuses legacy pushes without an `OLD` decision once a category
 //! has left `LEGACY_ONLY` (§9.4).
 //!
-//! Foundation only: no producer calls [`route_message`] yet, every category is
-//! `LEGACY_ONLY`, and push behaviour is unchanged. [`fence_protocol`] feeds the
-//! `routingProtocol` readiness fact the activation operation certifies (§9.6).
+//! The push fan-out ([`crate::realtime::push::fanout_jobs`]) reads the category's mode
+//! ([`current_mode`]) and, outside `LEGACY_ONLY`, calls [`route_message`] in the
+//! transaction that writes the push jobs (`OLD`) or the Notification Service publication
+//! (`NEW`, [`crate::notification_publications`]); in `SHADOW` an `OLD` decision also
+//! enqueues a shadow publication the service records and never delivers. In
+//! `LEGACY_ONLY` (every category, until a routing operation changes it) push behaviour is
+//! exactly the pre-fence one. [`fence_protocol`] feeds the `routingProtocol` readiness
+//! fact the activation operation certifies (§9.6).
 //!
 //! Push key (§9.3): the Messaging outbox event id, in its envelope form
 //! ([`push_key`], `evt_<32 hex>`); one decision covers every device fan-out of the event.
@@ -110,6 +115,9 @@ pub struct Decision {
     /// `true` when this call recorded the decision; `false` when an earlier decision for
     /// the key was found and followed (sticky, nothing written).
     pub created: bool,
+    /// The category's mode the decision was made under (`None` for a followed decision:
+    /// the mode it was made under is not recorded, and nothing new is written for it).
+    pub mode: Option<Mode>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,6 +132,17 @@ pub enum FenceError {
     Corrupt,
     #[error("database: {}", db::summarize_db_error(.0))]
     Db(#[from] DbErr),
+}
+
+impl From<FenceError> for crate::error::Error {
+    fn from(e: FenceError) -> Self {
+        match e {
+            FenceError::Db(db) => db.into(),
+            _ => {
+                crate::error::Error::reason(crate::error::ErrorCode::InternalError, "ROUTING_FENCE")
+            }
+        }
+    }
 }
 
 /// The routing key of the push wake-ups of one Messaging outbox event: the event's
@@ -179,6 +198,7 @@ fn sticky(row: DecisionRow, category: &str) -> Result<Decision, FenceError> {
         decision_version: row.decision_version,
         routing_version: row.routing_version,
         created: false,
+        mode: None,
     })
 }
 
@@ -195,6 +215,8 @@ const SELECT_DECISION: &str =
 ///   `OLD` in every other mode (`LEGACY_ONLY`, `SHADOW`, `FENCED_OLD`); a CRITICAL
 ///   category with `critical_fallback = FORCED` is always `OLD`. The decision is recorded
 ///   with reason `ROUTED` and the state's `routing_version`.
+/// * `new_capable = false` (the event's audience does not fit one Notification Service
+///   envelope) turns a `NEW` route into `OLD` with reason `RECIPIENT_LIMIT`.
 ///
 /// Concurrent first decisions for one key converge: the loser's insert waits for the
 /// winner's commit, inserts nothing and follows the winner's decision.
@@ -203,6 +225,7 @@ pub async fn route_message(
     key: &str,
     category: &str,
     expires_at: DateTime<Utc>,
+    new_capable: bool,
 ) -> Result<Decision, FenceError> {
     if !valid_key(key) {
         return Err(FenceError::InvalidKey);
@@ -228,11 +251,18 @@ pub async fn route_message(
     if CRITICAL_CATEGORIES.contains(&category) && state.critical_fallback == "FORCED" {
         route = Route::Old;
     }
+    // An event the Notification Service cannot be told about in one envelope stays on the
+    // legacy path, whatever the canary says.
+    let mut reason = "ROUTED";
+    if route == Route::New && !new_capable {
+        route = Route::Old;
+        reason = "RECIPIENT_LIMIT";
+    }
     let inserted = db::one::<DecisionRow, _>(
         txn,
         "INSERT INTO messaging_notification_route_decisions \
            (idempotency_key, decision_id, category, route, routing_version, reason, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, 'ROUTED', $6) \
+         VALUES ($1, $2, $3, $4, $5, $7, $6) \
          ON CONFLICT (idempotency_key) DO NOTHING \
          RETURNING decision_id, category, route, decision_version, routing_version",
         vec![
@@ -242,12 +272,14 @@ pub async fn route_message(
             route.as_str().into(),
             state.routing_version.into(),
             expires_at.into(),
+            reason.into(),
         ],
     )
     .await?;
     match inserted {
         Some(row) => Ok(Decision {
             created: true,
+            mode: Some(mode),
             ..sticky(row, category)?
         }),
         // A concurrent transaction decided the key first and has committed.
@@ -257,6 +289,33 @@ pub async fn route_message(
                 .ok_or(FenceError::Corrupt)?,
             category,
         ),
+    }
+}
+
+/// The current mode of `category`, read outside any transaction (one primary-key read).
+/// `None` when the category has no state row or the routing fence history is not applied
+/// (the table does not exist): pre-fence behaviour, exactly as `LEGACY_ONLY`. Any other
+/// database error is returned (the caller retries).
+pub async fn current_mode<C: ConnectionTrait>(
+    db: &C,
+    category: &str,
+) -> Result<Option<Mode>, FenceError> {
+    #[derive(FromQueryResult)]
+    struct ModeRow {
+        mode: String,
+    }
+    match db::one::<ModeRow, _>(
+        db,
+        "SELECT mode FROM messaging_notification_routing_state WHERE category = $1",
+        vec![category.into()],
+    )
+    .await
+    {
+        Ok(None) => Ok(None),
+        Ok(Some(row)) => Mode::parse(&row.mode).map(Some).ok_or(FenceError::Corrupt),
+        // undefined_table: the fence history is not applied.
+        Err(e) if db::sqlstate(&e).as_deref() == Some("42P01") => Ok(None),
+        Err(e) => Err(e.into()),
     }
 }
 

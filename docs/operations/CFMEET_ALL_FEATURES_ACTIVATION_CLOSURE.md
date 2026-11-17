@@ -1,5 +1,7 @@
 # CF Meet — all-features production activation closure
 
+> **Superseded (2026-11-16).** Current production state, feature activation and the remaining blockers are in [CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md](CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md). This report is kept as history; statements here about switches being off or Organizations not being authoritative may be out of date.
+
 Date: 2026-11-12 · Environment: production (`api.cfmeet.com`, Contabo VPS) · Baseline: [CFMEET_BACKEND_FINAL_CLOSURE.md](CFMEET_BACKEND_FINAL_CLOSURE.md) (2026-11-11)
 
 ## Verdict
