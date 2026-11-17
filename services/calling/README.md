@@ -579,6 +579,24 @@ See [`.env.example`](.env.example). Required: `DATABASE_URL`, `CALLING_SIGNALING
 at startup if its identity, key, trust bundle or runtime environment is missing or
 inconsistent. The Calling service owns its own database.
 
+### Notification Service publications (roadmap N7)
+
+`CF_NOTIFICATIONS_BASE_URL` (optional; unset by default = nothing written or sent, exactly
+the previous behaviour). Set, Calling publishes the catalogue's
+`calling.call.participant-missed` (to each recipient who missed a Call that reached its
+terminal state), `calling.voicemail.ready` (to the mailbox owners) and
+`calling.recording.ready` (to the principals who took part) to the Notification Service:
+written to `calling_notification_publications` in the same transaction as the fact and
+relayed every second to I1 (`POST /internal/v1/notification-events`), signed as
+`cfmeet.calling` for audience `cfmeet.notifications` — that service's trust bundle must grant
+`cfmeet.calling` `notifications-event.publish`. Recipients are CF Meet accounts only
+(`NATIVE_CF_USER` principals of a FIRST_PARTY tenant with a `cfmeet-user:<uuid>` reference);
+envelopes are ids only. The table lives in its own migration history
+(`calling_notification_publications_seaql_migrations`, applied by `calling-migration up`);
+with the variable set the service refuses to start until it is applied. Details:
+[`src/notification_publications.rs`](src/notification_publications.rs) and the
+[Notification Service runbook](../../docs/operations/notification-service-runbook.md).
+
 ### Feature switches (§95)
 
 Every Calling switch is server-side and stops NEW calls of its capability only. Live

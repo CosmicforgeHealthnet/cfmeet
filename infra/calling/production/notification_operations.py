@@ -116,11 +116,43 @@ PRODUCERS = {
     'developer-platform': dict(operation='activate-developer-publications',
                                containers=('developer-platform', 'developer-platform-worker'),
                                outbox='devplat_notification_publications'),
+    # Missed call / voicemail ready / recording ready (no legacy user notice; FIRST_PARTY tenants only).
+    'calling': dict(operation='activate-calling-publications', containers=('calling',),
+                    outbox='calling_notification_publications'),
+    # MEETING_INVITATION / MEETING_NOTIFICATION / ORGANIZATION_INVITATION through the fence.
     'meeting-service': dict(operation='activate-meeting-publications', containers=('meeting-service',),
-                            outbox=None),
+                            outbox='meeting_notification_publications', sealing=True),
 }
 GRANTS += tuple((spec['operation'], replica, issuer, PUBLICATION_PERMISSIONS)
                 for issuer, spec in PRODUCERS.items() for replica in REPLICAS)
+
+# N10: the Notification Service pulls the Hub's preferences (communications-preferences.export,
+# received by the Hub) and the Hub facade forwards U6 / U7 (notifications-user.forward,
+# received by both replicas).
+GRANTS += (('activate-preference-copy', 'communications', 'notifications', ('communications-preferences.export',)),) \
+    + tuple(('activate-preference-copy', replica, 'communications', ('notifications-user.forward',))
+            for replica in REPLICAS)
+
+# N12: the Account CRITICAL lane. The service claims / completes an Account lease (X6 / X7,
+# received by the Meeting Service) before it may send a CRITICAL message.
+GRANTS += (('activate-critical-lane', 'meeting-service', 'notifications', ('account-route-lease.claim',)),)
+CRITICAL_FALLBACK_KEY = 'meeting-account-fallback.key'
+CRITICAL_FALLBACK_TARGET = '/run/secrets/account-fallback.key'
+# Move order. After the passwordless sign-in (PR #97) only the device-linked notice and the
+# device-link step-up code are in the catalogue and can be delivered NEW; the sign-in,
+# email-change and action step-up codes are fenced but always decided OLD (UNPUBLISHABLE)
+# until the catalogue carries them, and the password categories have no producer left.
+CRITICAL_ORDER = ('SECURITY_DEVICE_LINKED', 'SECURITY_DEVICE_STEP_UP', 'AUTH_VERIFICATION',
+                  'SECURITY_PASSWORD_CHANGED', 'AUTH_PASSWORD_RESET')
+
+# N9: push. The service sends Web Push with Messaging's VAPID key (the key browser
+# subscriptions were made with); Messaging mirrors its registrations (I13); Calling's call
+# alerts use the fast lane (I3).
+GRANTS += tuple(('activate-messaging-push-mirror', replica, 'messaging', ('notifications-push-registration.sync',))
+                for replica in REPLICAS) \
+    + tuple(('activate-calling-push', replica, 'calling', ('notifications-call-push.dispatch',)) for replica in REPLICAS)
+WEB_PUSH_TARGET = '/run/secrets/web-push-vapid.pem'
+WEB_PUSH_SUBJECT = 'https://cfmeet.com'
 
 FLAGGED = {'meeting-service': {'NOTIFICATION_OWNER_API_ENABLED': 'true'}}
 SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID', 'CFMEET_COMMUNICATION_ENVIRONMENT_ID',
@@ -149,9 +181,9 @@ def gate(category, channel, mode, facts):
     """Refusal reason, or None. ``facts``: email_provider, resend_done, owners_done."""
     if mode != 'ACTIVE':
         return None
-    if category in CRITICAL:
-        return ('%s is CRITICAL: ACTIVE needs gates E3/E4, a fallback drill within 7 days and live alerting '
-                '(N12); this version refuses it' % category)
+    if category in CRITICAL and not facts.get('critical_lane_done'):
+        return ('%s is CRITICAL: ACTIVE needs the Account CRITICAL lane (activate-critical-lane: X6/X7 lease '
+                'grant, fallback key) first' % category)
     if channel == 'EMAIL':
         if facts.get('email_provider') in (None, '', 'none'):
             return 'EMAIL ACTIVE needs a configured Notification Service email provider'
@@ -192,7 +224,8 @@ def activate_routing(cr, sha, run_id, confirm):
     cr.require_release(sha)
     env = cr.env_of('notifications')
     facts = dict(email_provider=env.get('NOTIFICATIONS_EMAIL_PROVIDER'), resend_done=cr.done('activate-resend-email'),
-                 owners_done=cr.done('activate-notifications-owners'))
+                 owners_done=cr.done('activate-notifications-owners'),
+                 critical_lane_done=cr.done('activate-critical-lane'))
     refusal = gate(category, channel, mode, facts)
     if refusal:
         raise RuntimeError('Routing gate: ' + refusal + '; nothing changed')
@@ -338,6 +371,70 @@ def activate_messaging_publications(cr, sha, run_id, confirm):
                         [('messaging', overrides)], post=post)
 
 
+# --- The service's HPKE sealing key (codes, tokens and addresses sealed by producers) --------
+# The private key opens sealed parts in the renderer only (NOTIFICATIONS_HPKE_PRIVATE_KEY_FILE on
+# both replicas, owned by the service user, 0400, never printed); producers get only the public
+# key (CF_NOTIFICATIONS_SEALING_KEY = <kid>:<base64url X25519 public key>). Generated once on the
+# VPS; a new pair is never generated over an existing one (sealed rows in flight would not open).
+HPKE_PRIVATE = 'notifications-hpke.key'
+HPKE_PUBLIC = 'notifications-hpke.pub'
+HPKE_TARGET = '/run/secrets/notifications-hpke.key'
+X25519_P = 2 ** 255 - 19
+
+
+def x25519_public(private):
+    """RFC 7748 X25519(k, 9): the public key of a 32-byte private key (clamped as the
+    Notification Service's HPKE library clamps it). Dependency-free: the VPS needs no extra
+    Python package."""
+    k = bytearray(private)
+    k[0] &= 248
+    k[31] &= 127
+    k[31] |= 64
+    scalar = int.from_bytes(bytes(k), 'little')
+    x1, x2, z2, x3, z3, swap = 9, 1, 0, 9, 1, 0
+    a24 = 121665
+    for t in reversed(range(255)):
+        bit = (scalar >> t) & 1
+        swap ^= bit
+        if swap:
+            x2, x3, z2, z3 = x3, x2, z3, z2
+        swap = bit
+        a, b = (x2 + z2) % X25519_P, (x2 - z2) % X25519_P
+        aa, bb = a * a % X25519_P, b * b % X25519_P
+        e = (aa - bb) % X25519_P
+        c, d = (x3 + z3) % X25519_P, (x3 - z3) % X25519_P
+        da, cb = d * a % X25519_P, c * b % X25519_P
+        x3 = (da + cb) ** 2 % X25519_P
+        z3 = x1 * (da - cb) ** 2 % X25519_P
+        x2 = aa * bb % X25519_P
+        z2 = e * (aa + a24 * e) % X25519_P
+    if swap:
+        x2, z2 = x3, z3
+    return (x2 * pow(z2, X25519_P - 2, X25519_P) % X25519_P).to_bytes(32, 'little')
+
+
+def sealing_key(cr, today=None):
+    """(kid, private key path, producer value) — generated once, then reused."""
+    import base64
+    import datetime
+    import os
+    import secrets
+    private, public = cr.p.SECRETS / HPKE_PRIVATE, cr.p.SECRETS / HPKE_PUBLIC
+    if not private.exists():
+        kid = 'notif-hpke-%s-1' % (today or datetime.date.today()).strftime('%Y-%m')
+        raw = secrets.token_bytes(32)
+        cr.p.write_private(private, base64.b64encode(raw).decode())
+        cr.p.write_private(public, '%s:%s' % (kid, base64.urlsafe_b64encode(x25519_public(raw)).decode().rstrip('=')))
+    uid = cr.SERVICES['notifications']['uid']
+    os.chown(private, uid, uid)
+    os.chmod(private, 0o400)
+    value = public.read_text().strip()
+    kid = value.split(':', 1)[0]
+    if not re.fullmatch(r'notif-hpke-\d{4}-\d{2}(-[a-z0-9]{1,8})?', kid):
+        raise RuntimeError('The sealing public key file is malformed')
+    return kid, private, value
+
+
 def producer_sql(cr, service):
     if service == 'meeting-service':
         return cr.meeting_psql
@@ -364,14 +461,23 @@ def activate_publications(cr, sha, run_id, producer):
     for container in spec['containers']:
         cr.has_signing_identity(container)
     overrides = {'CF_NOTIFICATIONS_BASE_URL': cr.private_url(notif_tls)}
+    changes = []
+    if spec.get('sealing'):
+        # Sealed parts (invitation tokens / addresses): the service opens them, the producer
+        # only seals. Both replicas get the private key, the producer the public one.
+        kid, private, public = sealing_key(cr)
+        changes += [(replica, {'NOTIFICATIONS_HPKE_PRIVATE_KEY_FILE': HPKE_TARGET, 'NOTIFICATIONS_HPKE_KEY_ID': kid},
+                     {'mounts': [(private, HPKE_TARGET)]}) for replica in REPLICAS]
+        overrides['CF_NOTIFICATIONS_SEALING_KEY'] = public
+        cr.emit('notificationsSealingKey', {'kid': kid, 'replicas': list(REPLICAS), 'producer': producer})
+    changes += [(container, dict(overrides)) for container in spec['containers']]
 
     def post():
         status = private_status(cr, probe)
         if status != '401':
             raise RuntimeError('Notification Service I1 answers %s to an unsigned probe after activation' % status)
 
-    cr.apply_activation(spec['operation'], sha, run_id,
-                        [(container, dict(overrides)) for container in spec['containers']], post=post)
+    cr.apply_activation(spec['operation'], sha, run_id, changes, post=post)
 
 
 # --- Routing fence v1 (Document 4 §9.6): producers' protocol and the rollback floor ---------
@@ -449,8 +555,24 @@ def require_fence_protocol(cr, service, minimum=1):
 # decision skips the legacy path, so the service must deliver it on the same channels).
 FENCE_ROUTABLE = {
     ('messaging', 'MESSAGE_WAKEUPS'): dict(publications='activate-messaging-publications',
-                                           service_channels=('PUSH',), service_category='MESSAGE_WAKEUPS'),
+                                           service_channels=('PUSH',), service_category='MESSAGE_WAKEUPS',
+                                           new_requires=('activate-messaging-push-mirror',)),
+    # Meeting's non-critical email categories (N11). The CRITICAL ones (AUTH_*, SECURITY_*) stay
+    # LEGACY_ONLY until the N12 lease path exists.
+    ('meeting-service', 'MEETING_INVITATION'): dict(publications='activate-meeting-publications',
+                                                    service_channels=('EMAIL',), service_category='MEETING_INVITATION'),
+    ('meeting-service', 'ORGANIZATION_INVITATION'): dict(publications='activate-meeting-publications',
+                                                         service_channels=('EMAIL',),
+                                                         service_category='ORGANIZATION_INVITATION'),
+    ('meeting-service', 'MEETING_NOTIFICATION'): dict(publications='activate-meeting-publications',
+                                                      service_channels=('EMAIL', 'IN_APP'),
+                                                      service_category='MEETING_NOTIFICATION'),
 }
+# N12: the CRITICAL categories, once the lane is activated (lease grant, fallback key).
+FENCE_ROUTABLE.update({
+    ('meeting-service', category): dict(publications='activate-critical-lane', service_channels=('EMAIL',),
+                                        service_category=category)
+    for category in CRITICAL_ORDER})
 FENCE_MODES = {'legacy-only': 'LEGACY_ONLY', 'shadow': 'SHADOW', 'fenced-old': 'FENCED_OLD', 'fenced-new': 'FENCED_NEW'}
 # FENCED_NEW routes every new decision NEW (canary 100); the canary percentage is not a
 # workflow input (confirm accepts letters and hyphens only).
@@ -517,6 +639,9 @@ def fence_gate(service, category, mode, before, facts):
     if not facts.get('publications_done'):
         return '%s needs %s first' % (mode, spec['publications'])
     if mode == 'FENCED_NEW':
+        missing = [op for op in spec.get('new_requires', ()) if op not in facts.get('done', ())]
+        if missing:
+            return 'FENCED_NEW needs %s first' % ', '.join(missing)
         # Document 4 §9.4: OLD -> NEW only through SHADOW (observed) or FENCED_OLD.
         if before not in ('SHADOW', 'FENCED_OLD', 'FENCED_NEW'):
             return 'FENCED_NEW needs SHADOW or FENCED_OLD first (now %s)' % before
@@ -545,7 +670,8 @@ def activate_fence(cr, sha, run_id, confirm):
     spec = FENCE_ROUTABLE.get((service, category)) or {}
     facts = dict(protocol=routing_protocol(cr, service),
                  publications_done=bool(spec) and cr.done(spec['publications']),
-                 service_modes=service_modes(cr, spec['service_category']) if mode == 'FENCED_NEW' else {})
+                 service_modes=service_modes(cr, spec['service_category']) if mode == 'FENCED_NEW' else {},
+                 done=tuple(op for op in spec.get('new_requires', ()) if cr.done(op)))
     refusal = fence_gate(service, category, mode, before['mode'], facts)
     if refusal:
         raise RuntimeError('Routing fence gate: ' + refusal + '; nothing changed')
@@ -688,3 +814,259 @@ def activate_email(cr, sha, run_id, confirm):
 
     cr.apply_activation('activate-notifications-email', sha, run_id,
                         [(replica, dict(overrides), {'mounts': list(mounts)}) for replica in REPLICAS], post=post)
+
+
+# --- N10: preference copy and the Hub facade switch ---------------------------------------------
+PREFERENCE_VERIFY_SECONDS = 600
+PREFERENCE_KINDS = ('ACCOUNT', 'CONVERSATION', 'CONTACT')
+
+
+def _hub_sql(cr):
+    return lambda q: cr.release.db_sql(cr.SERVICES['communications']['db'], q)
+
+
+def _ns_sql(cr):
+    return lambda q: cr.release.db_sql(cr.SERVICES['notifications']['db'], q)
+
+
+def copy_state(cr):
+    out = _ns_sql(cr)("SELECT row_to_json(c) FROM (SELECT mode, phase, snapshots_completed, rows_written, "
+                      "rows_unchanged, rows_skipped, changes_applied, last_error, verify_requested_at, verified_at, "
+                      "verification FROM notif_preference_copy WHERE singleton) c;")
+    return json.loads(out or 'null')
+
+
+def hub_authority(cr):
+    out = _hub_sql(cr)("SELECT row_to_json(a) FROM (SELECT mode, version FROM communication_preference_authority "
+                       "WHERE singleton) a;")
+    return json.loads(out or 'null')
+
+
+def set_hub_authority(cr, mode, run_id, expected):
+    assert mode in ('HUB', 'FREEZE', 'SERVICE') and re.fullmatch(r'[0-9-]{1,32}', run_id)
+    guard = '' if expected is None else " AND mode = '%s'" % expected
+    out = _hub_sql(cr)("WITH u AS (UPDATE communication_preference_authority SET mode = '%s', version = version + 1, "
+                       "changed_by_run = '%s', changed_at = now() WHERE singleton%s RETURNING mode) "
+                       "SELECT count(*) FROM u;" % (mode, run_id, guard))
+    if (out or '').strip() != '1':
+        raise RuntimeError('The Hub preference authority changed concurrently; nothing applied')
+
+
+def set_copy_mode(cr, mode, run_id):
+    assert mode in ('OFF', 'RUN') and re.fullmatch(r'[0-9-]{1,32}', run_id)
+    _ns_sql(cr)("UPDATE notif_preference_copy SET mode = '%s', version = version + 1, changed_by_run = '%s', "
+                "updated_at = now() WHERE singleton;" % (mode, run_id))
+
+
+def activate_preference_copy(cr, sha, run_id, confirm):
+    """Grants the export / facade permissions and starts the copy + catch-up (W7). The Hub
+    stays the preference authority (mode HUB); nothing a user sees changes."""
+    cr.require_release(sha)
+    for op in ('activate-notifications-owners', 'activate-communications-publications'):
+        if not cr.done(op):
+            raise RuntimeError('The preference copy needs %s first' % op)
+    if not copy_state(cr):
+        raise RuntimeError('The Notification Service has no preference copy control row; release it first')
+    if not hub_authority(cr):
+        raise RuntimeError('The Hub has no preference authority row; release it first')
+
+    def post():
+        set_copy_mode(cr, 'RUN', run_id)
+        cr.emit('preferenceCopy', {'mode': 'RUN', 'state': copy_state(cr)})
+
+    cr.apply_activation('activate-preference-copy', sha, run_id, [], post=post)
+
+
+def verification_complete(doc):
+    if not isinstance(doc, dict) or doc.get('complete') is not True:
+        return False
+    for kind in PREFERENCE_KINDS:
+        k = doc.get(kind) or doc.get(kind.lower()) or {}
+        if not k.get('complete') or k.get('different') or k.get('skipped') \
+                or not (k.get('equal') == k.get('hubRows') == k.get('serviceRows')):
+            return False
+    return True
+
+
+def activate_preference_authority(cr, sha, run_id, confirm, sleep=None, clock=None):
+    """Freeze the Hub preference writes, run the final copy pass and verification, and move the
+    Hub endpoints to the Notification Service only when every kind matches exactly; otherwise
+    back to HUB. Journaled; rollback sets HUB."""
+    import time
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    cr.require_release(sha)
+    if not cr.done('activate-preference-copy'):
+        raise RuntimeError('activate-preference-copy first')
+    state = copy_state(cr)
+    if not state or state.get('mode') != 'RUN' or state.get('phase') != 'CATCH_UP' \
+            or (state.get('snapshots_completed') or 0) < 1 or state.get('last_error'):
+        raise RuntimeError('The preference copy is not caught up (needs RUN, CATCH_UP, one snapshot, no error): %s'
+                           % json.dumps({k: state.get(k) for k in ('mode', 'phase', 'snapshots_completed',
+                                                                   'last_error')} if state else None))
+    if (hub_authority(cr) or {}).get('mode') != 'HUB':
+        raise RuntimeError('The Hub preference authority is not HUB')
+    entry = cr.begin('activate-preference-authority', sha, run_id)
+    entry['preferenceAuthority'] = dict(before='HUB', after='SERVICE')
+    cr.commit(entry)
+    try:
+        set_hub_authority(cr, 'FREEZE', run_id, 'HUB')
+        _ns_sql(cr)("UPDATE notif_preference_copy SET verify_requested_at = clock_timestamp() WHERE singleton;")
+        deadline = clock() + PREFERENCE_VERIFY_SECONDS
+        while True:
+            state = copy_state(cr)
+            if state.get('verified_at') and state.get('verify_requested_at') \
+                    and state['verified_at'] >= state['verify_requested_at']:
+                break
+            if clock() >= deadline:
+                raise RuntimeError('The final preference pass did not finish in %ds' % PREFERENCE_VERIFY_SECONDS)
+            sleep(5)
+        cr.emit('preferenceVerification', state.get('verification'))
+        if not verification_complete(state.get('verification')):
+            raise RuntimeError('Preference verification did not match exactly; the Hub stays the authority')
+        set_hub_authority(cr, 'SERVICE', run_id, 'FREEZE')
+        set_copy_mode(cr, 'OFF', run_id)
+    except Exception:
+        try:
+            set_hub_authority(cr, 'HUB', run_id, None)
+        finally:
+            entry['status'] = 'failed'
+            cr.commit(entry)
+        raise
+    entry['status'] = 'done'
+    cr.commit(entry)
+    cr.emit('preferenceAuthority', {'mode': 'SERVICE'})
+
+
+def undo_preference_authority(cr, record, run_id):
+    set_hub_authority(cr, 'HUB', run_id, None)
+    cr.emit('preferenceAuthorityRestored', {'mode': 'HUB'})
+
+
+# --- N12: the Account CRITICAL lane ------------------------------------------------------------
+def fallback_key(cr):
+    """The Account fallback key (32 bytes, base64), generated once on the VPS for the Meeting
+    Service only (never on the Notification Service, never regenerated over an existing key:
+    rows sealed with it must still open). Never printed."""
+    import base64
+    import os
+    import secrets
+    path = cr.p.SECRETS / CRITICAL_FALLBACK_KEY
+    if not path.exists():
+        cr.p.write_private(path, base64.b64encode(secrets.token_bytes(32)).decode())
+    os.chmod(path, 0o400)
+    return path
+
+
+def meeting_health(cr):
+    """Meeting /health as JSON (routingProtocol, criticalFallbackKey)."""
+    s = cr.SERVICES['meeting-service']
+    out = cr.p.run('docker', 'run', '--rm', '--network', 'container:' + s['container'], cr.PROBE_IMAGE,
+                   '-sS', '--max-time', '4', 'http://127.0.0.1:%d%s' % (s['port'], s['health']))
+    try:
+        return json.loads(out or '{}')
+    except ValueError:
+        return {}
+
+
+def activate_critical_lane(cr, sha, run_id, confirm):
+    """Grants X6 / X7 (account-route-lease.claim) to the service, mounts the Account fallback key
+    on the Meeting Service, proves the public host refuses the lease routes. Nothing changes for
+    users: every CRITICAL category stays where it is until an activate-notification-fence run."""
+    cr.require_release(sha)
+    for op in ('activate-meeting-publications', 'activate-notifications-email'):
+        if not cr.done(op):
+            raise RuntimeError('The critical lane needs %s first' % op)
+    require_fence_protocol(cr, 'meeting-service')
+    deny_owner_routes_publicly(cr)
+    key = fallback_key(cr)
+
+    def post():
+        health = meeting_health(cr)
+        if health.get('criticalFallbackKey') is not True or not isinstance(health.get('routingProtocol'), int):
+            raise RuntimeError('The Meeting Service does not report its fallback key and routing protocol '
+                               '(criticalFallbackKey %s, routingProtocol %s)'
+                               % (health.get('criticalFallbackKey'), health.get('routingProtocol')))
+        cr.emit('criticalLane', {'criticalFallbackKey': True, 'routingProtocol': health['routingProtocol']})
+
+    cr.apply_activation('activate-critical-lane', sha, run_id,
+                        [('meeting-service', {'CF_ACCOUNT_FALLBACK_KEY_FILE': CRITICAL_FALLBACK_TARGET},
+                          {'mounts': [(key, CRITICAL_FALLBACK_TARGET)]})], post=post)
+
+
+# --- N9: push --------------------------------------------------------------------------------
+def notifications_ready(cr, name='notifications'):
+    s = cr.SERVICES[name]
+    out = cr.p.run('docker', 'run', '--rm', '--network', 'container:' + s['container'], cr.PROBE_IMAGE,
+                   '-sS', '--max-time', '4', 'http://127.0.0.1:%d%s' % (s['port'], s['health']))
+    try:
+        return json.loads(out or '{}')
+    except ValueError:
+        return {}
+
+
+def activate_push(cr, sha, run_id, confirm):
+    """The service's live push provider with Messaging's existing VAPID key (never a new key:
+    every browser subscription was made with it). A service-owned 0400 copy of the key file,
+    mounted read-only on both replicas. APNs / FCM stay unconfigured (no credentials)."""
+    import messaging_runtime
+    import os
+    cr.require_release(sha)
+    if not cr.done('activate-web-push'):
+        raise RuntimeError('No Messaging VAPID key yet: activate-web-push first')
+    source = messaging_runtime.WORK / cr.WEB_PUSH_KEY_NAME
+    if not source.is_file() or source.stat().st_mode & 0o077:
+        raise RuntimeError('The Messaging VAPID key file is missing or unsafe')
+    if not source.read_text().lstrip().startswith('-----BEGIN PRIVATE KEY-----'):
+        raise RuntimeError('The Messaging VAPID key is not a PKCS#8 PEM')
+    uid = cr.SERVICES['notifications']['uid']
+    copy = cr.p.SECRETS / 'notifications-web-push-vapid.pem'
+    cr.p.write_private(copy, source.read_text())
+    os.chown(copy, uid, uid)
+    os.chmod(copy, 0o400)
+    overrides = {'NOTIFICATIONS_PUSH_PROVIDER': 'live', 'NOTIFICATIONS_PUSH_WEB_VAPID_KEY_FILE': WEB_PUSH_TARGET,
+                 'NOTIFICATIONS_PUSH_WEB_SUBJECT': WEB_PUSH_SUBJECT}
+    allowed = cr.env_of('messaging').get('MESSAGING_PUSH_WEB_ALLOWED_HOSTS')
+    if allowed:
+        overrides['NOTIFICATIONS_PUSH_WEB_ALLOWED_HOSTS'] = allowed
+
+    def post():
+        for replica in REPLICAS:
+            key = notifications_ready(cr, replica).get('webPushApplicationServerKey')
+            if not key:
+                raise RuntimeError('%s reports no Web Push application server key after activation' % replica)
+        cr.emit('notificationsPush', {'provider': 'live', 'webPushApplicationServerKey': key})
+
+    cr.apply_activation('activate-notifications-push', sha, run_id,
+                        [(replica, dict(overrides), {'mounts': [(copy, WEB_PUSH_TARGET)]}) for replica in REPLICAS],
+                        post=post)
+
+
+def activate_messaging_push_mirror(cr, sha, run_id, confirm):
+    """Messaging copies its push registrations of CF Meet first-party accounts to the service
+    (I13) and keeps them in sync; its own registrations and push stay unchanged."""
+    cr.require_release(sha)
+    for op in ('activate-notifications-push', 'activate-messaging-publications'):
+        if not cr.done(op):
+            raise RuntimeError('The registration mirror needs %s first' % op)
+    env = cr.env_of('messaging')
+    missing = [k for k in ('CF_NOTIFICATIONS_BASE_URL', 'CF_COMMUNICATIONS_PERSONAL_TENANT_ID',
+                           'CF_COMMUNICATIONS_PERSONAL_APPLICATION_ID', 'CF_COMMUNICATIONS_PERSONAL_ENVIRONMENT_ID')
+               if not env.get(k)]
+    if missing:
+        raise RuntimeError('Messaging lacks %s' % ', '.join(missing))
+    cr.apply_activation('activate-messaging-push-mirror', sha, run_id,
+                        [('messaging', {'MESSAGING_PUSH_REGISTRATION_MIRROR': 'on'})])
+
+
+def activate_calling_push(cr, sha, run_id, confirm):
+    """Calling's incoming-call alerts through the service's fast lane (I3), first-party
+    recipients only, fire-and-forget (ringing never waits)."""
+    cr.require_release(sha)
+    for op in ('activate-notifications-push', 'activate-calling-publications'):
+        if not cr.done(op):
+            raise RuntimeError('Call push needs %s first' % op)
+    if not cr.env_of('calling').get('CF_NOTIFICATIONS_BASE_URL'):
+        raise RuntimeError('Calling has no CF_NOTIFICATIONS_BASE_URL')
+    cr.apply_activation('activate-calling-push', sha, run_id,
+                        [('calling', {'CALLING_PUSH_TRANSPORT': 'notifications'})])

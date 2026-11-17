@@ -31,6 +31,10 @@ pub enum Error {
     RecentAuthentication,
     #[error("dependency unavailable")]
     Unavailable,
+    /// Roadmap N10 write freeze (< 60 s) while notification preferences move to the
+    /// Notification Service: 503 + `Retry-After: 5`; clients retry.
+    #[error("notification preferences are briefly read-only; retry shortly")]
+    PreferencesFrozen,
     #[error("the resource already exists")]
     Duplicate,
     #[error("this action is not allowed")]
@@ -59,7 +63,9 @@ impl Error {
             Self::Pending => "REQUEST_PENDING",
             Self::RateLimited => "RATE_LIMITED",
             Self::RecentAuthentication => "RECENT_AUTHENTICATION_REQUIRED",
-            Self::Unavailable | Self::Database(_) => "COMMUNICATIONS_UNAVAILABLE",
+            Self::Unavailable | Self::Database(_) | Self::PreferencesFrozen => {
+                "COMMUNICATIONS_UNAVAILABLE"
+            }
             Self::Duplicate => "ALREADY_EXISTS",
             Self::ActionNotAllowed => "ACTION_NOT_ALLOWED",
             Self::DependencyNotConfigured => "DEPENDENCY_NOT_CONFIGURED",
@@ -78,9 +84,10 @@ impl Error {
                 StatusCode::CONFLICT
             }
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
-            Self::Unavailable | Self::Database(_) | Self::DependencyNotConfigured => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
+            Self::Unavailable
+            | Self::Database(_)
+            | Self::DependencyNotConfigured
+            | Self::PreferencesFrozen => StatusCode::SERVICE_UNAVAILABLE,
             Self::ActionNotAllowed | Self::NotActivated => StatusCode::FORBIDDEN,
             Self::PolicyValidation => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Owner { status, .. } => {
@@ -108,6 +115,11 @@ impl IntoResponse for Error {
             response
                 .headers_mut()
                 .insert("x-cfmeet-route", HeaderValue::from_static("unmatched"));
+        }
+        if matches!(self, Self::PreferencesFrozen) {
+            response
+                .headers_mut()
+                .insert("retry-after", HeaderValue::from_static("5"));
         }
         if matches!(self, Self::RateLimited) {
             response

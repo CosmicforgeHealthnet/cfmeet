@@ -21,13 +21,37 @@ for (const [path, ops] of Object.entries(contract.paths as Record<string, Record
   }
 }
 
+// The password routes the passwordless backend (PR #97) retired. The app still calls them
+// until its sign-in screens move to the one-time-code flow (docs/frontend/passwordless-auth-handover.md);
+// they fail against production meanwhile (owner decision 2026-11-17). Named here so that any
+// OTHER route drifting from the contract still fails, and this list can only shrink.
+const RETIRED_PASSWORD_ROUTES = new Set([
+  "login: POST /api/v1/auth/login",
+  "register: POST /api/v1/auth/register",
+  "verifyEmail: POST /api/v1/auth/verify-email",
+  "resendVerification: POST /api/v1/auth/resend-verification",
+  "forgotPassword: POST /api/v1/auth/forgot-password",
+  "verifyResetToken: POST /api/v1/auth/verify-reset-token",
+  "resetPassword: POST /api/v1/auth/reset-password",
+  "changePassword: POST /api/v1/auth/change-password",
+]);
+
 test("every mobile route is an operation of the served contract", () => {
   const missing: string[] = [];
   for (const [name, route] of Object.entries(ROUTES)) {
     const key = `${route.method} ${routeTemplate(route as never)}`;
-    if (!operations.has(key)) missing.push(`${name}: ${key}`);
+    if (!operations.has(key) && !RETIRED_PASSWORD_ROUTES.has(`${name}: ${key}`)) missing.push(`${name}: ${key}`);
   }
   assert.deepEqual(missing, [], `routes not in the contract:\n${missing.join("\n")}`);
+});
+
+test("the retired password routes are exactly the ones still awaiting the passwordless migration", () => {
+  for (const entry of RETIRED_PASSWORD_ROUTES) {
+    const [name, key] = entry.split(": ");
+    assert.ok(!operations.has(key), `${key} is served again: drop it from RETIRED_PASSWORD_ROUTES`);
+    const route = (ROUTES as Record<string, { method: string }>)[name];
+    if (route) assert.equal(`${route.method} ${routeTemplate(route as never)}`, key, `${name} changed`);
+  }
 });
 
 test("no mobile route uses a retired legacy meeting path", () => {

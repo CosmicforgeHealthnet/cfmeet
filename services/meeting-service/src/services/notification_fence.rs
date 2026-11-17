@@ -1,12 +1,22 @@
 //! Routing fence protocol v1 (Notification Service blueprint Document 4 §9): one system
 //! per message, decided, recorded and enforced inside the producer's own transaction.
 //!
-//! Foundation only (roadmap N7a): no producer calls these functions yet, so every message
-//! still takes the old path and the legacy guard triggers stay inert (`LEGACY_ONLY`).
+//! Producers (roadmap N7 / N11): the STANDARD categories `MEETING_INVITATION`,
+//! `MEETING_NOTIFICATION` and `ORGANIZATION_INVITATION` are routed by
+//! [`crate::services::notifications`] through [`current_mode`] and [`route_message_capable`]
+//! (publications: [`crate::services::notification_publications`]). The CRITICAL categories
+//! (roadmap N12) are routed by [`crate::services::critical_notifications`] at their legacy
+//! enqueue points (`account_notification_outbox`, X6 / X7 leases, AUTO / FORCED failover).
 //!
 //! * [`route_message`] — §9.3: sticky decision per idempotency key (`SELECT … FOR UPDATE`),
 //!   mode + canary + CRITICAL `FORCED` fallback, `reason = ROUTED`. The caller writes the
 //!   old-path row (route OLD) or the outbox row (route NEW) on the SAME transaction.
+//!   [`route_message_capable`] also turns a `NEW` route the event cannot take (audience
+//!   larger than one envelope, no complete catalogue envelope) into `OLD` with reason
+//!   `RECIPIENT_LIMIT` / `UNPUBLISHABLE`.
+//! * [`current_mode`] — the category's mode, read before anything is routed (`None`: no
+//!   fence history, exactly as `LEGACY_ONLY`); never fails inside a transaction for a
+//!   missing table.
 //! * [`reroute_unacked`] — §9.5: NEW → OLD (`REROUTED_UNACKED`) for a decision the service
 //!   never acknowledged; the CRITICAL outbox row becomes `SUPERSEDED`. The caller must
 //!   first have confirmed with the I1 `dryRun` probe that the service answers `UNKNOWN`,
@@ -205,11 +215,19 @@ pub enum DecisionReason {
     ReroutedCriticalLease,
     AutoFailover,
     ReroutedPossibleDuplicate,
+    /// Decided `OLD` although the canary picked `NEW`: the audience does not fit one
+    /// Notification Service envelope (fence history migration 2).
+    RecipientLimit,
+    /// Decided `OLD` although the canary picked `NEW`: the notification has no complete
+    /// catalogue envelope (fence history migration 2).
+    Unpublishable,
 }
 
 impl DecisionReason {
     pub fn as_str(self) -> &'static str {
         match self {
+            DecisionReason::RecipientLimit => "RECIPIENT_LIMIT",
+            DecisionReason::Unpublishable => "UNPUBLISHABLE",
             DecisionReason::Routed => "ROUTED",
             DecisionReason::ReroutedUnacked => "REROUTED_UNACKED",
             DecisionReason::ReroutedCancelled => "REROUTED_CANCELLED",
@@ -435,18 +453,46 @@ pub async fn route_message<C: ConnectionTrait>(
     category: MeetingCategory,
     expires_at: DateTime<Utc>,
 ) -> Result<RoutedMessage, DbErr> {
+    route_message_capable(conn, key, category, expires_at, Ok(())).await
+}
+
+/// [`route_message`] for a message whose Notification Service event may not exist:
+/// `new_capable = Err(reason)` (`RecipientLimit` or `Unpublishable`) turns a `NEW` route
+/// into `OLD` recorded with that reason, so the legacy path keeps delivering it whatever
+/// the canary says (never dropped). Needs fence history migration 2 for those reasons.
+pub async fn route_message_capable<C: ConnectionTrait>(
+    conn: &C,
+    key: &str,
+    category: MeetingCategory,
+    expires_at: DateTime<Utc>,
+    new_capable: Result<(), DecisionReason>,
+) -> Result<RoutedMessage, DbErr> {
     validate_key(key)?;
     if let Some(existing) = lock_decision(conn, key).await? {
         return Ok(existing.sticky());
     }
     let state = routing_state(conn, category).await?;
-    let (route, shadow) = decide_route(key, &state, category.is_critical());
+    let (mut route, mut shadow) = decide_route(key, &state, category.is_critical());
+    let mut reason = DecisionReason::Routed;
+    if route == Route::New {
+        if let Err(r) = new_capable {
+            if !matches!(
+                r,
+                DecisionReason::RecipientLimit | DecisionReason::Unpublishable
+            ) {
+                return Err(DbErr::Custom("invalid capability reason".into()));
+            }
+            route = Route::Old;
+            reason = r;
+            shadow = false;
+        }
+    }
     let decision_id = Uuid::new_v4();
     let inserted = conn
         .query_one(stmt(
             "INSERT INTO notification_route_decisions
                  (idempotency_key, decision_id, category, route, routing_version, reason, expires_at)
-             VALUES ($1, $2, $3, $4, $5, 'ROUTED', $6)
+             VALUES ($1, $2, $3, $4, $5, $7, $6)
              ON CONFLICT (idempotency_key) DO NOTHING
              RETURNING decision_id",
             vec![
@@ -456,6 +502,7 @@ pub async fn route_message<C: ConnectionTrait>(
                 route.as_str().into(),
                 state.routing_version.into(),
                 expires_at.into(),
+                reason.as_str().into(),
             ],
         ))
         .await?;
@@ -498,7 +545,57 @@ async fn reroute_to_old<C: ConnectionTrait>(
         vec![decision_id.into()],
     ))
     .await?;
+    // A STANDARD publication still waiting for I1 is never posted after the reroute.
+    if relation_exists(conn, "meeting_notification_publications").await? {
+        conn.execute(stmt(
+            "UPDATE meeting_notification_publications
+                SET state = 'SUPERSEDED', last_error = 'SUPERSEDED', completed_at = now(),
+                    envelope = envelope - 'sealed'
+              WHERE decision_id = $1 AND state = 'PENDING'",
+            vec![decision_id.into()],
+        ))
+        .await?;
+    }
     row.try_get("", "decision_version")
+}
+
+/// Whether `public.<table>` exists (a read that cannot fail for a missing table, so it is
+/// safe inside a transaction).
+async fn relation_exists<C: ConnectionTrait>(conn: &C, table: &str) -> Result<bool, DbErr> {
+    conn.query_one(stmt(
+        "SELECT to_regclass('public.' || $1) IS NOT NULL AS present",
+        vec![table.into()],
+    ))
+    .await?
+    .map(|r| r.try_get::<bool>("", "present"))
+    .transpose()
+    .map(|p| p.unwrap_or(false))
+}
+
+/// The routing mode of `category`, read before a producer routes anything. `None` when
+/// the fence history is not applied (no `notification_routing_state`) or the category has
+/// no row: the pre-fence behaviour, exactly as `LEGACY_ONLY`. Safe inside the caller's
+/// transaction (a missing table is detected without a failing statement).
+pub async fn current_mode<C: ConnectionTrait>(
+    conn: &C,
+    category: MeetingCategory,
+) -> Result<Option<RoutingMode>, DbErr> {
+    if !relation_exists(conn, "notification_routing_state").await? {
+        return Ok(None);
+    }
+    let Some(row) = conn
+        .query_one(stmt(
+            "SELECT mode FROM notification_routing_state WHERE category = $1",
+            vec![category.as_str().into()],
+        ))
+        .await?
+    else {
+        return Ok(None);
+    };
+    let mode: String = row.try_get("", "mode")?;
+    RoutingMode::parse(&mode)
+        .map(Some)
+        .ok_or_else(|| DbErr::Custom("unknown routing mode".into()))
 }
 
 /// Outcome of [`reroute_unacked`].

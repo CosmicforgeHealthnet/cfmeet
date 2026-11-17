@@ -678,6 +678,17 @@ impl AppCallService {
                 now,
             )
             .await?;
+        // Roadmap N7: `calling.voicemail.ready` to the mailbox's owners (CF Meet accounts
+        // only), atomic with READY.
+        if self.calls.config().notification_publications {
+            let owners = config::mailbox_owners(&txn, scope_of(&call), &mailbox)
+                .await
+                .map_err(super::enterprise_error)?;
+            crate::notification_publications::enqueue_voicemail_ready(
+                &txn, &call, capture_id, owners,
+            )
+            .await?;
+        }
         self.calls
             .record_artifact_usage_in(
                 &txn,

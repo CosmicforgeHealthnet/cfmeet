@@ -409,20 +409,25 @@ pub const CATALOGUE: &[EventSpec] = &[
         "CONNECTION",
         CONNECTION,
     ),
-    e(
-        13,
-        "messaging.message.created",
-        MSG,
-        High,
-        "MESSAGES",
-        "CONVERSATION",
-        &[
-            "conversationId",
-            "conversationKind",
-            "eventSequence",
-            "securityProfile",
-        ],
-    ),
+    // `sequence` (optional, 1.1.0, roadmap N9): the message sequence, so the wake-up keeps
+    // Messaging's 5-key metadata payload.
+    EventSpec {
+        optional_data: &["sequence"],
+        ..e(
+            13,
+            "messaging.message.created",
+            MSG,
+            High,
+            "MESSAGES",
+            "CONVERSATION",
+            &[
+                "conversationId",
+                "conversationKind",
+                "eventSequence",
+                "securityProfile",
+            ],
+        )
+    },
     e(
         14,
         "messaging.member.invited",

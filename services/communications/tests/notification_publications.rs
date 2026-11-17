@@ -782,7 +782,7 @@ async fn expired_rows_are_never_sent_and_settled_rows_are_purged() {
 #[tokio::test]
 async fn nothing_is_written_or_sent_without_the_notification_service() {
     let h = Harness::new().await;
-    assert!(!h.state.config.notifications_configured);
+    assert!(!h.state.config.notifications_publications);
     let (a, b) = pair(&h).await;
     let r = request(&h, &a, &b).await;
     accept(&h, &b, r, Uuid::new_v4()).await;

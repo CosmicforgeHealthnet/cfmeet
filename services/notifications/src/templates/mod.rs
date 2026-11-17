@@ -279,9 +279,14 @@ pub fn push_payload(
         if let Some(c) = data.get("conversationId").and_then(Value::as_str) {
             m.insert("conversationId".into(), json!(c));
         }
-        if let Some(s) = data.get("eventSequence") {
-            if s.is_number() || s.is_string() {
-                m.insert("eventSequence".into(), s.clone());
+        // Parity with Messaging's legacy job payload (the 5 metadata keys `v`, `type`,
+        // `conversationId`, `eventSequence`, `sequence`): `sequence` is the message
+        // sequence, optional in the event (1.1.0).
+        for key in ["eventSequence", "sequence"] {
+            if let Some(s) = data.get(key) {
+                if s.is_number() || s.is_string() {
+                    m.insert(key.into(), s.clone());
+                }
             }
         }
         return Value::Object(m);
@@ -608,6 +613,26 @@ mod tests {
             0,
         );
         assert!(cf_push_transport::adapters::metadata(&m).is_some());
+        // N9 parity: exactly Messaging's legacy job payload (5 keys), nothing else.
+        let full = push_payload(
+            "message.created",
+            &data(&[
+                ("conversationId", json!("c")),
+                ("conversationKind", json!("DIRECT")),
+                ("eventSequence", json!(4)),
+                ("sequence", json!(3)),
+                ("securityProfile", json!("PRIVATE_E2EE")),
+            ]),
+            9,
+        );
+        assert_eq!(
+            full,
+            json!({ "v": 1, "type": "message", "conversationId": "c", "eventSequence": 4, "sequence": 3 })
+        );
+        assert_eq!(
+            cf_push_transport::adapters::metadata(&full).unwrap().len(),
+            5
+        );
         let i = push_payload("contact.requested", &data(&[("actorRef", json!("x"))]), 7);
         assert!(cf_push_transport::adapters::metadata(&i).is_some());
         assert_eq!(i["type"], "inbox");

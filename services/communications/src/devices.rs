@@ -523,7 +523,7 @@ impl State {
         // A missing or malformed owner answer is a dependency failure, never a
         // null or optimistic provider state.
         let push = PushStatus::parse(&v).ok_or(Error::Unavailable)?;
-        let prefs = self.get_notification_preferences(p).await?;
+        let prefs = self.notification_preferences_embedded(p).await?;
         Ok(
             json!({"schemaVersion":1,"providers":push.services,"devices":push.devices,"pendingJobs":push.pending_jobs,"deadJobs":push.dead_jobs,
             "callRinging":{"owner":"CALLING","transport":"Calling signaling WebSocket; mobile push transport NOT_CONFIGURED"},

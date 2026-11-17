@@ -1,7 +1,7 @@
 //! The preference authority (roadmap N10; Document 4 §7.1, tables 14–17): account
 //! categories, the channel matrix, quiet hours, conversation and contact notification
 //! levels. Absent rows mean everything enabled (today's Hub defaults); SECURITY is fixed
-//! on and never stored. Every write increments `version` (optimistic concurrency via
+//! on and never stored (U7 refuses it; the copy never carries it). Every write increments `version` (optimistic concurrency via
 //! `expectedVersion`) and appends to the 7-day change log used for the rollback
 //! write-back to the Hub (Document 5 §6, 4.2).
 
@@ -433,12 +433,41 @@ impl PreferencesUpdate {
     }
 }
 
+/// Who made a service-side preference write (recorded in the change log): the Meeting
+/// relay (U7 directly) or the Hub preference facade (roadmap N10), which keeps the Hub
+/// mirror current. A rollback of the facade switch writes back only `Relay` changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    Relay,
+    HubFacade,
+}
+
+impl Origin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Origin::Relay => "RELAY",
+            Origin::HubFacade => "HUB_FACADE",
+        }
+    }
+}
+
 /// U7: applies a partial update atomically. Returns the new version.
 pub async fn update<C: TransactionTrait + ConnectionTrait>(
     conn: &C,
     account_ref: &str,
     u: &PreferencesUpdate,
     now: DateTime<Utc>,
+) -> Result<i64, UpdateError> {
+    update_from(conn, account_ref, u, now, Origin::Relay).await
+}
+
+/// U7 with the writer recorded in the change log.
+pub async fn update_from<C: TransactionTrait + ConnectionTrait>(
+    conn: &C,
+    account_ref: &str,
+    u: &PreferencesUpdate,
+    now: DateTime<Utc>,
+    origin: Origin,
 ) -> Result<i64, UpdateError> {
     u.validate(now)?;
     let txn = conn.begin().await?;
@@ -498,11 +527,12 @@ pub async fn update<C: TransactionTrait + ConnectionTrait>(
     if u.categories.is_some() || u.channels.is_some() || u.quiet_hours.is_some() {
         db::exec(
             &txn,
-            "INSERT INTO notif_preference_change_log (account_ref, scope, scope_ref, new_value, version) VALUES ($1, 'ACCOUNT', '', $2, $3)",
+            "INSERT INTO notif_preference_change_log (account_ref, scope, scope_ref, new_value, version, origin) VALUES ($1, 'ACCOUNT', '', $2, $3, $4)",
             vec![
                 account_ref.into(),
                 json!({ "categories": next.categories, "channels": next.channels, "quietHours": next.quiet_hours }).into(),
                 version.into(),
+                origin.as_str().into(),
             ],
         )
         .await?;
@@ -527,12 +557,13 @@ pub async fn update<C: TransactionTrait + ConnectionTrait>(
             }
             db::exec(
                 &txn,
-                "INSERT INTO notif_preference_change_log (account_ref, scope, scope_ref, new_value, version) VALUES ($1, 'CONVERSATION', $2, $3, $4)",
+                "INSERT INTO notif_preference_change_log (account_ref, scope, scope_ref, new_value, version, origin) VALUES ($1, 'CONVERSATION', $2, $3, $4, $5)",
                 vec![
                     account_ref.into(),
                     id.to_string().into(),
                     v.as_ref().map(|v| json!({"notifications": v.notifications, "mutedUntil": v.muted_until})).unwrap_or(json!({"notifications": "ALL"})).into(),
                     version.into(),
+                    origin.as_str().into(),
                 ],
             )
             .await?;
@@ -557,12 +588,13 @@ pub async fn update<C: TransactionTrait + ConnectionTrait>(
             }
             db::exec(
                 &txn,
-                "INSERT INTO notif_preference_change_log (account_ref, scope, scope_ref, new_value, version) VALUES ($1, 'CONTACT', $2, $3, $4)",
+                "INSERT INTO notif_preference_change_log (account_ref, scope, scope_ref, new_value, version, origin) VALUES ($1, 'CONTACT', $2, $3, $4, $5)",
                 vec![
                     account_ref.into(),
                     k.clone().into(),
                     json!({"notifications": v.as_ref().map(|v| v.notifications.as_str()).unwrap_or("ALL")}).into(),
                     version.into(),
+                    origin.as_str().into(),
                 ],
             )
             .await?;
@@ -584,14 +616,38 @@ async fn load_locked<C: ConnectionTrait>(
     load(conn, account_ref).await
 }
 
-/// Copy of the Hub's 7-boolean account preferences (Phase 4.2 copy / catch-up): writes
-/// only when the Hub version is newer than the copied one, never over a service-side
-/// edit made after the copy (`source_version` records the Hub version).
-#[derive(Debug, Clone, Deserialize)]
+// ---- Phase 4.2 copy / catch-up (roadmap N10) -----------------------------------------
+//
+// The Hub's rows arrive through its owner API (`crate::preference_copy`). Each copied row
+// records the Hub row version in `source_version`; a row is written only when the Hub
+// version is newer than the one already copied, so replays, overlapping pages and a
+// re-run copy never move a value backwards and never rewrite an unchanged row. For a
+// freshly copied row `version = source_version` (client-visible version continuity at
+// the facade switch); a row that already existed in the service keeps a monotonic
+// version. Before the switch the Hub is the authority for the fields it holds; after
+// it the Hub refuses to export (409), so a copy can never overwrite a service-side edit.
+
+/// A canonical `cfmeet-user:<uuid>` account reference.
+pub fn account_ref_ok(r: &str) -> bool {
+    r.strip_prefix("cfmeet-user:")
+        .and_then(|u| Uuid::parse_str(u).ok())
+        .is_some_and(|u| format!("cfmeet-user:{u}") == r)
+}
+
+/// A U7-valid contact reference.
+pub fn contact_ref_ok(k: &str) -> bool {
+    !k.is_empty()
+        && k.len() <= 64
+        && k.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'_' | b'-'))
+}
+
+/// One Hub account row: the 7 switches and the Hub row version.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HubPreferences {
     pub account_ref: String,
-    pub hub_version: i64,
+    pub version: i64,
     pub direct_messages: bool,
     pub group_messages: bool,
     pub incoming_calls: bool,
@@ -601,23 +657,66 @@ pub struct HubPreferences {
     pub meeting_invitations: bool,
 }
 
-/// Returns `true` when the row was written.
-pub async fn copy_from_hub<C: ConnectionTrait>(
-    conn: &C,
-    p: &HubPreferences,
-) -> Result<bool, DbErr> {
+/// One Hub conversation notification level.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubConversationPreference {
+    pub account_ref: String,
+    pub conversation_id: Uuid,
+    pub notifications: String,
+    #[serde(default)]
+    pub muted_until: Option<DateTime<Utc>>,
+    pub version: i64,
+}
+
+/// One Hub contact notification level (`contactRef` is the contact's account reference).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubContactPreference {
+    pub account_ref: String,
+    pub contact_ref: String,
+    pub notifications: String,
+    pub version: i64,
+}
+
+impl HubPreferences {
+    pub fn valid(&self) -> bool {
+        account_ref_ok(&self.account_ref) && self.version > 0
+    }
+}
+
+impl HubConversationPreference {
+    pub fn valid(&self) -> bool {
+        account_ref_ok(&self.account_ref)
+            && self.version > 0
+            && valid_level(&self.notifications)
+            && (self.muted_until.is_none() || self.notifications == "MUTED")
+    }
+}
+
+impl HubContactPreference {
+    pub fn valid(&self) -> bool {
+        account_ref_ok(&self.account_ref)
+            && contact_ref_ok(&self.contact_ref)
+            && self.version > 0
+            && valid_level(&self.notifications)
+    }
+}
+
+/// Copies one account row. Returns `true` when the row was written.
+pub async fn copy_account<C: ConnectionTrait>(conn: &C, p: &HubPreferences) -> Result<bool, DbErr> {
     let n = db::exec(
         conn,
-        "INSERT INTO notif_preferences (account_ref, version, direct_messages, group_messages, incoming_calls,
+        "INSERT INTO notif_preferences AS t (account_ref, version, direct_messages, group_messages, incoming_calls,
                 missed_calls, contact_requests, group_invitations, meeting_invitations, source_version)
-         VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9)
+         VALUES ($1, $9, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (account_ref) DO UPDATE SET
                 direct_messages = EXCLUDED.direct_messages, group_messages = EXCLUDED.group_messages,
                 incoming_calls = EXCLUDED.incoming_calls, missed_calls = EXCLUDED.missed_calls,
                 contact_requests = EXCLUDED.contact_requests, group_invitations = EXCLUDED.group_invitations,
                 meeting_invitations = EXCLUDED.meeting_invitations, source_version = EXCLUDED.source_version,
-                version = notif_preferences.version + 1, updated_at = now()
-          WHERE notif_preferences.source_version IS NULL OR notif_preferences.source_version < EXCLUDED.source_version",
+                version = GREATEST(t.version + 1, EXCLUDED.source_version), updated_at = now()
+          WHERE t.source_version IS NULL OR t.source_version < EXCLUDED.source_version",
         vec![
             p.account_ref.clone().into(),
             p.direct_messages.into(),
@@ -627,7 +726,141 @@ pub async fn copy_from_hub<C: ConnectionTrait>(
             p.contact_requests.into(),
             p.group_invitations.into(),
             p.meeting_invitations.into(),
-            p.hub_version.into(),
+            p.version.into(),
+        ],
+    )
+    .await?;
+    Ok(n == 1)
+}
+
+/// Copies one conversation level. Returns `true` when the row was written.
+pub async fn copy_conversation<C: ConnectionTrait>(
+    conn: &C,
+    p: &HubConversationPreference,
+) -> Result<bool, DbErr> {
+    let n = db::exec(
+        conn,
+        "INSERT INTO notif_conversation_preferences AS t (account_ref, conversation_id, notifications, muted_until, version, source_version)
+         VALUES ($1, $2, $3, $4, $5, $5)
+         ON CONFLICT (account_ref, conversation_id) DO UPDATE SET
+                notifications = EXCLUDED.notifications, muted_until = EXCLUDED.muted_until,
+                source_version = EXCLUDED.source_version,
+                version = GREATEST(t.version + 1, EXCLUDED.source_version), updated_at = now()
+          WHERE t.source_version IS NULL OR t.source_version < EXCLUDED.source_version",
+        vec![
+            p.account_ref.clone().into(),
+            p.conversation_id.into(),
+            p.notifications.clone().into(),
+            p.muted_until.into(),
+            p.version.into(),
+        ],
+    )
+    .await?;
+    Ok(n == 1)
+}
+
+/// Copies one contact level. Returns `true` when the row was written.
+pub async fn copy_contact<C: ConnectionTrait>(
+    conn: &C,
+    p: &HubContactPreference,
+) -> Result<bool, DbErr> {
+    let n = db::exec(
+        conn,
+        "INSERT INTO notif_contact_preferences AS t (account_ref, contact_ref, notifications, version, source_version)
+         VALUES ($1, $2, $3, $4, $4)
+         ON CONFLICT (account_ref, contact_ref) DO UPDATE SET
+                notifications = EXCLUDED.notifications, source_version = EXCLUDED.source_version,
+                version = GREATEST(t.version + 1, EXCLUDED.source_version), updated_at = now()
+          WHERE t.source_version IS NULL OR t.source_version < EXCLUDED.source_version",
+        vec![
+            p.account_ref.clone().into(),
+            p.contact_ref.clone().into(),
+            p.notifications.clone().into(),
+            p.version.into(),
+        ],
+    )
+    .await?;
+    Ok(n == 1)
+}
+
+/// The Hub no longer has the conversation row: drop the copied row (absent = `ALL`),
+/// never a row the service wrote itself after the copy.
+pub async fn remove_copied_conversation<C: ConnectionTrait>(
+    conn: &C,
+    account_ref: &str,
+    conversation: Uuid,
+) -> Result<bool, DbErr> {
+    let n = db::exec(
+        conn,
+        "DELETE FROM notif_conversation_preferences
+          WHERE account_ref = $1 AND conversation_id = $2 AND source_version IS NOT NULL AND version = source_version",
+        vec![account_ref.into(), conversation.into()],
+    )
+    .await?;
+    Ok(n == 1)
+}
+
+/// Whether the service holds exactly the Hub row (values and `source_version`).
+pub async fn account_matches<C: ConnectionTrait>(
+    conn: &C,
+    p: &HubPreferences,
+) -> Result<bool, DbErr> {
+    let n = db::scalar_i64(
+        conn,
+        "SELECT count(*)::bigint AS n FROM notif_preferences
+          WHERE account_ref = $1 AND source_version = $2 AND direct_messages = $3 AND group_messages = $4
+            AND incoming_calls = $5 AND missed_calls = $6 AND contact_requests = $7 AND group_invitations = $8
+            AND meeting_invitations = $9",
+        vec![
+            p.account_ref.clone().into(),
+            p.version.into(),
+            p.direct_messages.into(),
+            p.group_messages.into(),
+            p.incoming_calls.into(),
+            p.missed_calls.into(),
+            p.contact_requests.into(),
+            p.group_invitations.into(),
+            p.meeting_invitations.into(),
+        ],
+    )
+    .await?;
+    Ok(n == 1)
+}
+
+pub async fn conversation_matches<C: ConnectionTrait>(
+    conn: &C,
+    p: &HubConversationPreference,
+) -> Result<bool, DbErr> {
+    let n = db::scalar_i64(
+        conn,
+        "SELECT count(*)::bigint AS n FROM notif_conversation_preferences
+          WHERE account_ref = $1 AND conversation_id = $2 AND source_version = $3 AND notifications = $4
+            AND muted_until IS NOT DISTINCT FROM $5",
+        vec![
+            p.account_ref.clone().into(),
+            p.conversation_id.into(),
+            p.version.into(),
+            p.notifications.clone().into(),
+            p.muted_until.into(),
+        ],
+    )
+    .await?;
+    Ok(n == 1)
+}
+
+pub async fn contact_matches<C: ConnectionTrait>(
+    conn: &C,
+    p: &HubContactPreference,
+) -> Result<bool, DbErr> {
+    let n = db::scalar_i64(
+        conn,
+        "SELECT count(*)::bigint AS n FROM notif_contact_preferences
+          WHERE account_ref = $1 AND contact_ref = $2 AND source_version = $3 AND notifications = $4",
+        vec![
+            p.account_ref.clone().into(),
+            p.contact_ref.clone().into(),
+            p.version.into(),
+            p.notifications.clone().into(),
         ],
     )
     .await?;

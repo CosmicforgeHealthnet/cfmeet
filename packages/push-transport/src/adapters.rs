@@ -47,7 +47,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::Sha256;
 
-use crate::provider::{LocalTestPush, PushOutcome, PushProvider};
+use crate::provider::{LocalTestPush, PushOutcome, PushProvider, SendOptions};
 
 /// The only payload keys a notification may carry.
 pub const METADATA_KEYS: &[&str] = &["v", "type", "conversationId", "eventSequence", "sequence"];
@@ -196,31 +196,61 @@ impl Apns {
             && handle.bytes().all(|b| b.is_ascii_hexdigit())
     }
 
-    async fn send(&self, handle: &str, meta: &BTreeMap<String, String>) -> PushOutcome {
+    /// The client-localised alert key of a metadata `type` (message wake-ups keep the
+    /// key Messaging always sent).
+    pub fn alert_key(meta: &BTreeMap<String, String>) -> &'static str {
+        match meta.get("type").map(String::as_str) {
+            Some("call") => "CF_CALL_NOTIFICATION",
+            Some("inbox") => "CF_INBOX_NOTIFICATION",
+            _ => "CF_MESSAGE_NOTIFICATION",
+        }
+    }
+
+    async fn send(
+        &self,
+        handle: &str,
+        meta: &BTreeMap<String, String>,
+        options: &SendOptions,
+    ) -> PushOutcome {
         if !Self::valid_handle(handle) {
             return PushOutcome::InvalidHandle;
         }
-        let body = json!({
-            "aps": { "alert": { "loc-key": "CF_MESSAGE_NOTIFICATION" }, "mutable-content": 1, "sound": "default" },
-            "cf": meta,
-        });
-        let r = self
+        // A VoIP push (PushKit) wakes the app to report the call itself (CallKit): data
+        // only, its own topic and push type. Everything else is a generic alert.
+        let (body, topic, push_type) = if options.voip {
+            (
+                json!({ "cf": meta }),
+                format!("{}.voip", self.settings.topic),
+                "voip",
+            )
+        } else {
+            (
+                json!({
+                    "aps": { "alert": { "loc-key": Self::alert_key(meta) }, "mutable-content": 1, "sound": "default" },
+                    "cf": meta,
+                }),
+                self.settings.topic.clone(),
+                "alert",
+            )
+        };
+        let mut request = self
             .http
             .post(format!(
                 "{}/3/device/{handle}",
                 self.settings.base_url.trim_end_matches('/')
             ))
             .header("authorization", format!("bearer {}", self.provider_token()))
-            .header("apns-topic", &self.settings.topic)
-            .header("apns-push-type", "alert")
+            .header("apns-topic", topic)
+            .header("apns-push-type", push_type)
             .header("apns-priority", "10")
             .header(
                 "apns-expiration",
-                (now_unix() + TTL_SECONDS as i64).to_string(),
-            )
-            .json(&body)
-            .send()
-            .await;
+                (now_unix() + options.ttl() as i64).to_string(),
+            );
+        if let Some(id) = options.safe_collapse_id() {
+            request = request.header("apns-collapse-id", id);
+        }
+        let r = request.json(&body).send().await;
         let r = match r {
             Ok(r) => r,
             Err(e) => return PushOutcome::Retryable(format!("apns transport: {}", kind(&e))),
@@ -402,7 +432,12 @@ impl Fcm {
                 .all(|b| b.is_ascii_alphanumeric() || b"-_:.".contains(&b))
     }
 
-    async fn send(&self, handle: &str, meta: &BTreeMap<String, String>) -> PushOutcome {
+    async fn send(
+        &self,
+        handle: &str,
+        meta: &BTreeMap<String, String>,
+        options: &SendOptions,
+    ) -> PushOutcome {
         if !Self::valid_handle(handle) {
             return PushOutcome::InvalidHandle;
         }
@@ -410,10 +445,14 @@ impl Fcm {
             Ok(t) => t,
             Err(o) => return o,
         };
+        let mut android = json!({ "priority": "HIGH", "ttl": format!("{}s", options.ttl()) });
+        if let Some(id) = options.safe_collapse_id() {
+            android["collapse_key"] = json!(id);
+        }
         let body = json!({ "message": {
             "token": handle,
             "data": meta,
-            "android": { "priority": "HIGH", "ttl": format!("{TTL_SECONDS}s") },
+            "android": android,
         }});
         let r = self
             .http
@@ -585,8 +624,28 @@ pub fn encrypt_aes128gcm(
     out
 }
 
+/// The VAPID private key from its PEM file: PKCS#8 (`BEGIN PRIVATE KEY`, what `openssl
+/// genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256` writes and what the release
+/// tooling's `activate-web-push` generates for Messaging) or SEC1 (`BEGIN EC PRIVATE KEY`,
+/// `openssl ecparam -genkey`). Either way the public key, and therefore every browser
+/// subscription made against it, is the same. The message never echoes key material.
+pub fn vapid_secret(pem: &str) -> Result<SecretKey, String> {
+    // Surrounding blank lines (an editor, `echo >>`) never change the key.
+    let pem = format!("{}\n", pem.trim());
+    SecretKey::from_pkcs8_pem(&pem)
+        .or_else(|_| SecretKey::from_sec1_pem(&pem))
+        .map_err(|_| "the VAPID key is not a PKCS#8 (or SEC1) P-256 private key".to_string())
+}
+
+/// The base64url application-server (VAPID) public key of a VAPID private key PEM: the
+/// value browsers subscribed with (`GET /v1/messaging/push/configuration`).
+pub fn vapid_public_key(pem: &str) -> Result<String, String> {
+    let secret = vapid_secret(pem)?;
+    Ok(B64URL.encode(secret.public_key().to_sec1_point(false).as_bytes()))
+}
+
 pub struct WebPushSettings {
-    /// The VAPID application-server key (PKCS#8 PEM, P-256).
+    /// The VAPID application-server key (PKCS#8 or SEC1 PEM, P-256).
     pub vapid_key_pem: String,
     /// `mailto:` or `https:` contact (RFC 8292 `sub`).
     pub subject: String,
@@ -605,8 +664,7 @@ pub struct WebPush {
 
 impl WebPush {
     pub fn new(s: WebPushSettings) -> Result<Self, String> {
-        let secret = SecretKey::from_pkcs8_pem(&s.vapid_key_pem)
-            .map_err(|_| "the VAPID key is not a PKCS#8 P-256 private key".to_string())?;
+        let secret = vapid_secret(&s.vapid_key_pem)?;
         if !(s.subject.starts_with("mailto:") || s.subject.starts_with("https://")) {
             return Err("the VAPID subject is a mailto: or https: contact".into());
         }
@@ -633,7 +691,12 @@ impl WebPush {
         parse_subscription(handle, &self.allowed_hosts, self.allow_insecure)
     }
 
-    async fn send(&self, handle: &str, meta: &BTreeMap<String, String>) -> PushOutcome {
+    async fn send(
+        &self,
+        handle: &str,
+        meta: &BTreeMap<String, String>,
+        options: &SendOptions,
+    ) -> PushOutcome {
         let sub = match self.check(handle) {
             Ok(s) => s,
             Err(_) => return PushOutcome::InvalidHandle,
@@ -655,20 +718,21 @@ impl WebPush {
             &as_secret,
             &salt,
         );
-        let r = self
+        let mut request = self
             .http
             .post(sub.endpoint)
             .header(
                 "authorization",
                 format!("vapid t={jwt}, k={}", self.vapid_public),
             )
-            .header("ttl", TTL_SECONDS.to_string())
+            .header("ttl", options.ttl().to_string())
             .header("content-encoding", "aes128gcm")
             .header("content-type", "application/octet-stream")
-            .header("urgency", "high")
-            .body(body)
-            .send()
-            .await;
+            .header("urgency", "high");
+        if let Some(topic) = options.safe_collapse_id() {
+            request = request.header("topic", topic);
+        }
+        let r = request.body(body).send().await;
         let r = match r {
             Ok(r) => r,
             Err(e) => return PushOutcome::Retryable(format!("web push transport: {}", kind(&e))),
@@ -807,9 +871,20 @@ impl PushProvider for PushAdapters {
     }
 
     async fn send(&self, platform: &str, handle: &str, payload: &Value) -> PushOutcome {
+        self.send_with(platform, handle, payload, &SendOptions::default())
+            .await
+    }
+
+    async fn send_with(
+        &self,
+        platform: &str,
+        handle: &str,
+        payload: &Value,
+        options: &SendOptions,
+    ) -> PushOutcome {
         if platform == "LOCAL_TEST" {
             return match &self.local {
-                Some(l) => l.send(platform, handle, payload).await,
+                Some(l) => l.send_with(platform, handle, payload, options).await,
                 None => PushOutcome::Permanent("not configured".into()),
             };
         }
@@ -818,15 +893,15 @@ impl PushProvider for PushAdapters {
         };
         match platform {
             "APNS" => match &self.apns {
-                Some(a) => a.send(handle, &meta).await,
+                Some(a) => a.send(handle, &meta, options).await,
                 None => PushOutcome::Permanent("not configured".into()),
             },
             "FCM" => match &self.fcm {
-                Some(f) => f.send(handle, &meta).await,
+                Some(f) => f.send(handle, &meta, options).await,
                 None => PushOutcome::Permanent("not configured".into()),
             },
             "WEB_PUSH" => match &self.web {
-                Some(w) => w.send(handle, &meta).await,
+                Some(w) => w.send(handle, &meta, options).await,
                 None => PushOutcome::Permanent("not configured".into()),
             },
             _ => PushOutcome::Permanent("unknown platform".into()),
@@ -963,5 +1038,76 @@ mod tests {
         VerifyingKey::from(&key)
             .verify(input.as_bytes(), &sig)
             .unwrap();
+    }
+
+    /// N9: the Notification Service loads the VAPID key file Messaging's `activate-web-push`
+    /// generated (PKCS#8 PEM, trailing newline) and derives the same application-server
+    /// key, so existing browser subscriptions stay valid; a SEC1 PEM of the same scalar is
+    /// accepted too. Garbage is refused without echoing it.
+    #[test]
+    fn vapid_keys_load_from_pkcs8_and_sec1_pem_with_the_same_public_key() {
+        use p256::pkcs8::{EncodePrivateKey, LineEnding};
+        let secret = SecretKey::from_slice(&[0x2a; 32]).unwrap();
+        let pkcs8 = format!(
+            "{}\n",
+            secret.to_pkcs8_pem(LineEnding::LF).unwrap().as_str()
+        );
+        let sec1 = secret.to_sec1_pem(LineEnding::LF).unwrap().to_string();
+        assert!(pkcs8.starts_with("-----BEGIN PRIVATE KEY-----"));
+        assert!(sec1.starts_with("-----BEGIN EC PRIVATE KEY-----"));
+        let expected = B64URL.encode(secret.public_key().to_sec1_point(false).as_bytes());
+        assert_eq!(vapid_public_key(&pkcs8).unwrap(), expected);
+        assert_eq!(vapid_public_key(&sec1).unwrap(), expected);
+        let web = WebPush::new(WebPushSettings {
+            vapid_key_pem: pkcs8,
+            subject: "https://cfmeet.com".into(),
+            allowed_hosts: vec!["fcm.googleapis.com".into()],
+            allow_insecure: false,
+        })
+        .unwrap();
+        assert_eq!(web.application_server_key(), expected);
+        let err = vapid_secret("-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n")
+            .unwrap_err();
+        assert!(!err.contains("AAAA"));
+    }
+
+    #[test]
+    fn send_options_default_to_the_messaging_behaviour() {
+        let d = SendOptions::default();
+        assert_eq!(d.ttl(), TTL_SECONDS);
+        assert_eq!(d.safe_collapse_id(), None);
+        assert!(!d.voip);
+        let call = SendOptions {
+            ttl_seconds: Some(45),
+            collapse_id: Some("cfmeet-call".into()),
+            voip: true,
+        };
+        assert_eq!(call.ttl(), 45);
+        assert_eq!(call.safe_collapse_id(), Some("cfmeet-call"));
+        // Never above the 24 h default; unsafe collapse ids are dropped, not sent.
+        assert_eq!(
+            SendOptions {
+                ttl_seconds: Some(10 * TTL_SECONDS),
+                ..Default::default()
+            }
+            .ttl(),
+            TTL_SECONDS
+        );
+        for bad in ["", "has space", "a/b", &"x".repeat(33)] {
+            let o = SendOptions {
+                collapse_id: Some(bad.to_string()),
+                ..Default::default()
+            };
+            assert_eq!(o.safe_collapse_id(), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn apns_alert_keys_follow_the_metadata_type() {
+        let meta = |t: &str| BTreeMap::from([("type".to_string(), t.to_string())]);
+        assert_eq!(Apns::alert_key(&meta("message")), "CF_MESSAGE_NOTIFICATION");
+        assert_eq!(Apns::alert_key(&meta("call")), "CF_CALL_NOTIFICATION");
+        assert_eq!(Apns::alert_key(&meta("inbox")), "CF_INBOX_NOTIFICATION");
+        assert_eq!(Apns::alert_key(&BTreeMap::new()), "CF_MESSAGE_NOTIFICATION");
     }
 }

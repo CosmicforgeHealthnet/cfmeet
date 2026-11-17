@@ -48,6 +48,9 @@ pub struct AppState {
     pub attachments: AttachmentSettings,
     /// Part V H: the SMS Gateway's bridge API (unconfigured: bridges are refused).
     pub sms: Arc<dyn crate::sms_bridge::SmsTransport>,
+    /// N9 push-registration facade towards the Notification Service (`None`: off, the
+    /// default — Messaging behaves exactly as before).
+    pub push_mirror: Option<Arc<crate::push_mirror::PushMirror>>,
 }
 
 impl AppState {
@@ -82,6 +85,7 @@ impl AppState {
             scanner: Arc::new(crate::attachments::scanner::UnconfiguredScanner),
             attachments: AttachmentSettings::default(),
             sms: Arc::new(crate::sms_bridge::UnconfiguredSmsTransport),
+            push_mirror: None,
         }
     }
 

@@ -17,6 +17,11 @@
 //!
 //! Mutations (U3, U4, U5, U7, U8) require an `Idempotency-Key`; every operation has a
 //! per-account rate limit (per replica).
+//!
+//! Roadmap N10: the Communications Hub also holds I2, for its preference facade
+//! (`GET/PUT /me/notification-preferences`, conversation and contact notification
+//! levels); from the Hub only `GET` / `PUT /preferences` are accepted (else 403), and its
+//! writes are recorded in the change log with origin `HUB_FACADE`.
 
 use std::{
     collections::HashMap,
@@ -39,7 +44,9 @@ use uuid::Uuid;
 use super::{middleware::Caller, parse};
 use crate::{
     error::{error_body, ApiError, ApiResult, ErrorCode},
-    inbox, preferences, push,
+    inbox,
+    preferences::{self, account_ref_ok},
+    push,
     state::AppState,
 };
 
@@ -55,12 +62,6 @@ pub struct UserDispatch {
     pub idempotency_key: Option<String>,
     #[serde(default)]
     pub body: Option<Value>,
-}
-
-fn account_ref_ok(r: &str) -> bool {
-    r.strip_prefix("cfmeet-user:")
-        .and_then(|u| Uuid::parse_str(u).ok())
-        .is_some_and(|u| format!("cfmeet-user:{u}") == r)
 }
 
 fn query_map(q: Option<&str>) -> HashMap<String, String> {
@@ -133,7 +134,18 @@ pub async fn dispatch(
     if !account_ref_ok(&d.account) {
         return Err(ApiError::validation("account must be cfmeet-user:<uuid>"));
     }
-    Ok(match handle(&state, &d).await {
+    // Roadmap N10: the Communications Hub holds I2 for its preference facade only.
+    let origin = if caller.service() == cf_service_auth::services::COMMUNICATIONS {
+        if !matches!(d.method.as_str(), "GET" | "PUT")
+            || d.path.trim_end_matches('/') != "/preferences"
+        {
+            return Err(ApiError::new(ErrorCode::Forbidden));
+        }
+        preferences::Origin::HubFacade
+    } else {
+        preferences::Origin::Relay
+    };
+    Ok(match handle(&state, &d, origin).await {
         Ok(r) => r,
         Err(e) => relay_error(e),
     })
@@ -167,7 +179,11 @@ fn limit(account: &str, op: &'static str, per_minute: u32) -> ApiResult<()> {
     }
 }
 
-async fn handle(state: &AppState, d: &UserDispatch) -> ApiResult<Response> {
+async fn handle(
+    state: &AppState,
+    d: &UserDispatch,
+    origin: preferences::Origin,
+) -> ApiResult<Response> {
     let path = d.path.trim_end_matches('/');
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     let q = query_map(d.query.as_deref());
@@ -285,7 +301,7 @@ async fn handle(state: &AppState, d: &UserDispatch) -> ApiResult<Response> {
             limit(account, "U7", 30)?;
             need_key(d)?;
             let u: preferences::PreferencesUpdate = body_of(d)?;
-            match preferences::update(&state.db, account, &u, Utc::now()).await {
+            match preferences::update_from(&state.db, account, &u, Utc::now(), origin).await {
                 Ok(_) => {
                     let tz = state
                         .authorities

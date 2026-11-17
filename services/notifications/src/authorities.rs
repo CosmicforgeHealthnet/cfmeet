@@ -501,6 +501,65 @@ impl Authorities for HttpAuthorities {
     }
 }
 
+/// Roadmap N10: the Hub preference export (copy + catch-up), signed like X4 with the
+/// first-party delegated scope (`communications-preferences.export`).
+#[async_trait]
+impl crate::preference_copy::HubPreferenceSource for HttpAuthorities {
+    async fn export(
+        &self,
+        kind: &str,
+        after: Option<&str>,
+        limit: u32,
+    ) -> Result<crate::preference_copy::ExportPage, crate::preference_copy::HubError> {
+        self.hub_preferences(
+            "/internal/v1/communications/notification-preferences/export",
+            &json!({ "kind": kind, "after": after, "limit": limit }),
+        )
+        .await
+    }
+
+    async fn changes(
+        &self,
+        after: i64,
+        limit: u32,
+    ) -> Result<crate::preference_copy::ChangePage, crate::preference_copy::HubError> {
+        self.hub_preferences(
+            "/internal/v1/communications/notification-preferences/changes",
+            &json!({ "after": after, "limit": limit }),
+        )
+        .await
+    }
+}
+
+impl HttpAuthorities {
+    /// Whether the Hub owner API (and its scope) is configured.
+    pub fn hub_configured(&self) -> bool {
+        self.communications && self.scope.is_some()
+    }
+
+    async fn hub_preferences<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<T, crate::preference_copy::HubError> {
+        use crate::preference_copy::HubError;
+        let (true, Some(scope)) = (self.communications, &self.scope) else {
+            return Err(HubError::NotConfigured);
+        };
+        let request = OutboundServiceRequest::new_operation(ServiceId::communications())
+            .with_delegated_context(scope.clone());
+        match self.client.post_json(&request, path, body).await {
+            Ok(response) => response.json::<T>().map_err(|_| HubError::InvalidResponse),
+            Err(cf_service_auth::client::InternalCallError::Status {
+                status: 409, code, ..
+            }) if code.as_deref() == Some("PREFERENCE_AUTHORITY_MOVED") => {
+                Err(HubError::AuthorityMoved)
+            }
+            Err(_) => Err(HubError::Unavailable),
+        }
+    }
+}
+
 /// In-memory owners for tests and local runs.
 #[derive(Default)]
 pub struct StaticAuthorities {

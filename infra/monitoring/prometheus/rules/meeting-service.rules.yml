@@ -234,3 +234,72 @@ groups:
           summary: "Legacy writes rejected in the last hour"
           description: "Informational once legacy retirement starts; before that, any rejection is unexpected."
           runbook_url: "docs/phase2-certification/14-operational-runbook.md#migration-mismatch"
+
+      # ------------------------------------- Notification Service N12: Account CRITICAL lane (D-9)
+      # Counters from services/ops_metrics.rs (cfmeet_ops_critical_*); gauges rendered from
+      # PostgreSQL at scrape time by handlers/internal.rs (cfmeet_account_critical_*). Both
+      # replicas read the same database, hence max().
+      - alert: MeetingCriticalFallbackUnavailable
+        expr: |
+          sum(increase(cfmeet_ops_critical_fallback_unavailable_total[10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          approval: documented
+          service: meeting-service
+        annotations:
+          summary: "A CRITICAL code could not fail over to the legacy email path"
+          description: "The Account fallback key is missing or does not open fallback_sealed (CF_ACCOUNT_FALLBACK_KEY_FILE), so a NEW code that the Notification Service did not lease cannot be sent by the old path. Set critical_fallback = FORCED (new codes go OLD) and restore the key (Document 4 section 10.4, invariant 4)."
+          runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"
+
+      - alert: MeetingCriticalCodeStuck
+        expr: |
+          max(cfmeet_account_critical_oldest_open_seconds) > 120
+        for: 1m
+        labels:
+          severity: critical
+          approval: documented
+          service: meeting-service
+        annotations:
+          summary: "A CRITICAL code or security notice has been open for more than 2 minutes"
+          description: "Never-leased decisions fail over after 60 s, so an open one past 120 s is leased without completion (the service crashed mid-send), kept by critical_fallback = OFF, or the relay is not running. GET /internal/operations/notifications/critical lists the leased-uncompleted decisions for the FORCED break-glass reroute."
+          runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"
+
+      - alert: MeetingCriticalDeadLetters
+        expr: |
+          max(cfmeet_account_critical_dead) > 0
+        for: 0m
+        labels:
+          severity: critical
+          approval: documented
+          service: meeting-service
+        annotations:
+          summary: "A CRITICAL notification was refused and not failed over"
+          description: "The Notification Service refused a CRITICAL event while critical_fallback = OFF forbade the automatic failover: the user did not get the email. Restore AUTO; the user requests a new code."
+          runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"
+
+      - alert: MeetingCriticalAutoFailover
+        expr: |
+          sum(increase(cfmeet_ops_critical_auto_failover_total[15m])) > 0
+        labels:
+          severity: warning
+          approval: documented
+          service: meeting-service
+        annotations:
+          summary: "CRITICAL codes are being sent through the legacy fallback"
+          description: "The Notification Service did not acknowledge or lease a CRITICAL decision within 60 s (or refused it), so Account rerouted it to the retained Meeting email path. Delivery continues; investigate the service. Each use restarts the 90-day fallback retirement clock (Document 5 section 10)."
+          runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"
+
+      - alert: MeetingCriticalPossibleDuplicate
+        expr: |
+          sum(increase(cfmeet_ops_critical_possible_duplicate_total[1h])) > 0
+          or
+          sum(increase(cfmeet_ops_critical_completion_after_reroute_total[1h])) > 0
+        labels:
+          severity: warning
+          approval: documented
+          service: meeting-service
+        annotations:
+          summary: "A CRITICAL email may have been sent twice"
+          description: "A break-glass reroute of a leased, uncompleted decision (REROUTED_POSSIBLE_DUPLICATE), or a service completion reported after a reroute: at most one extra email with the same code (Document 4 section 9.11). Recorded and counted, never silent."
+          runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"

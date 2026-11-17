@@ -103,6 +103,10 @@ pub async fn health_check(State(state): State<AppState>) -> impl IntoResponse {
     // leave LEGACY_ONLY unless every replica reports it. Absent on any read error.
     if let Some(protocol) = crate::services::notification_fence::fence_protocol(&state.db).await {
         health["routingProtocol"] = json!(protocol);
+        // N12 (§10.4 readiness invariant 4): the Account fallback key is loaded and passed
+        // its self-test, so a CRITICAL message decided NEW can always fail over.
+        health["criticalFallbackKey"] =
+            json!(crate::services::critical_notifications::fallback_ready());
     }
 
     (StatusCode::OK, Json(health))

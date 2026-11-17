@@ -16,6 +16,14 @@
 //!   a Developer Platform production-access decision (operator console, after the audited
 //!   decision; `X-Internal-Token`). Fixed template: no caller-supplied text reaches the
 //!   email beyond a safe reason code.
+//! - `POST /internal/operations/email/fallback-drill` — Notification Service N12: one
+//!   controlled acceptance email through the CRITICAL lane's legacy fallback path (sealed
+//!   to and opened with the Account fallback key; `X-Internal-Token`).
+//! - `GET /internal/operations/notifications/critical` — PII-free CRITICAL lane state
+//!   (counts, oldest open age, leased-uncompleted decision ids; `X-Internal-Token`).
+//! - `POST /internal/operations/notifications/critical/reroute` — the operator's
+//!   lease-fenced reroute of CRITICAL decisions to the legacy path (break-glass under
+//!   `critical_fallback = FORCED`; `X-Internal-Token`).
 
 use axum::{
     body::Bytes,
@@ -32,6 +40,7 @@ use uuid::Uuid;
 use crate::{
     handlers::internal::internal_token_ok,
     services::{
+        critical_notifications as critical,
         email_delivery::{self, category, WebhookError},
         ops_metrics::{inc, OPS_METRICS as OM},
     },
@@ -298,4 +307,129 @@ pub async fn developer_access_decision(
             .into_response(),
         Err(e) => e.into_response(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Notification Service N12: the CRITICAL lane's legacy fallback (operations)
+// ---------------------------------------------------------------------------
+
+/// The fallback drill (`email-acceptance confirm=fallback`, Document 4 §10.4 readiness
+/// invariants 1, 2 and 4): one controlled `OPERATIONS_ACCEPTANCE` email sealed to the
+/// Account fallback key, opened and queued in the legacy ledger — the exact path an AUTO /
+/// FORCED failover takes. Poll `GET /internal/operations/email/deliveries/{id}` for
+/// `ACCEPTED` (and `DELIVERED` with the Resend webhook). 503 `FALLBACK_KEY_UNAVAILABLE`
+/// when no fallback key is loaded.
+pub async fn fallback_drill(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<AcceptanceEmailRequest>,
+) -> Response {
+    if !internal_token_ok(&headers) {
+        return not_found();
+    }
+    let reference: String = req
+        .reference
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .take(64)
+        .collect();
+    if reference.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "VALIDATION_ERROR"})),
+        )
+            .into_response();
+    }
+    let subject = format!("CF Meet fallback email drill {reference}");
+    let template = notification_email(
+        "CF Meet operations",
+        &subject,
+        &format!(
+            "This is a controlled drill of the CF Meet emergency email fallback (reference {reference}). It travelled the path a verification code takes when the Notification Service cannot send it. No action is needed."
+        ),
+    );
+    let email = email_delivery::NewEmail {
+        category: category::OPERATIONS_ACCEPTANCE,
+        idempotency_key: Some(format!("acceptance:fallback:{reference}")),
+        to: req.to.clone(),
+        to_name: None,
+        subject,
+        html: template.html,
+        text: template.text,
+        expires_at: Some(Utc::now() + Duration::hours(1)),
+    };
+    match critical::fallback_drill(&state.db, critical::installed(), email).await {
+        Ok(Some(e)) => {
+            inc(&OM.critical_fallback_drills);
+            (
+                StatusCode::ACCEPTED,
+                Json(json!({"deliveryId": e.id, "created": e.created, "path": "LEGACY_FALLBACK"})),
+            )
+                .into_response()
+        }
+        Ok(None) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "FALLBACK_KEY_UNAVAILABLE"})),
+        )
+            .into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// PII-free state of the CRITICAL lane (decision ids and counts only).
+pub async fn critical_lane_status(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !internal_token_ok(&headers) {
+        return not_found();
+    }
+    match critical::lane_status(&state.db).await {
+        Ok(s) => Json(s).into_response(),
+        Err(e) => crate::error::ApiError::from(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CriticalRerouteRequest {
+    pub decision_ids: Vec<Uuid>,
+}
+
+/// The operator's reroute of CRITICAL decisions to the legacy path (Document 4 §9.8,
+/// break-glass): never-leased decisions always; a leased, lapsed, uncompleted decision
+/// only while its category is `critical_fallback = FORCED` (recorded
+/// `REROUTED_POSSIBLE_DUPLICATE`). A live lease answers `WAIT_FOR_LEASE`, a completed
+/// decision `REFUSED`.
+pub async fn critical_reroute(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CriticalRerouteRequest>,
+) -> Response {
+    if !internal_token_ok(&headers) {
+        return not_found();
+    }
+    if req.decision_ids.is_empty() || req.decision_ids.len() > critical::MAX_BATCH {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "VALIDATION_ERROR"})),
+        )
+            .into_response();
+    }
+    let mut results = Vec::with_capacity(req.decision_ids.len());
+    for id in req.decision_ids {
+        match critical::operator_reroute(&state.db, critical::installed(), id, Utc::now()).await {
+            Ok(outcome) => {
+                let mut r = json!({"decisionId": id, "outcome": outcome.as_str()});
+                if let critical::Failover::Sent {
+                    reason,
+                    delivery_id,
+                } = outcome
+                {
+                    r["reason"] = json!(reason.as_str());
+                    r["deliveryId"] = json!(delivery_id);
+                }
+                results.push(r);
+            }
+            Err(e) => return crate::error::ApiError::from(e).into_response(),
+        }
+    }
+    Json(json!({"results": results})).into_response()
 }

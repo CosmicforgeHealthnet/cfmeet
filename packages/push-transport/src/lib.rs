@@ -17,4 +17,4 @@ pub mod config;
 pub mod provider;
 
 pub use config::{ApnsConfig, FcmConfig, PushAdapterConfig, WebPushConfig};
-pub use provider::{LocalTestPush, PushOutcome, PushProvider};
+pub use provider::{LocalTestPush, PushOutcome, PushProvider, SendOptions};

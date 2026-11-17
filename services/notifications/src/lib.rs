@@ -27,6 +27,7 @@ pub mod inbox;
 pub mod ingest;
 pub mod metrics;
 pub mod policy;
+pub mod preference_copy;
 pub mod preferences;
 pub mod processor;
 pub mod push;

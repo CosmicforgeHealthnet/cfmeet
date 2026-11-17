@@ -65,12 +65,15 @@ use crate::{
     domain::{ApplicationId, EnvironmentId, ServiceAccountId, TenantId},
     endpoints::EndpointService,
     media::{CallMediaProvider, MediaCredentialPolicy},
-    models::{call_endpoints, call_invitations, call_participants, call_sessions, calls},
+    models::{
+        call_endpoints, call_invitations, call_participants, call_sessions, calls, principals,
+        tenants,
+    },
     platform::principals::PrincipalResolver,
     privacy_relay::{PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
     signaling::{
         bus::{RealtimeSignalBus, SignalEnvelope},
-        push::{NoPushTransport, PushDispatcher},
+        push::{NoPushTransport, PushDispatcher, PushOffer},
         signals::{self, SignalType},
     },
 };
@@ -499,7 +502,7 @@ pub struct CommandOutcome {
 #[derive(Default)]
 pub(crate) struct PendingSignals {
     signals: Vec<SignalEnvelope>,
-    pushes: Vec<(Uuid, Value)>,
+    pushes: Vec<PushOffer>,
 }
 
 impl PendingSignals {
@@ -522,8 +525,8 @@ impl AppCallService {
                 tracing::warn!(%error, "realtime signal not published (recoverable via API)");
             }
         }
-        for (target, payload) in signals.pushes {
-            self.push.dispatch(target, payload).await;
+        for offer in signals.pushes {
+            self.push.dispatch_offer(offer).await;
         }
     }
 
@@ -640,18 +643,60 @@ impl AppCallService {
         invitation: &call_invitations::Model,
         caller: Option<&str>,
     ) -> CallResult<()> {
-        let Some(target) = call_endpoints::Entity::find_by_id(invitation.endpoint_id)
+        let Some(endpoint) = call_endpoints::Entity::find_by_id(invitation.endpoint_id)
             .one(db)
             .await?
-            .and_then(|e| e.push_target_ref)
         else {
             return Ok(());
         };
-        pending
-            .pushes
-            .push((target, signals::push_payload(call, invitation, caller)));
+        let Some(target) = endpoint.push_target_ref else {
+            return Ok(());
+        };
+        let first_party_account = first_party_account(db, &endpoint).await?;
+        pending.pushes.push(PushOffer {
+            push_target_ref: target,
+            payload: signals::push_payload(call, invitation, caller),
+            call_id: call.id,
+            first_party_account,
+        });
         Ok(())
     }
+}
+
+/// N9: the CF Meet account of an endpoint's principal when the recipient is first-party:
+/// an ACTIVE NATIVE_CF_USER whose reference is exactly `cfmeet-user:<uuid>`, in a
+/// FIRST_PARTY tenant. Anything else (customer applications, whose `pushTargetRef` is
+/// their own) is `None` and never reaches the Notification Service.
+pub(crate) async fn first_party_account<C: ConnectionTrait>(
+    db: &C,
+    endpoint: &call_endpoints::Model,
+) -> CallResult<Option<String>> {
+    use crate::domain::{PrincipalKind, PrincipalStatus, TenantClassification};
+    let Some(tenant) = tenants::Entity::find_by_id(endpoint.tenant_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if tenant.classification != TenantClassification::FirstParty {
+        return Ok(None);
+    }
+    let Some(principal) = principals::Entity::find_by_id(endpoint.principal_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let reference = principal.external_reference;
+    let valid = reference
+        .strip_prefix("cfmeet-user:")
+        .and_then(|u| Uuid::parse_str(u).ok())
+        .is_some_and(|u| format!("cfmeet-user:{u}") == reference);
+    Ok((principal.kind == PrincipalKind::NativeCfUser
+        && principal.status == PrincipalStatus::Active
+        && principal.tenant_id == endpoint.tenant_id
+        && valid)
+        .then_some(reference))
 }
 
 /// The display name the Call's initiator was created with (shown on incoming calls).

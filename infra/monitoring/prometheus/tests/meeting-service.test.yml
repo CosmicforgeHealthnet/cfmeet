@@ -349,3 +349,89 @@ tests:
       - eval_time: 20m
         alertname: MeetingRealtimeDegraded
         exp_alerts: []
+
+  # ------------------------------------------- Notification Service N12: Account CRITICAL lane
+  - name: a failover that cannot open the fallback pages at once; none does not
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_ops_critical_fallback_unavailable_total{instance="ms-1"}'
+        values: '0 0 0 1 1 1 1 1 1 1'
+      - series: 'cfmeet_ops_critical_fallback_unavailable_total{instance="ms-2"}'
+        values: '0x9'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MeetingCriticalFallbackUnavailable
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: MeetingCriticalFallbackUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: meeting-service
+            exp_annotations:
+              summary: "A CRITICAL code could not fail over to the legacy email path"
+              description: "The Account fallback key is missing or does not open fallback_sealed (CF_ACCOUNT_FALLBACK_KEY_FILE), so a NEW code that the Notification Service did not lease cannot be sent by the old path. Set critical_fallback = FORCED (new codes go OLD) and restore the key (Document 4 section 10.4, invariant 4)."
+              runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"
+
+  - name: a CRITICAL code open for more than 2 minutes pages; one inside the budget does not
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_account_critical_oldest_open_seconds{instance="ms-1"}'
+        values: '0 30 60 90 130 150 170 190'
+      - series: 'cfmeet_account_critical_oldest_open_seconds{instance="ms-2"}'
+        values: '0 30 60 90 130 150 170 190'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: MeetingCriticalCodeStuck
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: MeetingCriticalCodeStuck
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: meeting-service
+            exp_annotations:
+              summary: "A CRITICAL code or security notice has been open for more than 2 minutes"
+              description: "Never-leased decisions fail over after 60 s, so an open one past 120 s is leased without completion (the service crashed mid-send), kept by critical_fallback = OFF, or the relay is not running. GET /internal/operations/notifications/critical lists the leased-uncompleted decisions for the FORCED break-glass reroute."
+              runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"
+
+  - name: a CRITICAL dead letter pages; an empty lane does not
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_account_critical_dead{instance="ms-1"}'
+        values: '0 0 0 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: MeetingCriticalDeadLetters
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: MeetingCriticalDeadLetters
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: meeting-service
+            exp_annotations:
+              summary: "A CRITICAL notification was refused and not failed over"
+              description: "The Notification Service refused a CRITICAL event while critical_fallback = OFF forbade the automatic failover: the user did not get the email. Restore AUTO; the user requests a new code."
+              runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"
+
+  - name: a fallback use warns
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_ops_critical_auto_failover_total{instance="ms-1"}'
+        values: '0 0 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: MeetingCriticalAutoFailover
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: documented
+              service: meeting-service
+            exp_annotations:
+              summary: "CRITICAL codes are being sent through the legacy fallback"
+              description: "The Notification Service did not acknowledge or lease a CRITICAL decision within 60 s (or refused it), so Account rerouted it to the retained Meeting email path. Delivery continues; investigate the service. Each use restarts the 90-day fallback retirement clock (Document 5 section 10)."
+              runbook_url: "docs/operations/notification-service-runbook.md#account-critical-lane"

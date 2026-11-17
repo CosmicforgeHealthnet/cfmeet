@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     // Roadmap N7: the relay of contact-request notifications to the Notification Service,
     // signed with the Hub's own service identity. Off unless CF_NOTIFICATIONS_BASE_URL is
     // set (then nothing is enqueued either, exactly as before).
-    let publications = config.notifications_configured.then(|| {
+    let publications = config.notifications_publications.then(|| {
         tracing::info!("notification publications are relayed to the Notification Service");
         NotificationServiceEvents::new(config.client.clone())
     });
