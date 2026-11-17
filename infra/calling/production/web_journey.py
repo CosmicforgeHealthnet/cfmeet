@@ -2,9 +2,10 @@
 
 The browser journey itself runs on the workflow runner against the real website
 (apps/web/tests/messaging-production.browser.mjs). This VPS step only prepares what a real
-user would already have: three fresh, email-verified accounts (app_acceptance: the
-verification code of each newly created controlled account is read from Redis), and two
-Hub contact connections (A-B and A-C), made through the public API. Account C never opens
+user would already have: three fresh accounts (app_acceptance: passwordless sign-in with a
+controlled code replaced in Redis), and two Hub contact connections (A-B and A-C), made
+through the public API. Sign-in is passwordless, so each fixture carries a `refreshToken` of a
+fresh session for the browser (it cannot read a sign-in code), instead of a password. Account C never opens
 Messages here: it is the contact who has not set up messaging yet.
 
 Secrets stay protected: the accounts file is written 0600 under the VPS secret store and
@@ -51,7 +52,7 @@ def prepare(run_id):
     import app_acceptance
     people = app_acceptance.accounts('web-journey-' + run_id, count=3)
     for person in people:
-        login = app_acceptance.api('login', {'email': person['email'], 'password': person['password']})
+        login = app_acceptance.sign_in(person)
         person['token'] = login['access_token']
         person['cfMeetId'] = hub(person['token'], '/me')['cfMeetId']
     a, b, c = people
@@ -74,7 +75,9 @@ def prepare(run_id):
             request('/api/v1/auth/logout', person.pop('token'), 'POST', {})
         except RuntimeError:
             pass
-    fixtures = [{k: person[k] for k in ('email', 'password', 'cfMeetId', 'labels')} for person in people]
+    for person in people:
+        person['refreshToken'] = app_acceptance.refresh_token_for(person)
+    fixtures = [{k: person[k] for k in ('email', 'refreshToken', 'cfMeetId', 'labels')} for person in people]
     p.write_private(accounts_file(run_id), json.dumps(fixtures))
     print(json.dumps({'webJourneyFixtures': {'accounts': 3, 'emailVerified': True,
                                              'contactConnections': ['A-B', 'A-C'],

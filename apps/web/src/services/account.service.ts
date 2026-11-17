@@ -8,11 +8,20 @@ import type {
   AccountProfile,
   AccountSessionListResponse,
   AccountSessionRevokeResponse,
-  ChangePasswordRequest,
-  DeactivateAccountRequest,
   MessageResponse,
   UpdateAccountProfileRequest,
 } from "@/types/generated/meeting-service";
+
+/**
+ * The password-change body. The passwordless backend (PR #97) no longer publishes this
+ * operation in the served contract; the type is kept here until the web sign-in screens move
+ * to the one-time-code flow, so the existing screens keep compiling unchanged.
+ */
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+  confirm_password: string;
+}
 
 export const accountService = {
   getProfile: async () => (await apiV2.get<AccountProfile>("/me/profile")).data,
@@ -37,7 +46,9 @@ export const accountService = {
    * sign-in made within the re-authentication window, otherwise 403 REAUTHENTICATION_REQUIRED.
    */
   deactivate: async (currentPassword: string | null) => {
-    const body: DeactivateAccountRequest = currentPassword ? { current_password: currentPassword } : {};
+    // The served contract now names a step-up token (PR #97); the existing screen still sends
+    // the legacy field until it moves to the step-up flow.
+    const body: Record<string, string> = currentPassword ? { current_password: currentPassword } : {};
     return (await api.post<MessageResponse>("/users/me/deactivate", body)).data;
   },
 };

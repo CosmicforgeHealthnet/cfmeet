@@ -19,7 +19,7 @@
 //! account that never had a trusted device), approval from a trusted device (the approver
 //! types the comparison code shown on the new device and signs with its own device key),
 //! or an email step-up code (account recovery; proves control of the account mailbox).
-//! Knowing the password alone gives a usable but untrusted web sign-in (Meetings and
+//! A sign-in code alone gives a usable but untrusted web sign-in (Meetings and
 //! Calling keep working; E2EE enrollment and approvals do not).
 //!
 //! Every proof is an Ed25519 signature over a domain-separated statement with a purpose,
@@ -1531,7 +1531,7 @@ pub async fn send_email_code(
         "Your CF Meet device verification code",
         &format!(
             "Your code is {code}. It confirms a request to {what}. It expires in {} minutes. \
-             If you did not request this, do not share the code and change your password.",
+             If you did not request this, do not share the code and sign out all devices under Security & devices.",
             (l.expires_at - Utc::now()).num_minutes().max(1)
         ),
     );
@@ -1716,13 +1716,13 @@ pub async fn complete_link(
             "A new phone is now your primary CF Meet mobile",
             "A new phone was confirmed as the primary mobile of your CF Meet account. Any previous \
              phone was signed out; your trusted browsers stay signed in. If this was not you, \
-             change your password and revoke the phone under Security & devices.",
+             revoke the phone and sign out all devices under Security & devices.",
         )
     } else {
         (
             "A new browser was linked to your CF Meet account",
             "A new browser was confirmed as a trusted device of your CF Meet account. If this was \
-             not you, revoke it under Security & devices and change your password.",
+             not you, revoke it and sign out all devices under Security & devices.",
         )
     };
     crate::services::email::tolerate_unsendable(

@@ -1,6 +1,7 @@
 //! Notification Service N12 — the Account CRITICAL lane (Document 4 §9.2, §9.5, §9.8,
-//! §10.4): verification / reset / step-up codes and the password-changed / device-linked
-//! notices routed through the fence at their legacy enqueue points, the PW1 relay to a fake
+//! §10.4): the one-time codes (passwordless sign-in, email change and step-up action codes
+//! of PR #97, device step-up codes) and the device-linked notice routed through the fence
+//! at their legacy enqueue points, the PW1 relay to a fake
 //! I1 that verifies the REAL service token and validates every envelope, the X6 / X7 owner
 //! APIs called with real `cfmeet.notifications` tokens, AUTO failover, FORCED, the
 //! operator's break-glass reroute and the fallback drill. Real PostgreSQL; the legacy
@@ -30,7 +31,7 @@ use backend::services::{
     critical_notifications::{
         self as critical, CriticalEvent, CriticalKeys, CriticalRelayReport, Failover, FallbackKey,
     },
-    email::{device_notice_on, device_step_up_code_on, password_changed_notice_on},
+    email::{device_notice_on, device_step_up_code_on},
     email_delivery::{self, category, EmailWorker, NewEmail, RecordingProvider, WorkerSettings},
     notification_fence::{self as fence, MeetingCategory},
     notification_owner as owner,
@@ -576,16 +577,52 @@ impl H {
         )
     }
 
-    /// A verification code email for `user` through the real EmailService entry point.
-    async fn verification(&self, user: &User, code: &str) -> String {
-        self.app
-            .state
-            .email_service
-            .send_verification_email(user.id, &user.email, "ada", code)
-            .await
-            .unwrap();
-        verify_key(&user.email, code)
+    /// A device step-up code email for `user` (the code the catalogue carries:
+    /// `account.device-step-up-code.requested`) through its real enqueue point,
+    /// `email::device_step_up_code_on`; the code determines the link, so a repeat is the
+    /// same message.
+    async fn code_email(&self, user: &User, code: &str) -> String {
+        let link = Uuid::from_u128(user.id.as_u128() ^ code.parse::<u128>().unwrap());
+        let key = step_up_key(link, code);
+        device_step_up_code_on(
+            self.db(),
+            &user.email,
+            "ada",
+            user.id,
+            device_of(user),
+            key.clone(),
+            code,
+            step_up_template(code),
+            Utc::now() + Duration::minutes(10),
+        )
+        .await
+        .unwrap();
+        key
     }
+}
+
+/// The account device a test user's step-up code is for.
+fn device_of(user: &User) -> Uuid {
+    Uuid::from_u128(!user.id.as_u128())
+}
+
+/// The legacy key of a device step-up code (`device-step-up:<link>:<code digest>`).
+fn step_up_key(link: Uuid, code: &str) -> String {
+    use sha2::Digest;
+    format!(
+        "device-step-up:{link}:{}",
+        &hex::encode(sha2::Sha256::digest(code.as_bytes()))[..16]
+    )
+}
+
+fn step_up_template(code: &str) -> backend::templates::email::EmailTemplate {
+    backend::templates::email::notification_email(
+        "ada",
+        "Your CF Meet device verification code",
+        &format!(
+            "Your code is {code}. It confirms a request to trust a new browser for your CF Meet account. It expires in 10 minutes."
+        ),
+    )
 }
 
 /// The legacy key of a verification code email (`otp:verify:<recipient>:<code digest>`).
@@ -617,7 +654,7 @@ fn later(seconds: i64) -> DateTime<Utc> {
 async fn legacy_only_records_exactly_the_legacy_row() {
     let h = some!(H::new().await);
     let user = h.app.user("legacy").await;
-    let key = h.verification(&user, "482913").await;
+    let key = h.code_email(&user, "482913").await;
     assert_eq!(h.emails_for(&key).await, 1);
     assert_eq!(
         h.count("SELECT count(*) FROM notification_route_decisions")
@@ -641,21 +678,21 @@ async fn legacy_only_records_exactly_the_legacy_row() {
         .await
         .unwrap()
         .unwrap();
-    let legacy = backend::templates::email::verification_email("ada", "482913", "24 hours");
+    let legacy = step_up_template("482913");
     assert_eq!(
         r.try_get::<String>("", "category").unwrap(),
-        "AUTH_VERIFICATION"
+        "SECURITY_DEVICE_STEP_UP"
     );
     assert_eq!(r.try_get::<String>("", "recipient").unwrap(), user.email);
     assert_eq!(r.try_get::<String>("", "recipient_name").unwrap(), "ada");
     assert_eq!(
         r.try_get::<String>("", "subject").unwrap(),
-        "Your CF Meet verification code"
+        "Your CF Meet device verification code"
     );
     assert_eq!(r.try_get::<String>("", "text_body").unwrap(), legacy.text);
     assert_eq!(r.try_get::<String>("", "status").unwrap(), "QUEUED");
     // A repeat of the same code collapses as today.
-    h.verification(&user, "482913").await;
+    h.code_email(&user, "482913").await;
     assert_eq!(h.emails_for(&key).await, 1);
     assert!(h.i1.batches().is_empty());
 }
@@ -667,7 +704,7 @@ async fn new_decision_is_sent_once_by_the_service_under_its_lease() {
     let h = some!(H::new().await);
     h.set_all("FENCED_NEW", "AUTO").await;
     let user = h.app.user("fenced").await;
-    let key = h.verification(&user, "715302").await;
+    let key = h.code_email(&user, "715302").await;
     let (id, route, reason, version, leases, acked, _) = h.decision(&key).await;
     assert_eq!(
         (route.as_str(), reason.as_str(), version, leases, acked),
@@ -680,14 +717,18 @@ async fn new_decision_is_sent_once_by_the_service_under_its_lease() {
     // The envelope: catalogue-valid, ids only, the code sealed to the service key.
     let env: Envelope = serde_json::from_value(event.clone()).unwrap();
     validate(&env, Some(MEETING)).unwrap();
-    assert_eq!(event["eventType"], "account.verification-code.requested");
+    assert_eq!(event["eventType"], "account.device-step-up-code.requested");
     assert_eq!(event["route"]["decisionId"], json!(id));
     assert_eq!(
         event["recipients"][0]["ref"],
         format!("cfmeet-user:{}", user.id)
     );
     assert_eq!(event["delivery"]["idempotencyKey"], key);
-    assert_eq!(event["data"]["ttlMinutes"], 1440);
+    assert!((9..=10).contains(&event["data"]["ttlMinutes"].as_i64().unwrap()));
+    assert_eq!(
+        event["data"]["accountDeviceId"],
+        device_of(&user).to_string()
+    );
     assert!(event["sealed"]["ct"].is_string());
     assert!(!event.to_string().contains("715302") && !event.to_string().contains(&user.email));
     // The fallback holds the exact legacy email (Account key only, bound to the decision).
@@ -697,10 +738,8 @@ async fn new_decision_is_sent_once_by_the_service_under_its_lease() {
     let legacy = fallback.open(id, &blob).unwrap();
     assert_eq!(legacy.idempotency_key, key);
     assert_eq!(legacy.to, user.email);
-    assert_eq!(
-        legacy.text,
-        backend::templates::email::verification_email("ada", "715302", "24 hours").text
-    );
+    assert_eq!(legacy.text, step_up_template("715302").text);
+    assert_eq!(legacy.category, "SECURITY_DEVICE_STEP_UP");
     assert!(fallback.open(Uuid::new_v4(), &blob).is_err());
 
     // PW1 → I1 ACCEPTED: acknowledged (responsibility moves to the service, §9.5).
@@ -718,7 +757,7 @@ async fn new_decision_is_sent_once_by_the_service_under_its_lease() {
     assert!(until > Utc::now() && until <= Utc::now() + Duration::seconds(31));
     assert_eq!(h.x6_one(id).await, "UNKNOWN");
     // A live lease blocks every failover, even far past the AUTO budget.
-    assert_eq!(h.relay(later(3600)).await.failed_over, 0);
+    assert_eq!(h.relay(later(300)).await.failed_over, 0);
     // The provider accepted: X7 completes (terminal), idempotently.
     h.service_sent.lock().unwrap().push(id);
     assert_eq!(h.x7_one(id).await, "COMPLETED");
@@ -748,7 +787,7 @@ async fn new_decision_is_sent_once_by_the_service_under_its_lease() {
     let err = email_delivery::enqueue(
         h.db(),
         NewEmail {
-            category: category::AUTH_VERIFICATION,
+            category: category::SECURITY_DEVICE_STEP_UP,
             idempotency_key: Some(key.clone()),
             to: user.email.clone(),
             to_name: None,
@@ -765,41 +804,16 @@ async fn new_decision_is_sent_once_by_the_service_under_its_lease() {
 
 /// The service never acknowledges (both replicas down): AUTO fails over after 60 s, the
 /// legacy worker sends the SAME code exactly once, and the service can never send it
-/// afterwards. The whole public journey: register → code from the fallback → verified.
+/// afterwards.
 #[tokio::test]
 async fn service_never_acks_auto_failover_sends_the_same_code_once() {
     let h = some!(H::new().await);
-    if !require_test_redis() {
-        return;
-    }
     h.set_all("FENCED_NEW", "AUTO").await;
     h.i1.down(Some(503));
-    let address = format!(
-        "n12-{}@example.com",
-        &Uuid::new_v4().simple().to_string()[..8]
-    );
-    let (s, v) = h
-        .app
-        .post(
-            "/api/v1/auth/register",
-            Auth::None,
-            json!({"email": address, "username": format!("n12{}", &Uuid::new_v4().simple().to_string()[..6]),
-                   "password": "Str0ng!Passw0rd#", "confirm_password": "Str0ng!Passw0rd#"}),
-        )
-        .await;
-    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let user = h.app.user("failover").await;
+    let address = user.email.clone();
+    let key = h.code_email(&user, "591734").await;
     assert_eq!(h.count("SELECT count(*) FROM email_deliveries").await, 0);
-    let key: String = h
-        .db()
-        .query_one(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT idempotency_key FROM notification_route_decisions WHERE category = 'AUTH_VERIFICATION'".to_string(),
-        ))
-        .await
-        .unwrap()
-        .unwrap()
-        .try_get("", "idempotency_key")
-        .unwrap();
     let (id, ..) = h.decision(&key).await;
 
     // Inside the budget: retries, no failover.
@@ -836,18 +850,80 @@ async fn service_never_acks_auto_failover_sends_the_same_code_once() {
     let sent = provider.sent();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].1, address);
-    assert_eq!(sent[0].2, "Your CF Meet verification code");
-    let code = code_in(&sent[0].3);
+    assert_eq!(sent[0].2, "Your CF Meet device verification code");
+    assert_eq!(code_in(&sent[0].3), "591734", "the same code, once");
+    assert_eq!(h.service_sent(id), 0);
+}
+
+/// Passwordless sign-in (PR #97) under a fenced AUTH_VERIFICATION: the sign-in code has no
+/// catalogue event, so it is decided OLD (`UNPUBLISHABLE`), the guard trigger accepts its
+/// legacy row, and the public journey (request → emailed code → verify) works unchanged.
+#[tokio::test]
+async fn passwordless_sign_in_codes_stay_on_the_legacy_path_when_fenced() {
+    let h = some!(H::new().await);
+    if !require_test_redis() {
+        return;
+    }
+    h.set_all("FENCED_NEW", "AUTO").await;
+    let address = format!(
+        "n12-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
     let (s, v) = h
         .app
         .post(
-            "/api/v1/auth/verify-email",
+            "/api/v1/auth/otp/request",
             Auth::None,
-            json!({"email": address, "token": code}),
+            json!({ "email": address }),
         )
         .await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(h.service_sent(id), 0);
+    let key: String = h
+        .db()
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT idempotency_key FROM notification_route_decisions WHERE category = 'AUTH_VERIFICATION'"
+                .to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "idempotency_key")
+        .unwrap();
+    assert!(key.starts_with("otp:signin:"), "{key}");
+    let (_, route, reason, ..) = h.decision(&key).await;
+    assert_eq!((route.as_str(), reason.as_str()), ("OLD", "UNPUBLISHABLE"));
+    assert_eq!(h.emails_for(&key).await, 1);
+    assert_eq!(
+        h.count("SELECT count(*) FROM account_notification_outbox")
+            .await,
+        0
+    );
+    let provider = Arc::new(RecordingProvider::default());
+    let worker = EmailWorker::new(h.app.state.db.clone(), provider.clone(), settings());
+    assert_eq!(worker.tick(Utc::now()).await.unwrap().accepted, 1);
+    let sent = provider.sent();
+    assert_eq!(sent[0].2, "Your CF Meet sign-in code");
+    let code = sent[0]
+        .3
+        .lines()
+        .map(str::trim)
+        .find(|l| l.len() == 6 && l.bytes().all(|b| b.is_ascii_digit()))
+        .expect("a code line")
+        .to_string();
+    let (s, v) = h
+        .app
+        .post(
+            "/api/v1/auth/otp/verify",
+            Auth::None,
+            json!({ "email": address, "code": code }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(
+        v["access_token"].as_str().is_some_and(|t| !t.is_empty()),
+        "{v}"
+    );
 }
 
 /// A live service lease blocks every fallback; a lease that lapsed without X7 (the service
@@ -860,7 +936,7 @@ async fn leased_decisions_fall_back_only_by_break_glass() {
     let user = h.app.user("lease").await;
 
     // (a) Live lease: no automatic or operator reroute.
-    let live = h.verification(&user, "100001").await;
+    let live = h.code_email(&user, "100001").await;
     let (live_id, ..) = h.decision(&live).await;
     h.relay(Utc::now()).await;
     assert_eq!(h.x6_one(live_id).await, "GRANTED");
@@ -874,7 +950,7 @@ async fn leased_decisions_fall_back_only_by_break_glass() {
     assert_eq!(h.emails_for(&live).await, 0);
 
     // (b) Lapsed lease without completion.
-    let lapsed = h.verification(&user, "100002").await;
+    let lapsed = h.code_email(&user, "100002").await;
     let (lapsed_id, ..) = h.decision(&lapsed).await;
     h.relay(Utc::now()).await;
     let granted = {
@@ -888,7 +964,7 @@ async fn leased_decisions_fall_back_only_by_break_glass() {
     assert!(matches!(granted, fence::LeaseGrant::Granted { .. }));
     tokio::time::sleep(StdDuration::from_millis(150)).await;
     assert_eq!(
-        h.relay(later(600)).await.failed_over,
+        h.relay(later(300)).await.failed_over,
         0,
         "AUTO never risks a duplicate"
     );
@@ -911,13 +987,13 @@ async fn leased_decisions_fall_back_only_by_break_glass() {
 
     // FORCED: still nothing automatic for the leased one...
     h.set_mode(
-        MeetingCategory::AuthVerification,
+        MeetingCategory::SecurityDeviceStepUp,
         "FENCED_NEW",
         100,
         "FORCED",
     )
     .await;
-    assert_eq!(h.relay(later(600)).await.failed_over, 0);
+    assert_eq!(h.relay(later(300)).await.failed_over, 0);
     // ...until the operator's break-glass reroute (internal operation).
     let (s, v) = h
         .internal(
@@ -980,10 +1056,10 @@ async fn forced_sends_every_critical_message_through_the_legacy_path() {
     h.set_all("FENCED_NEW", "AUTO").await;
     h.i1.down(Some(503));
     let user = h.app.user("forced").await;
-    let in_flight = h.verification(&user, "200001").await;
+    let in_flight = h.code_email(&user, "200001").await;
     assert_eq!(h.decision(&in_flight).await.1, "NEW");
     h.set_all("FENCED_NEW", "FORCED").await;
-    let fresh = h.verification(&user, "200002").await;
+    let fresh = h.code_email(&user, "200002").await;
     let (_, route, reason, ..) = h.decision(&fresh).await;
     assert_eq!((route.as_str(), reason.as_str()), ("OLD", "ROUTED"));
     assert_eq!(h.emails_for(&fresh).await, 1);
@@ -994,7 +1070,7 @@ async fn forced_sends_every_critical_message_through_the_legacy_path() {
     assert_eq!(h.emails_for(&in_flight).await, 1);
     // OFF: never automatic, whatever the age.
     h.set_all("FENCED_NEW", "OFF").await;
-    let off = h.verification(&user, "200003").await;
+    let off = h.code_email(&user, "200003").await;
     assert_eq!(h.decision(&off).await.1, "NEW");
     assert_eq!(h.relay(later(3600)).await.failed_over, 0);
     assert_eq!(h.emails_for(&off).await, 0);
@@ -1016,7 +1092,7 @@ async fn shadow_keeps_the_legacy_email_and_publishes_a_never_delivered_copy() {
     let h = some!(H::new().await);
     h.set_all("SHADOW", "AUTO").await;
     let user = h.app.user("shadow").await;
-    let key = h.verification(&user, "300001").await;
+    let key = h.code_email(&user, "300001").await;
     let (id, route, ..) = h.decision(&key).await;
     assert_eq!(route, "OLD");
     assert_eq!(h.emails_for(&key).await, 1);
@@ -1036,7 +1112,7 @@ async fn shadow_keeps_the_legacy_email_and_publishes_a_never_delivered_copy() {
     assert_eq!(h.x6_one(id).await, "UNKNOWN");
     assert_eq!(h.emails_for(&key).await, 1);
     // A repeat is sticky: no second email, no second copy.
-    h.verification(&user, "300001").await;
+    h.code_email(&user, "300001").await;
     assert_eq!(h.emails_for(&key).await, 1);
     assert_eq!(
         h.count("SELECT count(*) FROM account_notification_outbox")
@@ -1052,20 +1128,20 @@ async fn refused_events_fail_over_at_once() {
     let h = some!(H::new().await);
     h.set_all("FENCED_NEW", "AUTO").await;
     let user = h.app.user("refused").await;
-    let key = h.verification(&user, "400001").await;
+    let key = h.code_email(&user, "400001").await;
     h.i1.script(&[Scripted::Outcome("REJECTED", "ROUTE_NOT_NEW")]);
     let r = h.relay(Utc::now()).await;
     assert_eq!(r.failed_over, 1);
     assert_eq!(h.decision(&key).await.2, "AUTO_FAILOVER");
     assert_eq!(h.emails_for(&key).await, 1);
     // A contract refusal of the whole batch, the same.
-    let batch = h.verification(&user, "400002").await;
+    let batch = h.code_email(&user, "400002").await;
     h.i1.script(&[Scripted::Status(422)]);
     assert_eq!(h.relay(Utc::now()).await.failed_over, 1);
     assert_eq!(h.emails_for(&batch).await, 1);
     // OFF: DEAD, counted, not sent anywhere.
     h.set_all("FENCED_NEW", "OFF").await;
-    let dead = h.verification(&user, "400003").await;
+    let dead = h.code_email(&user, "400003").await;
     let (dead_id, ..) = h.decision(&dead).await;
     h.i1.script(&[Scripted::Outcome("REJECTED", "CATEGORY_OFF")]);
     let r = h.relay(Utc::now()).await;
@@ -1078,7 +1154,7 @@ async fn refused_events_fail_over_at_once() {
     assert_eq!(status["dead"], 1);
     // DUPLICATE and HELD acknowledge (the service already has it).
     h.set_all("FENCED_NEW", "AUTO").await;
-    let dup = h.verification(&user, "400004").await;
+    let dup = h.code_email(&user, "400004").await;
     h.i1.script(&[Scripted::Outcome("DUPLICATE", "DUPLICATE")]);
     assert_eq!(h.relay(Utc::now()).await.acked, 1);
     assert!(h.decision(&dup).await.5);
@@ -1133,7 +1209,7 @@ async fn lease_claims_and_failovers_race_with_exactly_one_winner() {
     let user = h.app.user("race").await;
     let (mut granted, mut failed_over) = (0, 0);
     for i in 0..24 {
-        let key = h.verification(&user, &format!("6{:05}", i)).await;
+        let key = h.code_email(&user, &format!("6{:05}", i)).await;
         let (id, ..) = h.decision(&key).await;
         let db = h.db().clone();
         // Stagger the claim (0-5 ms) so both orders and true overlaps occur.
@@ -1181,7 +1257,7 @@ async fn x6_x7_are_signed_permissioned_and_strict() {
     let h = some!(H::new().await);
     h.set_all("FENCED_NEW", "AUTO").await;
     let user = h.app.user("x6").await;
-    let key = h.verification(&user, "700001").await;
+    let key = h.code_email(&user, "700001").await;
     let (id, ..) = h.decision(&key).await;
     let body = json!({ "decisionIds": [id], "leaseSeconds": 30 });
     for path in [LEASES, COMPLETIONS] {
@@ -1294,30 +1370,56 @@ async fn x6_x7_are_signed_permissioned_and_strict() {
     );
 }
 
-/// Every CRITICAL legacy enqueue point routes through the fence (NEW: outbox only, with
-/// the catalogue event of its category) and stays exactly the legacy row in LEGACY_ONLY.
+/// Every CRITICAL enqueue point that exists after PR #97 routes through the fence: the
+/// device step-up code and the device-linked notice travel NEW (outbox only, with their
+/// catalogue event); the passwordless sign-in, email-change and step-up action codes have
+/// no catalogue event and are decided OLD (`UNPUBLISHABLE`). In LEGACY_ONLY every one is
+/// exactly its legacy row, with no decision.
 #[tokio::test]
 async fn every_critical_enqueue_point_is_fenced() {
     let h = some!(H::new().await);
     let user = h.app.user("points").await;
     let device = Uuid::new_v4();
     let es = &h.app.state.email_service;
-    let mut expected = Vec::new();
+    let details = backend::templates::email::RequestDetails {
+        client: Some("TestBrowser/1.0".into()),
+        address: None,
+        when_utc: "2026-11-17 12:00".into(),
+    };
+    let digest = |code: &str| {
+        use sha2::Digest;
+        hex::encode(&sha2::Sha256::digest(code.as_bytes())[..12])
+    };
+    let mut published = 0;
     for (mode, suffix) in [("FENCED_NEW", "0001"), ("LEGACY_ONLY", "0002")] {
         h.set_all(mode, "AUTO").await;
-        // `password-changed:<user>:<unix second>`: one notice per second.
-        tokio::time::sleep(StdDuration::from_millis(1100)).await;
         let link = Uuid::new_v4();
-        let code_v = format!("81{suffix}");
-        let code_r = format!("82{suffix}");
-        es.send_verification_email(user.id, &user.email, "ada", &code_v)
+        let new_address = format!(
+            "new-{}@example.com",
+            &Uuid::new_v4().simple().to_string()[..8]
+        );
+        let (sign_in, change, action, step) = (
+            format!("81{suffix}"),
+            format!("82{suffix}"),
+            format!("83{suffix}"),
+            format!("84{suffix}"),
+        );
+        es.send_sign_in_code(
+            &user.email,
+            &sign_in,
+            Some("tok_abcdefghijklmnop"),
+            &details,
+        )
+        .await
+        .unwrap();
+        es.send_email_change_code(&new_address, "ada", &change)
             .await
             .unwrap();
-        es.send_password_reset_email(user.id, &user.email, "ada", &code_r)
+        es.send_step_up_code(&user.email, "ada", &action, "change your email address")
             .await
             .unwrap();
         let txn = h.db().begin().await.unwrap();
-        let step_key = format!("device-step-up:{link}:{suffix}abcdef012345");
+        let step_key = step_up_key(link, &step);
         device_step_up_code_on(
             &txn,
             &user.email,
@@ -1325,15 +1427,12 @@ async fn every_critical_enqueue_point_is_fenced() {
             user.id,
             device,
             step_key.clone(),
-            &format!("83{suffix}"),
-            backend::templates::email::notification_email("ada", "s", "m"),
+            &step,
+            step_up_template(&step),
             Utc::now() + Duration::minutes(10),
         )
         .await
         .unwrap();
-        password_changed_notice_on(&txn, &user.email, "ada", user.id, "changed")
-            .await
-            .unwrap();
         device_notice_on(
             &txn,
             &user.email,
@@ -1347,107 +1446,95 @@ async fn every_critical_enqueue_point_is_fenced() {
         .await
         .unwrap();
         txn.commit().await.unwrap();
-        let reset_key = {
-            use sha2::Digest;
-            format!(
-                "otp:reset:{}:{}",
-                email_delivery::recipient_hash(&user.email),
-                hex::encode(&sha2::Sha256::digest(code_r.as_bytes())[..12])
-            )
-        };
-        let changed_key: String = h
-            .db()
-            .query_one(Statement::from_string(
-                DbBackend::Postgres,
-                if mode == "FENCED_NEW" {
-                    "SELECT idempotency_key FROM notification_route_decisions
-                      WHERE category = 'SECURITY_PASSWORD_CHANGED' ORDER BY decided_at DESC LIMIT 1"
-                } else {
-                    "SELECT idempotency_key FROM email_deliveries
-                      WHERE category = 'SECURITY_PASSWORD_CHANGED' ORDER BY created_at DESC LIMIT 1"
-                }
-                .to_string(),
-            ))
-            .await
-            .unwrap()
-            .unwrap()
-            .try_get("", "idempotency_key")
-            .unwrap();
+        let hash = |a: &str| email_delivery::recipient_hash(a);
+        // (key, catalogue event when it travels NEW, legacy ledger category)
         let cases = [
             (
-                verify_key(&user.email, &code_v),
-                "account.verification-code.requested",
+                format!("otp:signin:{}:{}", hash(&user.email), digest(&sign_in)),
+                None,
                 "AUTH_VERIFICATION",
             ),
             (
-                reset_key,
-                "account.password-reset-code.requested",
-                "AUTH_PASSWORD_RESET",
+                format!("otp:emailchange:{}:{}", hash(&new_address), digest(&change)),
+                None,
+                "AUTH_VERIFICATION",
             ),
             (
-                step_key,
-                "account.device-step-up-code.requested",
+                format!("otp:stepup:{}:{}", hash(&user.email), digest(&action)),
+                None,
                 "SECURITY_DEVICE_STEP_UP",
             ),
             (
-                changed_key,
-                "account.security.password-changed",
-                "SECURITY_PASSWORD_CHANGED",
+                step_key,
+                Some("account.device-step-up-code.requested"),
+                "SECURITY_DEVICE_STEP_UP",
             ),
             (
                 format!("device-linked:{link}"),
-                "account.security.device-linked",
+                Some("account.security.device-linked"),
                 "NOTIFICATION",
             ),
         ];
         for (key, event_type, ledger_category) in cases {
-            if mode == "FENCED_NEW" {
-                let (id, route, ..) = h.decision(&key).await;
-                assert_eq!(route, "NEW", "{key}");
-                assert_eq!(h.emails_for(&key).await, 0, "{key}");
-                let (_, _, event, _, _) = h.outbox(id).await;
-                assert_eq!(event["eventType"], event_type);
-                validate(
-                    &serde_json::from_value(event.clone()).unwrap(),
-                    Some(MEETING),
-                )
+            let decided = h
+                .db()
+                .query_one(Statement::from_sql_and_values(
+                    DbBackend::Postgres,
+                    "SELECT count(*) AS n FROM notification_route_decisions WHERE idempotency_key = $1",
+                    [key.clone().into()],
+                ))
+                .await
+                .unwrap()
+                .unwrap()
+                .try_get::<i64>("", "n")
                 .unwrap();
-                let legacy = h
-                    .keys
-                    .fallback
-                    .as_ref()
-                    .unwrap()
-                    .open(id, &h.fallback_blob(id).await)
-                    .unwrap();
-                assert_eq!(legacy.category, ledger_category);
-                assert_eq!(legacy.idempotency_key, key);
-                expected.push(key);
-            } else {
+            if mode == "LEGACY_ONLY" {
                 assert_eq!(h.emails_for(&key).await, 1, "{key}");
-                let decided = h
-                    .db()
-                    .query_one(Statement::from_sql_and_values(
-                        DbBackend::Postgres,
-                        "SELECT count(*) AS n FROM notification_route_decisions WHERE idempotency_key = $1",
-                        [key.clone().into()],
-                    ))
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .try_get::<i64>("", "n")
-                    .unwrap();
                 assert_eq!(decided, 0, "LEGACY_ONLY records no decision: {key}");
+                continue;
+            }
+            assert_eq!(decided, 1, "{key}");
+            let (id, route, reason, ..) = h.decision(&key).await;
+            match event_type {
+                None => {
+                    assert_eq!(
+                        (route.as_str(), reason.as_str()),
+                        ("OLD", "UNPUBLISHABLE"),
+                        "{key}"
+                    );
+                    assert_eq!(h.emails_for(&key).await, 1, "{key}");
+                }
+                Some(event_type) => {
+                    assert_eq!(route, "NEW", "{key}");
+                    assert_eq!(h.emails_for(&key).await, 0, "{key}");
+                    let (_, _, event, _, _) = h.outbox(id).await;
+                    assert_eq!(event["eventType"], event_type);
+                    validate(
+                        &serde_json::from_value(event.clone()).unwrap(),
+                        Some(MEETING),
+                    )
+                    .unwrap();
+                    let legacy = h
+                        .keys
+                        .fallback
+                        .as_ref()
+                        .unwrap()
+                        .open(id, &h.fallback_blob(id).await)
+                        .unwrap();
+                    assert_eq!(legacy.category, ledger_category);
+                    assert_eq!(legacy.idempotency_key, key);
+                    published += 1;
+                }
             }
         }
     }
-    assert_eq!(expected.len(), 5);
+    assert_eq!(published, 2);
     assert_eq!(
         h.count("SELECT count(*) FROM account_notification_outbox")
             .await,
-        5
+        2
     );
-    // All five relay and acknowledge in one batch.
-    assert_eq!(h.relay(Utc::now()).await.acked, 5);
+    assert_eq!(h.relay(Utc::now()).await.acked, 2);
     assert!(h.i1.invalid().is_empty(), "{:?}", h.i1.invalid());
 }
 
@@ -1599,7 +1686,7 @@ async fn settled_rows_are_purged_after_retention() {
     let h = some!(H::new().await);
     h.set_all("FENCED_NEW", "AUTO").await;
     let user = h.app.user("purge").await;
-    let key = h.verification(&user, "950001").await;
+    let key = h.code_email(&user, "950001").await;
     let (id, ..) = h.decision(&key).await;
     h.relay(Utc::now()).await;
     assert_eq!(h.service_attempt(id).await, "GRANTED");

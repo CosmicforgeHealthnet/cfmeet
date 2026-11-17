@@ -30,6 +30,39 @@ Health check:
 curl http://localhost:8080/health
 ```
 
+## Sign-in (passwordless)
+
+Accounts sign in and sign up with an emailed one-time code; there are no passwords.
+
+1. `POST /api/v1/auth/otp/request {email}`: emails a 6-digit code and a one-click link,
+   both valid 10 minutes. The answer is the same for every address.
+2. Finish with either:
+   - `POST /api/v1/auth/otp/verify {email, code}`, or
+   - `POST /api/v1/auth/otp/verify-link {email, token}`. The link opens the web app's
+     `/auth/magic` page, which POSTs the token; a GET never signs in.
+
+   The first verification of a new address creates the account (`is_new_account: true`)
+   with a random username.
+
+- **Limits:** 5 codes per address per 15 minutes. After 5 checks the pending code is
+  destroyed (429).
+- **Alerts:** a sign-in from a browser not seen on the account for 90 days sends a security
+  alert email.
+- **Sensitive actions need a step-up code** sent to the current address
+  (`POST /api/v2/me/step-up/request`, then `/verify`):
+  - account deactivation (`POST /api/v1/users/me/deactivate {step_up_token}`);
+  - email change (`POST /api/v2/me/email/change/request`, then `/verify`).
+- **Email change:** the code goes to the new address. Other sessions are signed out, and the
+  previous address gets a 7-day undo link (`POST /api/v1/auth/email-change/revert`).
+  Owners who lost their old mailbox are helped by support
+  (`PATCH /api/v1/admin/users/{id}/email`).
+- **Test accounts:** `AUTH_TEST_ACCOUNTS` configures fixed-code review / acceptance accounts
+  (see `.env.example`).
+- **Metrics:** label-free `auth_*` counters on `/internal/metrics`. Suggested alerts:
+  - `auth_otp_verified / auth_otp_sent` below 50% over an hour (codes not arriving);
+  - `auth_code_email_slow` above 5% of `auth_otp_sent`;
+  - a spike in `auth_otp_locked` (code guessing).
+
 ## Phase 2
 
 Phase 2 — Meeting & Conference Platform — backend work is implemented here.

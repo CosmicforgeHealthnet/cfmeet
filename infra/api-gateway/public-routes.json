@@ -1328,21 +1328,7 @@
     {
       "domain": "meetings",
       "method": "POST",
-      "path": "/api/v1/auth/change-password",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v1/auth/forgot-password",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v1/auth/login",
+      "path": "/api/v1/auth/email-change/revert",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
     },
@@ -1384,35 +1370,21 @@
     {
       "domain": "meetings",
       "method": "POST",
-      "path": "/api/v1/auth/register",
+      "path": "/api/v1/auth/otp/request",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
     },
     {
       "domain": "meetings",
       "method": "POST",
-      "path": "/api/v1/auth/resend-verification",
+      "path": "/api/v1/auth/otp/verify",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
     },
     {
       "domain": "meetings",
       "method": "POST",
-      "path": "/api/v1/auth/reset-password",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v1/auth/verify-email",
-      "class": "EXCLUDED",
-      "reason": "LEGACY_DIRECT_INGRESS"
-    },
-    {
-      "domain": "meetings",
-      "method": "POST",
-      "path": "/api/v1/auth/verify-reset-token",
+      "path": "/api/v1/auth/otp/verify-link",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
     },
@@ -2274,6 +2246,34 @@
       "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/me/sessions/{sessionId}/revoke",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/step-up/request",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/step-up/verify",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/email/change/request",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/email/change/verify",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_ACCOUNT"
     },

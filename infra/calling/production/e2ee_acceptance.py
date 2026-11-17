@@ -63,8 +63,15 @@ def execute(sha, run_id):
     assert BINARY.is_file(), 'The workflow did not provide the acceptance client'
     folder = p.ROOT / 'messaging' / ('e2ee-acceptance-' + run_id)
     folder.mkdir(mode=0o700, parents=True, exist_ok=False)
-    accounts = [{'email': a['email'], 'password': a['password']}
-                for a in app_acceptance.accounts('e2ee-' + run_id, count=2)]
+    # Passwordless sign-in: every device of the journey signs in separately and the client
+    # cannot reach Redis, so each account gets the refresh tokens of sessions opened here
+    # (account A: five devices; B: one), right before the run (the device-declaration
+    # window counts from sign-in). Codes are limited to five per address per 15 minutes:
+    # the first session comes from the account's creation.
+    accounts = []
+    for a, devices in zip(app_acceptance.accounts('e2ee-' + run_id, count=2, keep_sessions=True), (5, 1)):
+        tokens = [a['refreshToken']] + [app_acceptance.refresh_token_for(a) for _ in range(devices - 1)]
+        accounts.append({'email': a['email'], 'refreshTokens': tokens})
     p.write_private(folder / 'accounts.private.json', json.dumps(accounts))
     os.chown(folder, 10001, 10001)
     os.chown(folder / 'accounts.private.json', 10001, 10001)

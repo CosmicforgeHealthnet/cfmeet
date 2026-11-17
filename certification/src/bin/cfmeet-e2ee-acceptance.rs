@@ -9,8 +9,12 @@
 //! with fresh keys and reads future messages only.
 //!
 //! Inputs: `CFMEET_BASE_URL` (for example https://api.cfmeet.com) and `CFMEET_E2EE_ACCOUNTS`
-//! (a JSON file `[{"email","password"},{"email","password"}]` of two fresh accounts).
-//! Output: one line `E2EE_ACCEPTANCE_REPORT {json}` (no tokens, passwords or keys; the
+//! (a JSON file of two fresh accounts). Sign-in is passwordless and every device signs in
+//! separately: each account is `{"email", "refreshTokens": [...]}` — refresh tokens of
+//! sessions the operator opened just before the run (production; one per device, used in
+//! order) — and/or `{"email", "code"}` for a fixed-code test account (`AUTH_TEST_ACCOUNTS`,
+//! the certification stack).
+//! Output: one line `E2EE_ACCEPTANCE_REPORT {json}` (no tokens, codes or keys; the
 //! random test phrases are listed so the operator can prove the server never stored them).
 use std::collections::BTreeMap;
 
@@ -129,9 +133,35 @@ struct Mls {
     cursor: i64,
 }
 
+/// How an account's devices sign in (passwordless): pre-opened sessions first, then the
+/// fixed code of a test account.
+#[derive(Clone, Default)]
+struct Credential {
+    code: Option<String>,
+    sessions: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+}
+
+impl Credential {
+    fn parse(a: &Value) -> Option<Self> {
+        let sessions: std::collections::VecDeque<String> = a["refreshTokens"]
+            .as_array()
+            .map(|v| {
+                v.iter()
+                    .filter_map(|t| t.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let code = a["code"].as_str().map(str::to_string);
+        (code.is_some() || !sessions.is_empty()).then(|| Self {
+            code,
+            sessions: std::sync::Arc::new(std::sync::Mutex::new(sessions)),
+        })
+    }
+}
+
 struct Account {
     email: String,
-    password: String,
+    credential: Credential,
     principal: Uuid,
     cfmeet_id: String,
     scope: (Uuid, Uuid, Uuid),
@@ -161,17 +191,36 @@ impl Journey {
         class: &'static str,
         platform: &'static str,
     ) -> anyhow::Result<Signin> {
-        let login = self
-            .api
-            .ok(
-                Method::POST,
-                "/api/v1/auth/login",
-                None,
-                Some(json!({"email": a.email, "password": a.password})),
-                &[200],
-                "sign in",
-            )
-            .await?;
+        let session = a.credential.sessions.lock().unwrap().pop_front();
+        let login = match (session, &a.credential.code) {
+            // A session the operator opened for this device: its refresh token is
+            // exchanged once (rotated) for this device's tokens.
+            (Some(refresh_token), _) => {
+                self.api
+                    .ok(
+                        Method::POST,
+                        "/api/v1/auth/refresh",
+                        None,
+                        Some(json!({ "refresh_token": refresh_token })),
+                        &[200],
+                        "sign in",
+                    )
+                    .await?
+            }
+            (None, Some(code)) => {
+                self.api
+                    .ok(
+                        Method::POST,
+                        "/api/v1/auth/otp/verify",
+                        None,
+                        Some(json!({"email": a.email, "code": code})),
+                        &[200],
+                        "sign in",
+                    )
+                    .await?
+            }
+            (None, None) => bail!("no sign-in left for an account (provide more refreshTokens)"),
+        };
         let access = login["access_token"]
             .as_str()
             .context("access token")?
@@ -369,14 +418,14 @@ impl Journey {
     async fn account(
         &self,
         email: &str,
-        password: &str,
+        credential: &Credential,
         first: &mut Option<Signin>,
     ) -> anyhow::Result<Account> {
         let mut s = self
             .sign_in(
                 &Account {
                     email: email.into(),
-                    password: password.into(),
+                    credential: credential.clone(),
                     principal: Uuid::nil(),
                     cfmeet_id: String::new(),
                     scope: (Uuid::nil(), Uuid::nil(), Uuid::nil()),
@@ -414,7 +463,7 @@ impl Journey {
             .await?;
         let account = Account {
             email: email.into(),
-            password: password.into(),
+            credential: credential.clone(),
             principal: uuid_of(&me["principalId"])?,
             cfmeet_id: profile["cfMeetId"].as_str().context("cfMeetId")?.into(),
             scope: (
@@ -605,7 +654,7 @@ impl Journey {
         Ok(())
     }
 
-    async fn run(&mut self, accounts: &[(String, String)]) -> anyhow::Result<()> {
+    async fn run(&mut self, accounts: &[(String, Credential)]) -> anyhow::Result<()> {
         // ---- Devices: web-only bootstrap, web linking, first mobile, untrusted browser.
         let (mut a_web1, mut b_web) = (None, None);
         let a = self
@@ -621,7 +670,7 @@ impl Journey {
         self.pass("web_only_account_bootstraps_a_trusted_browser_without_phone");
         let mut a_web2 = self.sign_in(&a, "web-2", "WEB", "WEB").await?;
         if self.declare(&mut a_web2).await?["trust"] != "UNTRUSTED" {
-            bail!("a password sign-in alone produced a trusted browser");
+            bail!("a sign-in code alone produced a trusted browser");
         }
         self.link(&a_web2, &a_web1).await?;
         self.pass("second_browser_linked_by_trusted_device_approval");
@@ -975,18 +1024,13 @@ impl Journey {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let base = std::env::var("CFMEET_BASE_URL").unwrap_or_else(|_| "https://api.cfmeet.com".into());
-    let accounts: Vec<(String, String)> = std::env::var("CFMEET_E2EE_ACCOUNTS")
+    let accounts: Vec<(String, Credential)> = std::env::var("CFMEET_E2EE_ACCOUNTS")
         .ok()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok())
         .map(|v| {
             v.iter()
-                .filter_map(|a| {
-                    Some((
-                        a["email"].as_str()?.to_string(),
-                        a["password"].as_str()?.to_string(),
-                    ))
-                })
+                .filter_map(|a| Some((a["email"].as_str()?.to_string(), Credential::parse(a)?)))
                 .collect()
         })
         .unwrap_or_default();

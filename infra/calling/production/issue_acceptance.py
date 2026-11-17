@@ -46,12 +46,17 @@ METRIC_PREFIXES = ('calling_media_admission_retries_total', 'calling_media_admis
                    'calling_finished_call_invitations_closed_total')
 
 
-def context(run_id, accounts, credential, principals, scopes=SCOPES):
+def context(run_id, accounts, credential, principals, scopes=SCOPES, session=None):
     """The only data the client receives: public URLs, the controlled accounts and one
-    restricted, short-lived credential (with the scopes it actually holds)."""
+    restricted, short-lived credential (with the scopes it actually holds). Sign-in is
+    passwordless and the client cannot reach Redis: each account carries the refresh token
+    of a session opened here (`session(account)`), exchanged once by the client."""
+    if session is None:
+        import app_acceptance
+        session = app_acceptance.refresh_token_for
     return {'base': PUBLIC, 'messaging': MESSAGING, 'runId': run_id, 'credential': credential,
             'principals': list(principals), 'scopes': list(scopes),
-            'accounts': [{'email': a['email'], 'password': a['password']} for a in accounts]}
+            'accounts': [{'email': a['email'], 'refreshToken': session(a)} for a in accounts]}
 
 
 def verdict(report):
@@ -89,7 +94,8 @@ def api(path, body=None, token=None):
 
 def principal_of(account):
     """The controlled account's principal, read through the public API (then signed out)."""
-    login = api('/api/v1/auth/login', {'email': account['email'], 'password': account['password']})
+    import app_acceptance
+    login = app_acceptance.sign_in_via(api, account)
     try:
         return api('/api/v2/messaging/me', token=login['access_token'])['principalId']
     finally:

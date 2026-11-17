@@ -19,10 +19,10 @@ pub struct UserMeResponse {
 /// Optional body of POST /api/v1/users/me/deactivate (ACC-026).
 #[derive(Debug, Default, Deserialize, ToSchema)]
 pub struct DeactivateAccountRequest {
-    /// The account's current password. Required unless the caller signed in within the
-    /// re-authentication window (default 10 minutes); accounts without a password (Google
-    /// sign-in) re-authenticate by signing in again.
-    pub current_password: Option<String>,
+    /// Single-use token from `POST /api/v2/me/step-up/verify` with purpose
+    /// `DEACTIVATE_ACCOUNT` (a code emailed to the account's address).
+    #[serde(default, alias = "stepUpToken")]
+    pub step_up_token: Option<String>,
 }
 
 /// Request for PATCH /api/v1/users/me

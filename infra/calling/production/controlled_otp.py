@@ -1,12 +1,11 @@
-"""Controlled verification codes for acceptance accounts (Notification Service N0-8).
+"""Controlled one-time codes for acceptance accounts (passwordless sign-in).
 
-Since N0-8 the Meeting Service stores OTP codes only as `<salt hex>:<SHA-256(salt || code) hex>`
-under `<prefix>:h:<SHA-256(lower(address))>` (services/meeting-service/src/services/otp.rs), so
-acceptance tooling can no longer read an issued code back. For its own controlled accounts it
-instead REPLACES the issued code with a fresh one in the same format (`SET ... XX`: only when a
-code was really issued). That is the same power as the former read, and nothing is ever stored
-in clear. Against the previous image (plaintext code under `<prefix>:<address>`) the tooling
-keeps reading the legacy key, so it works across the release in both directions.
+The Meeting Service stores every one-time code only as `<salt hex>:<SHA-256(salt || code) hex>`
+under `<prefix>:h:<SHA-256(lower(subject))>` (services/meeting-service/src/services/otp.rs):
+`otp:signin` for sign-in codes (subject: the address) and `otp:stepup` for step-up codes
+(subject: `user:<id>:<purpose>`). Acceptance tooling cannot read an issued code back; for its
+own controlled accounts it REPLACES the issued code with a fresh one in the same format
+(`SET ... XX`: only when a code was really issued). Nothing is ever stored in clear.
 """
 import hashlib
 import os
@@ -17,12 +16,17 @@ def address_digest(address):
     return hashlib.sha256(address.strip().lower().encode()).hexdigest()
 
 
-def hashed_key(address, prefix='otp:verify'):
+SIGN_IN = 'otp:signin'
+STEP_UP = 'otp:stepup'
+
+
+def hashed_key(address, prefix=SIGN_IN):
     return '%s:h:%s' % (prefix, address_digest(address))
 
 
-def legacy_key(address, prefix='otp:verify'):
-    return '%s:%s' % (prefix, address.lower())
+def step_up_key(user_id, purpose):
+    """The step-up code key of one account and purpose (e.g. DEACTIVATE_ACCOUNT)."""
+    return hashed_key('user:%s:%s' % (user_id, purpose), STEP_UP)
 
 
 def sealed(code, salt=None):

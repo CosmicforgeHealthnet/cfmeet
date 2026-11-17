@@ -1,22 +1,30 @@
 //! The Account CRITICAL lane (Notification Service roadmap N12; Document 4 §9.2, §9.5,
-//! §9.8, §10.4; Document 5 §4.5 / §4.6): verification, password-reset and device step-up
-//! codes and the password-changed / device-linked security notices.
+//! §9.8, §10.4; Document 5 §4.5 / §4.6): one-time codes and account security notices.
 //!
-//! **Enqueue** ([`enqueue`]). Each of the five legacy enqueue points (registration and
-//! resend, forgot password, device step-up, password change / reset, device link) hands
-//! its rendered legacy email and its catalogue event here. The category's routing mode is
-//! read first ([`fence::current_mode`]):
+//! **Enqueue** ([`enqueue`]). Every legacy enqueue point of a CRITICAL category hands its
+//! rendered legacy email and its catalogue event (if any) here:
+//!
+//! | Enqueue point (after PR #97, passwordless sign-in) | Ledger category / key | Catalogue event |
+//! |---|---|---|
+//! | `EmailService::send_sign_in_code` | `AUTH_VERIFICATION`, `otp:signin:…` | none (no account yet, magic link) |
+//! | `EmailService::send_email_change_code` | `AUTH_VERIFICATION`, `otp:emailchange:…` | none (new address) |
+//! | `EmailService::send_step_up_code` | `SECURITY_DEVICE_STEP_UP`, `otp:stepup:…` | none (action code) |
+//! | `email::device_step_up_code_on` (device links) | `SECURITY_DEVICE_STEP_UP`, `device-step-up:…` | `account.device-step-up-code.requested` |
+//! | `email::device_notice_on` (device linked) | `NOTIFICATION`, `device-linked:…` | `account.security.device-linked` |
+//!
+//! (`AUTH_PASSWORD_RESET` and `SECURITY_PASSWORD_CHANGED` have no producer since #97.)
+//! The category's routing mode is read first ([`fence::current_mode`]):
 //! * `LEGACY_ONLY` (or no fence history): today's call, `email_delivery::enqueue`, byte for
 //!   byte — nothing else is written;
 //! * otherwise ONE transaction records the sticky decision (keyed by the legacy
-//!   idempotency key, `otp:verify:…`, `otp:reset:…`, `device-step-up:…`,
-//!   `password-changed:…`, `device-linked:…`) and writes **either** the legacy email
-//!   (`OLD`, plus a shadow copy in `SHADOW`) **or** one `account_notification_outbox` row
-//!   (`NEW`): the envelope with the code HPKE-sealed to the service key
-//!   (`CF_NOTIFICATIONS_SEALING_KEY`), and `fallback_sealed`, the exact legacy email
-//!   sealed to the Account fallback key (`CF_ACCOUNT_FALLBACK_KEY_FILE`, XChaCha20-Poly1305, bound
-//!   to the decision id). A message that cannot travel `NEW` (no fallback key, no sealing
-//!   key for a code, no valid envelope) is decided `OLD` (`UNPUBLISHABLE`). `FORCED`
+//!   idempotency key) and writes **either** the legacy email (`OLD`, plus a shadow copy in
+//!   `SHADOW`) **or** one `account_notification_outbox` row (`NEW`): the envelope with the
+//!   code HPKE-sealed to the service key (`CF_NOTIFICATIONS_SEALING_KEY`), and
+//!   `fallback_sealed`, the exact legacy email sealed to the Account fallback key
+//!   (`CF_ACCOUNT_FALLBACK_KEY_FILE`, XChaCha20-Poly1305, bound
+//!   to the decision id). A message that cannot travel `NEW` (no catalogue event, no
+//!   fallback key, no sealing key for a code, no valid envelope) is decided `OLD`
+//!   (`UNPUBLISHABLE`). `FORCED`
 //!   decides every new message `OLD` ([`fence::route_message`]).
 //!
 //! **Relay** ([`relay_due`], [`run`], the PW1 worker): posts PENDING rows to I1 as
@@ -402,7 +410,9 @@ pub fn keys_from_env(sealing: Option<SealingKey>) -> Result<CriticalKeys, String
 #[derive(Clone)]
 pub struct CriticalEvent {
     pub category: MeetingCategory,
-    pub event_type: &'static str,
+    /// `None`: the message has no catalogue event (it is routed, and always decided
+    /// `OLD` / `UNPUBLISHABLE` outside `LEGACY_ONLY`).
+    pub event_type: Option<&'static str>,
     pub account_id: Uuid,
     /// Exactly the catalogue's data keys.
     pub data: Vec<(&'static str, Value)>,
@@ -420,10 +430,24 @@ impl std::fmt::Debug for CriticalEvent {
 }
 
 impl CriticalEvent {
+    /// A CRITICAL message the catalogue cannot carry (passwordless sign-in codes, step-up
+    /// action codes, email-change codes: PR #97). It is still routed — the guard trigger
+    /// requires a decision once its category leaves `LEGACY_ONLY` — and always stays on
+    /// the legacy path (`UNPUBLISHABLE`).
+    pub fn not_in_catalogue(category: MeetingCategory) -> Self {
+        Self {
+            category,
+            event_type: None,
+            account_id: Uuid::nil(),
+            data: Vec::new(),
+            code: None,
+        }
+    }
+
     pub fn verification_code(account_id: Uuid, code: &str, ttl_minutes: i64) -> Self {
         Self {
             category: MeetingCategory::AuthVerification,
-            event_type: event_type::VERIFICATION_CODE,
+            event_type: Some(event_type::VERIFICATION_CODE),
             account_id,
             data: vec![("ttlMinutes", json!(ttl_minutes))],
             code: Some(Zeroizing::new(code.to_string())),
@@ -433,7 +457,7 @@ impl CriticalEvent {
     pub fn password_reset_code(account_id: Uuid, code: &str, ttl_minutes: i64) -> Self {
         Self {
             category: MeetingCategory::AuthPasswordReset,
-            event_type: event_type::PASSWORD_RESET_CODE,
+            event_type: Some(event_type::PASSWORD_RESET_CODE),
             account_id,
             data: vec![("ttlMinutes", json!(ttl_minutes))],
             code: Some(Zeroizing::new(code.to_string())),
@@ -448,7 +472,7 @@ impl CriticalEvent {
     ) -> Self {
         Self {
             category: MeetingCategory::SecurityDeviceStepUp,
-            event_type: event_type::DEVICE_STEP_UP_CODE,
+            event_type: Some(event_type::DEVICE_STEP_UP_CODE),
             account_id,
             data: vec![
                 ("accountDeviceId", json!(account_device_id.to_string())),
@@ -461,7 +485,7 @@ impl CriticalEvent {
     pub fn password_changed(account_id: Uuid, changed_at: DateTime<Utc>) -> Self {
         Self {
             category: MeetingCategory::SecurityPasswordChanged,
-            event_type: event_type::PASSWORD_CHANGED,
+            event_type: Some(event_type::PASSWORD_CHANGED),
             account_id,
             data: vec![("changedAt", json!(rfc3339(changed_at)))],
             code: None,
@@ -471,7 +495,7 @@ impl CriticalEvent {
     pub fn device_linked(account_id: Uuid, account_device_id: Uuid, link_id: Uuid) -> Self {
         Self {
             category: MeetingCategory::SecurityDeviceLinked,
-            event_type: event_type::DEVICE_LINKED,
+            event_type: Some(event_type::DEVICE_LINKED),
             account_id,
             data: vec![
                 ("accountDeviceId", json!(account_device_id.to_string())),
@@ -498,9 +522,10 @@ pub fn build_envelope(
     expires_at: DateTime<Utc>,
     occurred_at: DateTime<Utc>,
 ) -> Result<Value, DecisionReason> {
+    let event_type = event.event_type.ok_or(DecisionReason::Unpublishable)?;
     let mut builder = EnvelopeBuilder::new(
         Producer::MeetingService,
-        event.event_type,
+        event_type,
         &rfc3339(occurred_at),
         route,
     )
@@ -1656,7 +1681,7 @@ mod tests {
                 now + Duration::hours(1),
                 now,
             )
-            .unwrap_or_else(|_| panic!("{}", event.event_type));
+            .unwrap_or_else(|_| panic!("{:?}", event.event_type));
             let env: cf_notification_client::Envelope = serde_json::from_value(v.clone()).unwrap();
             cf_notification_client::validate(&env, Some("cfmeet.meeting-service")).unwrap();
             assert_eq!(v["recipients"][0]["ref"], format!("cfmeet-user:{account}"));

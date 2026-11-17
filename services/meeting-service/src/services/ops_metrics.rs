@@ -159,6 +159,26 @@ counters!(
     conferences_empty_ended,
     conferences_archive_ended,
     conference_presence_checks_unknown,
+    // Passwordless sign-in (label-free; never addresses or codes).
+    auth_otp_requested,
+    auth_otp_sent,
+    auth_otp_verified,
+    auth_otp_wrong,
+    auth_otp_expired,
+    auth_otp_locked,
+    auth_magic_link_verified,
+    auth_account_created,
+    auth_test_account_sign_in,
+    auth_new_sign_in_alerts,
+    auth_step_up_requested,
+    auth_step_up_issued,
+    auth_email_change_requested,
+    auth_email_changed,
+    auth_email_change_reverted,
+    auth_admin_email_changed,
+    // Code emails (sign-in, step-up, email-change) accepted by the provider more than
+    // 30 seconds after they were queued.
+    auth_code_email_slow,
 );
 
 pub static OPS_METRICS: OpsMetrics = OpsMetrics::new();

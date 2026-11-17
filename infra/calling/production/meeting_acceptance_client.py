@@ -108,8 +108,10 @@ class Journey:
 
     # -- setup -------------------------------------------------------------------------
     def setup(self):
-        _, login = Api(self.base).call('POST', '/api/v1/auth/login',
-                                       {'email': self.account['email'], 'password': self.account['password']})
+        # Passwordless sign-in: the operator opened a session for this run; its refresh token
+        # is exchanged once (rotated) for this client's tokens.
+        _, login = Api(self.base).call('POST', '/api/v1/auth/refresh',
+                                       {'refresh_token': self.account['refreshToken']})
         self.host = Api(self.base, bearer=login['access_token'])
         _, space = self.host.call('POST', '/api/v2/meeting-spaces', {
             'title': 'CF Meet acceptance ' + self.run_id, 'accessPolicy': 'PUBLIC'}, expected=(201,))

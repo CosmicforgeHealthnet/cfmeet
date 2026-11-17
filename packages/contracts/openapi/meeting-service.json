@@ -333,6 +333,70 @@
         ]
       }
     },
+    "/api/v1/admin/users/{id}/email": {
+      "patch": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Change a user's email address (admin only, support-assisted)",
+        "description": "For an owner who lost access to the old mailbox and was verified by support outside the product\n(the self-service change needs a code from the current address). Sets the new address (to be\nproven at the next sign-in), signs out every session and linked device, notifies both the old\nand the new address, and records `EMAIL_CHANGED_BY_ADMIN` with the administrator and `reason`.\nReturns 409 if the address belongs to another account.",
+        "operationId": "change_user_email",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User UUID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminChangeEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Email address changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserApiResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - Admin access required"
+          },
+          "404": {
+            "description": "User not found"
+          },
+          "409": {
+            "description": "The address belongs to another account"
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v1/api-keys": {
       "get": {
         "tags": [
@@ -606,19 +670,19 @@
         ]
       }
     },
-    "/api/v1/auth/change-password": {
+    "/api/v1/auth/email-change/revert": {
       "post": {
         "tags": [
           "Authentication"
         ],
-        "summary": "Change password for authenticated user",
-        "description": "Changes the signed-in user's password after checking `current_password`. Requires a bearer\naccess token. `new_password` must be 8-128 characters and match `confirm_password`. Returns 400\nif the current password is wrong or the account uses Google sign-in. A change signs the account\nout of every session, including the current one; sign in again with the new password.",
-        "operationId": "change_password",
+        "summary": "Undo an email change",
+        "description": "Restores the previous email address of an account with the single-use token from the \"your\nemail address was changed\" notice (valid 7 days), and signs out every session and linked device\nof the account. The owner then signs in with the previous address. Public endpoint (the token is\nthe proof); the web app's `/auth/email-change/undo` page POSTs it. Returns 409 if the previous\naddress has since been taken by another account (support then helps).",
+        "operationId": "revert_email_change",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChangePasswordRequest"
+                "$ref": "#/components/schemas/EmailChangeRevertRequest"
               }
             }
           },
@@ -626,7 +690,7 @@
         },
         "responses": {
           "200": {
-            "description": "Password changed successfully",
+            "description": "Change undone; every session ended",
             "content": {
               "application/json": {
                 "schema": {
@@ -636,94 +700,13 @@
             }
           },
           "400": {
-            "description": "Invalid current password or validation error"
+            "description": "Invalid, used or expired link"
           },
-          "401": {
-            "description": "Unauthorized"
-          }
-        },
-        "security": [
-          {
-            "bearer_auth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/auth/forgot-password": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "Request password reset",
-        "description": "Starts a password reset by emailing a 6-digit reset code, valid for 1 hour, to an\nemail-and-password account. Public endpoint. The answer is the same whether or not such an\naccount exists (no email is sent for unknown or Google sign-in accounts); at most 5 codes per\nemail are sent within 15 minutes. Finish with `POST /api/v1/auth/reset-password`.",
-        "operationId": "forgot_password",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ForgotPasswordRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Request accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error"
+          "409": {
+            "description": "The previous address belongs to another account"
           },
           "429": {
             "description": "Too many requests"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/login": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "Login user",
-        "description": "Authenticates with email and password and returns an access token (valid 15 minutes), a refresh\ntoken (valid 7 days, rotated on every refresh) and basic user info. Each login opens an account\nsession that lasts at most 30 days and can be listed and revoked from\n`/api/v2/me/sessions`. Public endpoint. Accounts still pending email verification can log in, so\ncheck `user.status` and route to verification if needed (unless the deployment enforces\nverification at sign-in: then such an account gets `403 EMAIL_VERIFICATION_REQUIRED` after a\ncorrect password); deactivated accounts get 403. More than\n5 attempts per email within 15 minutes returns 429; a successful login resets the count.",
-        "operationId": "login",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Login successful",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LoginResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials"
-          },
-          "403": {
-            "description": "Email verification required or account inactive"
-          },
-          "429": {
-            "description": "Too many login attempts"
           }
         }
       }
@@ -817,7 +800,7 @@
           "Authentication"
         ],
         "summary": "Exchange a one-time Google sign-in code for tokens",
-        "description": "Completes Google sign-in when the API runs with `GOOGLE_OAUTH_TOKEN_DELIVERY=exchange_code`.\nThe code from the callback redirect is valid once, for 60 seconds. Returns the same body as\n`POST /api/v1/auth/login`. Public endpoint.",
+        "description": "Completes Google sign-in when the API runs with `GOOGLE_OAUTH_TOKEN_DELIVERY=exchange_code`.\nThe code from the callback redirect is valid once, for 60 seconds. Returns the same body as\n`POST /api/v1/auth/otp/verify` (without `is_new_account`). Public endpoint.",
         "operationId": "oauth_google_exchange",
         "requestBody": {
           "content": {
@@ -842,6 +825,126 @@
           },
           "400": {
             "description": "Invalid or expired exchange code"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/otp/request": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Request a sign-in code",
+        "description": "Passwordless sign-in and sign-up in one flow. Emails a 6-digit code (valid 10 minutes) and a\none-click sign-in link to the address; finish with `POST /api/v1/auth/otp/verify` (code) or\n`POST /api/v1/auth/otp/verify-link` (link). If no account exists yet, the first successful\nverification creates it. Public endpoint. The answer is identical whether or not an account\nexists (no email is sent to deactivated accounts or past the limit of 5 codes per address per\n15 minutes). A new request replaces the previous code and link. The email states when and from\nwhich browser the code was requested.",
+        "operationId": "request_otp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Request accepted (same answer for every address)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "429": {
+            "description": "Too many requests from this network"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/otp/verify": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Verify a sign-in code",
+        "description": "Finishes a passwordless sign-in with the 6-digit code from `POST /api/v1/auth/otp/request`.\nReturns an access token (valid 15 minutes), a refresh token (valid 7 days, rotated on every\nrefresh), basic user info and `is_new_account` (true when this sign-in created the account,\nwith an automatically generated username the user can change later). Each sign-in opens an\naccount session (at most 30 days) listed under `/api/v2/me/sessions`. Public endpoint.\n\nThe code is single-use and consumes the matching link too. A wrong, expired, used or replaced\ncode gets the same 400 answer whether or not an account exists. After 5 checks within 15\nminutes the pending code is destroyed and the answer is 429 (requesting a new code does not\nreset this). A correct code for a deactivated account gets 403. A correct code also verifies\nthe address of an account still pending verification. A sign-in from a device not seen on\nthe account in the last 90 days triggers a security alert email.",
+        "operationId": "verify_otp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtpVerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired code"
+          },
+          "403": {
+            "description": "Account has been deactivated"
+          },
+          "429": {
+            "description": "Too many attempts"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/otp/verify-link": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Verify a sign-in link",
+        "description": "Finishes a passwordless sign-in with the one-click link from the same email as the code. The\nlink opens the web app (`/auth/magic?email=…&token=…`), which POSTs both values here; the link\nitself never signs in on a GET, so email scanners that open links cannot use it up. Same\nanswers, limits and response as `POST /api/v1/auth/otp/verify`; the link and the code are one\nchallenge, so using either consumes both.",
+        "operationId": "verify_otp_link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpVerifyLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtpVerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired link"
+          },
+          "403": {
+            "description": "Account has been deactivated"
+          },
+          "429": {
+            "description": "Too many attempts"
           }
         }
       }
@@ -877,199 +980,6 @@
           },
           "401": {
             "description": "Invalid refresh token"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/register": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "Register a new user",
-        "description": "Creates an email-and-password account with the `user` role and `pending_verification` status,\nthen emails a 6-digit verification code (valid for 24 hours). Public endpoint; no tokens are\nreturned. Username must be 3-50 letters, digits or underscores and password 8-128 characters.\nEmail addresses are case-insensitive and stored lowercased. The answer never reveals whether\nthe email already has an account (owner decision D-12): an address already registered gets\nthe same 201 answer, no account is created or changed, and its owner receives an email notice\ninstead of a code. Returns 409 only if the username is taken (usernames are public).",
-        "operationId": "register",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RegisterRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "User registered successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RegisterResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error"
-          },
-          "409": {
-            "description": "Username already taken"
-          },
-          "429": {
-            "description": "Too many requests"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/resend-verification": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "Resend verification email",
-        "description": "Sends a new 6-digit verification code to an account that is still pending verification,\nreplacing the previous code. Public endpoint. The answer is the same whether or not such an\naccount exists; at most 5 codes per email are sent within 15 minutes.",
-        "operationId": "resend_verification_email",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResendVerificationRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Request accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error"
-          },
-          "429": {
-            "description": "Too many requests"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/reset-password": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "Reset password with token",
-        "description": "Sets a new password using the 6-digit code sent by `POST /api/v1/auth/forgot-password`. Public\nendpoint. `new_password` must be 8-128 characters and match `confirm_password`. The code is\nsingle-use; repeated wrong codes for the same email are rate-limited (429). A reset signs the\naccount out of every session.",
-        "operationId": "reset_password",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResetPasswordRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Password reset successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid or expired token"
-          },
-          "429": {
-            "description": "Too many attempts"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/verify-email": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "Verify email with token",
-        "description": "Activates a newly registered account using the 6-digit code emailed at registration. Public\nendpoint. The code is single-use; repeated wrong codes for the same email are rate-limited\n(429). Returns 400 if the code is wrong or expired; the answer does not reveal whether an\naccount exists or is already verified.",
-        "operationId": "verify_email",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VerifyEmailRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Email verified successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid or expired code"
-          },
-          "429": {
-            "description": "Too many attempts"
-          }
-        }
-      }
-    },
-    "/api/v1/auth/verify-reset-token": {
-      "post": {
-        "tags": [
-          "Authentication"
-        ],
-        "summary": "Verify password reset token",
-        "description": "Checks whether a password reset is pending for the given email, for example before showing the\nreset form. Public endpoint. Returns 200 only when the submitted 6-digit code matches the\npending reset code; the code is not consumed (`POST /api/v1/auth/reset-password` does that).\nEvery other case (unknown email, no pending reset, wrong or expired code) returns the same\n400 answer with comparable timing, so the endpoint never reveals whether an account exists.\nChecks share the reset code's attempt limit (429).",
-        "operationId": "verify_reset_token",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VerifyResetTokenRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Token is valid",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/VerifyResetTokenResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid or expired reset code (same answer whether or not the account exists)"
-          },
-          "429": {
-            "description": "Too many attempts"
           }
         }
       }
@@ -2275,10 +2185,10 @@
           "Users"
         ],
         "summary": "Deactivate current user's account (soft delete)",
-        "description": "Sets the user's status to Inactive. This immediately invalidates all existing\ntokens as the auth middleware checks user status on every request.\nThis operation is idempotent - calling it multiple times has the same effect.\n\nRe-authentication (ACC-026): send `current_password`, or call this within 10 minutes of\nsigning in (a fresh sign-in session). Otherwise the answer is `403\nREAUTHENTICATION_REQUIRED` and nothing changes. Accounts without a password (Google sign-in)\nsign in again first. Both outcomes are recorded in the account security audit. An\nadministrator reverses a deactivation with `PATCH /api/v1/admin/users/{id}` (`status:\nactive`); the user then signs in again.",
+        "description": "Sets the user's status to Inactive. This immediately invalidates all existing\ntokens as the auth middleware checks user status on every request.\nThis operation is idempotent - calling it multiple times has the same effect.\n\nConfirmation (ACC-026): send a `step_up_token` for purpose `DEACTIVATE_ACCOUNT`, obtained with\n`POST /api/v2/me/step-up/request` then `POST /api/v2/me/step-up/verify` (a code emailed to the\naccount's address). Without a valid token the answer is `403 REAUTHENTICATION_REQUIRED` and\nnothing changes; the token is single-use and bound to the current session. Both outcomes are\nrecorded in the account security audit. An administrator reverses a deactivation with `PATCH\n/api/v1/admin/users/{id}` (`status: active`); the user then signs in again.",
         "operationId": "deactivate_account",
         "requestBody": {
-          "description": "Optional: the current password (required unless the caller signed in recently)",
+          "description": "The step-up token for DEACTIVATE_ACCOUNT",
           "content": {
             "application/json": {
               "schema": {
@@ -2303,7 +2213,7 @@
             "description": "Unauthorized - missing or invalid token"
           },
           "403": {
-            "description": "REAUTHENTICATION_REQUIRED - wrong or missing current password and no recent sign-in"
+            "description": "REAUTHENTICATION_REQUIRED - missing, used or foreign step-up token"
           }
         },
         "security": [
@@ -2495,7 +2405,7 @@
           "Account sessions (v2)"
         ],
         "summary": "Read the account security audit (platform administrators)",
-        "description": "Append-only account security events — sign-ins, sign-outs, password changes and resets,\nGoogle linking, refresh-token reuse — newest first. Requires a platform administrator.\nEvents never contain passwords, tokens, email addresses or network addresses.",
+        "description": "Append-only account security events — sign-ins, sign-outs, email changes,\nGoogle linking, refresh-token reuse — newest first. Requires a platform administrator.\nEvents never contain passwords, tokens, email addresses or network addresses.",
         "operationId": "v2_admin_list_account_audit_events",
         "parameters": [
           {
@@ -11462,6 +11372,160 @@
         ]
       }
     },
+    "/api/v2/me/email/change/request": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Start an email change",
+        "description": "Needs a `stepUpToken` for `CHANGE_EMAIL` (proof of the CURRENT mailbox). Emails a 6-digit code\n(valid 10 minutes) to the NEW address; finish with `POST /api/v2/me/email/change/verify`. The\nanswer is the same whether or not the new address already has an account (that address gets a\nnotice instead of a code, and the change cannot complete). The address can be changed once\nevery 7 days (429).",
+        "operationId": "v2_request_email_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Code sent to the new address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeSentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid address, or already the account's address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - missing, used or foreign step-up token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Changed within the last 7 days, or too many codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/email/change/verify": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Confirm an email change",
+        "description": "Commits the change with the code sent to the new address. The new address is verified; every\nOTHER session is signed out (this one stays); the previous address gets a notice with a\nsingle-use link to undo the change within 7 days (`POST /api/v1/auth/email-change/revert`),\nand the new address a confirmation.",
+        "operationId": "v2_confirm_email_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Email address changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The address was taken in the meantime",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/me/organizations": {
       "get": {
         "tags": [
@@ -11804,6 +11868,140 @@
           },
           "404": {
             "description": "SESSION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/step-up/request": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Request a step-up code",
+        "description": "Emails a 6-digit code (valid 10 minutes) to the signed-in account's CURRENT address, to confirm\na sensitive action: `DEACTIVATE_ACCOUNT` or `CHANGE_EMAIL`. Exchange it with `POST\n/api/v2/me/step-up/verify`. At most 5 codes per purpose within 15 minutes (429).",
+        "operationId": "v2_request_step_up",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepUpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Code sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeSentResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - the token has no session; sign in again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many codes requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/step-up/verify": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Verify a step-up code",
+        "description": "Exchanges the emailed code for a single-use `stepUpToken` (valid 5 minutes), bound to this\nsession and purpose. A wrong or expired code gets 400; after 5 checks within 15 minutes the code\nis destroyed (429).",
+        "operationId": "v2_verify_step_up",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepUpVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepUpTokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts",
             "content": {
               "application/json": {
                 "schema": {
@@ -20072,6 +20270,23 @@
           }
         }
       },
+      "AdminChangeEmailRequest": {
+        "type": "object",
+        "description": "Support-assisted email change (admin only): the owner lost access to the old address\nand was verified by support outside the product.",
+        "required": [
+          "new_email",
+          "reason"
+        ],
+        "properties": {
+          "new_email": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why and how the owner was verified (recorded in the security audit)."
+          }
+        }
+      },
       "AdminLogListResponse": {
         "type": "object",
         "description": "Paginated response for admin logs",
@@ -21627,25 +21842,6 @@
           }
         }
       },
-      "ChangePasswordRequest": {
-        "type": "object",
-        "required": [
-          "current_password",
-          "new_password",
-          "confirm_password"
-        ],
-        "properties": {
-          "confirm_password": {
-            "type": "string"
-          },
-          "current_password": {
-            "type": "string"
-          },
-          "new_password": {
-            "type": "string"
-          }
-        }
-      },
       "ChangedResponse": {
         "type": "object",
         "required": [
@@ -21792,6 +21988,24 @@
           },
           "providerEnforcement": {
             "$ref": "#/components/schemas/ProviderEnforcement"
+          }
+        }
+      },
+      "CodeSentResponse": {
+        "type": "object",
+        "required": [
+          "message",
+          "expiresInSecs"
+        ],
+        "properties": {
+          "expiresInSecs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long the emailed code stays valid.",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
           }
         }
       },
@@ -23129,9 +23343,9 @@
         "type": "object",
         "description": "Optional body of POST /api/v1/users/me/deactivate (ACC-026).",
         "properties": {
-          "current_password": {
+          "step_up_token": {
             "type": "string",
-            "description": "The account's current password. Required unless the caller signed in within the\nre-authentication window (default 10 minutes); accounts without a password (Google\nsign-in) re-authenticate by signing in again.",
+            "description": "Single-use token from `POST /api/v2/me/step-up/verify` with purpose\n`DEACTIVATE_ACCOUNT` (a code emailed to the account's address).",
             "nullable": true
           }
         }
@@ -23568,6 +23782,69 @@
         },
         "additionalProperties": false
       },
+      "EmailChangeConfirmRequest": {
+        "type": "object",
+        "required": [
+          "newEmail",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The 6-digit code emailed to the NEW address."
+          },
+          "newEmail": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmailChangeRequest": {
+        "type": "object",
+        "required": [
+          "newEmail",
+          "stepUpToken"
+        ],
+        "properties": {
+          "newEmail": {
+            "type": "string",
+            "example": "new.address@example.com"
+          },
+          "stepUpToken": {
+            "type": "string",
+            "description": "From `POST /api/v2/me/step-up/verify` with purpose `CHANGE_EMAIL`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmailChangeRevertRequest": {
+        "type": "object",
+        "description": "Undo a self-service email change with the token mailed to the previous address.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "EmailChangedResponse": {
+        "type": "object",
+        "required": [
+          "email",
+          "otherSessionsEnded"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "otherSessionsEnded": {
+            "type": "boolean",
+            "description": "Other sessions were signed out; this one stays signed in."
+          }
+        }
+      },
       "EmailDelivery": {
         "type": "string",
         "description": "What happened to a requested invitation email.",
@@ -23861,17 +24138,6 @@
           "OPTIONAL",
           "DISABLED"
         ]
-      },
-      "ForgotPasswordRequest": {
-        "type": "object",
-        "required": [
-          "email"
-        ],
-        "properties": {
-          "email": {
-            "type": "string"
-          }
-        }
       },
       "GenerateReportRequest": {
         "type": "object",
@@ -24465,23 +24731,9 @@
         },
         "additionalProperties": false
       },
-      "LoginRequest": {
-        "type": "object",
-        "required": [
-          "email",
-          "password"
-        ],
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "password": {
-            "type": "string"
-          }
-        }
-      },
       "LoginResponse": {
         "type": "object",
+        "description": "Tokens and account of a completed sign-in.",
         "required": [
           "access_token",
           "refresh_token",
@@ -26474,6 +26726,78 @@
           }
         }
       },
+      "OtpRequest": {
+        "type": "object",
+        "description": "Start a passwordless sign-in (or sign-up): a one-time code is emailed.",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "ada@example.com"
+          }
+        }
+      },
+      "OtpVerifyLinkRequest": {
+        "type": "object",
+        "description": "Finish a passwordless sign-in with the magic link from the same email (the email\naddress and token both come from the link).",
+        "required": [
+          "email",
+          "token"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "OtpVerifyRequest": {
+        "type": "object",
+        "description": "Finish a passwordless sign-in with the emailed 6-digit code.",
+        "required": [
+          "email",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "048213"
+          },
+          "email": {
+            "type": "string",
+            "example": "ada@example.com"
+          }
+        }
+      },
+      "OtpVerifyResponse": {
+        "type": "object",
+        "description": "A completed passwordless sign-in.",
+        "required": [
+          "access_token",
+          "refresh_token",
+          "user",
+          "is_new_account"
+        ],
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "is_new_account": {
+            "type": "boolean",
+            "description": "True when this sign-in created the account (first sign-in with this address)."
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserInfo"
+          }
+        }
+      },
       "OwnerTransferRequest": {
         "type": "object",
         "required": [
@@ -28387,54 +28711,6 @@
           }
         }
       },
-      "RegisterRequest": {
-        "type": "object",
-        "required": [
-          "username",
-          "email",
-          "password",
-          "confirm_password"
-        ],
-        "properties": {
-          "confirm_password": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "password": {
-            "type": "string"
-          },
-          "username": {
-            "type": "string"
-          }
-        }
-      },
-      "RegisterResponse": {
-        "type": "object",
-        "required": [
-          "user_id",
-          "email",
-          "role",
-          "status"
-        ],
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "description": "`pending_verification` (spelled `pendingverification` until\n`ACCOUNT_STATUS_FORMAT=canonical`), `active`, `inactive` or `suspended`."
-          },
-          "user_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
       "RegistrationCreated": {
         "type": "object",
         "required": [
@@ -28647,40 +28923,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "ResendVerificationRequest": {
-        "type": "object",
-        "required": [
-          "email"
-        ],
-        "properties": {
-          "email": {
-            "type": "string"
-          }
-        }
-      },
-      "ResetPasswordRequest": {
-        "type": "object",
-        "required": [
-          "email",
-          "token",
-          "new_password",
-          "confirm_password"
-        ],
-        "properties": {
-          "confirm_password": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "new_password": {
-            "type": "string"
-          },
-          "token": {
-            "type": "string"
-          }
-        }
       },
       "ResolveInvitationResponse": {
         "type": "object",
@@ -29210,7 +29452,7 @@
         "properties": {
           "authMethod": {
             "type": "string",
-            "description": "PASSWORD, GOOGLE or LEGACY_REFRESH (a pre-session sign-in carried forward)."
+            "description": "EMAIL_OTP, GOOGLE, PASSWORD (historical) or LEGACY_REFRESH (a pre-session sign-in\ncarried forward)."
           },
           "authenticatedAt": {
             "type": "string",
@@ -29476,6 +29718,62 @@
             "format": "uuid",
             "description": "POST_MEETING: the READY recording to transcribe.",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "StepUpPurpose": {
+        "type": "string",
+        "description": "What the confirmation is for; a token for one purpose never authorizes another.",
+        "enum": [
+          "DEACTIVATE_ACCOUNT",
+          "CHANGE_EMAIL"
+        ]
+      },
+      "StepUpRequest": {
+        "type": "object",
+        "required": [
+          "purpose"
+        ],
+        "properties": {
+          "purpose": {
+            "$ref": "#/components/schemas/StepUpPurpose"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StepUpTokenResponse": {
+        "type": "object",
+        "required": [
+          "stepUpToken",
+          "expiresInSecs"
+        ],
+        "properties": {
+          "expiresInSecs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "stepUpToken": {
+            "type": "string",
+            "description": "Single-use token for the purpose, bound to this session. Send it with the action."
+          }
+        }
+      },
+      "StepUpVerifyRequest": {
+        "type": "object",
+        "required": [
+          "purpose",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The 6-digit code emailed to the account's current address.",
+            "example": "048213"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/StepUpPurpose"
           }
         },
         "additionalProperties": false
@@ -30301,64 +30599,19 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,\n`password_strength`, `passwords_mismatch`.",
-            "example": "password_strength"
+            "description": "Stable, machine-readable rule code, e.g. `length`, `email`, `regex`,\n`range`.",
+            "example": "email"
           },
           "field": {
             "type": "string",
-            "description": "Public JSON path of the offending field, as sent by the client (honours the\nrequest's serde naming), e.g. `password`, `displayName`, `items[0].email`.\n`null` when the problem concerns the request as a whole.",
-            "example": "password",
+            "description": "Public JSON path of the offending field, as sent by the client (honours the\nrequest's serde naming), e.g. `email`, `displayName`, `items[0].email`.\n`null` when the problem concerns the request as a whole.",
+            "example": "email",
             "nullable": true
           },
           "message": {
             "type": "string",
             "description": "Safe, human-readable message for this field.",
-            "example": "Password must be between 8 and 72 characters"
-          }
-        }
-      },
-      "VerifyEmailRequest": {
-        "type": "object",
-        "required": [
-          "email",
-          "token"
-        ],
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "token": {
-            "type": "string"
-          }
-        }
-      },
-      "VerifyResetTokenRequest": {
-        "type": "object",
-        "required": [
-          "email",
-          "token"
-        ],
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "token": {
-            "type": "string"
-          }
-        }
-      },
-      "VerifyResetTokenResponse": {
-        "type": "object",
-        "required": [
-          "message",
-          "valid"
-        ],
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "valid": {
-            "type": "boolean"
+            "example": "Invalid email address"
           }
         }
       },
@@ -30851,11 +31104,15 @@
     },
     {
       "name": "Authentication",
-      "description": "User authentication endpoints"
+      "description": "Passwordless sign-in and sign-up: request a 6-digit code by email (`POST /api/v1/auth/otp/request`), then verify the code or the one-click link from the same email. The first verification of a new address creates the account. Also token refresh, logout, Google sign-in and undoing an email change."
     },
     {
       "name": "Account profile (v2)",
       "description": "Blueprint Section 9: the signed-in user's account profile (username, display name, avatar reference, time zone, locale, email verification and the canonical account status). The Account is the authority; the Communications profile shows the same display name and avatar."
+    },
+    {
+      "name": "Account security (v2)",
+      "description": "Step-up confirmation (a code emailed to the account's current address) for sensitive actions, and the secure email change: proof of the current mailbox, a code to the new one, other sessions signed out, and a 7-day undo link sent to the previous address."
     },
     {
       "name": "Account sessions (v2)",
@@ -30895,7 +31152,7 @@
     },
     {
       "name": "Users",
-      "description": "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete; needs the current password or a recent sign-in)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens\n- Administrators reactivate an account with `PATCH /api/v1/admin/users/{id}` (`status: active`)"
+      "description": "User profile management and account operations.\n\n## Endpoints\n- **GET /users/me**: Get current user profile\n- **PATCH /users/me**: Update profile (username only)\n- **POST /users/me/deactivate**: Deactivate account (soft delete; needs a step-up token for DEACTIVATE_ACCOUNT)\n\n## Notes\n- All endpoints require JWT authentication\n- Deactivated users are blocked by auth middleware\n- Deactivation immediately invalidates all tokens\n- Administrators reactivate an account with `PATCH /api/v1/admin/users/{id}` (`status: active`)"
     },
     {
       "name": "Webhooks",
