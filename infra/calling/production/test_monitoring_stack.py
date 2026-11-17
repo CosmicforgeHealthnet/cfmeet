@@ -169,6 +169,8 @@ class Containers(unittest.TestCase):
             ms.prune('blackbox', two)
             self.assertFalse(one.exists())
             self.assertTrue(two.exists())
+            ms.prune('blackbox', None)
+            self.assertFalse(two.exists())
 
 
 class ReleaseIntegration(unittest.TestCase):

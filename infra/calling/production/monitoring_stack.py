@@ -294,6 +294,10 @@ def publish(component, staging):
 def prune(component, keep):
     for folder in ROOT.glob(component + '-*'):
         if folder.is_dir() and folder != keep and re.fullmatch(re.escape(component) + r'-[0-9a-f]{32}', folder.name):
+            # Published folders are sealed read-only (0500): restore write access first so
+            # removal also works for a non-root owner.
+            for d in [folder] + [x for x in folder.rglob('*') if x.is_dir()]:
+                os.chmod(d, 0o700)
             shutil.rmtree(folder)
 
 

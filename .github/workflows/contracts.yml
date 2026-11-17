@@ -156,7 +156,21 @@ jobs:
           python3 - "$RUNNER_TEMP/web-parity.json" <<'PY'
           import json, sys
           report = json.load(open(sys.argv[1]))
-          unmatched = [c for c in report["calls"] if c["bucket"] == "UNMATCHED"]
+          # Known drift, owned by the frontend team: the passwordless sign-in change (main,
+          # PR #97) removed these password endpoints; apps/web still calls them until its
+          # frontend handover lands. Remove entries as apps/web stops calling them; any
+          # OTHER unmatched call fails.
+          baseline = {
+              ("POST", "/api/v1/auth/change-password"), ("POST", "/api/v1/auth/forgot-password"),
+              ("POST", "/api/v1/auth/login"), ("POST", "/api/v1/auth/register"),
+              ("POST", "/api/v1/auth/resend-verification"), ("POST", "/api/v1/auth/reset-password"),
+              ("POST", "/api/v1/auth/verify-email"), ("POST", "/api/v1/auth/verify-reset-token"),
+          }
+          pending = [c for c in report["calls"] if c["bucket"] == "UNMATCHED" and (c["method"], c["path"]) in baseline]
+          for c in pending:
+              print("::warning::apps/web still calls removed %s %s (%s): passwordless frontend handover pending"
+                    % (c["method"], c["path"], c["sites"][0]))
+          unmatched = [c for c in report["calls"] if c["bucket"] == "UNMATCHED" and (c["method"], c["path"]) not in baseline]
           for c in unmatched:
               print("::error::apps/web calls %s %s (%s) but no contract operation has this path"
                     % (c["method"], c["path"], c["sites"][0]))
