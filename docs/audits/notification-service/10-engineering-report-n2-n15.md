@@ -296,23 +296,21 @@ With E1 recorded, the N14 gate no longer refuses email `ACTIVE` for lack of E1. 
 
 ---
 
-## 5. Remaining engineering (not built)
+## 5. What is not done, and why
 
-| Section | What remains |
-|---|---|
-| N6 | X6 / X7 on Account (Meeting) with the decision tables of N7 |
-| N7 | (N7a foundation built, §2.8; N7b Messaging shadow publication built, §2.9) multi-envelope events for audiences over 40 (contract decision); PW1 relay; publications from Meeting, Calling (destination + `CALL_PARTICIPANT_MISSED`, D-10), Hub (destination `NOTIFICATIONS`), Organizations (subscriber), Developer Platform; fence tests M-10 … M-17 |
-| N8 | web / mobile inbox (FE2) on U1–U5 through the Meeting relay; the contact-request canary needs the Hub publication (N7) |
-| N9 | Messaging registration facades and the copy of existing Web Push registrations (D-1b copy path), Calling `NotificationsPushTransport` on I3, the browser service worker for the service's VAPID key, real-device acceptance per platform |
-| N10 | Hub copy + catch-up job, facade switch of the Hub preference endpoints, FE3 |
-| N11 | Meeting / Developer Platform producer routing through the fence, reminder takeover operation, canary |
-| N12 | Account X6 / X7, PW1 AUTO failover, FORCED mode, fallback drill (`email-acceptance confirm=fallback`), D-9 alerting |
-
----
+| Item | State | What it needs |
+|---|---|---|
+| APNs (iOS push) | adapter built, not configured | owner credentials that do not exist: an APNs auth key (`.p8`), its key id, the Apple team id and the app bundle topic |
+| FCM (Android push) | adapter built, not configured | an FCM service-account JSON for the Firebase project of the Android app |
+| Web inbox / preference UI (FE2, FE3), web call push in the browser (FE4, FE5) | client work, not backend | a web / mobile release; the backend APIs (U1–U9 relay) are live |
+| N13 alert delivery to a person | rules built and tested | Prometheus / Alertmanager with receivers (owner decision D-9) |
+| Non-critical account notices (`new-sign-in`, `email-in-use`, `email-changed`) | still sent by Meeting's legacy path | a fence category of their own, and a decision on the masked address and undo token they carry |
+| Multi-envelope events | an audience over 40 (message wake-ups) or one envelope (Meeting) stays `OLD` (`RECIPIENT_LIMIT`), so the legacy path still reaches everyone | a contract decision on splitting one event across envelopes |
+| Call push cancel | not built | a catalogue event for "call answered elsewhere / ended" |
 
 ## 6. Retirement and time-based acceptance
 
-No category has moved to the service, so no 30-day, 60-day or 90-day window has started and every legacy pipeline (Meeting email ledger and worker, Meeting notice worker and reminder scan, Messaging push dispatcher, Hub preferences) remains the operating path. `LEGACY_RETIRED` is not applicable to any item.
+The legacy paths are not retired: they are the failover and rollback target of every fence. Examples are the Meeting email ledger and worker (the CRITICAL AUTO / FORCED fallback) and Messaging's push dispatcher (`FENCED_OLD` / `LEGACY_ONLY` rollback). `OPERATIONALLY_ACCEPTED` and `LEGACY_RETIRED` are time-based (Document 5 §10) and are not claimed for any category: the windows start at the `FENCED_NEW` times of §4.4.
 
 ## 7. Baselines Q1–Q18
 
