@@ -22,6 +22,7 @@ mod control;
 mod create;
 pub mod enterprise;
 pub mod history;
+mod host;
 pub mod http;
 pub mod incidents;
 mod invite;

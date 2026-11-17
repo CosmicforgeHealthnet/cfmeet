@@ -67,6 +67,15 @@ pub fn routes() -> Router<AppState> {
             post(stop_screen_share),
         )
         .route("/v1/calls/:call_id/participants", post(add_participants))
+        .route("/v1/calls/:call_id/host", post(transfer_host))
+        .route(
+            "/v1/calls/:call_id/participants/:participant_id/remove",
+            post(remove_participant),
+        )
+        .route(
+            "/v1/calls/:call_id/participants/:participant_id/mute",
+            post(mute_participant),
+        )
         .route("/v1/calls/:call_id/ivr/input", post(ivr_input))
         .route(
             "/v1/calls/:call_id/sessions/:session_id/media-credentials",
@@ -408,6 +417,16 @@ pub(crate) struct VersionBody {
     pub expected_version: i64,
 }
 
+/// Cancel / end / hold / resume: the version and (C4, end / hold / resume) the acting
+/// participant, which must be the host of a group Call.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ControlBody {
+    pub expected_version: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acting_participant_id: Option<Uuid>,
+}
+
 async fn invitation_command(
     state: AppState,
     ctx: PlatformAuthContext,
@@ -519,7 +538,7 @@ async fn version_command(
     ctx: PlatformAuthContext,
     headers: HeaderMap,
     call_id: String,
-    body: Result<Json<VersionBody>, JsonRejection>,
+    body: Result<Json<ControlBody>, JsonRejection>,
     operation: CommandOperation,
 ) -> Result<Response, CallingError> {
     ctx.require_scope(names::CALLS_WRITE)?;
@@ -528,6 +547,25 @@ async fn version_command(
     let key = command_key(&headers, operation, Some(call_uuid), &body, false)?;
     let cmd = CallCommandContext::customer(&ctx);
     let call_id = CallId::from_uuid(call_uuid);
+    // C4: END / HOLD / RESUME for everyone in a group Call are the host's; CANCEL (before
+    // anyone answered) names no participant.
+    match (operation, body.acting_participant_id) {
+        (CommandOperation::Cancel, Some(_)) => {
+            return Err(CallingError::Validation(
+                "actingParticipantId is not accepted by cancel.",
+            ))
+        }
+        (_, acting) => {
+            state
+                .app
+                .require_host_for_everyone(
+                    CallScope::of_platform(&ctx),
+                    call_id,
+                    acting.map(CallParticipantId::from_uuid),
+                )
+                .await?
+        }
+    }
     let outcome = match operation {
         CommandOperation::Cancel => {
             state
@@ -562,7 +600,7 @@ async fn cancel(
     ctx: PlatformAuthContext,
     headers: HeaderMap,
     Path(call_id): Path<String>,
-    body: Result<Json<VersionBody>, JsonRejection>,
+    body: Result<Json<ControlBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     version_command(state, ctx, headers, call_id, body, CommandOperation::Cancel).await
 }
@@ -572,7 +610,7 @@ async fn end(
     ctx: PlatformAuthContext,
     headers: HeaderMap,
     Path(call_id): Path<String>,
-    body: Result<Json<VersionBody>, JsonRejection>,
+    body: Result<Json<ControlBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     version_command(state, ctx, headers, call_id, body, CommandOperation::End).await
 }
@@ -582,7 +620,7 @@ async fn hold(
     ctx: PlatformAuthContext,
     headers: HeaderMap,
     Path(call_id): Path<String>,
-    body: Result<Json<VersionBody>, JsonRejection>,
+    body: Result<Json<ControlBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     version_command(state, ctx, headers, call_id, body, CommandOperation::Hold).await
 }
@@ -592,7 +630,7 @@ async fn resume(
     ctx: PlatformAuthContext,
     headers: HeaderMap,
     Path(call_id): Path<String>,
-    body: Result<Json<VersionBody>, JsonRejection>,
+    body: Result<Json<ControlBody>, JsonRejection>,
 ) -> Result<Response, CallingError> {
     version_command(state, ctx, headers, call_id, body, CommandOperation::Resume).await
 }
@@ -850,6 +888,97 @@ async fn media_credentials(
         )
         .await?;
     Ok(respond(StatusCode::OK, credential, false))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TransferHostBody {
+    acting_participant_id: Uuid,
+    host_participant_id: Uuid,
+}
+
+/// `POST /v1/calls/:call_id/host` (C4, calls.write): the host hands the role over.
+async fn transfer_host(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    body: Result<Json<TransferHostBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_id = CallId::from_uuid(uuid_path(&call_id)?);
+    let b = parse_body(body)?;
+    let out = state
+        .app
+        .transfer_host(
+            &CallCommandContext::customer(&ctx),
+            call_id,
+            CallParticipantId::from_uuid(b.acting_participant_id),
+            CallParticipantId::from_uuid(b.host_participant_id),
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, out, false))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostActionBody {
+    acting_participant_id: Uuid,
+}
+
+/// `POST /v1/calls/:call_id/participants/:participant_id/remove` (C4, calls.write): the
+/// host removes a participant (it cannot rejoin).
+async fn remove_participant(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path((call_id, participant_id)): Path<(String, String)>,
+    body: Result<Json<HostActionBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_id = CallId::from_uuid(uuid_path(&call_id)?);
+    let participant = CallParticipantId::from_uuid(uuid_path(&participant_id)?);
+    let b = parse_body(body)?;
+    let out = state
+        .app
+        .remove_participant(
+            &CallCommandContext::customer(&ctx),
+            call_id,
+            CallParticipantId::from_uuid(b.acting_participant_id),
+            participant,
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, out, false))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MuteBody {
+    acting_participant_id: Uuid,
+    muted: bool,
+}
+
+/// `POST /v1/calls/:call_id/participants/:participant_id/mute` (C4, calls.write): the host
+/// mutes or unmutes a participant's audio.
+async fn mute_participant(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path((call_id, participant_id)): Path<(String, String)>,
+    body: Result<Json<MuteBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_id = CallId::from_uuid(uuid_path(&call_id)?);
+    let participant = CallParticipantId::from_uuid(uuid_path(&participant_id)?);
+    let b = parse_body(body)?;
+    let out = state
+        .app
+        .mute_participant(
+            &CallCommandContext::customer(&ctx),
+            call_id,
+            CallParticipantId::from_uuid(b.acting_participant_id),
+            participant,
+            b.muted,
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, out, false))
 }
 
 #[derive(Debug, Deserialize)]

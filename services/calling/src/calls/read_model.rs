@@ -279,6 +279,11 @@ pub struct CallView {
     pub transfers: Vec<TransferView>,
     /// C6: who is presenting a screen now (`null` when nobody is).
     pub screen_share: Option<ScreenShareView>,
+    /// C4: the Call's host participant (the creator unless the role was transferred;
+    /// `null` once nobody is active).
+    pub host_participant_id: Option<String>,
+    /// C4: participants the host muted (no audio publishing until unmuted).
+    pub muted_participant_ids: Vec<String>,
     /// Whether THIS caller may read the call's recordings and recording authorizations
     /// (`GET /v1/calls/{id}/recordings`, `/recording-authorizations`): its credential holds
     /// `enterprise.recording.read`. Clients request recordings only when true (an ordinary
@@ -300,6 +305,8 @@ impl From<&CallDetail> for CallView {
                 participant_id: participant.to_string(),
                 started_at: ts(since),
             }),
+            host_participant_id: d.host.map(|h| h.to_string()),
+            muted_participant_ids: d.host_muted.iter().map(ToString::to_string).collect(),
             can_view_recordings: false,
         }
     }

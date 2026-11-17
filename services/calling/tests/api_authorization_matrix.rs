@@ -86,6 +86,15 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /v1/calls/{call_id}/screen-share", Probe::Body),
     ("POST /v1/calls/{call_id}/screen-share/stop", Probe::Body),
     ("POST /v1/calls/{call_id}/participants", Probe::Body),
+    ("POST /v1/calls/{call_id}/host", Probe::Body),
+    (
+        "POST /v1/calls/{call_id}/participants/{participant_id}/remove",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/participants/{participant_id}/mute",
+        Probe::Body,
+    ),
     (
         "POST /v1/calls/{call_id}/sessions/{session_id}/quality-samples",
         Probe::Body,
@@ -626,6 +635,10 @@ async fn provision() -> Option<Provisioned> {
         a.session_on(call, caller_device.endpoint).await.unwrap(),
     );
     ids.insert("endpoint_id", callee_device.endpoint);
+    ids.insert(
+        "participant_id",
+        a.participant_of(call, callee_device.principal).await,
+    );
     let caller_signaling = a.signaling_token(&caller_device).await;
     let callee_signaling = a.signaling_token(&callee_device).await;
     Some(Provisioned {

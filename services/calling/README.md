@@ -234,6 +234,15 @@ references or telephone numbers.
 5. Hold / resume / transfer / session removal / end are commands with `expectedVersion`;
    the provider enforces them. END reaches ENDED only on cleanup evidence; usage is
    finalized.
+6. Group calls have a host (C4, migration 000052): the creator, unless the role was
+   handed over (`POST /v1/calls/{id}/host`); while the host is not present (its sessions
+   removed) the longest-standing present participant holds the role. In a group call
+   (more than two participants, ever) END / HOLD / RESUME naming an
+   `actingParticipantId` are the host's (403 for anyone else, who leaves by removing its
+   session); the backend acting without one is unchanged. The host removes a participant
+   for good (`…/participants/{participant_id}/remove`, HOST_REMOVED) or mutes it
+   (`…/participants/{participant_id}/mute`, enforced at the provider until unmuted). The
+   Call view shows `hostParticipantId` and `mutedParticipantIds`.
 
 Signals are sent only after the authoritative transaction commits and fan out across
 instances through PostgreSQL `LISTEN` / `NOTIFY` (`PgNotifySignalBus`); only endpoints
