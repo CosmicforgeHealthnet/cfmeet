@@ -1534,7 +1534,7 @@ def rollback(sha, run_id):
     journal = load_journal()
     candidates = [e for e in journal if e['status'] in ('done', 'failed')
                   and (e['components'] or e.get('routing') or e.get('edge') or e.get('notificationRouting')
-                       or e.get('notificationFence'))]
+                       or e.get('notificationFence') or e.get('preferenceAuthority'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
@@ -1558,6 +1558,8 @@ def rollback(sha, run_id):
         notif_ops.undo_routing(sys.modules[__name__], entry['notificationRouting'], run_id)
     if entry.get('notificationFence'):
         notif_ops.undo_fence(sys.modules[__name__], entry['notificationFence'], run_id)
+    if entry.get('preferenceAuthority'):
+        notif_ops.undo_preference_authority(sys.modules[__name__], entry['preferenceAuthority'], run_id)
     for component in reversed(entry['components']):
         restore(component, run_id)
         commit(entry)
@@ -2567,6 +2569,12 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, 'developer-platform')),
     'activate-meeting-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
         sys.modules[__name__], sha, run_id, 'meeting-service')),
+    # Notification Service N10: preference copy + catch-up, then the Hub facade switch.
+    'activate-preference-copy': ((), lambda sha, run_id, confirm: notif_ops.activate_preference_copy(
+        sys.modules[__name__], sha, run_id, confirm)),
+    'activate-preference-authority': (('activate-preference-copy',), lambda sha, run_id, confirm:
+                                      notif_ops.activate_preference_authority(sys.modules[__name__], sha, run_id,
+                                                                              confirm)),
     # Notification Service N5 / N11: Resend as the service's own provider (VPS credentials).
     'activate-notifications-email': (('activate-resend-email',), lambda sha, run_id, confirm:
                                      notif_ops.activate_email(sys.modules[__name__], sha, run_id, confirm)),

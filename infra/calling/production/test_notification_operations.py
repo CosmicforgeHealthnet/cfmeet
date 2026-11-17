@@ -650,5 +650,89 @@ class SealingKey(unittest.TestCase):
                          no.x25519_public(base64.b64decode(private)))
 
 
+
+class PreferenceAuthority(unittest.TestCase):
+    GOOD = {'complete': True, **{k: {'hubRows': 3, 'serviceRows': 3, 'equal': 3, 'different': 0, 'skipped': 0,
+                                     'complete': True} for k in ('account', 'conversation', 'contact')}}
+
+    def fake(self, verification, copy_phase='CATCH_UP', finishes=True):
+        fake = FakeProducerCr([], done=('activate-preference-copy',))
+        state = {'mode': 'RUN', 'phase': copy_phase, 'snapshots_completed': 1, 'last_error': None,
+                 'verify_requested_at': None, 'verified_at': None, 'verification': None}
+        hub = {'mode': 'HUB', 'version': 1}
+        writes = []
+
+        def db_sql(db, sql):
+            writes.append((db, sql))
+            if 'FROM notif_preference_copy' in sql and sql.startswith('SELECT row_to_json'):
+                return json.dumps(state)
+            if 'FROM communication_preference_authority' in sql and sql.startswith('SELECT row_to_json'):
+                return json.dumps(hub)
+            if 'verify_requested_at = clock_timestamp()' in sql:
+                state['verify_requested_at'] = '2026-11-17T13:00:00+00:00'
+                if finishes:
+                    state['verified_at'] = '2026-11-17T13:00:20+00:00'
+                    state['verification'] = verification
+                return ''
+            m = re.search(r"SET mode = '(\w+)'", sql)
+            if 'communication_preference_authority' in sql and m:
+                hub['mode'] = m.group(1)
+                return '1'
+            if 'notif_preference_copy' in sql and m:
+                state['mode'] = m.group(1)
+                return ''
+            raise AssertionError(sql)
+        fake.release.db_sql = db_sql
+        fake.hub, fake.state, fake.writes = hub, state, writes
+        return fake
+
+    def test_an_exact_verification_moves_the_hub_to_the_service_and_stops_the_copy(self):
+        fake = self.fake(self.GOOD)
+        no.activate_preference_authority(fake, 'a' * 40, '42-1', '', sleep=lambda s: None)
+        self.assertEqual(fake.hub['mode'], 'SERVICE')
+        self.assertEqual(fake.state['mode'], 'OFF')
+        modes = [re.search(r"SET mode = '(\w+)'", q).group(1) for d, q in fake.writes
+                 if 'UPDATE communication_preference_authority' in q]
+        self.assertEqual(modes, ['FREEZE', 'SERVICE'])
+        self.assertEqual(fake.journal[-1]['status'], 'done')
+        no.undo_preference_authority(fake, fake.journal[-1]['preferenceAuthority'], '43-1')
+        self.assertEqual(fake.hub['mode'], 'HUB')
+
+    def test_any_difference_returns_the_hub_to_hub(self):
+        for bad in ({**self.GOOD, 'complete': False},
+                    {**self.GOOD, 'contact': {**self.GOOD['contact'], 'different': 1}},
+                    {**self.GOOD, 'account': {**self.GOOD['account'], 'serviceRows': 2}}):
+            fake = self.fake(bad)
+            with self.assertRaisesRegex(RuntimeError, 'did not match'):
+                no.activate_preference_authority(fake, 'a' * 40, '42-1', '', sleep=lambda s: None)
+            self.assertEqual(fake.hub['mode'], 'HUB')
+            self.assertEqual(fake.journal[-1]['status'], 'failed')
+
+    def test_a_pass_that_never_finishes_returns_the_hub_to_hub(self):
+        fake = self.fake(self.GOOD, finishes=False)
+        clock = [0.0]
+
+        def sleep(seconds):
+            clock[0] += seconds
+        with self.assertRaisesRegex(RuntimeError, 'did not finish'):
+            no.activate_preference_authority(fake, 'a' * 40, '42-1', '', sleep=sleep, clock=lambda: clock[0])
+        self.assertEqual(fake.hub['mode'], 'HUB')
+
+    def test_refused_before_the_copy_caught_up(self):
+        fake = self.fake(self.GOOD, copy_phase='SNAPSHOT')
+        with self.assertRaisesRegex(RuntimeError, 'not caught up'):
+            no.activate_preference_authority(fake, 'a' * 40, '42-1', '', sleep=lambda s: None)
+        self.assertEqual(fake.journal, [])
+        self.assertFalse([q for _, q in fake.writes if q.startswith('WITH u AS')])
+
+    def test_the_copy_grants_both_directions(self):
+        granted = sorted((r, i, p) for op, r, i, p in cr.GRANTS if op == 'activate-preference-copy')
+        self.assertEqual(granted, [('communications', 'notifications', ('communications-preferences.export',)),
+                                   ('notifications', 'communications', ('notifications-user.forward',)),
+                                   ('notifications-2', 'communications', ('notifications-user.forward',))])
+        for op in ('activate-preference-copy', 'activate-preference-authority'):
+            self.assertIn(op, cr.OPERATIONS)
+
+
 if __name__ == '__main__':
     unittest.main()

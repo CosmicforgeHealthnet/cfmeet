@@ -123,6 +123,13 @@ PRODUCERS = {
 GRANTS += tuple((spec['operation'], replica, issuer, PUBLICATION_PERMISSIONS)
                 for issuer, spec in PRODUCERS.items() for replica in REPLICAS)
 
+# N10: the Notification Service pulls the Hub's preferences (communications-preferences.export,
+# received by the Hub) and the Hub facade forwards U6 / U7 (notifications-user.forward,
+# received by both replicas).
+GRANTS += (('activate-preference-copy', 'communications', 'notifications', ('communications-preferences.export',)),) \
+    + tuple(('activate-preference-copy', replica, 'communications', ('notifications-user.forward',))
+            for replica in REPLICAS)
+
 FLAGGED = {'meeting-service': {'NOTIFICATION_OWNER_API_ENABLED': 'true'}}
 SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID', 'CFMEET_COMMUNICATION_ENVIRONMENT_ID',
               'CFMEET_COMMUNICATION_ENVIRONMENT_KIND', 'CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID')
@@ -772,3 +779,130 @@ def activate_email(cr, sha, run_id, confirm):
 
     cr.apply_activation('activate-notifications-email', sha, run_id,
                         [(replica, dict(overrides), {'mounts': list(mounts)}) for replica in REPLICAS], post=post)
+
+
+# --- N10: preference copy and the Hub facade switch ---------------------------------------------
+PREFERENCE_VERIFY_SECONDS = 600
+PREFERENCE_KINDS = ('ACCOUNT', 'CONVERSATION', 'CONTACT')
+
+
+def _hub_sql(cr):
+    return lambda q: cr.release.db_sql(cr.SERVICES['communications']['db'], q)
+
+
+def _ns_sql(cr):
+    return lambda q: cr.release.db_sql(cr.SERVICES['notifications']['db'], q)
+
+
+def copy_state(cr):
+    out = _ns_sql(cr)("SELECT row_to_json(c) FROM (SELECT mode, phase, snapshots_completed, rows_written, "
+                      "rows_unchanged, rows_skipped, changes_applied, last_error, verify_requested_at, verified_at, "
+                      "verification FROM notif_preference_copy WHERE singleton) c;")
+    return json.loads(out or 'null')
+
+
+def hub_authority(cr):
+    out = _hub_sql(cr)("SELECT row_to_json(a) FROM (SELECT mode, version FROM communication_preference_authority "
+                       "WHERE singleton) a;")
+    return json.loads(out or 'null')
+
+
+def set_hub_authority(cr, mode, run_id, expected):
+    assert mode in ('HUB', 'FREEZE', 'SERVICE') and re.fullmatch(r'[0-9-]{1,32}', run_id)
+    guard = '' if expected is None else " AND mode = '%s'" % expected
+    out = _hub_sql(cr)("WITH u AS (UPDATE communication_preference_authority SET mode = '%s', version = version + 1, "
+                       "changed_by_run = '%s', changed_at = now() WHERE singleton%s RETURNING mode) "
+                       "SELECT count(*) FROM u;" % (mode, run_id, guard))
+    if (out or '').strip() != '1':
+        raise RuntimeError('The Hub preference authority changed concurrently; nothing applied')
+
+
+def set_copy_mode(cr, mode, run_id):
+    assert mode in ('OFF', 'RUN') and re.fullmatch(r'[0-9-]{1,32}', run_id)
+    _ns_sql(cr)("UPDATE notif_preference_copy SET mode = '%s', version = version + 1, changed_by_run = '%s', "
+                "updated_at = now() WHERE singleton;" % (mode, run_id))
+
+
+def activate_preference_copy(cr, sha, run_id, confirm):
+    """Grants the export / facade permissions and starts the copy + catch-up (W7). The Hub
+    stays the preference authority (mode HUB); nothing a user sees changes."""
+    cr.require_release(sha)
+    for op in ('activate-notifications-owners', 'activate-communications-publications'):
+        if not cr.done(op):
+            raise RuntimeError('The preference copy needs %s first' % op)
+    if not copy_state(cr):
+        raise RuntimeError('The Notification Service has no preference copy control row; release it first')
+    if not hub_authority(cr):
+        raise RuntimeError('The Hub has no preference authority row; release it first')
+
+    def post():
+        set_copy_mode(cr, 'RUN', run_id)
+        cr.emit('preferenceCopy', {'mode': 'RUN', 'state': copy_state(cr)})
+
+    cr.apply_activation('activate-preference-copy', sha, run_id, [], post=post)
+
+
+def verification_complete(doc):
+    if not isinstance(doc, dict) or doc.get('complete') is not True:
+        return False
+    for kind in PREFERENCE_KINDS:
+        k = doc.get(kind) or doc.get(kind.lower()) or {}
+        if not k.get('complete') or k.get('different') or k.get('skipped') \
+                or not (k.get('equal') == k.get('hubRows') == k.get('serviceRows')):
+            return False
+    return True
+
+
+def activate_preference_authority(cr, sha, run_id, confirm, sleep=None, clock=None):
+    """Freeze the Hub preference writes, run the final copy pass and verification, and move the
+    Hub endpoints to the Notification Service only when every kind matches exactly; otherwise
+    back to HUB. Journaled; rollback sets HUB."""
+    import time
+    sleep = sleep or time.sleep
+    clock = clock or time.monotonic
+    cr.require_release(sha)
+    if not cr.done('activate-preference-copy'):
+        raise RuntimeError('activate-preference-copy first')
+    state = copy_state(cr)
+    if not state or state.get('mode') != 'RUN' or state.get('phase') != 'CATCH_UP' \
+            or (state.get('snapshots_completed') or 0) < 1 or state.get('last_error'):
+        raise RuntimeError('The preference copy is not caught up (needs RUN, CATCH_UP, one snapshot, no error): %s'
+                           % json.dumps({k: state.get(k) for k in ('mode', 'phase', 'snapshots_completed',
+                                                                   'last_error')} if state else None))
+    if (hub_authority(cr) or {}).get('mode') != 'HUB':
+        raise RuntimeError('The Hub preference authority is not HUB')
+    entry = cr.begin('activate-preference-authority', sha, run_id)
+    entry['preferenceAuthority'] = dict(before='HUB', after='SERVICE')
+    cr.commit(entry)
+    try:
+        set_hub_authority(cr, 'FREEZE', run_id, 'HUB')
+        _ns_sql(cr)("UPDATE notif_preference_copy SET verify_requested_at = clock_timestamp() WHERE singleton;")
+        deadline = clock() + PREFERENCE_VERIFY_SECONDS
+        while True:
+            state = copy_state(cr)
+            if state.get('verified_at') and state.get('verify_requested_at') \
+                    and state['verified_at'] >= state['verify_requested_at']:
+                break
+            if clock() >= deadline:
+                raise RuntimeError('The final preference pass did not finish in %ds' % PREFERENCE_VERIFY_SECONDS)
+            sleep(5)
+        cr.emit('preferenceVerification', state.get('verification'))
+        if not verification_complete(state.get('verification')):
+            raise RuntimeError('Preference verification did not match exactly; the Hub stays the authority')
+        set_hub_authority(cr, 'SERVICE', run_id, 'FREEZE')
+        set_copy_mode(cr, 'OFF', run_id)
+    except Exception:
+        try:
+            set_hub_authority(cr, 'HUB', run_id, None)
+        finally:
+            entry['status'] = 'failed'
+            cr.commit(entry)
+        raise
+    entry['status'] = 'done'
+    cr.commit(entry)
+    cr.emit('preferenceAuthority', {'mode': 'SERVICE'})
+
+
+def undo_preference_authority(cr, record, run_id):
+    set_hub_authority(cr, 'HUB', run_id, None)
+    cr.emit('preferenceAuthorityRestored', {'mode': 'HUB'})
