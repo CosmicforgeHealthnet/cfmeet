@@ -98,7 +98,7 @@ Three of them are gateway-routed. The two Calling media gateway routes are exclu
 
 1. **The account authority is the weakest service.** Meeting-service owns accounts, which every other service trusts, but carries the legacy auth model: symmetric JWT, no token type, revocation gaps, plaintext legacy secrets, naive timestamps, no audit table and no backup path. See SEC-001…SEC-013, ACC-001…ACC-004, DATA-001…DATA-003, DATA-015.
 2. **No organization authority** (ORG-001). Enterprise Calling, the Developer Platform and Meetings each model a different "organization". The web runs all Calling traffic through one shared credential and scope (CAL-007).
-3. **Part VI is undeployed** (PLT-005). The Developer Platform (126 registered operations) and the gateway (572 manifest routes, both SDKs, public docs) are built and CI-tested, but neither is deployed, and production first-party traffic bypasses them.
+3. **Part VI was undeployed at audit time** (PLT-005; since deployed to production and certified, see the [final production certification](../operations/cfmeet-final-production-certification.md)). The Developer Platform (126 registered operations) and the gateway (572 manifest routes, both SDKs, public docs) are built and CI-tested, but neither is deployed, and production first-party traffic bypasses them.
 4. **Two generations of the meeting model are live** (v1 + v2). Mobile is the remaining v1 writer.
 5. **Device and revocation fan-out spans four registries** without one account-level revocation event.
 

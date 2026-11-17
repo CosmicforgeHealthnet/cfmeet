@@ -21,9 +21,14 @@ dependency/legal review including hpke-rs MPL-2.0; target runtime/client securit
 critical/high findings closed and residual risk accepted; owner authorization of the exact
 production E2EE configuration. No new paid infrastructure is provisioned for this.
 
-The production configuration validator still rejects
-`MESSAGING_E2EE_DEVICES_ENABLED=true`. This work does not add an override or reinterpret
-MANAGED as PRIVATE_E2EE. Calling, Meetings and unrelated permitted contexts retain their
+**Update (owner decision 2026-11-15, [ADR 0060](../decisions/0060-account-linked-devices-and-production-personal-e2ee.md)):
+personal PRIVATE_E2EE is enabled in production.** The production configuration validator
+accepts `MESSAGING_E2EE_DEVICES_ENABLED=true` only with the owner's release record
+(`MESSAGING_E2EE_PRODUCTION_RELEASE_FILE`, written by the coordinated
+`activate-personal-encryption` operation), which states `independentAssessment:
+NOT_PERFORMED` and accepts `KEY_TRANSPARENCY_UNWITNESSED`. The outside evidence listed above
+is therefore still open, as accepted residual risk, not a production block. MANAGED is
+never reinterpreted as PRIVATE_E2EE. Calling, Meetings and unrelated permitted contexts retain their
 independent authorization. Off-server disaster recovery is owner-deferred.
 
 ## Findings repaired within this milestone

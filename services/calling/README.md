@@ -38,8 +38,15 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **Part IV Workstream L** Calls to and from Digital Communications Numbers (DCNs) owned by `services/numbering` (inbound DCN offers verified against Numbering, outbound DCN presentation with enterprise membership policy and single-use caller-identity grants) | **Implemented** (ADR 0041; summary below) |
 | **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → service account → credential limits and the principal axis, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
 
-**Deferred (later sections / services):** push delivery through a push vendor (a
-transport-neutral push-ready payload is produced), a message-broker transport for
+**Push (current state):** Calling builds the transport-neutral
+`cfmeet.calling.push-invitation` payload for endpoints that registered a `pushTargetRef`,
+but the service runs with `NoPushTransport` (`src/main.rs`), so nothing is pushed. The
+Notification Service's internal call-push route (`POST /internal/v1/push/call-invitations`)
+exists, but Calling is not wired to it yet. Incoming calls therefore reach a device only
+through its open signaling WebSocket or the recovery API (see [Flow](#flow)).
+
+**Deferred (later sections / services):** wiring Calling's push dispatcher to the
+Notification Service, a message-broker transport for
 platform events, quality metrics from providers that do not offer them, Numbering's own
 lifecycle and number administration (it is a separate service), billing / invoicing / pricing, and the Part F items listed below.
 
@@ -228,8 +235,11 @@ references or telephone numbers.
    the provider enforces them. END reaches ENDED only on cleanup evidence; usage is
    finalized.
 
-Signals are sent only after the authoritative transaction commits; a reconnecting
-endpoint recovers with `GET /v1/calling/invitations`. Expiry and media reconciliation
+Signals are sent only after the authoritative transaction commits and fan out across
+instances through PostgreSQL `LISTEN` / `NOTIFY` (`PgNotifySignalBus`); only endpoints
+with an open `GET /v1/calling/signaling` connection receive them (there is no push
+fallback yet, see above). A reconnecting endpoint recovers with
+`GET /v1/calling/invitations`. Expiry and media reconciliation
 workers run on every instance (row leases / `SKIP LOCKED`).
 
 ### Tables (migrations 000010–000014)
@@ -275,7 +285,7 @@ Meeting Service dependency; Telephony only executes edge primitives.
 | §55 | Ring groups: SIMULTANEOUS / ORDERED, group single winner, bounded fan-out, fallback | ADR 0019 |
 | §56 | Queues: FIFO, authoritative positions, one offer per entry / agent, timeouts, overflow, abandonment | ADR 0019 |
 | §57 | Declarative versioned IVR (keys never stored or logged), built-in prompts, RTC keypad and SIP DTMF | ADR 0020 |
-| §58 | Business hours (IANA zones, DST, exceptions), typed forwarding, loop / hop protection; public forwarding only through every Part E gate | ADR 0021 |
+| §58 | Business hours (IANA zones, DST, exceptions), typed forwarding (`/v1/enterprise/forwarding-rules`), loop / hop protection; public forwarding only through every Part E gate. Forwarding and voicemail apply to calls routed over `ENTERPRISE_INTERNAL` (extensions, ring groups, queues) only: an ordinary person-to-person application call is neither forwarded nor sent to voicemail | ADR 0021 |
 | §59 | Hold / resume / transfer to enterprise targets on the same Call | ADR 0022 |
 | §60 | Voicemail: mailboxes, edge (SIP) / LiveKit Egress (RTC) capture, protected object storage (`packages/object-storage`), READY, authorized signed retrieval, read state, deletion, retention | ADR 0023, 0027 |
 | §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge (SIP) / audio-only room-composite (RTC) capture, protected artifacts, audited access | ADR 0024, 0027 |

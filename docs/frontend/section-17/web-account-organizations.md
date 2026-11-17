@@ -78,5 +78,7 @@ submission. Error text is mapped from stable codes in `src/lib/organizations/org
 4. **`createdBy` is a user id with no display name** (ORG-003): shown as "You" or a shortened account id.
 5. **Refresh rate limiting / client attribution.** Refreshes reach the API from the web server, so any per-IP
    limiter on `/api/v1/auth/refresh` sees the web tier's address; session `clientLabel` stays from sign-in.
-6. **`change-password` bounds**: the API documents 8–128 characters, while bcrypt reads 72 bytes; the web form
-   enforces ≤ 72 bytes (ACC-025 rule in `account-core.ts`).
+6. **Password bounds**: the server enforces 8–72 (at most 72 bytes, `MAX_PASSWORD_BYTES`, the bcrypt input limit)
+   on sign-up, reset and change; the web form enforces the same ≤ 72 bytes (ACC-025 rule in `account-core.ts`).
+   The generated OpenAPI descriptions still say 8–128 until the Meeting Service handler documentation is
+   corrected and the contract regenerated.
