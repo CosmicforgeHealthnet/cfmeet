@@ -624,7 +624,11 @@ async fn resolve_and_evaluate_truth_tables() {
     }
     let o = resolve(&h, owner, None).await;
     assert_eq!(o[0]["organizationStatus"], "SUSPENDED");
-    assert_eq!(o[0]["capabilities"], json!(["organization.read"]));
+    // The audit history stays readable to the owner while suspended (gap audit G8).
+    assert_eq!(
+        o[0]["capabilities"],
+        json!(["organization.read", "organization.audit.read"])
+    );
     assert_eq!(
         resolve(&h, member, None).await[0]["capabilities"],
         json!([])

@@ -424,7 +424,7 @@ async fn organization_lifecycle_journey() {
     assert_eq!(suspended["lifecycleStatus"], "SUSPENDED");
     assert_eq!(
         suspended["viewer"]["capabilities"],
-        json!(["organization.read"])
+        json!(["organization.read", "organization.audit.read"])
     );
     h.user(member)
         .get(&format!("/internal/v1/organizations/{id}"))

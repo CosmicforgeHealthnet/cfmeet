@@ -177,6 +177,10 @@ pub fn app(state: AppState) -> Router {
             patch(organizations::admin_update),
         )
         .route(
+            "/admin/organizations/:id/audit-events",
+            get(authorization::admin_audit_events),
+        )
+        .route(
             "/admin/organizations/:id/owners",
             post(members::admin_appoint_owner),
         )

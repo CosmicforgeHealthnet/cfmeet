@@ -390,6 +390,68 @@ pub struct AuditQuery {
     pub before: Option<i64>,
     #[serde(default)]
     pub limit: Option<i64>,
+    /// Exact action, e.g. `membership.updated`.
+    #[serde(default)]
+    pub action: Option<String>,
+    /// Only changes made by this user.
+    #[serde(default)]
+    pub actor_user_id: Option<Uuid>,
+    /// Inclusive lower bound (RFC 3339).
+    #[serde(default)]
+    pub from: Option<String>,
+    /// Exclusive upper bound (RFC 3339).
+    #[serde(default)]
+    pub to: Option<String>,
+}
+
+fn audit_time(
+    value: Option<&str>,
+    name: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, ApiError> {
+    value
+        .map(|v| {
+            chrono::DateTime::parse_from_rfc3339(v)
+                .map(|t| t.with_timezone(&chrono::Utc))
+                .map_err(|_| ApiError::validation(format!("{name} must be an RFC 3339 timestamp")))
+        })
+        .transpose()
+}
+
+/// One page of an organization's audit history with the query's filters (newest first).
+async fn audit_page(state: &AppState, id: Uuid, q: &AuditQuery) -> ApiResult<Response> {
+    let limit = page_limit(q.limit)?;
+    if q.action.as_deref().is_some_and(|a| {
+        a.is_empty()
+            || a.len() > 64
+            || !a
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c == '.' || c == '_')
+    }) {
+        return Err(ApiError::validation(
+            "action must be an audit action such as membership.updated",
+        ));
+    }
+    let from = audit_time(q.from.as_deref(), "from")?;
+    let to = audit_time(q.to.as_deref(), "to")?;
+    let rows: Vec<AuditRow> = db::all(
+        &state.db,
+        "SELECT seq, id, organization_id, actor_kind, actor_user_id, actor_service, action, target_type, target_id, summary, request_id, correlation_id, occurred_at \
+         FROM organization_audit_events WHERE organization_id = $1 AND ($2::bigint IS NULL OR seq < $2) \
+           AND ($4::text IS NULL OR action = $4) AND ($5::uuid IS NULL OR actor_user_id = $5) \
+           AND ($6::timestamptz IS NULL OR occurred_at >= $6) AND ($7::timestamptz IS NULL OR occurred_at < $7) \
+         ORDER BY seq DESC LIMIT $3",
+        vec![
+            id.into(),
+            q.before.into(),
+            (limit + 1).into(),
+            q.action.clone().into(),
+            q.actor_user_id.into(),
+            from.into(),
+            to.into(),
+        ],
+    )
+    .await?;
+    audit_items(&rows, limit)
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -419,15 +481,27 @@ pub async fn audit_events(
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationRead)?;
     let user = caller.user()?;
-    let limit = page_limit(q.limit)?;
     authorize(&state.db, id, user, Capability::AuditRead, false).await?;
-    let rows: Vec<AuditRow> = db::all(
-        &state.db,
-        "SELECT seq, id, organization_id, actor_kind, actor_user_id, actor_service, action, target_type, target_id, summary, request_id, correlation_id, occurred_at \
-         FROM organization_audit_events WHERE organization_id = $1 AND ($2::bigint IS NULL OR seq < $2) ORDER BY seq DESC LIMIT $3",
-        vec![id.into(), q.before.into(), (limit + 1).into()],
-    )
-    .await?;
+    audit_page(&state, id, &q).await
+}
+
+/// `GET /internal/v1/admin/organizations/{id}/audit-events` — the operator's read of an
+/// organization's audit history in any lifecycle state (`organization.administer`), with the
+/// same filters and paging as the member read.
+pub async fn admin_audit_events(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+    Query(q): Query<AuditQuery>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    store::org(&state.db, id, false)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    audit_page(&state, id, &q).await
+}
+
+fn audit_items(rows: &[AuditRow], limit: i64) -> ApiResult<Response> {
     let more = rows.len() as i64 > limit;
     let items: Vec<Value> = rows
         .iter()

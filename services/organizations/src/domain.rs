@@ -157,6 +157,11 @@ pub fn evaluate(
         _ if role == Role::Owner && capability == Capability::OrganizationRead => {
             return DecisionReason::Allowed
         }
+        // The audit history stays readable to OWNERs and ADMINs exactly when it matters:
+        // while the organization is suspended or after it was archived.
+        _ if matches!(role, Role::Owner | Role::Admin) && capability == Capability::AuditRead => {
+            return DecisionReason::Allowed
+        }
         LifecycleStatus::Suspended => return DecisionReason::OrganizationSuspended,
         LifecycleStatus::Archived => return DecisionReason::OrganizationArchived,
     }
@@ -273,14 +278,14 @@ mod tests {
     }
 
     #[test]
-    fn suspended_or_archived_organizations_grant_only_owner_read() {
+    fn suspended_or_archived_organizations_grant_only_owner_read_and_audit_history() {
         for status in [LifecycleStatus::Suspended, LifecycleStatus::Archived] {
             for role in Role::ALL {
                 let caps = effective_capabilities(*role, MembershipStatus::Active, status);
-                if *role == Owner {
-                    assert_eq!(caps, vec![OrganizationRead]);
-                } else {
-                    assert!(caps.is_empty(), "{role}");
+                match role {
+                    Owner => assert_eq!(caps, vec![OrganizationRead, AuditRead]),
+                    Admin => assert_eq!(caps, vec![AuditRead]),
+                    _ => assert!(caps.is_empty(), "{role}"),
                 }
             }
         }

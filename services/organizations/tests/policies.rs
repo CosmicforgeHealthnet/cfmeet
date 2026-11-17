@@ -82,7 +82,8 @@ async fn the_role_resource_matrix_holds_for_every_status_and_organization() {
             );
         }
     }
-    // A suspended organization grants nothing but organization.read to its OWNERs.
+    // A suspended organization grants nothing but organization.read to its OWNERs, and the
+    // audit history to its OWNERs and ADMINs.
     h.user(owner)
         .post(
             &format!("/internal/v1/organizations/{a}/suspend"),
@@ -93,7 +94,8 @@ async fn the_role_resource_matrix_holds_for_every_status_and_organization() {
     for (user, role, _) in [&people[0], &people[2], &people[4]] {
         for cap in Capability::ALL {
             let e = evaluate(&h, *user, &a, cap.as_str()).await;
-            let expected = *role == Role::Owner && *cap == Capability::OrganizationRead;
+            let expected = (*role == Role::Owner && *cap == Capability::OrganizationRead)
+                || (matches!(role, Role::Owner | Role::Admin) && *cap == Capability::AuditRead);
             assert_eq!(e["allowed"], expected, "{role} {cap} suspended org");
         }
     }

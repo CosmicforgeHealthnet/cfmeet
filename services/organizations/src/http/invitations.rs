@@ -267,10 +267,35 @@ pub async fn create(
 pub struct ListQuery {
     #[serde(default)]
     pub status: Option<String>,
+    /// The previous page's `nextCursor` (opaque).
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// Page size 1–200 (default 50).
+    #[serde(default)]
+    pub limit: Option<i64>,
 }
 
-/// `GET /internal/v1/organizations/{id}/invitations?status` — newest first (200 max);
-/// requires `organization.members.invite` for the actor.
+/// `<created_at micros>.<id>` of the last item of a page.
+fn invitation_cursor(row: &InvitationRow) -> String {
+    format!("{}.{}", row.created_at.timestamp_micros(), row.id)
+}
+
+fn parse_invitation_cursor(raw: &str) -> Result<(DateTime<Utc>, Uuid), ApiError> {
+    raw.split_once('.')
+        .and_then(|(t, id)| {
+            Some((
+                DateTime::<Utc>::from_timestamp_micros(t.parse().ok()?)?,
+                Uuid::parse_str(id).ok()?,
+            ))
+        })
+        .ok_or_else(|| ApiError::validation("cursor must be a previous page's nextCursor"))
+}
+
+/// `GET /internal/v1/organizations/{id}/invitations?status&cursor&limit` — newest first,
+/// paged (`limit` 1–200, default 50 with a cursor and 200 without; `nextCursor` while
+/// more remain). `status` is the
+/// effective status: a PENDING invitation past its expiry counts as EXPIRED. Requires
+/// `organization.members.invite` for the actor.
 pub async fn list(
     State(state): State<AppState>,
     caller: Caller,
@@ -289,24 +314,54 @@ pub async fn list(
             ));
         }
     }
+    // Callers that do not page keep the former page of up to 200 (now with a cursor).
+    let limit = if q.limit.is_none() && q.cursor.is_none() {
+        200
+    } else {
+        super::page_limit(q.limit)?
+    };
+    let after = q
+        .cursor
+        .as_deref()
+        .map(parse_invitation_cursor)
+        .transpose()?;
     authorize(&state.db, id, user, Capability::MembersInvite, false).await?;
     let now = db::now(&state.db).await?;
+    // The effective status in SQL: PENDING means not yet expired; EXPIRED includes a
+    // PENDING invitation past its expiry that the sweeper has not recorded yet.
     let rows: Vec<InvitationRow> = db::all(
         &state.db,
-        &format!("SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE organization_id = $1 ORDER BY created_at DESC, id DESC LIMIT 200"),
-        vec![id.into()],
+        &format!(
+            "SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE organization_id = $1 \
+               AND ($2::text IS NULL \
+                    OR ($2 = 'PENDING' AND status = 'PENDING' AND expires_at > $3) \
+                    OR ($2 = 'EXPIRED' AND (status = 'EXPIRED' OR (status = 'PENDING' AND expires_at <= $3))) \
+                    OR ($2 NOT IN ('PENDING', 'EXPIRED') AND status = $2)) \
+               AND ($4::timestamptz IS NULL OR (created_at, id) < ($4, $5)) \
+             ORDER BY created_at DESC, id DESC LIMIT $6"
+        ),
+        vec![
+            id.into(),
+            q.status.clone().into(),
+            now.into(),
+            after.map(|a| a.0).into(),
+            after.map(|a| a.1).into(),
+            (limit + 1).into(),
+        ],
     )
     .await?;
-    let items: Vec<Value> = rows
-        .iter()
-        .filter(|r| {
-            q.status
-                .as_deref()
-                .is_none_or(|s| r.effective_status(now) == s)
-        })
-        .map(|r| r.to_json(now))
-        .collect();
-    Ok(respond(StatusCode::OK, json!({ "items": items })))
+    let more = rows.len() as i64 > limit;
+    let page = &rows[..rows.len().min(limit as usize)];
+    let items: Vec<Value> = page.iter().map(|r| r.to_json(now)).collect();
+    let next = if more {
+        page.last().map(invitation_cursor)
+    } else {
+        None
+    };
+    Ok(respond(
+        StatusCode::OK,
+        json!({ "items": items, "nextCursor": next }),
+    ))
 }
 
 /// `POST /internal/v1/organizations/{id}/invitations/{invitationId}/revoke` — idempotent.

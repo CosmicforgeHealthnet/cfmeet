@@ -466,3 +466,150 @@ async fn an_operator_appoints_an_owner_with_an_audited_reason() {
         .await
         .expect_error(409, "ORGANIZATION_ARCHIVED");
 }
+
+#[tokio::test]
+async fn the_audit_history_stays_readable_while_suspended_and_can_be_filtered() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let owner = Uuid::new_v4();
+    let org = h.create_org(owner, "audit-readable-org").await;
+    let id = s(&org["id"]);
+    invite(
+        &h,
+        owner,
+        &id,
+        json!({ "email": "a1@example.com", "role": "MEMBER" }),
+    )
+    .await;
+    invite(
+        &h,
+        owner,
+        &id,
+        json!({ "email": "a2@example.com", "role": "MEMBER" }),
+    )
+    .await;
+    h.user(owner)
+        .post(
+            &format!("/internal/v1/organizations/{id}/suspend"),
+            json!({}),
+        )
+        .await
+        .expect(200);
+    let audit = format!("/internal/v1/organizations/{id}/audit-events");
+    let all = h.user(owner).get(&audit).await.expect(200).clone();
+    assert!(all["items"].as_array().unwrap().len() >= 3, "{all:#}");
+    let created = h
+        .user(owner)
+        .get(&format!("{audit}?action=invitation.created"))
+        .await
+        .expect(200)
+        .clone();
+    let created = created["items"].as_array().unwrap();
+    assert_eq!(created.len(), 2);
+    assert!(created.iter().all(|e| e["action"] == "invitation.created"));
+    let by_someone_else = h
+        .user(owner)
+        .get(&format!("{audit}?actorUserId={}", Uuid::new_v4()))
+        .await
+        .expect(200)
+        .clone();
+    assert_eq!(by_someone_else["items"], json!([]));
+    let future = h
+        .user(owner)
+        .get(&format!("{audit}?from=2999-01-01T00:00:00Z"))
+        .await
+        .expect(200)
+        .clone();
+    assert_eq!(future["items"], json!([]));
+    h.user(owner)
+        .get(&format!("{audit}?from=yesterday"))
+        .await
+        .expect_error(400, "VALIDATION_ERROR");
+    // A member of the suspended organization still cannot; the operator can, in any state.
+    h.user(Uuid::new_v4())
+        .get(&audit)
+        .await
+        .expect_error(404, "ORGANIZATION_NOT_FOUND");
+    let operator = h
+        .by(&h.peers.operator)
+        .get(&format!(
+            "/internal/v1/admin/organizations/{id}/audit-events?limit=1"
+        ))
+        .await
+        .expect(200)
+        .clone();
+    assert_eq!(operator["items"].as_array().unwrap().len(), 1);
+    assert!(operator["nextCursor"].is_i64());
+    h.by(&h.peers.messaging)
+        .get(&format!(
+            "/internal/v1/admin/organizations/{id}/audit-events"
+        ))
+        .await
+        .expect_error(403, "INTERNAL_PERMISSION_DENIED");
+}
+
+#[tokio::test]
+async fn the_invitation_list_filters_in_the_database_and_pages_with_a_cursor() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let owner = Uuid::new_v4();
+    let org = h.create_org(owner, "invitation-paging-org").await;
+    let id = s(&org["id"]);
+    for i in 0..5 {
+        invite(
+            &h,
+            owner,
+            &id,
+            json!({ "email": format!("p{i}@example.com"), "role": "MEMBER" }),
+        )
+        .await;
+    }
+    // One invitation is past its expiry but not yet swept: it counts as EXPIRED.
+    h.exec(&format!(
+        "UPDATE organization_invitations SET created_at = now() - interval '9 days', expires_at = now() - interval '2 days' WHERE organization_id = '{id}' AND email_normalized = 'p0@example.com'"
+    ))
+    .await
+    .unwrap();
+    let list = format!("/internal/v1/organizations/{id}/invitations");
+    let pending = h
+        .user(owner)
+        .get(&format!("{list}?status=PENDING"))
+        .await
+        .expect(200)
+        .clone();
+    assert_eq!(pending["items"].as_array().unwrap().len(), 4);
+    let expired = h
+        .user(owner)
+        .get(&format!("{list}?status=EXPIRED"))
+        .await
+        .expect(200)
+        .clone();
+    assert_eq!(expired["items"].as_array().unwrap().len(), 1);
+    // Paging covers every row exactly once.
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let path = match &cursor {
+            Some(c) => format!("{list}?limit=2&cursor={c}"),
+            None => format!("{list}?limit=2"),
+        };
+        let page = h.user(owner).get(&path).await.expect(200).clone();
+        for item in page["items"].as_array().unwrap() {
+            seen.push(s(&item["id"]));
+        }
+        match page["nextCursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+    }
+    let mut unique = seen.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!((seen.len(), unique.len()), (5, 5));
+    h.user(owner)
+        .get(&format!("{list}?cursor=nope"))
+        .await
+        .expect_error(400, "VALIDATION_ERROR");
+}

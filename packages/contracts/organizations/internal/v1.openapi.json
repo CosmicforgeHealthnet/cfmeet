@@ -964,7 +964,7 @@
       "get": {
         "operationId": "listInvitations",
         "summary": "List invitations",
-        "description": "Newest first (at most 200). Requires organization.members.invite for the acting user. A pending invitation past its expiry is reported EXPIRED.",
+        "description": "Newest first (at most 200). Requires organization.members.invite for the acting user. A pending invitation past its expiry is reported EXPIRED. Newest first, paged: limit 1-200 (default 50 when paging, 200 when neither limit nor cursor is given) and nextCursor while more remain. status is the effective status (a PENDING invitation past its expiry counts as EXPIRED).",
         "tags": [
           "Invitations"
         ],
@@ -996,6 +996,19 @@
               ]
             },
             "description": "Status filter."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The previous page's nextCursor (opaque).",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
           }
         ],
         "responses": {
@@ -1727,7 +1740,7 @@
       "get": {
         "operationId": "listAuditEvents",
         "summary": "List audit events",
-        "description": "Newest first; requires organization.audit.read for the acting user. Audit events are append-only and never contain an email address or a token.",
+        "description": "Newest first; requires organization.audit.read for the acting user. Audit events are append-only and never contain an email address or a token. Filters: action, actorUserId, from, to. OWNERs and ADMINs keep organization.audit.read while the organization is SUSPENDED or ARCHIVED.",
         "tags": [
           "Organizations"
         ],
@@ -1755,6 +1768,45 @@
               "type": "integer"
             },
             "description": "Return events with seq below this cursor."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "Only this action, e.g. membership.updated.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorUserId",
+            "in": "query",
+            "required": false,
+            "description": "Only changes made by this user.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
           }
         ],
         "responses": {
@@ -5452,6 +5504,150 @@
           }
         }
       }
+    },
+    "/internal/v1/admin/organizations/{id}/audit-events": {
+      "get": {
+        "operationId": "adminListAuditEvents",
+        "summary": "An organization's audit history (operator)",
+        "description": "The operator read of an organization's audit history in any lifecycle state, with the filters and paging of listAuditEvents. Requires organization.administer; no acting user.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Return events with seq below this cursor."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "Only this action, e.g. membership.updated.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorUserId",
+            "in": "query",
+            "required": false,
+            "description": "Only changes made by this user.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of audit events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6405,6 +6601,13 @@
             "items": {
               "$ref": "#/components/schemas/Invitation"
             }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The cursor of the next page; null on the last page."
           }
         },
         "required": [
