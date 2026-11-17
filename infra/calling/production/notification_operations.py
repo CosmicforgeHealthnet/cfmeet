@@ -100,6 +100,24 @@ PUBLICATION_PROBE = '/internal/v1/notification-events'
 GRANTS += tuple(('activate-messaging-publications', replica, 'messaging', PUBLICATION_PERMISSIONS)
                 for replica in REPLICAS)
 
+# N7: the other producers publish through the same I1 grant. Each activation grants
+# notifications-event.publish to ONE producer on both replicas and gives the producer's containers
+# CF_NOTIFICATIONS_BASE_URL (its relay starts; nothing is delivered while the service's routing
+# rows for its categories are OFF). `outbox`: the producer's publication table, proven to exist
+# in the running image's database before the switch.
+PRODUCERS = {
+    'organizations': dict(operation='activate-organizations-publications', containers=('organizations',),
+                          outbox=None),
+    'communications': dict(operation='activate-communications-publications', containers=('communications',),
+                           outbox='communication_notification_publications'),
+    'developer-platform': dict(operation='activate-developer-publications',
+                               containers=('developer-platform', 'developer-platform-worker'), outbox=None),
+    'meeting-service': dict(operation='activate-meeting-publications', containers=('meeting-service',),
+                            outbox=None),
+}
+GRANTS += tuple((spec['operation'], replica, issuer, PUBLICATION_PERMISSIONS)
+                for issuer, spec in PRODUCERS.items() for replica in REPLICAS)
+
 FLAGGED = {'meeting-service': {'NOTIFICATION_OWNER_API_ENABLED': 'true'}}
 SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID', 'CFMEET_COMMUNICATION_ENVIRONMENT_ID',
               'CFMEET_COMMUNICATION_ENVIRONMENT_KIND', 'CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID')
@@ -314,6 +332,42 @@ def activate_messaging_publications(cr, sha, run_id, confirm):
 
     cr.apply_activation('activate-messaging-publications', sha, run_id,
                         [('messaging', overrides)], post=post)
+
+
+def producer_sql(cr, service):
+    if service == 'meeting-service':
+        return cr.meeting_psql
+    return lambda q, d=cr.SERVICES[service]['db']: cr.release.db_sql(d, q)
+
+
+def activate_publications(cr, sha, run_id, producer):
+    """One producer of PRODUCERS: grant I1 and point its containers at the service."""
+    spec = PRODUCERS[producer]
+    if not spec['outbox']:
+        raise RuntimeError('%s has no publication outbox in this release tooling' % producer)
+    cr.require_release(sha)
+    notif_tls = cr.SERVICES['notifications']['tls']
+    cr.tls_route_present(notif_tls)
+    probe = cr.private_url(notif_tls) + PUBLICATION_PROBE
+    status = private_status(cr, probe)
+    if status != '401':
+        raise RuntimeError('Notification Service I1 answered %s to an unsigned probe (expected 401)' % status)
+    present = (producer_sql(cr, producer)(
+        "SELECT to_regclass('public.%s') IS NOT NULL;" % spec['outbox']) or '').strip()
+    if present not in ('t', 'true'):
+        raise RuntimeError('%s has no %s table; release an image with its N7 publication first'
+                           % (producer, spec['outbox']))
+    for container in spec['containers']:
+        cr.has_signing_identity(container)
+    overrides = {'CF_NOTIFICATIONS_BASE_URL': cr.private_url(notif_tls)}
+
+    def post():
+        status = private_status(cr, probe)
+        if status != '401':
+            raise RuntimeError('Notification Service I1 answers %s to an unsigned probe after activation' % status)
+
+    cr.apply_activation(spec['operation'], sha, run_id,
+                        [(container, dict(overrides)) for container in spec['containers']], post=post)
 
 
 # --- Routing fence v1 (Document 4 §9.6): producers' protocol and the rollback floor ---------

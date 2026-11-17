@@ -2555,6 +2555,15 @@ ACTIVATIONS = {
     # Notification Service N7b: Messaging publishes message wake-ups to I1 (shadow first).
     'activate-messaging-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_messaging_publications(
         sys.modules[__name__], sha, run_id, confirm)),
+    # Notification Service N7: the other producers' I1 grant (one producer per run).
+    'activate-organizations-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'organizations')),
+    'activate-communications-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'communications')),
+    'activate-developer-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'developer-platform')),
+    'activate-meeting-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'meeting-service')),
     # Notification Service N5 / N11: Resend as the service's own provider (VPS credentials).
     'activate-notifications-email': (('activate-resend-email',), lambda sha, run_id, confirm:
                                      notif_ops.activate_email(sys.modules[__name__], sha, run_id, confirm)),
