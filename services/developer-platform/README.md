@@ -42,6 +42,25 @@ implemented.
   a deterministic source event id; each notice writes one `SERVICE` activity event
   (`system:credential-lifecycle`). Revoked / superseded / rotated credentials get none.
   `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED=false` turns it off.
+* **Notification Service publications (roadmap N7 / N11):** only with
+  `CF_NOTIFICATIONS_BASE_URL` (API and worker; unset: nothing is enqueued or sent). The
+  transactional outbox `devplat_notification_publications` holds ids-only
+  `cfmeet.notifications.event` envelopes built with `packages/notification-client`:
+  `developer-platform.credential.expiring-soon` / `.expired` (worker sweep over every
+  environment of the platform's projects, same lead times as the webhooks; recipients: the
+  organization's ACTIVE owners and admins, `cfmeet-user:<id>`) and
+  `developer-platform.production-access.decided` (operator approve / reject transaction;
+  recipient: the applicant, else the owners). Deterministic event ids and idempotency keys
+  (`devplat-access:<request>:<decision>`, today's Meeting ledger format), batches of ≤ 100
+  to `POST /internal/v1/notification-events` signed for `cfmeet.notifications`
+  (`notifications-event.publish`), retries with backoff on 5xx / 401 / 403 / 408 / 429,
+  dead letter on contract 4xx / `REJECTED`, expiry after 3 days, purge after 30. The
+  production-access decision already has a user email (operator console → Meeting Service
+  `developer-access-decision`), so it is published only with
+  `DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE=notification-service` (default
+  `legacy`), and that email must be switched off at the same time.
+  `DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE=off` stops the credential notices.
+  Customer webhooks are unaffected.
 * **Reference reconciliation (DATA-017, report only):**
   `developer-platform-reconcile-references` (also in the image; `cargo run --bin …`) prints
   a JSON report of every foreign reference (Platform Access tenants / applications /

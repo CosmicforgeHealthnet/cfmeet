@@ -949,3 +949,154 @@ async fn ledger_purge_scrubs_and_deletes_only_rows_past_the_retention_window() {
     assert_eq!(email_delivery::retention_windows(30), (30, 60));
     assert_eq!(email_delivery::retention_windows(i64::MAX), (3650, 7300));
 }
+
+/// Notification Service N5: the provider account has one webhook (this one). Events for
+/// messages this ledger did not send are handed on, byte for byte with their Svix headers,
+/// to the Notification Service's own verified callback; its failures make the provider
+/// retry (503); a service without a callback (404) leaves the event here, as before.
+#[tokio::test]
+async fn events_for_messages_this_ledger_did_not_send_are_handed_to_the_notification_service() {
+    use axum::{extract::State, http::HeaderMap, routing::post, Router};
+    use backend::services::notification_relay::NotificationsRelay;
+    use cf_service_auth::{
+        KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey, ServiceTokenSigner, SystemClock,
+        TokenTtl,
+    };
+    use std::sync::Mutex;
+
+    let app = app!();
+    let raw = b"resend-webhook-signing-secret-32b";
+    let secret = format!(
+        "whsec_{}",
+        base64::engine::general_purpose::STANDARD.encode(raw)
+    );
+
+    // The fake Notification Service callback: records (headers, body), answers the scripted status.
+    type Seen = Arc<Mutex<(Vec<(String, String, String, String)>, Vec<u16>)>>;
+    let seen: Seen = Arc::new(Mutex::new((Vec::new(), Vec::new())));
+    async fn callback(State(s): State<Seen>, h: HeaderMap, body: String) -> StatusCode {
+        let get = |n: &str| h.get(n).unwrap().to_str().unwrap().to_string();
+        let mut inner = s.lock().unwrap();
+        inner.0.push((
+            get("svix-id"),
+            get("svix-timestamp"),
+            get("svix-signature"),
+            body,
+        ));
+        let status = if inner.1.is_empty() {
+            200
+        } else {
+            inner.1.remove(0)
+        };
+        StatusCode::from_u16(status).unwrap()
+    }
+    let fake = Router::new()
+        .route(
+            "/api/v1/notifications/provider-events/resend",
+            post(callback),
+        )
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, fake).await;
+    });
+    let signer = Arc::new(ServiceTokenSigner::new(
+        ServiceId::meeting_service(),
+        RuntimeEnvironment::Test,
+        ServiceSigningKey::generate(KeyId::parse("meeting-service-test-1").unwrap()),
+        TokenTtl::default(),
+        Arc::new(SystemClock),
+    ));
+    let mut state = app.state.clone();
+    state.email_webhook_secret = Some(secret);
+    state.notifications = Some(Arc::new(NotificationsRelay::new(signer, &url).unwrap()));
+    let router = backend::routes::create_routes(state);
+    let db = app.state.db.clone();
+
+    // One message of this ledger.
+    let worker = EmailWorker::new(
+        db.clone(),
+        Arc::new(RecordingProvider::default()),
+        settings(),
+    );
+    let own = email_delivery::enqueue(&db, email("forward-own"))
+        .await
+        .unwrap();
+    worker.tick(Utc::now()).await.unwrap();
+    db.execute_unprepared(&format!(
+        "UPDATE email_deliveries SET provider='resend' WHERE id='{}'",
+        own.id
+    ))
+    .await
+    .unwrap();
+    let own_message = format!("rec_{}", own.id.simple());
+
+    let request = |evt: &str, message: &str| {
+        let body = json!({"type": "email.delivered", "created_at": "2026-11-17T10:00:00Z",
+            "data": {"email_id": message}})
+        .to_string();
+        let (ts, sig) = signed(raw, evt, &body);
+        let req = Request::post("/api/v1/email/provider-events/resend")
+            .header("content-type", "application/json")
+            .header("svix-id", evt)
+            .header("svix-timestamp", ts.clone())
+            .header("svix-signature", sig.clone())
+            .body(Body::from(body.clone()))
+            .unwrap();
+        (req, (evt.to_string(), ts, sig, body))
+    };
+    let status_of = |req: Request<Body>| {
+        let router = router.clone();
+        async move { router.oneshot(req).await.unwrap().status() }
+    };
+
+    // This ledger's message: applied here, never forwarded.
+    let (req, _) = request("evt_fwd_own", &own_message);
+    assert_eq!(status_of(req).await, StatusCode::OK);
+    assert!(seen.lock().unwrap().0.is_empty());
+    let delivered: i64 = db
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            format!(
+                "SELECT count(*) AS n FROM email_deliveries WHERE id='{}' AND status='DELIVERED'",
+                own.id
+            ),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "n")
+        .unwrap();
+    assert_eq!(delivered, 1);
+
+    // Another sender's message: handed on byte for byte.
+    let (req, sent) = request("evt_fwd_other", "re_notification_service_message");
+    assert_eq!(status_of(req).await, StatusCode::OK);
+    assert_eq!(seen.lock().unwrap().0, vec![sent]);
+
+    // The service fails: the provider must retry (503); then it succeeds on the retry.
+    seen.lock().unwrap().1.push(503);
+    let (req, _) = request("evt_fwd_retry", "re_notification_service_message_2");
+    assert_eq!(status_of(req).await, StatusCode::SERVICE_UNAVAILABLE);
+    let (req, _) = request("evt_fwd_retry", "re_notification_service_message_2");
+    assert_eq!(status_of(req).await, StatusCode::OK);
+    assert_eq!(seen.lock().unwrap().0.len(), 3);
+
+    // No provider callback configured there (404): kept here, as before.
+    seen.lock().unwrap().1.push(404);
+    let (req, _) = request("evt_fwd_none", "re_unknown_message");
+    assert_eq!(status_of(req).await, StatusCode::OK);
+    let recorded: i64 = db
+        .query_one(sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            "SELECT count(*) AS n FROM email_delivery_events WHERE event_id IN ('evt_fwd_none', 'evt_fwd_other')"
+                .to_string(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "n")
+        .unwrap();
+    assert_eq!(recorded, 2);
+}

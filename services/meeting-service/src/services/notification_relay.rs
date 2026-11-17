@@ -40,6 +40,10 @@ use url::Url;
 
 /// I2 `dispatchNotificationsUser`.
 pub const DISPATCH_PATH: &str = "/internal/v1/notifications/dispatch";
+/// The Notification Service's Svix-verified Resend callback (Document 4 §3.2).
+pub const RESEND_EVENTS_PATH: &str = "/api/v1/notifications/provider-events/resend";
+/// The provider headers a forwarded event keeps (the service verifies the signature itself).
+pub const SVIX_HEADERS: [&str; 3] = ["svix-id", "svix-timestamp", "svix-signature"];
 /// Largest relayed answer (a page of at most 100 inbox items).
 const MAX_ANSWER_BYTES: usize = 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -79,6 +83,7 @@ pub struct RelayUnavailable;
 pub struct NotificationsRelay {
     signer: Arc<ServiceTokenSigner>,
     url: Url,
+    resend_events_url: Url,
     http: reqwest::Client,
 }
 
@@ -135,6 +140,9 @@ impl NotificationsRelay {
         let url = Url::parse(base_url)
             .and_then(|u| u.join(DISPATCH_PATH))
             .map_err(|_| "CF_NOTIFICATIONS_BASE_URL is invalid")?;
+        let resend_events_url = Url::parse(base_url)
+            .and_then(|u| u.join(RESEND_EVENTS_PATH))
+            .map_err(|_| "CF_NOTIFICATIONS_BASE_URL is invalid")?;
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
@@ -142,7 +150,44 @@ impl NotificationsRelay {
             .connect_timeout(TIMEOUT)
             .build()
             .map_err(|_| "the Notification Service HTTP client cannot be built")?;
-        Ok(Self { signer, url, http })
+        Ok(Self {
+            signer,
+            url,
+            resend_events_url,
+            http,
+        })
+    }
+
+    /// Hands one Svix-signed Resend event, byte for byte with its three `svix-*` headers, to
+    /// the Notification Service's provider callback (Document 4 §3.2). The provider account
+    /// has one webhook, registered on the Meeting Service; events for messages the Meeting
+    /// ledger did not send belong to the Notification Service, which verifies the same
+    /// signature with the same secret. Returns the answer's status; transport failures are
+    /// [`RelayUnavailable`] (the caller answers 503 so the provider retries).
+    pub async fn forward_resend_event(
+        &self,
+        incoming: &HeaderMap,
+        body: &[u8],
+    ) -> Result<u16, RelayUnavailable> {
+        let mut headers = HeaderMap::new();
+        for name in SVIX_HEADERS {
+            if let Some(value) = incoming.get(name) {
+                headers.insert(name, value.clone());
+            }
+        }
+        headers.insert(
+            axum::http::header::CONTENT_TYPE,
+            axum::http::HeaderValue::from_static("application/json"),
+        );
+        let response = self
+            .http
+            .post(self.resend_events_url.clone())
+            .headers(headers)
+            .body(body.to_vec())
+            .send()
+            .await
+            .map_err(|_| RelayUnavailable)?;
+        Ok(response.status().as_u16())
     }
 
     /// One signed I2 call. Every HTTP status is an answer; transport failures, oversize
@@ -250,6 +295,10 @@ mod tests {
         assert_eq!(
             relay.url.as_str(),
             "http://127.0.0.1:9/internal/v1/notifications/dispatch"
+        );
+        assert_eq!(
+            relay.resend_events_url.as_str(),
+            "http://127.0.0.1:9/api/v1/notifications/provider-events/resend"
         );
         assert!(NotificationsRelay::new(test, "not a url").is_err());
         let production = signer(ServiceId::meeting_service(), RuntimeEnvironment::Production);

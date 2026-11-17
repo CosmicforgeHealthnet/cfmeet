@@ -29,6 +29,9 @@ async fn main() -> anyhow::Result<()> {
     let dispatcher = config
         .event_dispatcher(Arc::new(cf_service_auth::SystemClock))
         .unwrap_or_else(|e| fatal("event delivery configuration error", e));
+    let notifications = config
+        .notification_sink(Arc::new(cf_service_auth::SystemClock))
+        .unwrap_or_else(|e| fatal("notification publication configuration error", e));
     if check_only {
         println!(
             "{}",
@@ -39,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
                 "bindAddress": config.bind_address.to_string(),
                 "outboxDelivery": if dispatcher.enabled() { "enabled" } else { "disabled" },
                 "eventDestinations": dispatcher.destinations(),
+                "notificationPublications": if notifications.is_some() { "enabled" } else { "disabled" },
                 "provisioning": if config.provisioning.is_some() { "enabled" } else { "disabled" },
                 "serviceBindings": if config.service_bindings_enabled { "enabled" } else { "disabled" },
             })
@@ -50,8 +54,12 @@ async fn main() -> anyhow::Result<()> {
         provisioning = platform_scopes.is_some(),
         service_bindings = config.service_bindings_enabled,
         event_destinations = ?dispatcher.destinations(),
+        notification_publications = notifications.is_some(),
         "organizations configuration loaded"
     );
+    if notifications.is_none() {
+        tracing::info!("CF_NOTIFICATIONS_BASE_URL is not set: no notification is published");
+    }
     let db = organizations::connect(config.database_url(), config.database_max_connections).await?;
     let worker_db = db.clone();
     let interval = config.worker_interval;
@@ -62,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
         worker_db,
         dispatcher,
         platform_scopes,
+        notifications,
         interval,
         organizations::shutdown_signal(),
     ));

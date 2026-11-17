@@ -3,7 +3,11 @@
 //! - `POST /api/v1/email/provider-events/resend` — Resend delivery events (Svix-signed:
 //!   `svix-id`, `svix-timestamp`, `svix-signature`, secret `RESEND_WEBHOOK_SECRET`). Public
 //!   (the provider calls it), refused with 401 without a valid signature, 404 when no secret
-//!   is configured. Duplicate event ids are acknowledged and ignored.
+//!   is configured. Duplicate event ids are acknowledged and ignored. The provider account
+//!   has this one webhook: an event for a message this ledger did not send (one the
+//!   Notification Service sent) is handed on, byte for byte, to the Notification Service's
+//!   own Svix-verified callback when the relay is configured (`CF_NOTIFICATIONS_BASE_URL`);
+//!   503 when that hop fails, so the provider retries.
 //! - `POST /internal/operations/email/acceptance` — enqueue one controlled acceptance
 //!   email to the given address (operations; `X-Internal-Token`).
 //! - `GET /internal/operations/email/deliveries/{id}` — PII-free delivery status
@@ -87,6 +91,42 @@ pub async fn resend_events(
         )
             .into_response();
     };
+    if let (Some(relay), Some(message_id)) = (
+        state.notifications.as_ref(),
+        payload.pointer("/data/email_id").and_then(Value::as_str),
+    ) {
+        match email_delivery::owns_message(&state.db, "resend", message_id).await {
+            Ok(true) => {}
+            Ok(false) => match relay.forward_resend_event(&headers, &body).await {
+                // The Notification Service applied (or already had) the event; record it
+                // here too (no delivery of this ledger matches, so nothing changes).
+                Ok(status) if (200..300).contains(&status) => {
+                    inc(&OM.email_webhook_forwarded);
+                    let _ = email_delivery::apply_provider_event(&state.db, "resend", id, &payload)
+                        .await;
+                    return Json(json!({"received": true, "forwarded": true})).into_response();
+                }
+                // The service has no provider callback configured: this ledger keeps the
+                // event, exactly as before.
+                Ok(404) => {}
+                _ => {
+                    inc(&OM.email_webhook_forward_failures);
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        Json(json!({"error": "SERVICE_UNAVAILABLE"})),
+                    )
+                        .into_response();
+                }
+            },
+            Err(_) => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(json!({"error": "SERVICE_UNAVAILABLE"})),
+                )
+                    .into_response()
+            }
+        }
+    }
     match email_delivery::apply_provider_event(&state.db, "resend", id, &payload).await {
         Ok(applied) => Json(json!({"received": true, "duplicate": !applied})).into_response(),
         Err(WebhookError::Malformed) => (

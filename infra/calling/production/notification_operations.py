@@ -36,12 +36,25 @@ Two coordinated-release operations, each journaled and reversible:
   is published while ``MESSAGE_WAKEUPS`` is ``LEGACY_ONLY``; nothing is delivered by the
   service while its own routing rows are OFF.
 
+* ``activate-notifications-email`` (roadmap N5 / N11, owner decision 2026-11-17) makes Resend
+  the Notification Service's email provider with the credentials already on the VPS
+  (``/opt/cfmeet-core/secrets/resend-api-key`` and ``resend-webhook-secret``, root-only, never
+  printed, never leaving the VPS). The replicas run as their own user, so each activation
+  writes service-owned 0400 copies next to the originals and mounts them read-only on both
+  replicas (``NOTIFICATIONS_RESEND_API_KEY_FILE`` / ``NOTIFICATIONS_RESEND_WEBHOOK_SECRET_FILE``).
+  The provider account keeps its one webhook on the Meeting Service, which hands events for
+  messages it did not send to the service's own Svix-verified callback. Nothing is sent by
+  this step: every ``notif_routing`` EMAIL row stays as it is (OFF until a routing run).
+
 * ``activate-notification-fence`` changes ONE producer routing-fence row per run (Document 4
   §9.6). ``confirm`` is ``<service>-<category>-<mode>`` in lower case with hyphens, e.g.
-  ``messaging-message-wakeups-shadow``. This version moves only between ``LEGACY_ONLY`` and
-  ``SHADOW`` (no route can become NEW, so the legacy path keeps delivering everything), only
+  ``messaging-message-wakeups-shadow``. Modes: ``legacy-only``, ``shadow``, ``fenced-old``,
+  ``fenced-new`` (canary 100: every new decision NEW, the legacy path is skipped for it). Only
   for categories whose producer code records decisions (``FENCE_ROUTABLE``), only while the
-  producer image reports ``routingProtocol`` (M-12). Journaled; ``rollback`` restores it.
+  producer image reports ``routingProtocol`` (M-12). ``fenced-new`` needs SHADOW or FENCED_OLD
+  first and every Notification Service routing row the category is delivered on ACTIVE, so
+  a NEW decision is never left undelivered. Journaled; ``rollback`` restores the previous mode
+  (decisions already made stay sticky: a NEW decision is delivered by the service).
 """
 
 import json
@@ -86,6 +99,28 @@ PUBLICATION_PERMISSIONS = ('notifications-event.publish',)
 PUBLICATION_PROBE = '/internal/v1/notification-events'
 GRANTS += tuple(('activate-messaging-publications', replica, 'messaging', PUBLICATION_PERMISSIONS)
                 for replica in REPLICAS)
+
+# N7: the other producers publish through the same I1 grant. Each activation grants
+# notifications-event.publish to ONE producer on both replicas and gives the producer's containers
+# CF_NOTIFICATIONS_BASE_URL (its relay starts; nothing is delivered while the service's routing
+# rows for its categories are OFF). `outbox`: the producer's publication table, proven to exist
+# in the running image's database before the switch.
+PRODUCERS = {
+    'organizations': dict(operation='activate-organizations-publications', containers=('organizations',),
+                          outbox='organization_notification_publications'),
+    'communications': dict(operation='activate-communications-publications', containers=('communications',),
+                           outbox='communication_notification_publications'),
+    # Credential expiring / expired (no legacy user notice). The production-access decision
+    # stays on its legacy email (developer_access.notify_applicant) until
+    # DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE is switched together with it.
+    'developer-platform': dict(operation='activate-developer-publications',
+                               containers=('developer-platform', 'developer-platform-worker'),
+                               outbox='devplat_notification_publications'),
+    'meeting-service': dict(operation='activate-meeting-publications', containers=('meeting-service',),
+                            outbox=None),
+}
+GRANTS += tuple((spec['operation'], replica, issuer, PUBLICATION_PERMISSIONS)
+                for issuer, spec in PRODUCERS.items() for replica in REPLICAS)
 
 FLAGGED = {'meeting-service': {'NOTIFICATION_OWNER_API_ENABLED': 'true'}}
 SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID', 'CFMEET_COMMUNICATION_ENVIRONMENT_ID',
@@ -303,6 +338,42 @@ def activate_messaging_publications(cr, sha, run_id, confirm):
                         [('messaging', overrides)], post=post)
 
 
+def producer_sql(cr, service):
+    if service == 'meeting-service':
+        return cr.meeting_psql
+    return lambda q, d=cr.SERVICES[service]['db']: cr.release.db_sql(d, q)
+
+
+def activate_publications(cr, sha, run_id, producer):
+    """One producer of PRODUCERS: grant I1 and point its containers at the service."""
+    spec = PRODUCERS[producer]
+    if not spec['outbox']:
+        raise RuntimeError('%s has no publication outbox in this release tooling' % producer)
+    cr.require_release(sha)
+    notif_tls = cr.SERVICES['notifications']['tls']
+    cr.tls_route_present(notif_tls)
+    probe = cr.private_url(notif_tls) + PUBLICATION_PROBE
+    status = private_status(cr, probe)
+    if status != '401':
+        raise RuntimeError('Notification Service I1 answered %s to an unsigned probe (expected 401)' % status)
+    present = (producer_sql(cr, producer)(
+        "SELECT to_regclass('public.%s') IS NOT NULL;" % spec['outbox']) or '').strip()
+    if present not in ('t', 'true'):
+        raise RuntimeError('%s has no %s table; release an image with its N7 publication first'
+                           % (producer, spec['outbox']))
+    for container in spec['containers']:
+        cr.has_signing_identity(container)
+    overrides = {'CF_NOTIFICATIONS_BASE_URL': cr.private_url(notif_tls)}
+
+    def post():
+        status = private_status(cr, probe)
+        if status != '401':
+            raise RuntimeError('Notification Service I1 answers %s to an unsigned probe after activation' % status)
+
+    cr.apply_activation(spec['operation'], sha, run_id,
+                        [(container, dict(overrides)) for container in spec['containers']], post=post)
+
+
 # --- Routing fence v1 (Document 4 §9.6): producers' protocol and the rollback floor ---------
 # Producers with an old delivery path keep their routing decisions in their own database.
 FENCE_PRODUCERS = {
@@ -373,8 +444,17 @@ def require_fence_protocol(cr, service, minimum=1):
 # Categories whose producer code records a routing decision before writing legacy rows. A
 # category outside this set must stay LEGACY_ONLY: its guard trigger would refuse the legacy
 # rows its producer still writes without a decision.
-FENCE_ROUTABLE = {('messaging', 'MESSAGE_WAKEUPS'): 'activate-messaging-publications'}
-FENCE_MODES = {'legacy-only': 'LEGACY_ONLY', 'shadow': 'SHADOW'}
+# Each routable producer category: the activation that lets the producer publish, and the
+# Notification Service routing rows that must be ACTIVE before its route may become NEW (a NEW
+# decision skips the legacy path, so the service must deliver it on the same channels).
+FENCE_ROUTABLE = {
+    ('messaging', 'MESSAGE_WAKEUPS'): dict(publications='activate-messaging-publications',
+                                           service_channels=('PUSH',), service_category='MESSAGE_WAKEUPS'),
+}
+FENCE_MODES = {'legacy-only': 'LEGACY_ONLY', 'shadow': 'SHADOW', 'fenced-old': 'FENCED_OLD', 'fenced-new': 'FENCED_NEW'}
+# FENCED_NEW routes every new decision NEW (canary 100); the canary percentage is not a
+# workflow input (confirm accepts letters and hyphens only).
+FENCED_NEW_CANARY = 100
 
 
 def parse_fence(confirm):
@@ -409,12 +489,13 @@ def set_fence_mode(cr, service, category, mode, run_id, expected_version=None):
     assert service in FENCE_PRODUCERS and CATEGORY_RE.fullmatch(category) and mode in FENCE_MODES.values()
     assert re.fullmatch(r'[0-9-]{1,32}', run_id)
     table = FENCE_PRODUCERS[service]['table']
+    canary = FENCED_NEW_CANARY if mode == 'FENCED_NEW' else 0
     guard = '' if expected_version is None else ' AND routing_version = %d' % int(expected_version)
     out = _producer_sql(cr, service)(
-        "WITH u AS (UPDATE %s SET mode = '%s', canary_percent = 0, routing_version = routing_version + 1, "
+        "WITH u AS (UPDATE %s SET mode = '%s', canary_percent = %d, routing_version = routing_version + 1, "
         "changed_by_run = '%s', changed_at = now() WHERE category = '%s'%s RETURNING routing_version) "
         "SELECT count(*) || ':' || coalesce(max(routing_version), 0) FROM u;"
-        % (table, mode, run_id, category, guard))
+        % (table, mode, canary, run_id, category, guard))
     count, version = (out or '0:0').strip().split(':')
     if count != '1':
         raise RuntimeError('Routing fence row %s/%s changed concurrently; nothing applied' % (service, category))
@@ -423,20 +504,35 @@ def set_fence_mode(cr, service, category, mode, run_id, expected_version=None):
 
 def fence_gate(service, category, mode, before, facts):
     """Refusal reason, or None. ``facts``: protocol (routingProtocol of the running image),
-    publications_done (the producer's publication activation is recorded)."""
-    if before not in FENCE_MODES.values():
-        return ('%s/%s is %s; this version only moves between LEGACY_ONLY and SHADOW'
-                % (service, category, before))
+    publications_done (the producer's publication activation is recorded), service_modes
+    ({channel: mode} of the Notification Service routing rows of the category)."""
     if mode == 'LEGACY_ONLY':
         return None
-    if (service, category) not in FENCE_ROUTABLE:
+    spec = FENCE_ROUTABLE.get((service, category))
+    if not spec:
         return ('%s/%s has no producer code that records routing decisions; it must stay LEGACY_ONLY'
                 % (service, category))
     if not isinstance(facts.get('protocol'), int) or facts['protocol'] < 1:
         return '%s reports no routingProtocol; release a fence-capable image first' % service
     if not facts.get('publications_done'):
-        return 'SHADOW needs %s first' % FENCE_ROUTABLE[(service, category)]
+        return '%s needs %s first' % (mode, spec['publications'])
+    if mode == 'FENCED_NEW':
+        # Document 4 §9.4: OLD -> NEW only through SHADOW (observed) or FENCED_OLD.
+        if before not in ('SHADOW', 'FENCED_OLD', 'FENCED_NEW'):
+            return 'FENCED_NEW needs SHADOW or FENCED_OLD first (now %s)' % before
+        modes = facts.get('service_modes') or {}
+        missing = [c for c in spec['service_channels'] if modes.get(c) != 'ACTIVE']
+        if missing:
+            return ('FENCED_NEW would skip the legacy path while the Notification Service does not deliver %s on %s; '
+                    'activate those routing rows first' % (spec['service_category'], ', '.join(missing)))
     return None
+
+
+def service_modes(cr, category):
+    db = cr.SERVICES['notifications']['db']
+    out = cr.release.db_sql(db, "SELECT coalesce(json_object_agg(channel, mode), '{}') FROM notif_routing "
+                                "WHERE category = '%s';" % category)
+    return json.loads(out or '{}')
 
 
 def activate_fence(cr, sha, run_id, confirm):
@@ -446,9 +542,10 @@ def activate_fence(cr, sha, run_id, confirm):
         raise RuntimeError('Routing fence gate: ' + fence_gate(service, category, mode, 'LEGACY_ONLY', {})
                            + '; nothing changed')
     before = fence_row(cr, service, category)
-    prerequisite = FENCE_ROUTABLE.get((service, category))
+    spec = FENCE_ROUTABLE.get((service, category)) or {}
     facts = dict(protocol=routing_protocol(cr, service),
-                 publications_done=bool(prerequisite) and cr.done(prerequisite))
+                 publications_done=bool(spec) and cr.done(spec['publications']),
+                 service_modes=service_modes(cr, spec['service_category']) if mode == 'FENCED_NEW' else {})
     refusal = fence_gate(service, category, mode, before['mode'], facts)
     if refusal:
         raise RuntimeError('Routing fence gate: ' + refusal + '; nothing changed')
@@ -483,7 +580,18 @@ PRODUCER_DIAGNOSTICS_SQL = {
         "FROM messaging_notification_route_decisions GROUP BY route, reason ORDER BY route, reason) d), "
         "'publications', (SELECT coalesce(json_agg(q), '[]') FROM (SELECT shadow, state, outcome, last_error, "
         "count(*) AS count, min(created_at) AS first, max(created_at) AS last FROM messaging_notification_publications "
-        "GROUP BY shadow, state, outcome, last_error ORDER BY shadow, state, outcome, last_error) q));"),
+        "GROUP BY shadow, state, outcome, last_error ORDER BY shadow, state, outcome, last_error) q), "
+        # Why a SHADOW phase may see no decisions: the message events since the fence last
+        # changed (by kind and outbox state) and the enabled push registrations (counts only).
+        "'messageEventsSinceFenceChange', (SELECT coalesce(json_agg(m), '[]') FROM (SELECT "
+        "coalesce(payload->>'message_kind', '') AS kind, status, count(*) AS count FROM messaging_outbox_events "
+        "WHERE event_type = 'messaging.message.created' AND occurred_at >= (SELECT changed_at FROM "
+        "messaging_notification_routing_state WHERE category = 'MESSAGE_WAKEUPS') GROUP BY 1, 2 ORDER BY 1, 2) m), "
+        "'messageEventsLast7Days', (SELECT count(*) FROM messaging_outbox_events WHERE event_type = "
+        "'messaging.message.created' AND occurred_at > now() - interval '7 days'), "
+        "'enabledPushRegistrations', (SELECT count(*) FROM messaging_push_registrations WHERE enabled), "
+        "'pushJobsSinceFenceChange', (SELECT count(*) FROM messaging_push_jobs WHERE created_at >= (SELECT changed_at "
+        "FROM messaging_notification_routing_state WHERE category = 'MESSAGE_WAKEUPS')));"),
 }
 SERVICE_DIAGNOSTICS_SQL = (
     "SELECT json_build_object("
@@ -509,3 +617,74 @@ def notification_diagnostics(cr):
         out['notifications'] = 'unavailable'
     cr.emit('notificationDiagnostics', out)
     return out
+
+
+# --- N5 / N11: the Notification Service's own Resend provider ---------------------------------
+RESEND_SOURCES = ('resend-api-key', 'resend-webhook-secret')
+NOTIFICATIONS_RESEND_TARGETS = {'resend-api-key': '/run/secrets/resend-api-key',
+                                'resend-webhook-secret': '/run/secrets/resend-webhook-secret'}
+NOTIFICATIONS_EMAIL_FROM = 'CF Meet <no-reply@cfmeet.com>'
+PROVIDER_CALLBACK = '/api/v1/notifications/provider-events/resend'
+SECRET_FORMS = {'resend-api-key': re.compile(r're_[A-Za-z0-9_]{8,200}'),
+                'resend-webhook-secret': re.compile(r'whsec_[A-Za-z0-9+/=]{16,200}')}
+
+
+def check_root_secret(path, form):
+    """The original VPS secret: a regular root-owned file, no group/other access, one line of the
+    expected form. Nothing about the value is returned or printed."""
+    import os
+    import stat
+    st = os.lstat(path)
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o077:
+        raise RuntimeError('%s must be a regular root-owned file without group/other access' % path.name)
+    text = path.read_text().strip()
+    if '\n' in text or not form.fullmatch(text):
+        raise RuntimeError('%s does not hold a value of the expected form' % path.name)
+
+
+def service_copy(cr, source, owner_uid):
+    """A 0400 copy owned by the service user (the replicas do not run as root), refreshed from
+    the root-only original on every activation. The value is never printed."""
+    import os
+    target = source.with_name('notifications-' + source.name)
+    cr.p.write_private(target, source.read_text().strip())
+    os.chown(target, owner_uid, owner_uid)
+    os.chmod(target, 0o400)
+    return target
+
+
+def email_changes(cr):
+    uid = cr.SERVICES['notifications']['uid']
+    mounts, overrides = [], {'NOTIFICATIONS_EMAIL_PROVIDER': 'resend', 'NOTIFICATIONS_EMAIL_FROM': NOTIFICATIONS_EMAIL_FROM}
+    for name in RESEND_SOURCES:
+        source = cr.p.SECRETS / name
+        check_root_secret(source, SECRET_FORMS[name])
+        mounts.append((service_copy(cr, source, uid), NOTIFICATIONS_RESEND_TARGETS[name]))
+    overrides['NOTIFICATIONS_RESEND_API_KEY_FILE'] = NOTIFICATIONS_RESEND_TARGETS['resend-api-key']
+    overrides['NOTIFICATIONS_RESEND_WEBHOOK_SECRET_FILE'] = NOTIFICATIONS_RESEND_TARGETS['resend-webhook-secret']
+    return overrides, mounts
+
+
+def activate_email(cr, sha, run_id, confirm):
+    cr.require_release(sha)
+    if not cr.done('activate-resend-email'):
+        raise RuntimeError('Gate E1 first: activate-resend-email (the provider account and domain proven)')
+    notif_tls = cr.SERVICES['notifications']['tls']
+    cr.tls_route_present(notif_tls)
+    callback = cr.private_url(notif_tls) + PROVIDER_CALLBACK
+    # Before: the callback is not configured (404) or already is (401 to an unsigned event).
+    before = private_status(cr, callback)
+    if before not in ('404', '401'):
+        raise RuntimeError('The Notification Service provider callback answered %s before activation' % before)
+    overrides, mounts = email_changes(cr)
+    cr.emit('notificationsEmail', {'provider': 'resend', 'sender': NOTIFICATIONS_EMAIL_FROM,
+                                   'webhookSigning': True, 'replicas': list(REPLICAS)})
+
+    def post():
+        # The webhook secret is loaded: an unsigned event is refused (401), never 404.
+        status = private_status(cr, callback)
+        if status != '401':
+            raise RuntimeError('The provider callback answers %s after activation (expected 401 unsigned)' % status)
+
+    cr.apply_activation('activate-notifications-email', sha, run_id,
+                        [(replica, dict(overrides), {'mounts': list(mounts)}) for replica in REPLICAS], post=post)

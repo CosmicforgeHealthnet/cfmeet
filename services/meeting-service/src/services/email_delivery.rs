@@ -1108,6 +1108,24 @@ fn rank(status: &str) -> i32 {
     }
 }
 
+/// Whether `message_id` is one of this ledger's provider messages. Events for other
+/// messages (sent by the Notification Service through the same provider account) are
+/// handed on to it ([`crate::services::notification_relay::NotificationsRelay::forward_resend_event`]).
+pub async fn owns_message(
+    db: &DatabaseConnection,
+    provider: &str,
+    message_id: &str,
+) -> Result<bool, sea_orm::DbErr> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS one FROM email_deliveries WHERE provider = $1 AND provider_message_id = $2 LIMIT 1",
+            [provider.into(), message_id.into()],
+        ))
+        .await?
+        .is_some())
+}
+
 /// Apply one verified provider event. Returns `false` for a duplicate event id.
 pub async fn apply_provider_event(
     db: &DatabaseConnection,

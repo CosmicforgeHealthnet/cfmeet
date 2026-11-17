@@ -1252,7 +1252,10 @@ SAFE_DEFAULTS = {
     'messaging': {'MESSAGING_E2EE_DEVICES_ENABLED': (None, 'false'), 'MESSAGING_PUSH_PROVIDER': (None, '', 'none')},
     'calling': {'CALLING_PUBLIC_OUTBOUND_ENABLED': (None, 'false'), 'CALLING_PUBLIC_INBOUND_ENABLED': (None, 'false')},
     'developer-platform': {'DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL': (None, 'false'),
-                           'DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE': (None, 'shadow')},
+                           'DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE': (None, 'shadow'),
+                           # The decision email has one sender: the legacy Meeting email
+                           # (developer_access.notify_applicant) until both switch together.
+                           'DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE': (None, '', 'legacy')},
     # Dark until the Notification Service activation operations (N5 / N9) are recorded.
     'notifications': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
     'notifications-2': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
@@ -1275,6 +1278,10 @@ def safe_defaults():
     # (activate-personal-encryption), and only with the release record mounted (checked below).
     if done('activate-personal-encryption'):
         rules['messaging']['MESSAGING_E2EE_DEVICES_ENABLED'] = (None, 'false', 'true')
+    # The Notification Service's own Resend provider (activate-notifications-email).
+    if done('activate-notifications-email'):
+        for name in ('notifications', 'notifications-2'):
+            rules[name]['NOTIFICATIONS_EMAIL_PROVIDER'] = (None, '', 'none', 'resend')
     return rules
 
 
@@ -2551,12 +2558,25 @@ ACTIVATIONS = {
     # Notification Service N7b: Messaging publishes message wake-ups to I1 (shadow first).
     'activate-messaging-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_messaging_publications(
         sys.modules[__name__], sha, run_id, confirm)),
+    # Notification Service N7: the other producers' I1 grant (one producer per run).
+    'activate-organizations-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'organizations')),
+    'activate-communications-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'communications')),
+    'activate-developer-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'developer-platform')),
+    'activate-meeting-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
+        sys.modules[__name__], sha, run_id, 'meeting-service')),
+    # Notification Service N5 / N11: Resend as the service's own provider (VPS credentials).
+    'activate-notifications-email': (('activate-resend-email',), lambda sha, run_id, confirm:
+                                     notif_ops.activate_email(sys.modules[__name__], sha, run_id, confirm)),
     # Document 4 §9.6: one producer fence row per run, LEGACY_ONLY <-> SHADOW only, reversible.
     'activate-notification-fence': ((), lambda sha, run_id, confirm: notif_ops.activate_fence(
         sys.modules[__name__], sha, run_id, confirm)),
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
-    + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review')
+    + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review',
+       'notifications-acceptance')
 # The HTTPS receiver of the acceptance webhook: a public endpoint answering 204 to any POST.
 # (api.cfmeet.com itself resolves to the private TLS proxy on cfmeet-core-private, which the
 # worker's STRICT endpoint policy refuses as a private address.)
@@ -2616,6 +2636,22 @@ def run(operation, sha, run_id, confirm=''):
         emit('organizationAcceptanceSummary', checks)
         if any(v != 'PASS' for v in checks.values()):
             raise RuntimeError('Organization acceptance failed')
+    elif operation == 'notifications-acceptance':
+        # Real in-app delivery through the Notification Service: three fresh accounts and two
+        # organizations (archived again) through the public API only. Needs the Organizations
+        # producer and the ORGANIZATION_UPDATES IN_APP routing row ACTIVE.
+        if not done('activate-organizations-publications'):
+            raise RuntimeError('Acceptance needs activate-organizations-publications')
+        modes = notif_ops.service_modes(sys.modules[__name__], 'ORGANIZATION_UPDATES')
+        if modes.get('IN_APP') != 'ACTIVE':
+            raise RuntimeError('Acceptance needs the ORGANIZATION_UPDATES IN_APP routing row ACTIVE '
+                               '(activate-notifications-routing organization-updates-in-app-active)')
+        import notifications_acceptance
+        checks = notifications_acceptance.run(run_id, emit)
+        emit('notificationsAcceptanceSummary', checks)
+        notif_ops.notification_diagnostics(sys.modules[__name__])
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Notification acceptance failed')
     elif operation == 'developer-acceptance':
         # Writes acceptance data through the public API only; requires the activations it tests.
         missing = [o for o in ('activate-developer-console', 'activate-developer-webhooks', 'activate-gateway-families')

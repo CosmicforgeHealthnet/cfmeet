@@ -8,6 +8,7 @@ on:
       - "services/messaging/**"
       - "services/meeting-service/**"
       - "packages/communications-policy/**"
+      - "packages/notification-client/**"
       - "packages/service-auth/**"
       - "packages/migration-guard/**"
       - "scripts/migrations/assert_destructive_guard.sh"

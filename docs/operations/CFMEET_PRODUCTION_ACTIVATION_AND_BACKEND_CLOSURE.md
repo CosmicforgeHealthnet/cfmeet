@@ -17,7 +17,7 @@
   * a client release;
   * a regulated-data assessment.
 * **Not claimed:**
-  * Resend activation (suspended by the owner);
+  * delivery of Resend email to a real human inbox (E1 was proven against Resend's delivery test inbox);
   * any external telecom, APNs or FCM delivery;
   * an independent cryptographic assessment;
   * Notification Service cutovers or operational acceptance;
@@ -163,8 +163,8 @@ None of these is reachable on the public host: certify probes 25 internal, opera
 
 | Integration | Needed from | State |
 |---|---|---|
-| Resend email (E1) | owner: Resend credentials and activation | **SUSPENDED by owner decision**; not activated (PR #88 belongs to the Notification Service track) |
-| Current SMTP transport | owner: valid SMTP credentials | **failing** (SMTP 535 authentication rejected); configuration untouched |
+| Resend email (E1) | — | **Active.** The Meeting Service sends through Resend with the VPS-only credentials (PR #88): `activate-resend-email` run 43963096642 (ACCEPTED, signed DELIVERED), `email-acceptance confirm=otp` run 43968733391 (OTP journey 10/10). The recipient was Resend's test inbox; a human-inbox check needs `CFMEET_EMAIL_ACCEPTANCE_RECIPIENT` (PR #90). |
+| Previous SMTP transport | — | replaced by Resend (no longer used) |
 | PSTN / SIP telephony, public inbound/outbound calling, callback relay, enterprise SIP | a contracted carrier | disabled (`TELEPHONY_ENABLED=false` and related) |
 | SMS | an SMS carrier | disabled |
 | Phone numbers and porting | number inventory providers | disabled |
