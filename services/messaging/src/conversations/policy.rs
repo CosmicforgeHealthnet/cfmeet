@@ -855,12 +855,33 @@ impl ApplicationBaseline {
         }
     }
 
-    /// `application` layered over this baseline: an attachment setting the application
-    /// left unset takes the baseline's value; everything else is the application's.
+    /// Gap audit S6: the secure-backup settings this baseline contributes. CF Meet's
+    /// personal E2EE chats get opt-in, client-encrypted backups, so losing every device
+    /// need not lose history (the server stores objects it cannot read).
+    pub fn backups(self) -> BackupOverride {
+        match self {
+            Self::CfMeetFirstParty => BackupOverride {
+                enabled: Some(true),
+                max_bytes: Some(256 * 1024 * 1024),
+                retain_count: Some(2),
+            },
+        }
+    }
+
+    /// `application` layered over this baseline: an attachment or backup setting the
+    /// application left unset takes the baseline's value; everything else is the
+    /// application's.
     pub fn under(self, application: &ApplicationPolicy) -> ApplicationPolicy {
         let base = self.attachments();
         let own = application.attachments.clone().unwrap_or_default();
         let mut layered = application.clone();
+        let base_backups = self.backups();
+        let own_backups = application.backups.clone().unwrap_or_default();
+        layered.backups = Some(BackupOverride {
+            enabled: own_backups.enabled.or(base_backups.enabled),
+            max_bytes: own_backups.max_bytes.or(base_backups.max_bytes),
+            retain_count: own_backups.retain_count.or(base_backups.retain_count),
+        });
         layered.attachments = Some(AttachmentOverride {
             enabled: own.enabled.or(base.enabled),
             max_bytes: own.max_bytes.or(base.max_bytes),
