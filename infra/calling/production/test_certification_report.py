@@ -189,6 +189,15 @@ class Report(unittest.TestCase):
                 services[:2], None, collected=False, failure='COORDINATED_RELEASE_FAILED: RuntimeError x'), None)
             self.assertEqual(broken['verdict'], 'INCOMPLETE')
             self.assertIn('public certification did not run', broken['failures'])
+            # An unlabelled image (emergency Meeting-only deploy) still yields a serializable
+            # report, grouped under `unlabelled`, and fails its image check.
+            unlabelled = [dict(s) for s in services]
+            unlabelled[0] = dict(unlabelled[0], image={'result': 'FAIL', 'imageRevision': None})
+            result = report.evaluate(self.repo, self.docs, self.write_log(unlabelled, self.platform()), {'failed': []})
+            self.assertIn('unlabelled', result['revisions'])
+            json.dumps(result, indent=1, sort_keys=True, default=str)
+            self.assertEqual(result['verdict'], 'NOT_CERTIFIED')
+            report.render(result, 'https://example.invalid/run')
             services[0]['readiness'] = {'result': 'FAIL', 'status': 503}
             failed = report.evaluate(self.repo, self.docs, self.write_log(services, self.platform()), {'failed': []})
             self.assertEqual(failed['verdict'], 'NOT_CERTIFIED')

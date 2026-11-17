@@ -178,7 +178,11 @@ def evaluate(repo, head, log, public):
         verdict = 'CERTIFIED_READ_ONLY'
     revisions = {}
     for s in services:
-        revisions.setdefault((s.get('image') or {}).get('imageRevision'), []).append(s['service'])
+        # An image built outside the coordinated release (the emergency Meeting-only deploy)
+        # carries no revision label: report it as such instead of a `None` key, which the
+        # sorted JSON report cannot serialize next to string keys.
+        revision = (s.get('image') or {}).get('imageRevision') or 'unlabelled'
+        revisions.setdefault(revision, []).append(s['service'])
     return dict(verdict=verdict, head=head, failures=failures, services=services, platform=data['platform'],
                 public=public, started=data['started'], revisions=revisions,
                 outstanding=list(OUTSTANDING_ALWAYS) + [f for f in failures])
