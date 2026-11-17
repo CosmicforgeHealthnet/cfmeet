@@ -138,10 +138,10 @@ GRANTS += (('activate-preference-copy', 'communications', 'notifications', ('com
 GRANTS += (('activate-critical-lane', 'meeting-service', 'notifications', ('account-route-lease.claim',)),)
 CRITICAL_FALLBACK_KEY = 'meeting-account-fallback.key'
 CRITICAL_FALLBACK_TARGET = '/run/secrets/account-fallback.key'
-# Move order. After the passwordless sign-in (PR #97) only the device-linked notice and the
-# device-link step-up code are in the catalogue and can be delivered NEW; the sign-in,
-# email-change and action step-up codes are fenced but always decided OLD (UNPUBLISHABLE)
-# until the catalogue carries them, and the password categories have no producer left.
+# Move order. The device-linked notice and the device-link step-up code first; then the
+# passwordless codes (sign-in, email change, action step-up: catalogue 1.2.0, events #32-#34),
+# which need NOTIFICATIONS_APP_URL equal to the Meeting Service's APP_URL (the magic link).
+# The password categories have no producer left after PR #97.
 CRITICAL_ORDER = ('SECURITY_DEVICE_LINKED', 'SECURITY_DEVICE_STEP_UP', 'AUTH_VERIFICATION',
                   'SECURITY_PASSWORD_CHANGED', 'AUTH_PASSWORD_RESET')
 
