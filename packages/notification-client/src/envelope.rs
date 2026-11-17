@@ -297,6 +297,13 @@ pub fn validate(env: &Envelope, issuer: Option<&str>) -> Result<&'static EventSp
             return Err(Invalid("recipients"));
         }
     }
+    // A type that names its recipient kind has exactly one recipient of that kind (a
+    // sealed address belongs to exactly one email principal).
+    if let Some(kind) = spec.recipient {
+        if count != 1 || !kind.matches(&env.recipients[0].reference) {
+            return Err(Invalid("recipients"));
+        }
+    }
     // Delivery.
     let d = &env.delivery;
     if d.priority != spec.priority {
@@ -349,6 +356,11 @@ pub fn validate(env: &Envelope, issuer: Option<&str>) -> Result<&'static EventSp
         }
         if !data_value_ok(v) {
             return Err(DataValue(k.clone()));
+        }
+        if let Some((_, allowed)) = spec.closed_data.iter().find(|(key, _)| *key == k) {
+            if !v.as_str().is_some_and(|s| allowed.contains(&s)) {
+                return Err(DataValue(k.clone()));
+            }
         }
     }
     if let Some(missing) = spec

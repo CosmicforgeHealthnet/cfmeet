@@ -38,6 +38,34 @@ fn verification(h: &Harness, recipient: &str, code: &str) -> Value {
     )
 }
 
+/// The email principal of an address that has no account (or is not the account's yet).
+const PRINCIPAL: &str = "meeting-email-principal:7c3e9a51-2b4d-8e6f-9a1b-3c5d7e9f1a2b";
+
+/// An email-change code to a new address, on behalf of Alice (the ACCOUNT subject).
+fn email_change(h: &Harness, key: &str, code: &str) -> Value {
+    let alice_id = Uuid::parse_str(&alice()["cfmeet-user:".len()..]).unwrap();
+    let env = cf_notification_client::EnvelopeBuilder::new(
+        Producer::MeetingService,
+        "account.email-change-code.requested",
+        NOW,
+        route(),
+    )
+    .unwrap()
+    .dedupe_key(key)
+    .idempotency_key(key)
+    .subject(alice_id, None)
+    .recipient(PRINCIPAL)
+    .data("ttlMinutes", 10)
+    .secret(
+        SealedPlaintext::default()
+            .with_code(code)
+            .with_address("alice.new@example.com"),
+    )
+    .build_sealed(&h.sealing)
+    .unwrap();
+    serde_json::to_value(env).unwrap()
+}
+
 #[tokio::test]
 async fn ingest_outcomes_follow_the_contract() {
     let Some(h) = Harness::new().await else {
@@ -224,6 +252,200 @@ async fn critical_codes_are_sent_only_under_an_account_lease_and_completed() {
         0
     );
     assert_eq!(h.count("SELECT count(*)::bigint FROM notif_deliveries WHERE channel = 'EMAIL' AND status = 'SENT'").await, 1);
+}
+
+/// The passwordless account codes of PR #97 (contract 1.1.0) in the CRITICAL lane: the
+/// sign-in code to an email principal with no account (sealed code, magic-link token and
+/// address), the email-change code to the new address on behalf of the subject account
+/// (X1 authorizes it and names the greeting), and the action step-up code to the account.
+/// Each is sent once, only under its X6 lease, completed with X7, rendered exactly as the
+/// Meeting templates render it, and nothing secret is ever at rest in clear.
+#[tokio::test]
+async fn passwordless_account_codes_are_sent_under_their_lease_as_meeting_renders_them() {
+    use notifications::templates::email::{
+        email_change_code_email, sign_in_code_email, step_up_code_email, RequestDetails,
+    };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    h.set_mode("AUTH_VERIFICATION", "EMAIL", "ACTIVE").await;
+    h.set_mode("SECURITY_DEVICE_STEP_UP", "EMAIL", "ACTIVE")
+        .await;
+    let meeting = h.peers.meeting.clone();
+    let principal = PRINCIPAL.to_string();
+    let decision =
+        |ev: &Value| Uuid::parse_str(ev["route"]["decisionId"].as_str().unwrap()).unwrap();
+
+    let sign_in = sealed_envelope(
+        &h.sealing,
+        Producer::MeetingService,
+        "account.sign-in-code.requested",
+        std::slice::from_ref(&principal),
+        &[
+            ("ttlMinutes", json!(10)),
+            ("requestedAt", json!("2026-11-17T12:00:00Z")),
+            ("requestClient", json!("TestBrowser/1.0")),
+            ("requestNetwork", json!("102.89.x.x")),
+        ],
+        "otp:signin:6b86b273ff34fce1:0a1b2c3d",
+        SealedPlaintext::default()
+            .with_code("482913")
+            .with_token("tok_0123456789abcdefghij")
+            .with_address("new.user+cf@example.com"),
+    );
+    let change = email_change(&h, "otp:emailchange:aa:bb", "593017");
+    let step_up = sealed_envelope(
+        &h.sealing,
+        Producer::MeetingService,
+        "account.step-up-code.requested",
+        &[alice()],
+        &[
+            ("ttlMinutes", json!(10)),
+            ("purpose", json!("DEACTIVATE_ACCOUNT")),
+        ],
+        "otp:stepup:cc:dd",
+        SealedPlaintext::default().with_code("640128"),
+    );
+    let decisions = [decision(&sign_in), decision(&change), decision(&step_up)];
+    let r = h
+        .ingest(&meeting, vec![sign_in.clone(), change, step_up])
+        .await;
+    for i in 0..3 {
+        assert_eq!(r.expect(200)["results"][i]["outcome"], "ACCEPTED", "{i}");
+    }
+    // A sign-in code addressed to an account (not one email principal) is refused at I1.
+    let mut to_account = sign_in.clone();
+    to_account["eventId"] = json!(format!("evt_{}", Uuid::new_v4().simple()));
+    to_account["route"]["decisionId"] = json!(Uuid::new_v4());
+    to_account["recipients"] = json!([{ "ref": alice() }]);
+    let r = h.ingest(&meeting, vec![to_account]).await;
+    assert_eq!(r.expect(200)["results"][0]["outcome"], "REJECTED");
+
+    h.process_all().await;
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_email_messages WHERE lane = 'CRITICAL' AND status = 'QUEUED'")
+            .await,
+        3
+    );
+    // Nothing secret at rest in clear: codes, token and addresses are sealed.
+    for secret in [
+        "482913",
+        "593017",
+        "640128",
+        "tok_0123456789abcdefghij",
+        "new.user",
+        "alice.new@example.com",
+    ] {
+        assert_eq!(
+            h.count(&format!("SELECT count(*)::bigint FROM notif_email_messages WHERE concat_ws(' ', recipient_sealed, subject_sealed, body_sealed) LIKE '%{secret}%'")).await,
+            0,
+            "{secret}"
+        );
+        assert_eq!(
+            h.count(&format!(
+                "SELECT count(*)::bigint FROM notif_notifications WHERE params::text LIKE '%{secret}%'"
+            ))
+            .await,
+            0,
+            "{secret}"
+        );
+    }
+    let r = h.email_worker("CRITICAL").tick(Utc::now()).await.unwrap();
+    assert_eq!(r.accepted, 3);
+    let mut sent = h.provider.sent();
+    sent.sort_by(|a, b| a.1.cmp(&b.1));
+    let to: Vec<&str> = sent.iter().map(|s| s.1.as_str()).collect();
+    assert_eq!(
+        to,
+        vec![
+            "alice.new@example.com",
+            ALICE_EMAIL,
+            "new.user+cf@example.com"
+        ]
+    );
+    // Sign-in: Meeting's PR #97 email, with the magic link built from the sealed token,
+    // the sealed address and NOTIFICATIONS_APP_URL.
+    let link = "https://cfmeet.com/auth/magic?email=new.user%2Bcf%40example.com&token=tok_0123456789abcdefghij";
+    let legacy = sign_in_code_email(
+        "482913",
+        "10 minutes",
+        Some(link),
+        &RequestDetails {
+            client: Some("TestBrowser/1.0".into()),
+            address: Some("102.89.x.x".into()),
+            when_utc: "2026-11-17 12:00".into(),
+        },
+    );
+    assert_eq!(sent[2].2, "Your CF Meet sign-in code");
+    assert_eq!(sent[2].3, legacy.text);
+    // Email change: to the new address, greeted with the subject account's name (X1).
+    assert_eq!(sent[0].2, "Confirm your new CF Meet email address");
+    assert_eq!(
+        sent[0].3,
+        email_change_code_email("Alice", "593017", "10 minutes").text
+    );
+    // Step-up: the action named by the closed purpose, to the account's address.
+    assert_eq!(sent[1].2, "Confirm it's you");
+    assert_eq!(
+        sent[1].3,
+        step_up_code_email(
+            "Alice",
+            "640128",
+            "10 minutes",
+            "deactivate your CF Meet account"
+        )
+        .text
+    );
+    let mut claimed = h.owners.leases_claimed.lock().unwrap().clone();
+    let mut completed = h.owners.completed.lock().unwrap().clone();
+    let mut want = decisions.to_vec();
+    claimed.sort();
+    completed.sort();
+    want.sort();
+    assert_eq!((claimed, completed), (want.clone(), want));
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_email_messages WHERE body_sealed IS NOT NULL")
+            .await,
+        0
+    );
+    // The ledger keys are Meeting's keys.
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_email_messages WHERE idempotency_key IN ('otp:signin:6b86b273ff34fce1:0a1b2c3d', 'otp:emailchange:aa:bb', 'otp:stepup:cc:dd')")
+            .await,
+        3
+    );
+}
+
+/// An email-change code is sent only while its subject account is active (X1).
+#[tokio::test]
+async fn an_email_change_code_needs_an_active_subject_account() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    h.set_mode("AUTH_VERIFICATION", "EMAIL", "ACTIVE").await;
+    let meeting = h.peers.meeting.clone();
+    h.owners
+        .contacts
+        .lock()
+        .unwrap()
+        .get_mut(&alice())
+        .unwrap()
+        .status = "DEACTIVATED".into();
+    let change = email_change(&h, "otp:emailchange:ee:ff", "593017");
+    h.ingest(&meeting, vec![change]).await.expect(200);
+    h.process_all().await;
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_email_messages")
+            .await,
+        0
+    );
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_notifications WHERE state = 'SUPPRESSED'")
+            .await,
+        1
+    );
+    h.email_worker("CRITICAL").tick(Utc::now()).await.unwrap();
+    assert!(h.provider.sent().is_empty());
 }
 
 #[tokio::test]

@@ -37,7 +37,7 @@ impl StepUpPurpose {
     }
 
     /// The action as shown in the email ("confirm that you want to …").
-    fn action(self) -> &'static str {
+    pub fn action(self) -> &'static str {
         match self {
             StepUpPurpose::DeactivateAccount => "deactivate your CF Meet account",
             StepUpPurpose::ChangeEmail => "change the email address of your CF Meet account",
@@ -95,7 +95,7 @@ pub async fn request(
         .await?;
     state
         .email_service
-        .send_step_up_code(&user.email, &user.username, &code, purpose.action())
+        .send_step_up_code(&user.email, &user.username, user.id, &code, purpose)
         .await?;
     crate::services::ops_metrics::inc(
         &crate::services::ops_metrics::OPS_METRICS.auth_step_up_requested,
