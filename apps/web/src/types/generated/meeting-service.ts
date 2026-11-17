@@ -1394,6 +1394,14 @@ export interface GoogleExchangeRequest {
   exchange_code: string;
 }
 
+/** Gap audit A4: a native Google ID token. */
+export interface GoogleNativeRequest {
+  /** The ID token returned by the Google Sign-In SDK. */
+  idToken: string;
+  /** The nonce the token was requested with, if any. */
+  nonce?: string | null;
+}
+
 
 export interface HandRaiseResponse {
   changed: boolean;
@@ -4009,6 +4017,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v1/auth/logout": "logout",
   "POST /api/v1/auth/mfa/verify": "verify_mfa",
   "POST /api/v1/auth/oauth/google/exchange": "oauth_google_exchange",
+  "POST /api/v1/auth/oauth/google/native": "oauth_google_native",
   "POST /api/v1/auth/otp/request": "request_otp",
   "POST /api/v1/auth/otp/verify": "verify_otp",
   "POST /api/v1/auth/otp/verify-link": "verify_otp_link",

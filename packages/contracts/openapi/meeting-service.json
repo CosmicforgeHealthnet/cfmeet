@@ -867,6 +867,50 @@
         }
       }
     },
+    "/api/v1/auth/oauth/google/native": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Sign in with Google on a native app",
+        "description": "Gap audit A4: for the mobile apps. Send the Google ID token the platform SDK returned (and the\nnonce it was requested with, when one was used). The token's signature is verified against\nGoogle's published keys and every claim is checked (issuer, audience = the web client or a\nconfigured native client, expiry, verified email). The answer is that of any sign-in; an\naccount with two-step sign-in gets `401 MFA_REQUIRED` with an `mfaTicket` instead.",
+        "operationId": "oauth_google_native",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleNativeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtpVerifyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ID token rejected, or MFA_REQUIRED"
+          },
+          "403": {
+            "description": "Account has been deactivated"
+          },
+          "409": {
+            "description": "The address belongs to an account linked to another Google identity"
+          },
+          "503": {
+            "description": "Google's keys are unreachable"
+          }
+        }
+      }
+    },
     "/api/v1/auth/otp/request": {
       "post": {
         "tags": [
@@ -25693,6 +25737,25 @@
             "type": "string"
           }
         }
+      },
+      "GoogleNativeRequest": {
+        "type": "object",
+        "description": "Gap audit A4: a native Google ID token.",
+        "required": [
+          "idToken"
+        ],
+        "properties": {
+          "idToken": {
+            "type": "string",
+            "description": "The ID token returned by the Google Sign-In SDK."
+          },
+          "nonce": {
+            "type": "string",
+            "description": "The nonce the token was requested with, if any.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
       },
       "HandRaiseResponse": {
         "type": "object",

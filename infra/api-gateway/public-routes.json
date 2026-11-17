@@ -1375,6 +1375,13 @@
     {
       "domain": "meetings",
       "method": "POST",
+      "path": "/api/v1/auth/oauth/google/native",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
       "path": "/api/v1/auth/refresh",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"

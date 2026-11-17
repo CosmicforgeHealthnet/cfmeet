@@ -84,13 +84,13 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 156 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 157 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
 | `CALENDAR_FILE_DIRECT_INGRESS` | 2 | meetings | RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API. |
 | `CONTACT_VAULT_PRIVATE` | 5 | privacy-relay | Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway. |
-| `FIRST_PARTY_APP_ACCOUNT` | 30 | meetings | The CF Meet app's own account profile. |
+| `FIRST_PARTY_APP_ACCOUNT` | 31 | meetings | The CF Meet app's own account profile. |
 | `FIRST_PARTY_APP_BACKEND` | 16 | meetings | The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly. |
 | `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
 | `FIRST_PARTY_ORGANIZATIONS` | 42 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
@@ -99,7 +99,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 156 
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 2 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **156** | | |
+| **Total** | **157** | | |
 
 #### `CALENDAR_FILE_DIRECT_INGRESS` (2)
 
@@ -118,11 +118,12 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 156 
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/disable` | `disableContact` | `cfmeet.privacy-relay.http-api` |
 | POST | `/v1/privacy-relay/contacts/{contact_reference}/verification` | `assertContactVerification` | `cfmeet.privacy-relay.http-api` |
 
-#### `FIRST_PARTY_APP_ACCOUNT` (30)
+#### `FIRST_PARTY_APP_ACCOUNT` (31)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
 | POST | `/api/v1/auth/oauth/google/exchange` | `oauth_google_exchange` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v1/auth/oauth/google/native` | `oauth_google_native` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/me/account/delete` | `v2_delete_my_account` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/data-export` | `v2_export_my_data` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/me/device-links` | `v2_list_pending_device_links` | `cfmeet.meeting-service.http-api` |

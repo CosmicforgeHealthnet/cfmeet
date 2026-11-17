@@ -1338,8 +1338,74 @@ async fn oauth_google_callback_inner(
         chrono::Utc::now().timestamp(),
     )
     .map_err(|reason| ApiError::Unauthorized(format!("ID token rejected: {reason}")))?;
+    google_session(state, headers, &identity).await
+}
 
-    let (user, event) = resolve_google_account(state, &identity).await?;
+/// Sign in with Google on a native app
+///
+/// Gap audit A4: for the mobile apps. Send the Google ID token the platform SDK returned (and the
+/// nonce it was requested with, when one was used). The token's signature is verified against
+/// Google's published keys and every claim is checked (issuer, audience = the web client or a
+/// configured native client, expiry, verified email). The answer is that of any sign-in; an
+/// account with two-step sign-in gets `401 MFA_REQUIRED` with an `mfaTicket` instead.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/oauth/google/native",
+    tag = "Authentication",
+    request_body = GoogleNativeRequest,
+    responses(
+        (status = 200, description = "Signed in", body = OtpVerifyResponse),
+        (status = 401, description = "ID token rejected, or MFA_REQUIRED"),
+        (status = 403, description = "Account has been deactivated"),
+        (status = 409, description = "The address belongs to an account linked to another Google identity"),
+        (status = 503, description = "Google's keys are unreachable"),
+    )
+)]
+pub async fn oauth_google_native(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<GoogleNativeRequest>,
+) -> ApiResult<Json<OtpVerifyResponse>> {
+    limit_by_client(&state, &headers, "oauth-native", 60, 15 * 60).await?;
+    let identity = crate::services::google_native::verify(
+        &payload.id_token,
+        &state.google_client_id,
+        payload.nonce.as_deref(),
+    )
+    .await?;
+    let (user, issued) = google_session(&state, &headers, &identity).await?;
+    Ok(Json(OtpVerifyResponse {
+        access_token: issued.access_token,
+        refresh_token: issued.refresh_token,
+        user: UserInfo {
+            id: user.id,
+            username: user.username.clone(),
+            role: security::role_claim(&user),
+            status: status_string(&state, &user),
+        },
+        is_new_account: false,
+    }))
+}
+
+/// Gap audit A4: a native Google ID token.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GoogleNativeRequest {
+    /// The ID token returned by the Google Sign-In SDK.
+    pub id_token: String,
+    /// The nonce the token was requested with, if any.
+    #[serde(default)]
+    pub nonce: Option<String>,
+}
+
+/// The sign-in of a verified Google identity (web callback and native ID token): account
+/// resolution, the second factor when enabled, the session and its audit.
+async fn google_session(
+    state: &AppState,
+    headers: &HeaderMap,
+    identity: &GoogleIdentity,
+) -> ApiResult<(users::Model, security::IssuedSession)> {
+    let (user, event) = resolve_google_account(state, identity).await?;
     // Gap audit A1: Google proves the address, not the second factor.
     if crate::services::mfa::enabled(&state.db, user.id).await? {
         let pending = crate::services::mfa::Pending {

@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 280 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 281 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.20.0 | 137 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **664** |
+| **Total** | | | **665** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -106,6 +106,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | GET | `/api/v1/auth/oauth/google` | none (public) | Initiate Google OAuth flow | 303, 500 | — | `openapi/meeting-service.json#oauth_google_init` |
 | GET | `/api/v1/auth/oauth/google/callback` | none (public) | Google OAuth callback handler | 303 | — | `openapi/meeting-service.json#oauth_google_callback` |
 | POST | `/api/v1/auth/oauth/google/exchange` | none (public) | Exchange a one-time Google sign-in code for tokens | 200, 400 | — | `openapi/meeting-service.json#oauth_google_exchange` |
+| POST | `/api/v1/auth/oauth/google/native` | none (public) | Sign in with Google on a native app | 200, 401, 403, 409, 503 | MFA_REQUIRED | `openapi/meeting-service.json#oauth_google_native` |
 | POST | `/api/v1/auth/otp/request` | none (public) | Request a sign-in code | 200, 400, 429 | — | `openapi/meeting-service.json#request_otp` |
 | POST | `/api/v1/auth/otp/verify` | none (public) | Verify a sign-in code | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp` |
 | POST | `/api/v1/auth/otp/verify-link` | none (public) | Verify a sign-in link | 200, 400, 403, 429 | — | `openapi/meeting-service.json#verify_otp_link` |
