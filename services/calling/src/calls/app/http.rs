@@ -68,6 +68,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/v1/calls/:call_id/participants", post(add_participants))
         .route("/v1/calls/:call_id/host", post(transfer_host))
+        .route("/v1/calls/:call_id/history", delete(hide_from_history))
         .route(
             "/v1/calls/:call_id/participants/:participant_id/remove",
             post(remove_participant),
@@ -983,6 +984,41 @@ async fn mute_participant(
         )
         .await?;
     Ok(respond(StatusCode::OK, out, false))
+}
+
+/// `DELETE /v1/calls/{call_id}/history?principalId=` (calls.write): the principal hides a
+/// finished Call from its own history (204, idempotent).
+async fn hide_from_history(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let Query(pairs) =
+        query.map_err(|_| CallingError::Validation("The query string is invalid."))?;
+    let principal = match pairs.as_slice() {
+        [(k, v)] if k == "principalId" => Uuid::parse_str(v)
+            .map(PrincipalId::from_uuid)
+            .map_err(|_| CallingError::Validation("principalId must be a UUID."))?,
+        _ => {
+            return Err(CallingError::Validation(
+                "principalId (and nothing else) is required.",
+            ))
+        }
+    };
+    let call_id = Uuid::parse_str(&call_id)
+        .map(CallId::from_uuid)
+        .map_err(|_| CallingError::NotFound)?;
+    state
+        .app
+        .hide_from_history(CallScope::of_platform(&ctx), principal, call_id)
+        .await?;
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
 }
 
 #[derive(Debug, Deserialize)]
