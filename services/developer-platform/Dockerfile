@@ -5,8 +5,9 @@
 #   docker build -f services/developer-platform/Dockerfile -t cfmeet-developer-platform .
 #
 # Only packages/service-auth, packages/webhooks (Section 53: the shared webhook
-# primitives), packages/contracts/platform-developer and services/developer-platform enter
-# the build context (Dockerfile.dockerignore).
+# primitives), packages/notification-client (Notification Service envelopes),
+# packages/contracts/platform-developer and services/developer-platform enter the build
+# context (Dockerfile.dockerignore).
 #
 # The image contains the API (`developer-platform`), the worker
 # (`developer-platform-worker`) and the migration runner (`developer-platform-migration`).
@@ -22,6 +23,8 @@ COPY packages/migration-guard packages/migration-guard
 # Part VI §55 unified usage facts (shared fact model / exporter).
 COPY packages/usage-facts packages/usage-facts
 COPY packages/webhooks packages/webhooks
+# Notification Service producer client (envelope builder / validator; roadmap N7 / N11).
+COPY packages/notification-client packages/notification-client
 COPY packages/contracts/platform-developer packages/contracts/platform-developer
 COPY services/developer-platform services/developer-platform
 WORKDIR /src/services/developer-platform

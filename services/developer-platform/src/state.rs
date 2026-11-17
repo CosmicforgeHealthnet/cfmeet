@@ -6,6 +6,7 @@ use sea_orm::DatabaseConnection;
 
 use crate::{
     config::{service_auth::ServiceAuthRuntime, FeatureFlags},
+    notification_publications::Publishing,
     platform_access::{PlatformAccessPort, UnconfiguredPlatformAccess},
     session::{HumanSessions, UnconfiguredSessions},
     webhooks::{
@@ -28,6 +29,9 @@ pub struct AppState {
     /// Calling's controlled webhook export (Section 53 migration); unconfigured: every
     /// migration command fails closed.
     pub calling_export: Arc<dyn CallingMigrationPort>,
+    /// Notification Service N7 / N11: what this process enqueues for the Notification
+    /// Service (default: nothing, today's behaviour).
+    pub notifications: Publishing,
 }
 
 impl AppState {
@@ -41,7 +45,14 @@ impl AppState {
             production_reviewers: Arc::new(Vec::new()),
             webhooks: None,
             calling_export: Arc::new(UnconfiguredCalling),
+            notifications: Publishing::default(),
         }
+    }
+
+    /// Publication to the Notification Service (only with `CF_NOTIFICATIONS_BASE_URL`).
+    pub fn with_notifications(mut self, notifications: Publishing) -> Self {
+        self.notifications = notifications;
+        self
     }
 
     pub fn with_platform_access(mut self, platform_access: Arc<dyn PlatformAccessPort>) -> Self {

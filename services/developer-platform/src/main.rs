@@ -5,6 +5,7 @@ use std::sync::Arc;
 use developer_platform::{
     config::{service_auth::ServiceAuthSettings, DeveloperPlatformConfig},
     http,
+    notification_publications::Publishing,
     platform_access::HttpPlatformAccess,
     session::MeetingServiceSessions,
     state::AppState,
@@ -53,7 +54,12 @@ async fn main() -> anyhow::Result<()> {
                     "DEVELOPER_PLATFORM_WEBHOOKS_ENABLED": config.webhooks.enabled,
                     "DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE": config.webhooks.mode.as_str(),
                     "DEVELOPER_PLATFORM_WEBHOOK_MUTATIONS_FROZEN": config.webhooks.mutations_frozen,
+                    "DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE":
+                        if config.notification_routes.production_access { "notification-service" } else { "legacy" },
+                    "DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE":
+                        if config.notification_routes.credential_lifecycle { "notification-service" } else { "off" },
                 },
+                "notificationServiceConfigured": settings.has_target(cf_service_auth::services::NOTIFICATIONS),
                 "webhookMigrationTransferKeyConfigured": config.webhooks.transfer_key.is_some(),
             })
         );
@@ -99,6 +105,25 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!(
             "CF_MEETING_SERVICE_BASE_URL is not set: Developer Console sessions are refused"
         );
+    }
+    // Notification Service N7 / N11: production-access decisions are enqueued for the
+    // Notification Service only on the explicit route AND with CF_NOTIFICATIONS_BASE_URL.
+    let notifications_configured = settings.has_target(cf_service_auth::services::NOTIFICATIONS);
+    if config.notification_routes.production_access {
+        if notifications_configured {
+            state = state.with_notifications(Publishing {
+                production_access: true,
+            });
+            tracing::warn!(
+                "production-access decisions are published to the Notification Service: the \
+                 operator-console decision email (Meeting Service developer-access-decision) must be off"
+            );
+        } else {
+            tracing::warn!(
+                "DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE=notification-service needs \
+                 CF_NOTIFICATIONS_BASE_URL: production-access decisions are not published"
+            );
+        }
     }
     let app = http::app(state);
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;

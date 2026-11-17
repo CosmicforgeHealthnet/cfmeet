@@ -24,6 +24,13 @@
 //! | `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_MAX_ENVIRONMENTS` | no | subscribed environments examined per sweep (1–10000, default 500) |
 //! | `DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS` | no | DATA-017 report-only reference reconciliation logged by the worker (0 = off, else 300–604800; default 86400) |
 //! | `DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_REMOTE_LIMIT` | no | ids of each kind verified at Platform Access per report (0 = local checks only, max 100000; default 1000) |
+//! | `DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE` | no | who notifies the applicant of a production-access decision: `legacy` (default: nothing is published; the operator-console email through the Meeting Service stays the only notice) or `notification-service` (`developer-platform.production-access.decided` is published to the Notification Service — switch the operator-console email off at the same time, never both). Effective only with `CF_NOTIFICATIONS_BASE_URL` |
+//! | `DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE` | no | `notification-service` (default) or `off`: the worker publishes `developer-platform.credential.expiring-soon` / `.expired` to the Notification Service (no other user notice exists for them; customer webhooks are unaffected). Effective only with `CF_NOTIFICATIONS_BASE_URL`, Platform Access and `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED` (same lead times, lookback, interval and environment bound) |
+//!
+//! Without `CF_NOTIFICATIONS_BASE_URL` nothing is published to the Notification Service,
+//! whatever the two routes say (today's behaviour). The API process enqueues production-
+//! access decisions; the worker enqueues credential notices and relays every publication,
+//! so both processes need the variable.
 //!
 //! The webhook variables are detailed in [`webhooks`]. Service authentication (`CF_*`) is
 //! read by [`service_auth`]. Error messages never echo a value.
@@ -102,6 +109,62 @@ pub struct DeveloperPlatformConfig {
     pub reference_reconciliation_interval: Option<Duration>,
     /// DATA-017: ids of each kind verified at Platform Access per report.
     pub reference_reconciliation_remote_limit: u64,
+    /// Notification Service N7 / N11: which events are routed to the Notification Service
+    /// (requested; effective only with `CF_NOTIFICATIONS_BASE_URL`).
+    pub notification_routes: NotificationRoutes,
+}
+
+/// The per-event routes to the Notification Service (requested in configuration).
+///
+/// An event with an existing user notice outside the Notification Service (the
+/// production-access decision email the operator console sends through the Meeting
+/// Service) defaults to `legacy`: publishing it is an explicit, mutually exclusive switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotificationRoutes {
+    /// `DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE=notification-service`.
+    pub production_access: bool,
+    /// `DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE` (default `notification-service`).
+    pub credential_lifecycle: bool,
+}
+
+impl Default for NotificationRoutes {
+    fn default() -> Self {
+        Self {
+            production_access: false,
+            credential_lifecycle: true,
+        }
+    }
+}
+
+fn notification_routes(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<NotificationRoutes, ConfigError> {
+    const PRODUCTION: &str = "DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE";
+    const CREDENTIAL: &str = "DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE";
+    let production_access = match get(PRODUCTION).as_deref() {
+        None | Some("legacy") => false,
+        Some("notification-service") => true,
+        Some(_) => {
+            return Err(ConfigError::invalid(
+                PRODUCTION,
+                "must be `legacy` or `notification-service`",
+            ))
+        }
+    };
+    let credential_lifecycle = match get(CREDENTIAL).as_deref() {
+        None | Some("notification-service") => true,
+        Some("off") => false,
+        Some(_) => {
+            return Err(ConfigError::invalid(
+                CREDENTIAL,
+                "must be `notification-service` or `off`",
+            ))
+        }
+    };
+    Ok(NotificationRoutes {
+        production_access,
+        credential_lifecycle,
+    })
 }
 
 impl fmt::Debug for DeveloperPlatformConfig {
@@ -115,6 +178,7 @@ impl fmt::Debug for DeveloperPlatformConfig {
             .field("worker_instance_id", &self.worker_instance_id)
             .field("webhooks", &self.webhooks)
             .field("credential_lifecycle", &self.credential_lifecycle)
+            .field("notification_routes", &self.notification_routes)
             .field(
                 "reference_reconciliation_interval",
                 &self.reference_reconciliation_interval,
@@ -319,6 +383,7 @@ impl DeveloperPlatformConfig {
         };
         let webhooks = webhooks::from_lookup(&get)?;
         let credential_lifecycle = credential_lifecycle(&get)?;
+        let notification_routes = notification_routes(&get)?;
         let reference_reconciliation_interval = match bounded(
             &get,
             "DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS",
@@ -357,6 +422,7 @@ impl DeveloperPlatformConfig {
             credential_lifecycle,
             reference_reconciliation_interval,
             reference_reconciliation_remote_limit,
+            notification_routes,
         })
     }
 
@@ -460,6 +526,52 @@ mod tests {
         assert!(!cfg.credential_lifecycle.enabled);
         assert_eq!(cfg.credential_lifecycle.warning_days, vec![30, 3]);
         assert_eq!(cfg.reference_reconciliation_interval, None);
+    }
+
+    #[test]
+    fn the_production_access_notice_stays_legacy_unless_explicitly_routed() {
+        let with = |extra: &[(&'static str, &'static str)]| {
+            let mut v: Vec<(&str, &str)> = BASE.to_vec();
+            v.extend_from_slice(extra);
+            DeveloperPlatformConfig::from_lookup(lookup(&v)).map(|c| c.notification_routes)
+        };
+        assert_eq!(
+            with(&[]).unwrap(),
+            NotificationRoutes {
+                production_access: false,
+                credential_lifecycle: true,
+            }
+        );
+        let routed = with(&[
+            (
+                "DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE",
+                "notification-service",
+            ),
+            ("DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE", "off"),
+        ])
+        .unwrap();
+        assert!(routed.production_access && !routed.credential_lifecycle);
+        assert!(
+            !with(&[(
+                "DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE",
+                "legacy"
+            )])
+            .unwrap()
+            .production_access
+        );
+        for (var, value) in [
+            (
+                "DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE",
+                "both-please",
+            ),
+            (
+                "DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE",
+                "legacy",
+            ),
+        ] {
+            let err = with(&[(var, value)]).unwrap_err();
+            assert!(!err.to_string().contains(value), "{var}");
+        }
     }
 
     #[test]

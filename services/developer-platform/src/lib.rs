@@ -22,6 +22,7 @@ pub mod digest;
 pub mod domain;
 pub mod http;
 pub mod ledger;
+pub mod notification_publications;
 pub mod platform_access;
 pub mod reference_reconciliation;
 pub mod session;
