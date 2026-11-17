@@ -445,7 +445,12 @@ class ProducerFence(unittest.TestCase):
             self.assertEqual(fake.journal, [])
 
     def test_fenced_new_routes_everything_new_once_the_service_delivers(self):
+        # Without the registration mirror the service would have no endpoint to wake: refused.
         fake = FakeProducerCr([{'mode': 'SHADOW', 'version': 2}], done=self.DONE, service={'PUSH': 'ACTIVE'})
+        with self.assertRaisesRegex(RuntimeError, 'activate-messaging-push-mirror'):
+            no.activate_fence(fake, 'a' * 40, '42-1', 'messaging-message-wakeups-fenced-new')
+        fake = FakeProducerCr([{'mode': 'SHADOW', 'version': 2}], done=self.DONE + ('activate-messaging-push-mirror',),
+                              service={'PUSH': 'ACTIVE'})
         no.activate_fence(fake, 'a' * 40, '42-1', 'messaging-message-wakeups-fenced-new')
         self.assertEqual(fake.journal[-1]['notificationFence']['after'], 'FENCED_NEW')
         update = [q for _, q in fake.release.sql if q.startswith('WITH u AS (UPDATE')][-1]
@@ -770,6 +775,30 @@ class CriticalLane(unittest.TestCase):
         self.assertEqual(first, second)
         import base64
         self.assertEqual(len(base64.b64decode(first)), 32)
+
+
+
+class Push(unittest.TestCase):
+    def test_grants_operations_and_verify_rule(self):
+        mirror = sorted((r, i, p) for op, r, i, p in cr.GRANTS if op == 'activate-messaging-push-mirror')
+        self.assertEqual(mirror, [(r, 'messaging', ('notifications-push-registration.sync',)) for r in no.REPLICAS])
+        calls = sorted((r, i, p) for op, r, i, p in cr.GRANTS if op == 'activate-calling-push')
+        self.assertEqual(calls, [(r, 'calling', ('notifications-call-push.dispatch',)) for r in no.REPLICAS])
+        for op in ('activate-notifications-push', 'activate-messaging-push-mirror', 'activate-calling-push'):
+            self.assertIn(op, cr.OPERATIONS)
+        from unittest import mock
+        with mock.patch.object(cr, 'done', return_value=False):
+            self.assertNotIn('live', cr.safe_defaults()['notifications']['NOTIFICATIONS_PUSH_PROVIDER'])
+        with mock.patch.object(cr, 'done', side_effect=lambda op: op == 'activate-notifications-push'):
+            self.assertIn('live', cr.safe_defaults()['notifications-2']['NOTIFICATIONS_PUSH_PROVIDER'])
+
+    def test_mirror_and_call_push_need_their_prerequisites(self):
+        fake = FakeProducerCr([], done=('activate-messaging-publications',))
+        with self.assertRaisesRegex(RuntimeError, 'activate-notifications-push'):
+            no.activate_messaging_push_mirror(fake, 'a' * 40, '42-1', '')
+        with self.assertRaisesRegex(RuntimeError, 'activate-notifications-push'):
+            no.activate_calling_push(fake, 'a' * 40, '42-1', '')
+        self.assertEqual(fake.activations, [])
 
 
 if __name__ == '__main__':
