@@ -1252,7 +1252,10 @@ SAFE_DEFAULTS = {
     'messaging': {'MESSAGING_E2EE_DEVICES_ENABLED': (None, 'false'), 'MESSAGING_PUSH_PROVIDER': (None, '', 'none')},
     'calling': {'CALLING_PUBLIC_OUTBOUND_ENABLED': (None, 'false'), 'CALLING_PUBLIC_INBOUND_ENABLED': (None, 'false')},
     'developer-platform': {'DEVELOPER_PLATFORM_PRODUCTION_AUTO_APPROVAL': (None, 'false'),
-                           'DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE': (None, 'shadow')},
+                           'DEVELOPER_PLATFORM_WEBHOOK_DELIVERY_MODE': (None, 'shadow'),
+                           # The decision email has one sender: the legacy Meeting email
+                           # (developer_access.notify_applicant) until both switch together.
+                           'DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE': (None, '', 'legacy')},
     # Dark until the Notification Service activation operations (N5 / N9) are recorded.
     'notifications': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
     'notifications-2': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},

@@ -110,8 +110,12 @@ PRODUCERS = {
                           outbox='organization_notification_publications'),
     'communications': dict(operation='activate-communications-publications', containers=('communications',),
                            outbox='communication_notification_publications'),
+    # Credential expiring / expired (no legacy user notice). The production-access decision
+    # stays on its legacy email (developer_access.notify_applicant) until
+    # DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE is switched together with it.
     'developer-platform': dict(operation='activate-developer-publications',
-                               containers=('developer-platform', 'developer-platform-worker'), outbox=None),
+                               containers=('developer-platform', 'developer-platform-worker'),
+                               outbox='devplat_notification_publications'),
     'meeting-service': dict(operation='activate-meeting-publications', containers=('meeting-service',),
                             outbox=None),
 }
