@@ -705,3 +705,86 @@ where
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     read().await
 }
+
+/// C9: Call creation is rate limited per initiating principal BY DEFAULT — with nothing
+/// configured anywhere, the 61st Call of one principal within a minute is refused
+/// (RATE_LIMITED, Retry-After) while another principal is unaffected; the next minute
+/// opens a new window, and a principal-level policy replaces the default (higher or lower).
+#[tokio::test]
+async fn call_creation_is_rate_limited_per_principal_by_default() {
+    let Some(w) = CallWorld::new().await else {
+        return;
+    };
+    let a = caller(&w, w.consumer.sa(w.kind)).await;
+    let default = calling::platform::limits::DEFAULT_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE;
+    // Start at the beginning of a minute window so the whole burst falls in one window.
+    let now = calling::domain::Clock::now(&w.h.clock);
+    let into_minute = now.timestamp() % 60;
+    w.h.clock
+        .advance(chrono::Duration::seconds(60 - into_minute));
+    for i in 0..default {
+        let c = create(&w, &a, &w.initiator)
+            .await
+            .unwrap_or_else(|e| panic!("creation {i}: {e:?}"));
+        cancel(&w, &a, &c).await;
+    }
+    match create(&w, &a, &w.initiator).await {
+        Err(CallError::RateLimited { retry_after_secs }) => {
+            assert!((1..=60).contains(&retry_after_secs), "{retry_after_secs}")
+        }
+        other => panic!("expected RATE_LIMITED, got {other:?}"),
+    }
+    // Through the API: the normalized 429.
+    let endpoint =
+        w.h.request(
+            Method::POST,
+            "/v1/calling/endpoints",
+            Some(&a.secret),
+            Some(serde_json::json!({
+                "principalId": w.initiator.id(), "endpointKey": "c9-device",
+                "endpointKind": "MOBILE", "capabilities": { "audio": true, "video": false },
+            })),
+        )
+        .await;
+    assert_eq!(endpoint.status, StatusCode::CREATED, "{}", endpoint.text);
+    let r =
+        w.h.request_with(
+            Method::POST,
+            "/v1/calls",
+            Some(&a.secret),
+            Some(serde_json::json!({
+                "kind": "VOICE",
+                "initiatorPrincipalId": w.initiator.id(),
+                "initiatorEndpointId": endpoint.json["endpointId"],
+                "targetPrincipalIds": [w.recipient.id()],
+            })),
+            &[("idempotency-key", "c9-default-rate")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{}", r.text);
+    assert_eq!(r.json["error"]["code"], "RATE_LIMITED");
+    // Another principal keeps its own allowance.
+    let other = create(&w, &a, &w.recipient).await.unwrap();
+    cancel(&w, &a, &other).await;
+    // A new minute: a new window.
+    w.h.clock.advance(chrono::Duration::seconds(60));
+    let c = create(&w, &a, &w.initiator).await.unwrap();
+    cancel(&w, &a, &c).await;
+    // A configured principal rate replaces the default (here: lower).
+    w.h.platform
+        .set_principal_limits(
+            w.initiator.id(),
+            LimitValues {
+                requests_per_minute: Some(2),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let c = create(&w, &a, &w.initiator).await.unwrap();
+    cancel(&w, &a, &c).await;
+    assert!(matches!(
+        create(&w, &a, &w.initiator).await,
+        Err(CallError::RateLimited { .. })
+    ));
+}

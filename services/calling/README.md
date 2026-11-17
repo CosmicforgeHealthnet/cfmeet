@@ -564,7 +564,12 @@ set-credential | set-principal`). Two axes (ADR 0028 §70):
   default; every configured parent is also an aggregate ceiling (a service-account
   ceiling across all of its credentials, …).
 * **PRINCIPAL** — an independent ceiling of a server-resolved principal, shared by every
-  credential, service account and device acting for it.
+  credential, service account and device acting for it. Call creation is limited per
+  initiating principal even when nothing is configured (C9):
+  `CALLING_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE` (default 60, `0` = off) applies when
+  the principal has no configured request rate (`platform_admin limits set-principal
+  --requests-per-minute` overrides it, higher or lower); a refusal is 429 with
+  `Retry-After` and a deduplicated `limit.exceeded` notice.
 
 An operation must satisfy every applicable ceiling (plus the environment's spend
 policy); the broadest exhausted level is reported. Telecom spend defaults to zero and is

@@ -177,8 +177,13 @@ impl CallService {
             scope.application_id().as_uuid(),
             scope.environment_id().as_uuid(),
         );
-        let (decision, rate_notices) =
-            crate::platform::limits::check_principal_rate(txn, self.now(), initiator.id()).await?;
+        let (decision, rate_notices) = crate::platform::limits::check_principal_rate(
+            txn,
+            self.now(),
+            initiator.id(),
+            Some(self.limit_defaults.call_creations_per_principal_per_minute),
+        )
+        .await?;
         if let crate::platform::limits::RateDecision::Limited { retry_after_secs } = decision {
             // The creating transaction rolls back: the notice is emitted on its own.
             crate::webhooks::notices::emit_detached(

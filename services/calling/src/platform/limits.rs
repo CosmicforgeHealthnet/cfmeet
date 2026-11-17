@@ -42,13 +42,24 @@ use crate::{
 pub struct LimitDefaults {
     pub requests_per_minute: i64,
     pub max_concurrent_communications: i64,
+    /// C9: Calls one principal may initiate per minute when its own principal-level
+    /// policy configures no request rate (`CALLING_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE`,
+    /// default [`DEFAULT_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE`]; `0` turns the default
+    /// off). Shared by every credential / service account acting for the principal.
+    pub call_creations_per_principal_per_minute: i64,
 }
+
+/// C9: the default per-principal Call-creation rate (no person places 60 calls a minute;
+/// an automated dialer through one principal does).
+pub const DEFAULT_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE: i64 = 60;
 
 impl Default for LimitDefaults {
     fn default() -> Self {
         Self {
             requests_per_minute: 600,
             max_concurrent_communications: 50,
+            call_creations_per_principal_per_minute:
+                DEFAULT_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE,
         }
     }
 }
@@ -771,9 +782,10 @@ fn judge(
 }
 
 /// Part G §70: the request-rate ceiling of a principal-scoped operation (a Call created
-/// for a server-resolved initiator). Counted only when the principal configures a
-/// ceiling; every credential / service account acting for the principal shares the
-/// window. Runs on the caller's connection — the creating transaction — so it never
+/// for a server-resolved initiator): the principal's configured ceiling, else (C9) the
+/// platform default `default_ceiling` (`None` / `0`: no default — counted only when the
+/// principal configures a ceiling); every credential / service account acting for the
+/// principal shares the window. Runs on the caller's connection — the creating transaction — so it never
 /// needs a second pool connection: the increment commits with the creation (a refused
 /// or failed creation does not consume the window; the window row lock serializes the
 /// principal's concurrent creations). Returns the decision and the notices for the
@@ -782,9 +794,12 @@ pub(crate) async fn check_principal_rate<C: ConnectionTrait>(
     db: &C,
     now: DateTime<Utc>,
     principal_id: PrincipalId,
+    default_ceiling: Option<i64>,
 ) -> Result<(RateDecision, Vec<crate::webhooks::notices::LimitNotice>), DbErr> {
     use crate::webhooks::notices::LimitLevel;
-    let Some(ceiling) = rpm(&principal_level(db, principal_id).await?) else {
+    let Some(ceiling) =
+        rpm(&principal_level(db, principal_id).await?).or(default_ceiling.filter(|c| *c > 0))
+    else {
         return Ok((RateDecision::Allowed, Vec::new()));
     };
     let window_start = window_of(now);
