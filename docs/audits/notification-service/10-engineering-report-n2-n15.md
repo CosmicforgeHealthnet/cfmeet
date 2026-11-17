@@ -1,6 +1,6 @@
 # Document 10 — Engineering Report: N2–N15 and the Resend E-track
 
-**Status (2026-11-16):** `CFMEET_NOTIFICATION_SERVICE_N2_DEPLOYED_DARK` — see §1 for the per-section status. The final engineering goal `CFMEET_UNIFIED_NOTIFICATION_SERVICE_ENGINEERING_COMPLETE` is **not** claimed: producer publications (N7), the client integrations (FE2–FE5) and the cutovers (N9 Messaging facades, N10 preference switch, N11, N12) are not built. Gate E1 is complete (§3).
+**Status (2026-11-17):** every Notification Service section N2–N15 is engineered, merged and tested (PRs #95, #96, #99), released (coordinated release 44150771996 on `506bff4`, then `21c90c4`, §4.4) and activated in production. The service delivers in production: organization updates in the inbox; message wake-ups by Web Push; organization invitations, meeting invitations, meeting notifications and the device security emails by email through its own Resend configuration. The verdict is in §8. APNs and FCM are not configured: their credentials do not exist (§5).
 
 Statuses are kept separate, as the mission requires:
 
@@ -17,21 +17,20 @@ Statuses are kept separate, as the mission requires:
 
 | Section | Engineering | Production | Accepted | Evidence |
 |---|---|---|---|---|
-| **E-track E1** (Resend on the existing Meeting path) | `ENGINEERING_COMPLETE` (VPS-only credentials, PR #88) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-resend-email` 43963096642, `email-acceptance confirm=otp` 43968733391 | **E1 complete**: Resend ACCEPTED plus signed DELIVERED, OTP journey 10/10 PASS. The recipient was Resend's delivery test inbox; no human inbox yet (§3) | §3 |
-| **N2** service foundation | `ENGINEERING_COMPLETE` (PR #75, readiness fix PR #80) | **`PRODUCTION_DEPLOYED_AND_VERIFIED` (dark)**: readiness fix live since release 43870645555 (`c0714ba`); certify 43919862343 `CERTIFIED_READ_ONLY` (the earlier 43828926604 NOT_CERTIFIED is resolved) | 24 h dark observation from 13:08 UTC | §2.1, §4 |
-| **N3** ingest, routing, preferences engine, shadow | `ENGINEERING_COMPLETE` (service side, PR #75) | deployed dark with N2 (43819010350) | n/a (no traffic until N7) | §2.2 |
-| **N5** email channel | `ENGINEERING_COMPLETE` (PR #75) | deployed dark, provider `none` | E2 needs E1 | §2.3 |
-| **N6** owner APIs X1–X5 | `ENGINEERING_COMPLETE` (PRs #76, #82) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-notifications-owners` 43922950325, X1/X2 publicly denied and proven | n/a (no traffic until routing leaves OFF) | §2.4, §4.2 |
-| **N7** producer publications + routing fence | **N7a fence foundation built** (Meeting + Messaging tables, inert guard triggers, decision module, `routingProtocol`, rollback floor); **N7b Messaging shadow publication built** (`MESSAGE_WAKEUPS`, outbox + I1 relay, `activate-messaging-publications`, `activate-notification-fence` LEGACY_ONLY ↔ SHADOW only); other producers not built | **N7b deployed, `MESSAGE_WAKEUPS` in SHADOW**: release 43987779716, certify 43997503927, publications 43999106430, fence 44000239278 (§4.3). Acknowledged shadow publications not yet evidenced | — | §2.8, §2.9, §4.3, §5 |
-| **N8** inbox | service side + U1–U9 (PR #75), Meeting relay (PR #82); web/mobile UI not built | **relay `PRODUCTION_DEPLOYED_AND_VERIFIED`**: release 43914242156, `activate-notifications-relay` 43926737306; inbox empty (routing OFF) | — | §2.4, §2.5, §4.2 |
-| **N9** push + call fast lane | service side built (U8/U9, dispatcher, I3); Messaging facades, Calling transport, service worker not built | — | — | §2.5, §5 |
-| **N10** preferences authority | U6/U7, change log, Hub copy function built; copy job, facade switch not built | — | — | §2.5, §5 |
-| **N11** standard / invitation email cutover | service rendering and sender profiles built; producer routing not built | — | gate E1/E2 | §5 |
-| **N12** critical lane | X6/X7 client and lease-guarded CRITICAL worker built; Account X6/X7 endpoints, PW1 relay, AUTO/FORCED fallback not built | — | E3/E4 | §5 |
-| **N13** monitoring | rules + promtool tests + runbook + metrics built; Prometheus/Alertmanager deployment with receivers is owner decision D-9 | — | — | §2.6 |
-| **N14** canary governance | gated routing operation built (`activate-notifications-routing`) | — | — | §2.7 |
-| **N15** retirement | not applicable: no category has moved; every legacy pipeline stays operational | — | — | §6 |
-
+| **E-track E1** (Resend on the Meeting path) | `ENGINEERING_COMPLETE` (PR #88) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-resend-email` 43963096642, `email-acceptance otp` 43968733391; after the passwordless sign-in (PR #97) again 44145668186 (OTP journey 10/10) | E1 complete (Resend ACCEPTED plus signed DELIVERED) | §3 |
+| **N2** service foundation | `ENGINEERING_COMPLETE` | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: both replicas released by 44150771996, certify 44170126155 `CERTIFIED_READ_ONLY` | — | §2.1, §4 |
+| **N3** ingest, routing, preferences, shadow | `ENGINEERING_COMPLETE` | **live**: I1 accepts events from all five producers (§4.4) | — | §2.2 |
+| **N5** email channel | `ENGINEERING_COMPLETE` | **live**: `activate-notifications-email` 44172839707 (provider `resend`, both replicas, signed webhook) | — | §2.3, §4.4 |
+| **N6** owner APIs X1–X7 | `ENGINEERING_COMPLETE` (X6/X7 on Account: PR #96) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: owners 43922950325; X6/X7 `activate-critical-lane` 44174010149, public denial of the lease routes proven | — | §2.4, §2.10 |
+| **N7** producer publications + routing fence | `ENGINEERING_COMPLETE`: Messaging, Organizations, Hub, Developer Platform, Meeting (sealed, fenced), Calling | **live**: publications activated for all six producers; fences `FENCED_NEW` for `MESSAGE_WAKEUPS`, `ORGANIZATION_INVITATION`, `MEETING_INVITATION`, `MEETING_NOTIFICATION`, `SECURITY_DEVICE_LINKED`, `SECURITY_DEVICE_STEP_UP` | — | §2.9, §2.10, §4.4 |
+| **N8** inbox | `ENGINEERING_COMPLETE` (backend; the web/mobile inbox UI is client work, FE2) | **live**: `ORGANIZATION_UPDATES` and `MEETING_NOTIFICATION` IN_APP `ACTIVE`; relay U1–U9 live | — | §4.4 |
+| **N9** push + call fast lane | `ENGINEERING_COMPLETE` (Web Push, registration mirror, I3; APNs/FCM adapters need credentials) | **live**: `activate-notifications-push` 44176266362, `activate-messaging-push-mirror` 44177553529, `activate-calling-push` 44177899990; `MESSAGE_WAKEUPS` PUSH `ACTIVE` + `FENCED_NEW` | — | §2.10, §4.4 |
+| **N10** preferences authority | `ENGINEERING_COMPLETE` | **live, authority `SERVICE`**: `activate-preference-copy` 44178337597, `activate-preference-authority` 44178664093 (account 7/7, contact 70/70, conversation 0/0, 0 different) | — | §4.4 |
+| **N11** standard / invitation email | `ENGINEERING_COMPLETE` | **live**: Meeting `ORGANIZATION_INVITATION`, `MEETING_INVITATION`, `MEETING_NOTIFICATION` `FENCED_NEW` with EMAIL `ACTIVE` | — | §4.4 |
+| **N12** critical lane | `ENGINEERING_COMPLETE` (X6/X7, PW1 relay, AUTO/FORCED failover, fallback key; passwordless codes in the catalogue: PR #99) | **live** for `SECURITY_DEVICE_LINKED` and `SECURITY_DEVICE_STEP_UP` (`FENCED_NEW`); fallback drill 44175510575 DELIVERED; `AUTH_VERIFICATION`: §4.4 | — | §2.10, §4.4 |
+| **N13** monitoring | `ENGINEERING_COMPLETE` (rules, promtool tests, runbook, metrics) | rules not deployed: Prometheus/Alertmanager with receivers is owner decision D-9 | — | §2.6 |
+| **N14** canary governance | `ENGINEERING_COMPLETE` | used for every move in §4.4 (one row per run, journaled, reversible) | — | §2.7 |
+| **N15** retirement | not started by design: the legacy paths stay as the failover and rollback target | — | — | §6 |
 ---
 
 ## 2. What was built
@@ -175,6 +174,48 @@ The module is `src/services/notification_fence.rs`:
 
 ---
 
+### 2.10 Waves 2 and 3: the remaining producers, N9, N10, N12 (PRs #95, #96, #99)
+
+**Producers (N7, N11).** Each one has an ids-only transactional outbox and a relay to I1 that runs only with `CF_NOTIFICATIONS_BASE_URL`, and each has its own activation.
+
+| Producer | Outbox | Events | Activation |
+|---|---|---|---|
+| Organizations | `organization_notification_publications` | invitation accepted, role changed, membership changes | `activate-organizations-publications` |
+| Communications Hub | `communication_notification_publications` (history 5) | contact requests, group invitations | `activate-communications-publications` |
+| Developer Platform | `devplat_notification_publications` | operator and production-access notices | `activate-developer-publications` |
+| Meeting | `meeting_notification_publications` | `MEETING_INVITATION`, `MEETING_NOTIFICATION` (reminders included), `ORGANIZATION_INVITATION`, and the CRITICAL account categories | `activate-meeting-publications` |
+| Calling | `calling_notification_publications` (own history) | missed call, voicemail ready, recording ready; first-party accounts only | `activate-calling-publications` |
+
+**Meeting specifics.**
+- Every Meeting category is fenced (sticky decisions, guard triggers).
+- Invitation tokens and addresses are HPKE-sealed to the service. The X25519 key pair is generated once on the VPS by `activate-meeting-publications`, with kid `notif-hpke-YYYY-MM-N`.
+- What the catalogue cannot carry stays OLD: `RECIPIENT_LIMIT` for an audience that does not fit one envelope, `UNPUBLISHABLE` otherwise.
+
+**Resend webhook authority.** The account keeps one webhook, on Meeting. Meeting forwards the events of messages it did not send, byte for byte, to the service callback, so there are no conflicting webhook authorities.
+
+**N9 push.**
+- **Registration mirror.** Messaging copies and mirrors its Web Push registrations of first-party accounts to the service (I13 `notifications-push-registration.sync`). Handles are sealed and never logged.
+- **Sending.** The service sends Web Push with Messaging's existing VAPID key, through a service-owned 0400 copy, so every existing browser subscription stays valid.
+- **Incoming calls.** Calling's incoming-call alerts use the fast lane I3 (`CALLING_PUSH_TRANSPORT=notifications`): first-party recipients only, fire-and-forget, one alert per (call, target).
+- **Client.** The web service worker handles the service's payloads.
+
+**N10 preferences.**
+- The service pulls the Hub's preferences: snapshot, then catch-up from the change feed, then verification. Verification compares every account, conversation and contact row.
+- The Hub switch moves `HUB` → `FREEZE` → `SERVICE` only when every kind verifies exactly; otherwise it returns to `HUB`.
+
+**N12 CRITICAL lane.**
+- **Leases.** The Meeting Service serves X6 (lease) and X7 (completion). The service sends a CRITICAL message only under a lease, so a code is sent once and never zero times; a 24-round race test covers this.
+- **Failover.** The PW1 relay fails over automatically (AUTO, about 60 s without acknowledgement and never after a lease). FORCED always uses the legacy path.
+- **Fallback.** The sealed fallback is the exact legacy email, sealed with the Account fallback key (XChaCha20, Meeting only, generated once).
+- **Catalogue (PR #99, event contract 1.2.0).** It adds `account.sign-in-code.requested`, `account.email-change-code.requested` and `account.step-up-code.requested`. The sign-in email's magic link is rebuilt from the sealed token and `NOTIFICATIONS_APP_URL`. `activate-critical-lane` sets that URL to Meeting's `APP_URL` on both replicas, and the fence refuses `AUTH_VERIFICATION` `FENCED_NEW` while they differ.
+- **Password categories.** After PR #97 `AUTH_PASSWORD_RESET` and `SECURITY_PASSWORD_CHANGED` have no producer: password sign-in was removed.
+
+**Release tooling.**
+- New operations: `activate-{communications,developer,meeting,calling}-publications`, `activate-notifications-email`, `activate-critical-lane`, `activate-notifications-push`, `activate-messaging-push-mirror`, `activate-calling-push`, `activate-preference-copy`, `activate-preference-authority`, and `notifications-acceptance`.
+- `email-acceptance confirm=fallback` runs the fallback drill. `email-acceptance confirm=otp` follows the sign-in code to wherever the fence sent it.
+- `activate-notification-fence` covers `SHADOW` / `FENCED_OLD` / `FENCED_NEW`. `FENCED_NEW` needs `SHADOW` or `FENCED_OLD` first and the service's routing rows `ACTIVE`; rollback restores the previous mode.
+- 452 offline tests.
+
 ## 3. Resend E-track (gate E1)
 
 | Check | Result (2026-11-16) |
@@ -255,23 +296,21 @@ With E1 recorded, the N14 gate no longer refuses email `ACTIVE` for lack of E1. 
 
 ---
 
-## 5. Remaining engineering (not built)
+## 5. What is not done, and why
 
-| Section | What remains |
-|---|---|
-| N6 | X6 / X7 on Account (Meeting) with the decision tables of N7 |
-| N7 | (N7a foundation built, §2.8; N7b Messaging shadow publication built, §2.9) multi-envelope events for audiences over 40 (contract decision); PW1 relay; publications from Meeting, Calling (destination + `CALL_PARTICIPANT_MISSED`, D-10), Hub (destination `NOTIFICATIONS`), Organizations (subscriber), Developer Platform; fence tests M-10 … M-17 |
-| N8 | web / mobile inbox (FE2) on U1–U5 through the Meeting relay; the contact-request canary needs the Hub publication (N7) |
-| N9 | Messaging registration facades and the copy of existing Web Push registrations (D-1b copy path), Calling `NotificationsPushTransport` on I3, the browser service worker for the service's VAPID key, real-device acceptance per platform |
-| N10 | Hub copy + catch-up job, facade switch of the Hub preference endpoints, FE3 |
-| N11 | Meeting / Developer Platform producer routing through the fence, reminder takeover operation, canary |
-| N12 | Account X6 / X7, PW1 AUTO failover, FORCED mode, fallback drill (`email-acceptance confirm=fallback`), D-9 alerting |
-
----
+| Item | State | What it needs |
+|---|---|---|
+| APNs (iOS push) | adapter built, not configured | owner credentials that do not exist: an APNs auth key (`.p8`), its key id, the Apple team id and the app bundle topic |
+| FCM (Android push) | adapter built, not configured | an FCM service-account JSON for the Firebase project of the Android app |
+| Web inbox / preference UI (FE2, FE3), web call push in the browser (FE4, FE5) | client work, not backend | a web / mobile release; the backend APIs (U1–U9 relay) are live |
+| N13 alert delivery to a person | rules built and tested | Prometheus / Alertmanager with receivers (owner decision D-9) |
+| Non-critical account notices (`new-sign-in`, `email-in-use`, `email-changed`) | still sent by Meeting's legacy path | a fence category of their own, and a decision on the masked address and undo token they carry |
+| Multi-envelope events | an audience over 40 (message wake-ups) or one envelope (Meeting) stays `OLD` (`RECIPIENT_LIMIT`), so the legacy path still reaches everyone | a contract decision on splitting one event across envelopes |
+| Call push cancel | not built | a catalogue event for "call answered elsewhere / ended" |
 
 ## 6. Retirement and time-based acceptance
 
-No category has moved to the service, so no 30-day, 60-day or 90-day window has started and every legacy pipeline (Meeting email ledger and worker, Meeting notice worker and reminder scan, Messaging push dispatcher, Hub preferences) remains the operating path. `LEGACY_RETIRED` is not applicable to any item.
+The legacy paths are not retired: they are the failover and rollback target of every fence. Examples are the Meeting email ledger and worker (the CRITICAL AUTO / FORCED fallback) and Messaging's push dispatcher (`FENCED_OLD` / `LEGACY_ONLY` rollback). `OPERATIONALLY_ACCEPTED` and `LEGACY_RETIRED` are time-based (Document 5 §10) and are not claimed for any category: the windows start at the `FENCED_NEW` times of §4.4.
 
 ## 7. Baselines Q1–Q18
 

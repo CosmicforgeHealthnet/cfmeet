@@ -492,10 +492,14 @@ class Diagnostics(unittest.TestCase):
 
             def emit(self, kind, value):
                 self.emitted.append((kind, value))
+
+            def meeting_psql(self, sql):
+                seen.append(('meeting', sql))
+                return '{"ok": 1}'
         fake = Fake()
         out = no.notification_diagnostics(fake)
-        self.assertEqual(out, {'messaging': {'ok': 1}, 'notifications': {'ok': 1}})
-        self.assertEqual([db for db, _ in seen], ['cfmeet_messaging', 'cfmeet_notifications'])
+        self.assertEqual(out, {'messaging': {'ok': 1}, 'meeting-service': {'ok': 1}, 'notifications': {'ok': 1}})
+        self.assertEqual([db for db, _ in seen], ['cfmeet_messaging', 'meeting', 'cfmeet_notifications'])
         for _, sql in seen:
             self.assertTrue(sql.startswith('SELECT json_build_object('))
             for forbidden in ('envelope', 'event_id', 'recipient', 'INSERT', 'UPDATE', 'DELETE'):
