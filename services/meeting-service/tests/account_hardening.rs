@@ -795,3 +795,70 @@ async fn a_kicked_guest_loses_api_access_at_once() {
     let (after, _) = app.get(&path, Auth::Bearer(&guest)).await;
     assert_eq!(after, StatusCode::UNAUTHORIZED);
 }
+
+/// Gap audit A2: the personal-data export holds the account's own data; deletion needs a
+/// DELETE_ACCOUNT step-up, anonymizes the account, ends every sign-in and is audited
+/// without personal data.
+#[tokio::test]
+async fn personal_data_is_exported_and_the_account_can_be_deleted() {
+    let app = app_with_redis!();
+    let id = email_user(&app, "erase-me@example.com", "active").await;
+    let (s, v) = login(&app, "erase-me@example.com").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let access = v["access_token"].as_str().unwrap().to_string();
+
+    let (s, export) = app
+        .get("/api/v2/me/data-export", Auth::Bearer(&access))
+        .await;
+    assert_eq!(s, StatusCode::OK, "{export}");
+    assert_eq!(export["account"]["email"], "erase-me@example.com");
+    assert!(export["signIns"].as_array().unwrap().len() >= 1, "{export}");
+    assert!(export["elsewhere"]["messaging"].is_string());
+
+    // A token for another purpose does not delete.
+    let wrong = app.step_up_token(&access, id, "DEACTIVATE_ACCOUNT").await;
+    let (s, _) = app
+        .post(
+            "/api/v2/me/account/delete",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": wrong }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(status_of(&app, id).await, "active");
+
+    let token = app.step_up_token(&access, id, "DELETE_ACCOUNT").await;
+    let (s, v) = app
+        .post(
+            "/api/v2/me/account/delete",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": token }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "{v}");
+    assert_eq!(status_of(&app, id).await, "inactive");
+    assert_eq!(
+        text(&app, &format!("SELECT email FROM users WHERE id = '{id}'"))
+            .await
+            .unwrap(),
+        format!("deleted+{}@deleted.invalid", id.simple())
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE user_id = '{id}' AND revoked_at IS NULL"
+        ))
+        .await,
+        0
+    );
+    assert_eq!(events(&app, id, "ACCOUNT_DELETED", "SUCCESS").await, 1);
+    let (s, _) = app
+        .get("/api/v2/me/data-export", Auth::Bearer(&access))
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    // The address can sign up afresh: it is no longer linked to the deleted account.
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM users WHERE lower(email) = 'erase-me@example.com'")
+            .await,
+        0
+    );
+}

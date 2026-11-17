@@ -11204,6 +11204,56 @@
         ]
       }
     },
+    "/api/v2/me/account/delete": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Delete my account",
+        "description": "Gap audit A2: permanently deletes (anonymizes) the signed-in account after a\n`DELETE_ACCOUNT` step-up: the address, username, name, avatar, time zone, locale and any\npassword are removed and the account can never sign in again; the Google link is removed,\nmeeting memberships end, owned meeting spaces are archived and webinar registrations are\ncancelled; every sign-in and device ends, and Messaging, the Communications Hub and Calling\ncredentials end with them. The previous address receives one confirmation email.",
+        "operationId": "v2_delete_my_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - missing, wrong, used or expired step-up token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/me/conferences": {
       "get": {
         "tags": [
@@ -11320,6 +11370,53 @@
           },
           "403": {
             "description": "PERMISSION_DENIED (organizationId)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/data-export": {
+      "get": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Export my personal data",
+        "description": "Gap audit A2: one JSON document of everything the Meeting Service holds about the\nsigned-in account (profile, sign-ins, linked devices, owned meeting spaces, memberships,\nwebinar registrations, conference participation and its own security events). Chats,\ncontacts and calls are held by Messaging, the Communications Hub and Calling, which the\ndocument names. Requires a session-bound sign-in.",
+        "operationId": "v2_export_my_data",
+        "responses": {
+          "200": {
+            "description": "The personal-data export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - the token has no session; sign in again",
             "content": {
               "application/json": {
                 "schema": {
@@ -24557,6 +24654,20 @@
         },
         "additionalProperties": false
       },
+      "DeleteAccountRequest": {
+        "type": "object",
+        "description": "Gap audit A2: the confirmation of an account deletion.",
+        "required": [
+          "stepUpToken"
+        ],
+        "properties": {
+          "stepUpToken": {
+            "type": "string",
+            "description": "A step-up token for purpose `DELETE_ACCOUNT` (`POST /api/v2/me/step-up/verify`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "DenyRequest": {
         "type": "object",
         "properties": {
@@ -31054,7 +31165,8 @@
         "description": "What the confirmation is for; a token for one purpose never authorizes another.",
         "enum": [
           "DEACTIVATE_ACCOUNT",
-          "CHANGE_EMAIL"
+          "CHANGE_EMAIL",
+          "DELETE_ACCOUNT"
         ]
       },
       "StepUpRequest": {

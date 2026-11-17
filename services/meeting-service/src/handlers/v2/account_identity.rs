@@ -228,3 +228,75 @@ pub async fn confirm_email_change(
         other_sessions_ended: true,
     }))
 }
+
+/// Export my personal data
+///
+/// Gap audit A2: one JSON document of everything the Meeting Service holds about the
+/// signed-in account (profile, sign-ins, linked devices, owned meeting spaces, memberships,
+/// webinar registrations, conference participation and its own security events). Chats,
+/// contacts and calls are held by Messaging, the Communications Hub and Calling, which the
+/// document names. Requires a session-bound sign-in.
+#[utoipa::path(
+    get, path = "/api/v2/me/data-export", tag = "Account security (v2)", operation_id = "v2_export_my_data",
+    responses(
+        (status = 200, description = "The personal-data export", body = Object),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "REAUTHENTICATION_REQUIRED - the token has no session; sign in again", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn export_my_data(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+) -> ApiResult<Json<serde_json::Value>> {
+    let (user, _) = signed_in(&state, &actor, &headers).await?;
+    Ok(Json(
+        crate::services::account_erasure::export(&state, user.id).await?,
+    ))
+}
+
+/// Gap audit A2: the confirmation of an account deletion.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeleteAccountRequest {
+    /// A step-up token for purpose `DELETE_ACCOUNT` (`POST /api/v2/me/step-up/verify`).
+    pub step_up_token: String,
+}
+
+/// Delete my account
+///
+/// Gap audit A2: permanently deletes (anonymizes) the signed-in account after a
+/// `DELETE_ACCOUNT` step-up: the address, username, name, avatar, time zone, locale and any
+/// password are removed and the account can never sign in again; the Google link is removed,
+/// meeting memberships end, owned meeting spaces are archived and webinar registrations are
+/// cancelled; every sign-in and device ends, and Messaging, the Communications Hub and Calling
+/// credentials end with them. The previous address receives one confirmation email.
+#[utoipa::path(
+    post, path = "/api/v2/me/account/delete", tag = "Account security (v2)", operation_id = "v2_delete_my_account",
+    request_body = DeleteAccountRequest,
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "REAUTHENTICATION_REQUIRED - missing, wrong, used or expired step-up token", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_my_account(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Json(req): V2Json<DeleteAccountRequest>,
+) -> ApiResult<axum::http::StatusCode> {
+    let (user, session) = signed_in(&state, &actor, &headers).await?;
+    step_up::consume(
+        &state,
+        user.id,
+        Some(session),
+        StepUpPurpose::DeleteAccount,
+        Some(req.step_up_token.as_str()),
+    )
+    .await?;
+    crate::services::account_erasure::erase(&state, user.id, Some(session)).await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}

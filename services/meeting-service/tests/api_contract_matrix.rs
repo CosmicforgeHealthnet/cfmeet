@@ -79,8 +79,8 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // passwordless account-security operations (step-up request / verify, email change
     // request / verify) + 7 gap-closure operations (my organization invitations, accept /
     // decline one by id, operator owner appointment, registrant self-cancel, sign out other
-    // sessions, operator session revocation, identity duplicate report and enforcement, 5 organization operator routes).
-    assert_eq!(probed, 247, "all v2 operations probed");
+    // sessions, operator session revocation, identity duplicate report and enforcement, 5 organization operator routes, data export, account deletion).
+    assert_eq!(probed, 249, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

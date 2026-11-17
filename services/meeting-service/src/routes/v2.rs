@@ -725,6 +725,14 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::account_identity::verify_step_up),
         )
         .route(
+            "/me/data-export",
+            get(crate::handlers::v2::account_identity::export_my_data),
+        )
+        .route(
+            "/me/account/delete",
+            post(crate::handlers::v2::account_identity::delete_my_account),
+        )
+        .route(
             "/me/email/change/request",
             post(crate::handlers::v2::account_identity::request_email_change),
         )

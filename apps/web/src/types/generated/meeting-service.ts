@@ -1137,6 +1137,12 @@ export interface DeclareDeviceRequest {
   publicKey: string;
 }
 
+/** Gap audit A2: the confirmation of an account deletion. */
+export interface DeleteAccountRequest {
+  /** A step-up token for purpose `DELETE_ACCOUNT` (`POST /api/v2/me/step-up/verify`). */
+  stepUpToken: string;
+}
+
 
 export interface DenyRequest {
   all?: boolean;
@@ -3326,7 +3332,7 @@ export interface StartTranscriptionRequest {
 }
 
 /** What the confirmation is for; a token for one purpose never authorizes another. */
-export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL";
+export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT";
 
 
 export interface StepUpRequest {
@@ -3897,6 +3903,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/conferences/{id}/transcripts/{artifactId}": "v2_get_transcript",
   "GET /api/v2/conferences/{id}/waiting-room": "v2_get_waiting_room",
   "GET /api/v2/me/conferences": "v2_my_conferences",
+  "GET /api/v2/me/data-export": "v2_export_my_data",
   "GET /api/v2/me/device-links": "v2_list_pending_device_links",
   "GET /api/v2/me/device-links/{linkId}": "v2_get_device_link",
   "GET /api/v2/me/device-policy": "v2_get_my_device_policy",
@@ -4057,6 +4064,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/conferences/{id}/waiting-room/deny": "v2_deny",
   "POST /api/v2/instant-meetings": "v2_create_instant_meeting",
   "POST /api/v2/invitations/{token}/resolve": "v2_resolve_invitation",
+  "POST /api/v2/me/account/delete": "v2_delete_my_account",
   "POST /api/v2/me/device-links": "v2_create_device_link",
   "POST /api/v2/me/device-links/{linkId}/approve": "v2_approve_device_link",
   "POST /api/v2/me/device-links/{linkId}/cancel": "v2_cancel_device_link",

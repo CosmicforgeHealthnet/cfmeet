@@ -421,6 +421,8 @@ pub enum SecurityNotice {
     Deactivated,
     /// The first device of the account became trusted (gap audit A6).
     FirstDeviceTrusted,
+    /// The account was deleted (gap audit A2).
+    Deleted,
 }
 
 impl SecurityNotice {
@@ -431,6 +433,7 @@ impl SecurityNotice {
             SecurityNotice::SignedOutEverywhere => "signed-out-everywhere",
             SecurityNotice::Deactivated => "deactivated",
             SecurityNotice::FirstDeviceTrusted => "first-device-trusted",
+            SecurityNotice::Deleted => "deleted",
         }
     }
 
@@ -456,6 +459,10 @@ impl SecurityNotice {
             SecurityNotice::FirstDeviceTrusted => (
                 "A device is now trusted on your CF Meet account",
                 "The first device of your CF Meet account was just set up as a trusted device. Trusted devices can approve new devices and sign out others.",
+            ),
+            SecurityNotice::Deleted => (
+                "Your CF Meet account was deleted",
+                "Your CF Meet account was just deleted: your profile and sign-ins were removed and this address is no longer linked to it. Contact support at once if you did not do this.",
             ),
         }
     }

@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 273 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 275 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.20.0 | 137 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **657** |
+| **Total** | | | **659** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -65,6 +65,8 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| POST | `/api/v2/me/account/delete` | account session | Delete my account | 204, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_delete_my_account` |
+| GET | `/api/v2/me/data-export` | account session | Export my personal data | 200, 401, 403 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_export_my_data` |
 | POST | `/api/v2/me/email/change/request` | account session | Start an email change | 200, 400, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_email_change` |
 | POST | `/api/v2/me/email/change/verify` | account session | Confirm an email change | 200, 400, 401, 409, 429 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_confirm_email_change` |
 | POST | `/api/v2/me/step-up/request` | account session | Request a step-up code | 200, 401, 403, 429 | AUTHENTICATION_REQUIRED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_request_step_up` |

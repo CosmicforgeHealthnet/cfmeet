@@ -2263,6 +2263,20 @@
     },
     {
       "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/data-export",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/account/delete",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/me/sessions/{sessionId}/revoke",
       "class": "EXCLUDED",

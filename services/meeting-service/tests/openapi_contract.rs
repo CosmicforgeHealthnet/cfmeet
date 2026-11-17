@@ -381,6 +381,8 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/me/sessions"),
         ("post", "/api/v2/me/sessions/revoke-all"),
         ("post", "/api/v2/me/sessions/revoke-others"),
+        ("get", "/api/v2/me/data-export"),
+        ("post", "/api/v2/me/account/delete"),
         ("post", "/api/v2/admin/users/{userId}/sessions/revoke"),
         ("get", "/api/v2/admin/identity-duplicates"),
         ("post", "/api/v2/admin/identity-duplicates/enforce"),
