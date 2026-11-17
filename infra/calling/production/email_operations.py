@@ -421,12 +421,36 @@ def deactivate(cr, env, token, user_id):
     return 'PASS' if status in (200, 204) else 'MANUAL %s' % status
 
 
+def fallback_drill(cr, run_id):
+    """N12: the Account CRITICAL fallback path. One drill email, sealed and opened with the
+    Account fallback key (CF_ACCOUNT_FALLBACK_KEY_FILE) on the Meeting Service, sent through the
+    legacy ledger to the acceptance recipient: ACCEPTED, then a signed DELIVERED."""
+    env = p.env_of(p.inspect(cr.MEETING))
+    recipient = acceptance_recipient(cr)
+    reference = 'drill-' + re.sub(r'[^0-9a-z-]', '-', run_id.lower())[:40]
+    status, body = internal(env, 'POST', '/internal/operations/email/fallback-drill',
+                            {'to': recipient, 'reference': reference})
+    result = {'reference': reference, 'recipientDomain': domain_of(recipient), 'status': status}
+    if status != 202 or not body or not body.get('deliveryId'):
+        emit('fallbackDrill', result)
+        raise RuntimeError('The fallback drill could not be queued (HTTP %s; the fallback key may be missing)' % status)
+    result['deliveryId'] = body['deliveryId']
+    result['accepted'] = wait_for(env, body['deliveryId'], ('ACCEPTED', 'DELIVERED'), 90)
+    result['delivered'] = wait_for(env, body['deliveryId'], ('DELIVERED',), 180)
+    emit('fallbackDrill', result)
+    if not result['delivered'] or result['delivered']['status'] != 'DELIVERED':
+        raise RuntimeError('The fallback drill email was not delivered: %s' % json.dumps(result['delivered']))
+    return result
+
+
 def email_acceptance(cr, sha, run_id, confirm):
     require_ledger(cr)
     env = p.env_of(p.inspect(cr.MEETING))
     if env.get('EMAIL_PROVIDER') != 'resend':
         raise RuntimeError('Resend is not the active provider (run activate-resend-email)')
     email_acceptance_check(cr, run_id, bool(env.get('RESEND_WEBHOOK_SECRET_FILE')))
+    if 'fallback' in (confirm or '').split(','):
+        fallback_drill(cr, run_id)
     if 'otp' in (confirm or '').split(','):
         checks = otp_journey(cr, run_id)
         emit('otpJourney', checks)

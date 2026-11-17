@@ -2571,6 +2571,9 @@ ACTIVATIONS = {
         sys.modules[__name__], sha, run_id, 'meeting-service')),
     'activate-calling-publications': ((), lambda sha, run_id, confirm: notif_ops.activate_publications(
         sys.modules[__name__], sha, run_id, 'calling')),
+    # Notification Service N12: the Account CRITICAL lane (X6 / X7 grant, fallback key, denials).
+    'activate-critical-lane': ((), lambda sha, run_id, confirm: notif_ops.activate_critical_lane(
+        sys.modules[__name__], sha, run_id, confirm)),
     # Notification Service N10: preference copy + catch-up, then the Hub facade switch.
     'activate-preference-copy': ((), lambda sha, run_id, confirm: notif_ops.activate_preference_copy(
         sys.modules[__name__], sha, run_id, confirm)),

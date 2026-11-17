@@ -224,14 +224,14 @@ class OwnerDenial(unittest.TestCase):
         return Fake(), calls
 
     def test_owner_routes_are_denied_and_proven_before_activation(self):
-        fake, calls = self.fake([True, True])
+        fake, calls = self.fake([True] * len(cr.release.NOTIFICATION_OWNER_DENIAL_PROBES))
         no.deny_owner_routes_publicly(fake)
         self.assertEqual(calls[:2], ['secure', 'reload'])
         self.assertEqual(calls[2:], list(cr.release.NOTIFICATION_OWNER_DENIAL_PROBES))
         self.assertEqual(fake.emitted[-1][0], 'publicOwnerDenial')
 
     def test_a_reachable_owner_route_stops_the_activation(self):
-        fake, _ = self.fake([True, False])
+        fake, _ = self.fake([True, False, True, True])
         with self.assertRaises(RuntimeError):
             no.deny_owner_routes_publicly(fake)
 
@@ -327,6 +327,7 @@ class FakeProducerCr(FakeCr):
                     return service_rows
                 return FakeRelease.db_sql(self, db, sql)
         self.release = Release(rows)
+        self.meeting_psql = lambda q: self.release.db_sql('meeting', q)
 
         class P:
             NET = 'net'
@@ -420,8 +421,10 @@ class ProducerFence(unittest.TestCase):
 
     def test_gates_refuse_and_change_nothing(self):
         cases = [
-            # Meeting has no producer code recording decisions: SHADOW would block its legacy emails.
+            # A CRITICAL category needs the Account CRITICAL lane (lease grant, fallback key) first.
             (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE), 'meeting-service-auth-verification-shadow'),
+            # A producer without decision-recording code stays LEGACY_ONLY (Calling has no fence).
+            (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}], done=self.DONE), 'messaging-unknown-category-shadow'),
             # The publication activation must come first.
             (dict(rows=[{'mode': 'LEGACY_ONLY', 'version': 1}]), 'messaging-message-wakeups-shadow'),
             # A pre-fence image.
@@ -732,6 +735,41 @@ class PreferenceAuthority(unittest.TestCase):
                                    ('notifications-2', 'communications', ('notifications-user.forward',))])
         for op in ('activate-preference-copy', 'activate-preference-authority'):
             self.assertIn(op, cr.OPERATIONS)
+
+
+
+class CriticalLane(unittest.TestCase):
+    def test_lease_grant_fallback_key_and_routing_gate(self):
+        granted = [(r, i, p) for op, r, i, p in cr.GRANTS if op == 'activate-critical-lane']
+        self.assertEqual(granted, [('meeting-service', 'notifications', ('account-route-lease.claim',))])
+        self.assertIn('activate-critical-lane', cr.OPERATIONS)
+        for category in no.CRITICAL_ORDER:
+            self.assertEqual(no.FENCE_ROUTABLE[('meeting-service', category)]['publications'], 'activate-critical-lane')
+            # The service's CRITICAL routing row may become ACTIVE only after the lane.
+            facts = dict(email_provider='resend', resend_done=True, owners_done=True)
+            self.assertIn('critical lane', no.gate(category, 'EMAIL', 'ACTIVE', facts).lower())
+            self.assertIsNone(no.gate(category, 'EMAIL', 'ACTIVE', dict(facts, critical_lane_done=True)))
+
+    def test_the_fallback_key_is_generated_once_and_never_printed(self):
+        import tempfile
+        from unittest import mock
+        directory = cr.Path(tempfile.mkdtemp())
+
+        class P:
+            SECRETS = directory
+
+            @staticmethod
+            def write_private(path, data):
+                path.write_text(data)
+
+        class Fake:
+            p = P
+        with mock.patch('os.chmod'):
+            first = no.fallback_key(Fake).read_text()
+            second = no.fallback_key(Fake).read_text()
+        self.assertEqual(first, second)
+        import base64
+        self.assertEqual(len(base64.b64decode(first)), 32)
 
 
 if __name__ == '__main__':
