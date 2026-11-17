@@ -17,9 +17,9 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 273 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.5.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.20.0 | 137 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **656** |
+| **Total** | | | **657** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -934,7 +934,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.20.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.17.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.18.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -1051,6 +1051,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.17.0**;
 | POST | `/v1/conversations/{conversationId}/members` | customer credential (server-side only) | add Member | 200, 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#addMember` |
 | DELETE | `/v1/conversations/{conversationId}/members/{principalId}` | customer credential (server-side only) | remove Member | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#removeMember` |
 | PATCH | `/v1/conversations/{conversationId}/members/{principalId}` | customer credential (server-side only) | change Member Role | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#changeMemberRole` |
+| POST | `/v1/conversations/{conversationId}/owner` | customer credential (server-side only) | Transfer conversation ownership | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#transferConversationOwnership` |
 
 ### History Transfers
 

@@ -8570,6 +8570,18 @@ export namespace Messaging {
       params: { path: { conversationId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: CommitRequest };
       response: Message;
     };
+    /** POST /v1/conversations/{conversationId}/owner — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    transferConversationOwnership: {
+      params: { path: { conversationId: Uuid }; headers?: { "cf-acting-principal"?: Uuid }; body: {
+          /** The new owner (an ACTIVE member). */
+          principalId: string;
+        } };
+      response: {
+      conversationId: string;
+      ownerPrincipalId: string;
+      changed: boolean;
+    };
+    };
     /** DELETE /v1/conversations/{conversationId}/bans/{principalId} — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     unbanMember: {
       params: { path: { conversationId: Uuid; principalId: Uuid }; headers?: { "cf-acting-principal"?: Uuid } };

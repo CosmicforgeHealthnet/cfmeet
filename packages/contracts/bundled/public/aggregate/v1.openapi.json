@@ -26,7 +26,7 @@
     },
     {
       "name": "messaging",
-      "description": "cfmeet.messaging.http-api 1.17.0"
+      "description": "cfmeet.messaging.http-api 1.18.0"
     },
     {
       "name": "numbering",
@@ -30274,6 +30274,121 @@
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN"
+        ]
+      }
+    },
+    "/v1/conversations/{conversationId}/owner": {
+      "post": {
+        "operationId": "transferConversationOwnership",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Transfer conversation ownership",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "conversations.manage",
+        "description": "Gap audit S3: the owner (or the application acting without a principal) hands a GROUP/MANAGED conversation to another ACTIVE member that may hold an administrative role (not BOT_SERVICE or READ_ONLY); the previous owner becomes ADMIN. Members other than the owner get PRINCIPAL_NOT_AUTHORIZED (OWNER_ONLY); DIRECT conversations are fixed. An owner who leaves (DELETE .../members/{self}) hands ownership to the most senior active member (ADMIN, MODERATOR, MEMBER; earliest joined), or is refused OWNER_SUCCESSOR_REQUIRED when only non-eligible members remain. Requires conversations.manage.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal acts (OWNER / ADMIN). Without it: the application's administration (scope conversations.manage).",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ownership state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "conversationId",
+                    "ownerPrincipalId",
+                    "changed"
+                  ],
+                  "properties": {
+                    "conversationId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "ownerPrincipalId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "principalId"
+                ],
+                "properties": {
+                  "principalId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The new owner (an ACTIVE member)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.transferConversationOwnership",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
         ]
       }
     },

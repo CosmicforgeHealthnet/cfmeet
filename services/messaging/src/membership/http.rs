@@ -18,7 +18,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::{AddRequest, Administrator, BanRequest, RoleChange};
+use super::{AddRequest, Administrator, BanRequest, OwnershipTransfer, RoleChange};
 use crate::{
     conversations::http::{CONVERSATIONS_MANAGE, MESSAGES_READ},
     http::{
@@ -37,6 +37,7 @@ pub fn routes() -> Router<AppState> {
             "/:conversation_id/members/:principal_id",
             delete(remove).patch(change_role),
         )
+        .route("/:conversation_id/owner", post(transfer_ownership))
         .route("/:conversation_id/bans", get(list_bans).post(ban))
         .route("/:conversation_id/bans/:principal_id", delete(unban))
         .route(
@@ -190,6 +191,19 @@ async fn change_role(
     let admin = administrator(&state, &caller, &headers).await?;
     Ok(Json(
         super::change_role(&state, caller.context(), &admin, id, principal, body).await?,
+    ))
+}
+
+async fn transfer_ownership(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<OwnershipTransfer>,
+) -> Result<impl IntoResponse, ApiError> {
+    let admin = administrator(&state, &caller, &headers).await?;
+    Ok(Json(
+        super::transfer_ownership(&state, caller.context(), &admin, id, body).await?,
     ))
 }
 

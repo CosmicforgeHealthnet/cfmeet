@@ -102,6 +102,7 @@ const MIRROR: &[(&str, &str)] = &[
     ("GET", "/internal/v1/delegated/v1/conversations/{conversationId}/messages/{messageId}/sms-transport"),
     ("GET", "/internal/v1/delegated/v1/conversations/{conversationId}/bans"),
     ("POST", "/internal/v1/delegated/v1/conversations/{conversationId}/bans"),
+    ("POST", "/internal/v1/delegated/v1/conversations/{conversationId}/owner"),
     ("DELETE", "/internal/v1/delegated/v1/conversations/{conversationId}/bans/{principalId}"),
     ("GET", "/internal/v1/delegated/v1/conversations/{conversationId}/messages/{messageId}/reactions"),
     ("PUT", "/internal/v1/delegated/v1/conversations/{conversationId}/messages/{messageId}/reactions/{reaction}"),

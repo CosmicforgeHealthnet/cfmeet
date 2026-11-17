@@ -639,10 +639,23 @@ pub async fn remove_in<C: ConnectionTrait>(
         return Err(Error::code(ErrorCode::NotFound));
     };
     if current.role == "OWNER" {
-        return Err(Error::reason(
-            ErrorCode::Conflict,
-            "OWNER_CANNOT_BE_REMOVED",
-        ));
+        // Gap audit S3: other members never remove the owner. The owner leaving hands
+        // ownership to the most senior active member first (ADMIN, then MODERATOR, then
+        // MEMBER; earliest joined). A last owner with nobody eligible left may leave.
+        if !leaving {
+            return Err(Error::reason(
+                ErrorCode::Conflict,
+                "OWNER_CANNOT_BE_REMOVED",
+            ));
+        }
+        if let Some(successor) = successor_of(db, conversation.id, principal).await? {
+            transfer_in(db, ctx, conversation, principal, successor, request, now).await?;
+        } else if has_other_active_members(db, conversation.id, principal).await? {
+            return Err(Error::reason(
+                ErrorCode::Conflict,
+                "OWNER_SUCCESSOR_REQUIRED",
+            ));
+        }
     }
     db::exec(
         db,
@@ -900,6 +913,180 @@ pub async fn set_role_in<C: ConnectionTrait>(
     )
     .await?;
     Ok(true)
+}
+
+/// Gap audit S3: the most senior active member who can own the conversation (ADMIN, then
+/// MODERATOR, then MEMBER; earliest joined first), the owner excluded.
+async fn successor_of<C: ConnectionTrait>(
+    db: &C,
+    conversation: Uuid,
+    owner: Uuid,
+) -> Result<Option<Uuid>> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Row {
+        principal_id: Uuid,
+    }
+    let row: Option<Row> = db::one(
+        db,
+        "SELECT principal_id FROM messaging_conversation_members \
+          WHERE conversation_id = $1 AND principal_id <> $2 AND state = 'ACTIVE' \
+            AND role IN ('ADMIN', 'MODERATOR', 'MEMBER') \
+          ORDER BY CASE role WHEN 'ADMIN' THEN 0 WHEN 'MODERATOR' THEN 1 ELSE 2 END, joined_at, principal_id \
+          LIMIT 1",
+        vec![conversation.into(), owner.into()],
+    )
+    .await?;
+    Ok(row.map(|r| r.principal_id))
+}
+
+async fn has_other_active_members<C: ConnectionTrait>(
+    db: &C,
+    conversation: Uuid,
+    principal: Uuid,
+) -> Result<bool> {
+    #[derive(sea_orm::FromQueryResult)]
+    struct Row {
+        n: i64,
+    }
+    let row: Option<Row> = db::one(
+        db,
+        "SELECT count(*)::bigint AS n FROM messaging_conversation_members \
+          WHERE conversation_id = $1 AND principal_id <> $2 AND state = 'ACTIVE'",
+        vec![conversation.into(), principal.into()],
+    )
+    .await?;
+    Ok(row.is_some_and(|r| r.n > 0))
+}
+
+/// Gap audit S3: moves ownership from `from` (who becomes ADMIN) to the active member
+/// `to`, inside the caller's transaction, with both member events.
+pub async fn transfer_in<C: ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    conversation: &ConversationRow,
+    from: Uuid,
+    to: Uuid,
+    request: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    db::exec(
+        db,
+        "UPDATE messaging_conversation_members SET role = 'ADMIN', updated_at = $3, version = version + 1 \
+         WHERE conversation_id = $1 AND principal_id = $2 AND role = 'OWNER'",
+        vec![conversation.id.into(), from.into(), now.into()],
+    )
+    .await?;
+    db::exec(
+        db,
+        "UPDATE messaging_conversation_members SET role = 'OWNER', updated_at = $3, version = version + 1 \
+         WHERE conversation_id = $1 AND principal_id = $2 AND state = 'ACTIVE'",
+        vec![conversation.id.into(), to.into(), now.into()],
+    )
+    .await?;
+    db::exec(
+        db,
+        "UPDATE messaging_conversations SET owner_principal_id = $2, updated_at = $3, version = version + 1 \
+         WHERE id = $1",
+        vec![conversation.id.into(), to.into(), now.into()],
+    )
+    .await?;
+    for (principal, role) in [(from, "ADMIN"), (to, "OWNER")] {
+        outbox::enqueue_conversation(
+            db,
+            conversation.id,
+            NewEvent {
+                event_type: "messaging.member.updated",
+                aggregate_type: "CONVERSATION",
+                aggregate_id: conversation.id,
+                scope: scope_of(ctx),
+                payload: json!({
+                    "conversation_id": conversation.id,
+                    "principal_id": principal,
+                    "role": role,
+                    "send_restricted_until": null,
+                    "reason": "OWNERSHIP_TRANSFERRED",
+                }),
+            },
+            request,
+            now,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OwnershipTransfer {
+    pub principal_id: Uuid,
+}
+
+/// Gap audit S3: `POST /v1/conversations/{id}/owner` — the owner (or a service acting
+/// without a principal) hands the conversation to another ACTIVE member, who must be a
+/// principal that may hold an administrative role. The previous owner becomes ADMIN.
+pub async fn transfer_ownership(
+    state: &AppState,
+    ctx: &TrustedContext,
+    admin: &Administrator,
+    conversation_id: Uuid,
+    request: OwnershipTransfer,
+) -> Result<Value> {
+    let st = state.clone();
+    let ctx = ctx.clone();
+    let admin = admin.clone();
+    let request_ctx = request_context();
+    state
+        .db
+        .transaction::<_, Value, Error>(move |txn| {
+            Box::pin(async move {
+                let now = st.now();
+                let conversation = load(txn, &ctx, conversation_id, true)
+                    .await?
+                    .ok_or(Error::code(ErrorCode::NotFound))?;
+                if conversation.context_class == "DIRECT" {
+                    return Err(Error::reason(
+                        ErrorCode::InvalidTransition,
+                        "DIRECT_MEMBERSHIP_FIXED",
+                    ));
+                }
+                let owner = conversation.owner_principal_id;
+                if let Some(acting) = admin.principal_id() {
+                    if acting != owner {
+                        return Err(Error::reason(
+                            ErrorCode::PrincipalNotAuthorized,
+                            "OWNER_ONLY",
+                        ));
+                    }
+                }
+                let to = request.principal_id;
+                if to == owner {
+                    return Ok(json!({ "conversationId": conversation_id, "ownerPrincipalId": owner, "changed": false }));
+                }
+                let member = access::membership(txn, conversation_id, to, true)
+                    .await?
+                    .filter(|m| m.is_active())
+                    .ok_or(Error::code(ErrorCode::NotFound))?;
+                if matches!(member.role.as_str(), "BOT_SERVICE" | "READ_ONLY") {
+                    return Err(Error::reason(ErrorCode::Conflict, "SUCCESSOR_NOT_ELIGIBLE"));
+                }
+                role_fits_principal("ADMIN", &principal_kind(&st, &ctx, to).await?)?;
+                transfer_in(txn, &ctx, &conversation, owner, to, &request_ctx, now).await?;
+                record_audit(
+                    txn,
+                    &ctx,
+                    &admin,
+                    "OWNERSHIP_TRANSFERRED",
+                    conversation_id,
+                    json!({ "from_principal_id": owner, "to_principal_id": to }),
+                    &request_ctx,
+                    now,
+                )
+                .await?;
+                Ok(json!({ "conversationId": conversation_id, "ownerPrincipalId": to, "changed": true }))
+            })
+        })
+        .await
+        .map_err(Error::from)
 }
 
 /// Bans `principal` (removing it first when active) inside the caller's transaction: a
