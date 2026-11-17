@@ -449,6 +449,11 @@ impl AppCallService {
             // A PSTN_TO_APP Call: the answered app side is now bridged to the public leg.
             self.after_application_answer(call.id).await;
         }
+        if !answered {
+            // Joining a live Call (an answered transfer, a later group answer): a recording
+            // in progress gives this participant its notice (and asks for its consent).
+            self.recording_notice_on_join(call.id, participant.id).await;
+        }
         Ok(CommandOutcome {
             body,
             replayed: false,

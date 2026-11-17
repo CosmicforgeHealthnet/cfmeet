@@ -189,6 +189,8 @@ impl AppCallService {
         self.publish(pending).await;
         crate::metrics::inc("calling_rejoins_total", &[("result", "REJOINED")]);
         tracing::info!(call_id = %call.id, participant_id = %participant.id, session_id = %session.id, "participant rejoined the call");
+        // A recording in progress: notice (and consent) for the rejoined participant.
+        self.recording_notice_on_join(call.id, participant.id).await;
         Ok(body)
     }
 }

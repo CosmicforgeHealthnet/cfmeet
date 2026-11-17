@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.22.0"
+      "description": "cfmeet.calling.http-api 1.23.0"
     },
     {
       "name": "privacy-relay",
@@ -26494,7 +26494,7 @@
           "calling"
         ],
         "summary": "Record a participant's recording consent",
-        "description": "Requires calls.write and enterprise.calls.use. The participant's OWN decision through its endpoint; idempotent on replay.",
+        "description": "Requires calls.write and enterprise.calls.use. The participant's OWN decision through its endpoint; idempotent on replay. 1.23.0 (late joiners): a participant whose session starts while a recording runs (an answered transfer, a later answer, a rejoin) receives call.recording_started at once with data.lateJoin, data.participantId and data.consentRequired. When the policy requires its consent and it has not GRANTED it for this Call, it has 60 seconds to do so through POST /v1/calls/{call_id}/recording-consent; a DECLINED, or no grant by then, stops the recording with stopReason CONSENT_WITHDRAWN.",
         "security": [
           {
             "calling.platformCredential": [
@@ -26580,7 +26580,7 @@
           "calling"
         ],
         "summary": "Start recording a Call",
-        "description": "Requires enterprise.recording.manage. Creates an immutable recording authorization first (kill switch CALL_RECORDING_ENABLED, enterprise Call, ACTIVE default policy and mode, CONNECTED, actor, server-issued notice, each required participant's own consent, protected storage, a capture path). ALLOWED: 201 with the recording; a Call already being recorded: 200 with it (idempotent); DENIED: 403 RECORDING_NOT_AUTHORIZED (the decision and reason are in recording-authorizations).",
+        "description": "Requires enterprise.recording.manage. Creates an immutable recording authorization first (kill switch CALL_RECORDING_ENABLED, enterprise Call, ACTIVE default policy and mode, CONNECTED, actor, server-issued notice, each required participant's own consent, protected storage, a capture path). ALLOWED: 201 with the recording; a Call already being recorded: 200 with it (idempotent); DENIED: 403 RECORDING_NOT_AUTHORIZED (the decision and reason are in recording-authorizations). 1.23.0 (late joiners): a participant whose session starts while a recording runs (an answered transfer, a later answer, a rejoin) receives call.recording_started at once with data.lateJoin, data.participantId and data.consentRequired. When the policy requires its consent and it has not GRANTED it for this Call, it has 60 seconds to do so through POST /v1/calls/{call_id}/recording-consent; a DECLINED, or no grant by then, stops the recording with stopReason CONSENT_WITHDRAWN.",
         "security": [
           {
             "calling.platformCredential": [
