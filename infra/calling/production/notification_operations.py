@@ -138,8 +138,12 @@ GRANTS += (('activate-preference-copy', 'communications', 'notifications', ('com
 GRANTS += (('activate-critical-lane', 'meeting-service', 'notifications', ('account-route-lease.claim',)),)
 CRITICAL_FALLBACK_KEY = 'meeting-account-fallback.key'
 CRITICAL_FALLBACK_TARGET = '/run/secrets/account-fallback.key'
-CRITICAL_ORDER = ('SECURITY_PASSWORD_CHANGED', 'SECURITY_DEVICE_LINKED', 'AUTH_VERIFICATION',
-                  'AUTH_PASSWORD_RESET', 'SECURITY_DEVICE_STEP_UP')
+# Move order. After the passwordless sign-in (PR #97) only the device-linked notice and the
+# device-link step-up code are in the catalogue and can be delivered NEW; the sign-in,
+# email-change and action step-up codes are fenced but always decided OLD (UNPUBLISHABLE)
+# until the catalogue carries them, and the password categories have no producer left.
+CRITICAL_ORDER = ('SECURITY_DEVICE_LINKED', 'SECURITY_DEVICE_STEP_UP', 'AUTH_VERIFICATION',
+                  'SECURITY_PASSWORD_CHANGED', 'AUTH_PASSWORD_RESET')
 
 FLAGGED = {'meeting-service': {'NOTIFICATION_OWNER_API_ENABLED': 'true'}}
 SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATION_ID', 'CFMEET_COMMUNICATION_ENVIRONMENT_ID',
