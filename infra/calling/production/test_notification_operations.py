@@ -441,5 +441,36 @@ class ProducerFence(unittest.TestCase):
         self.assertIn("notif_ops.undo_fence(", src)
 
 
+
+class Diagnostics(unittest.TestCase):
+    def test_counts_only_from_messaging_and_the_service(self):
+        seen = []
+
+        class Release:
+            @staticmethod
+            def db_sql(db, sql):
+                seen.append((db, sql))
+                return '{"ok": 1}'
+
+        class Fake:
+            SERVICES = cr.SERVICES
+            release = Release
+            emitted = []
+
+            def emit(self, kind, value):
+                self.emitted.append((kind, value))
+        fake = Fake()
+        out = no.notification_diagnostics(fake)
+        self.assertEqual(out, {'messaging': {'ok': 1}, 'notifications': {'ok': 1}})
+        self.assertEqual([db for db, _ in seen], ['cfmeet_messaging', 'cfmeet_notifications'])
+        for _, sql in seen:
+            self.assertTrue(sql.startswith('SELECT json_build_object('))
+            for forbidden in ('envelope', 'event_id', 'recipient', 'INSERT', 'UPDATE', 'DELETE'):
+                self.assertNotIn(forbidden, sql)
+        self.assertEqual(fake.emitted[-1][0], 'notificationDiagnostics')
+        src = (cr.Path(__file__).resolve().parent / 'coordinated_release.py').read_text()
+        self.assertIn('notif_ops.notification_diagnostics(sys.modules[__name__])', src)
+
+
 if __name__ == '__main__':
     unittest.main()

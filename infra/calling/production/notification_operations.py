@@ -471,3 +471,41 @@ def undo_fence(cr, record, run_id):
     """Rollback of one fence change: back to the recorded previous mode."""
     version = set_fence_mode(cr, record['service'], record['category'], record['before'], run_id)
     cr.emit('notificationFenceRestored', dict(record, restoredVersion=version))
+
+
+# --- Read-only notification diagnostics (diagnose): counts only, never ids or content ------
+PRODUCER_DIAGNOSTICS_SQL = {
+    'messaging': (
+        "SELECT json_build_object("
+        "'fence', (SELECT coalesce(json_agg(json_build_object('category', category, 'mode', mode, "
+        "'routingVersion', routing_version) ORDER BY category), '[]') FROM messaging_notification_routing_state), "
+        "'decisions', (SELECT coalesce(json_agg(d), '[]') FROM (SELECT route, reason, count(*) AS count "
+        "FROM messaging_notification_route_decisions GROUP BY route, reason ORDER BY route, reason) d), "
+        "'publications', (SELECT coalesce(json_agg(q), '[]') FROM (SELECT shadow, state, outcome, last_error, "
+        "count(*) AS count, min(created_at) AS first, max(created_at) AS last FROM messaging_notification_publications "
+        "GROUP BY shadow, state, outcome, last_error ORDER BY shadow, state, outcome, last_error) q));"),
+}
+SERVICE_DIAGNOSTICS_SQL = (
+    "SELECT json_build_object("
+    "'inbox', (SELECT coalesce(json_agg(i), '[]') FROM (SELECT producer, shadow, state, count(*) AS count, "
+    "max(received_at) AS last FROM notif_event_inbox GROUP BY producer, shadow, state ORDER BY producer, shadow, state) i), "
+    "'shadowObservations', (SELECT count(*) FROM notif_shadow_observations), "
+    "'deliveries', (SELECT count(*) FROM notif_deliveries), "
+    "'routingNotOff', (SELECT count(*) FROM notif_routing WHERE mode <> 'OFF'));")
+
+
+def notification_diagnostics(cr):
+    """Producer fence / publication counts and the service's inbox counts (read-only)."""
+    out = {}
+    for service, sql in PRODUCER_DIAGNOSTICS_SQL.items():
+        try:
+            out[service] = json.loads(_producer_sql(cr, service)(sql) or 'null')
+        except (RuntimeError, ValueError):
+            out[service] = 'unavailable'
+    try:
+        out['notifications'] = json.loads(cr.release.db_sql(cr.SERVICES['notifications']['db'],
+                                                            SERVICE_DIAGNOSTICS_SQL) or 'null')
+    except (RuntimeError, ValueError):
+        out['notifications'] = 'unavailable'
+    cr.emit('notificationDiagnostics', out)
+    return out
