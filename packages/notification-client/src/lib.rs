@@ -3,7 +3,7 @@
 //!
 //! Keeps every producer integration identical:
 //!
-//! * [`catalogue`] — the closed catalogue of the 31 inbound event types and the control
+//! * [`catalogue`] — the closed catalogue of the 34 inbound event types and the control
 //!   event (mirrors `x-cfmeet-catalogue` in `cfmeet.notifications.event`);
 //! * [`envelope`] — the `cfmeet.notifications.event` v1 builder and validator (forbidden
 //!   data keys, sealed allowance, legacy idempotency-key formats, CRITICAL rules, size);
@@ -21,7 +21,8 @@ pub mod routing;
 pub mod seal;
 
 pub use catalogue::{
-    spec, EventSpec, Lane, LegacyKey, Priority, Producer, CATALOGUE, CONTROL_EVENT,
+    spec, EventSpec, Lane, LegacyKey, Priority, Producer, RecipientKind, CATALOGUE, CONTROL_EVENT,
+    STEP_UP_PURPOSES,
 };
 pub use envelope::{validate, Envelope, EnvelopeBuilder, EnvelopeError};
 pub use routing::{decide, Decision, Route, RouteRef, RoutingMode, RoutingState, ROUTING_PROTOCOL};
