@@ -127,11 +127,7 @@ pub async fn revoke_my_session(
     V2Path(session_id): V2Path<Uuid>,
 ) -> ApiResult<Json<AccountSessionRevokeResponse>> {
     let user = actor.require_registered()?;
-    let owned = security::list_sessions(&state.db, user.user_id, true, None)
-        .await?
-        .into_iter()
-        .any(|s| s.session_id == session_id);
-    if !owned {
+    if !security::owns_session(&state.db, user.user_id, session_id).await? {
         return Err(ApiError::domain(
             ErrorCode::SessionNotFound,
             "Session not found",
@@ -233,6 +229,134 @@ pub async fn revoke_all_my_sessions(
     Ok(Json(AccountSessionRevokeResponse {
         revoked_count: revoked,
     }))
+}
+
+/// Sign out every other session
+///
+/// Gap audit A20: ends every open sign-in of the account except the one making the
+/// request (each with its Hub, Messaging and Calling credentials and meeting media). The
+/// account stays signed in here and keeps its linked devices. Once the account has a
+/// trusted device, only a trusted device may do this.
+#[utoipa::path(
+    post, path = "/api/v2/me/sessions/revoke-others", tag = "Account sessions (v2)", operation_id = "v2_revoke_other_account_sessions",
+    responses(
+        (status = 200, description = "Every other session ended", body = AccountSessionRevokeResponse),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "DEVICE_NOT_TRUSTED (the account has a trusted device and this sign-in is not on one); REAUTHENTICATION_REQUIRED (a sign-in without a session id: sign in again)", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn revoke_other_sessions(
+    State(state): State<AppState>,
+    actor: ActorContext,
+) -> ApiResult<Json<AccountSessionRevokeResponse>> {
+    let user = actor.require_registered()?;
+    let user_id = user.user_id;
+    let Some(current) = user.account_session_id else {
+        return Err(ApiError::domain(
+            ErrorCode::ReauthenticationRequired,
+            "Signing out other sessions needs a session-bound sign-in; sign in again",
+        ));
+    };
+    if crate::services::account_devices::has_trusted_device(&state.db, user_id).await?
+        && !crate::services::account_devices::session_on_trusted_device(
+            &state.db,
+            user_id,
+            Some(current),
+        )
+        .await?
+    {
+        return Err(ApiError::domain(
+            ErrorCode::DeviceNotTrusted,
+            "Signing out other sessions needs a trusted device of this account once it has one",
+        ));
+    }
+    let revoked =
+        security::revoke_others(&state, user_id, Some(current), RevokeReason::UserRevoked).await?;
+    security::record_event(
+        &state.db,
+        SecurityEvent::new("LOGOUT_OTHERS", Outcome::Success)
+            .by_user(user_id)
+            .session(current)
+            .detail(serde_json::json!({ "sessionsEnded": revoked })),
+    )
+    .await?;
+    Ok(Json(AccountSessionRevokeResponse {
+        revoked_count: revoked,
+    }))
+}
+
+/// End every session of a user (platform administrators)
+///
+/// Gap audit A20: ends every open sign-in of the account and every credential issued
+/// before now (the account revocation epoch), without suspending or deactivating it; the
+/// user can sign in again. Hub, Messaging and Calling credentials end with them. Requires a
+/// platform administrator and an audited reason.
+#[utoipa::path(
+    post, path = "/api/v2/admin/users/{userId}/sessions/revoke", tag = "Account sessions (v2)", operation_id = "v2_admin_revoke_user_sessions",
+    params(("userId" = Uuid, Path, description = "The account")),
+    request_body = AdminRevokeSessionsRequest,
+    responses(
+        (status = 200, description = "Every session ended", body = AccountSessionRevokeResponse),
+        (status = 400, description = "VALIDATION_ERROR (reason 1-500 characters)", body = ErrorEnvelope),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "USER_NOT_FOUND", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn admin_revoke_user_sessions(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(user_id): V2Path<Uuid>,
+    super::V2Json(body): super::V2Json<AdminRevokeSessionsRequest>,
+) -> ApiResult<Json<AccountSessionRevokeResponse>> {
+    let admin = actor.require_registered()?;
+    if !admin.platform_admin {
+        return Err(ApiError::domain(
+            ErrorCode::PermissionDenied,
+            "Platform administrator required",
+        ));
+    }
+    let reason = body.reason.trim();
+    if reason.is_empty() || reason.chars().count() > 500 {
+        return Err(ApiError::domain(
+            ErrorCode::ValidationError,
+            "reason must be 1-500 characters",
+        ));
+    }
+    use sea_orm::EntityTrait;
+    if crate::models::users::Entity::find_by_id(user_id)
+        .one(&state.db)
+        .await?
+        .is_none()
+    {
+        return Err(ApiError::domain(ErrorCode::UserNotFound, "User not found"));
+    }
+    let revoked = security::revoke_all(&state.db, user_id, RevokeReason::AdminRevoked).await?;
+    security::record_event(
+        &state.db,
+        SecurityEvent::new("ADMIN_SESSIONS_REVOKED", Outcome::Success)
+            .by_user(admin.user_id)
+            .detail(serde_json::json!({
+                "targetUserId": user_id,
+                "sessionsEnded": revoked,
+                // The audit row is bounded (2 KiB): the first 200 characters are kept.
+                "reason": reason.chars().take(200).collect::<String>(),
+            })),
+    )
+    .await?;
+    crate::services::communications::credentials_ended(&state, user_id, "ADMIN_REVOKED").await;
+    Ok(Json(AccountSessionRevokeResponse {
+        revoked_count: revoked,
+    }))
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdminRevokeSessionsRequest {
+    /// Why the sessions are ended (1-500 characters; recorded in the security audit).
+    pub reason: String,
 }
 
 /// Read the account security audit (platform administrators)

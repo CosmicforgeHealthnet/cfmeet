@@ -336,11 +336,126 @@ pub async fn open_session_by_reference(
     environment_id: Uuid,
     reference: &str,
 ) -> ApiResult<Option<Uuid>> {
-    Ok(list_sessions(db, user_id, false, None)
+    // Gap audit A21: every open session is considered, not only the newest 100.
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id FROM account_sessions \
+              WHERE user_id = $1 AND revoked_at IS NULL AND absolute_expires_at > now()",
+            [user_id.into()],
+        ))
+        .await?;
+    for row in rows {
+        let id: Uuid = row.try_get("", "id")?;
+        if session_reference(environment_id, id) == reference {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+/// Gap audit A21: whether `session_id` is one of the user's sessions (open or ended),
+/// whatever its age.
+pub async fn owns_session<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> ApiResult<bool> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS x FROM account_sessions WHERE id = $1 AND user_id = $2",
+            [session_id.into(), user_id.into()],
+        ))
         .await?
-        .into_iter()
-        .map(|s| s.session_id)
-        .find(|id| session_reference(environment_id, *id) == reference))
+        .is_some())
+}
+
+/// Gap audit A21: the most sign-ins an account keeps open at once
+/// (`ACCOUNT_MAX_OPEN_SESSIONS`, default 50, at least 5). Signing in past it ends the
+/// least recently used sign-ins (SUPERSEDED), never the new one.
+pub fn max_open_sessions() -> i64 {
+    static MAX: OnceLock<i64> = OnceLock::new();
+    *MAX.get_or_init(|| {
+        std::env::var("ACCOUNT_MAX_OPEN_SESSIONS")
+            .ok()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(50)
+            .max(5)
+    })
+}
+
+/// Ends the user's open sign-ins beyond [`max_open_sessions`] (least recently used
+/// first, `keep` excepted) and fans each end out. Returns how many ended.
+pub async fn enforce_session_cap(state: &AppState, user_id: Uuid, keep: Uuid) -> ApiResult<u64> {
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = 'SUPERSEDED' \
+              WHERE id IN (SELECT id FROM account_sessions \
+                            WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL \
+                              AND absolute_expires_at > now() \
+                            ORDER BY COALESCE(last_refreshed_at, created_at) DESC, id \
+                            OFFSET $3) \
+                AND revoked_at IS NULL \
+              RETURNING id",
+            [
+                user_id.into(),
+                keep.into(),
+                (max_open_sessions() - 1).into(),
+            ],
+        ))
+        .await?;
+    let mut ended = 0;
+    for row in rows {
+        let session_id: Uuid = row.try_get("", "id")?;
+        record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("SESSION_REVOKED", Outcome::Success)
+                .by_user(user_id)
+                .session(session_id)
+                .detail(json!({"trigger":"SESSION_CAP"})),
+        )
+        .await;
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user_id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of a superseded sign-in failed: {e}");
+        }
+        ended += 1;
+    }
+    Ok(ended)
+}
+
+/// Gap audit A20: ends every open sign-in of the user except `keep`, fanning each out.
+pub async fn revoke_others(
+    state: &AppState,
+    user_id: Uuid,
+    keep: Option<Uuid>,
+    reason: RevokeReason,
+) -> ApiResult<u64> {
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = $3 \
+              WHERE user_id = $1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR id <> $2) \
+              RETURNING id",
+            [user_id.into(), keep.into(), reason.as_str().into()],
+        ))
+        .await?;
+    let mut ended = 0;
+    for row in rows {
+        let session_id: Uuid = row.try_get("", "id")?;
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user_id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of an ended sign-in failed: {e}");
+        }
+        ended += 1;
+    }
+    Ok(ended)
 }
 
 pub fn normalize_email(email: &str) -> String {
@@ -599,6 +714,10 @@ pub async fn start_session(
         .await?
         .ok_or_else(|| ApiError::InternalError("session was not created".into()))?;
     let auth_time: i64 = row.try_get("", "auth_time")?;
+    // Gap audit A21: a bounded number of open sign-ins per account.
+    if let Err(e) = enforce_session_cap(state, user.id, session_id).await {
+        tracing::warn!(user_id = %user.id, "session cap not enforced: {e}");
+    }
     let (access_token, refresh_token) = state.jwt_service.session_tokens(
         user.id,
         &role_claim(user),

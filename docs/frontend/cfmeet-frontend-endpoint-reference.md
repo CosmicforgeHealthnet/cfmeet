@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 272 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 273 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.4.0 | 73 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.17.0 | 135 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **652** |
+| **Total** | | | **653** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -67,6 +67,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/me/sessions` | account session | List my sessions | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_sessions` |
 | POST | `/api/v2/me/sessions/revoke-all` | account session | Sign out everywhere | 200, 401, 403 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_revoke_all_my_sessions` |
+| POST | `/api/v2/me/sessions/revoke-others` | account session | Sign out every other session | 200, 401, 403 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED, REAUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_revoke_other_account_sessions` |
 | POST | `/api/v2/me/sessions/{sessionId}/revoke` | account session | Sign out one session | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, DEVICE_NOT_TRUSTED, SESSION_NOT_FOUND | `openapi/meeting-service.json#v2_revoke_my_session` |
 
 ### Artifacts (v2)

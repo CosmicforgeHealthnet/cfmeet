@@ -3152,6 +3152,95 @@
         ]
       }
     },
+    "/api/v2/admin/users/{userId}/sessions/revoke": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "End every session of a user (platform administrators)",
+        "description": "Gap audit A20: ends every open sign-in of the account and every credential issued\nbefore now (the account revocation epoch), without suspending or deactivating it; the\nuser can sign in again. Hub, Messaging and Calling credentials end with them. Requires a\nplatform administrator and an audited reason.",
+        "operationId": "v2_admin_revoke_user_sessions",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The account",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRevokeSessionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionRevokeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (reason 1-500 characters)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "USER_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}": {
       "get": {
         "tags": [
@@ -11911,6 +12000,53 @@
           },
           "403": {
             "description": "DEVICE_NOT_TRUSTED (the account has a trusted device and this sign-in is not on one)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/sessions/revoke-others": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Sign out every other session",
+        "description": "Gap audit A20: ends every open sign-in of the account except the one making the\nrequest (each with its Hub, Messaging and Calling credentials and meeting media). The\naccount stays signed in here and keeps its linked devices. Once the account has a\ntrusted device, only a trusted device may do this.",
+        "operationId": "v2_revoke_other_account_sessions",
+        "responses": {
+          "200": {
+            "description": "Every other session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionRevokeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (the account has a trusted device and this sign-in is not on one); REAUTHENTICATION_REQUIRED (a sign-in without a session id: sign in again)",
             "content": {
               "application/json": {
                 "schema": {
@@ -20731,6 +20867,19 @@
           }
         }
       },
+      "AdminRevokeSessionsRequest": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why the sessions are ended (1-500 characters; recorded in the security audit)."
+          }
+        },
+        "additionalProperties": false
+      },
       "AdminUpdateUserRequest": {
         "type": "object",
         "description": "Request to update a user (admin only)",
@@ -24275,6 +24424,7 @@
           "DEVICE_DECLARATION_REFUSED",
           "DEVICE_DECLARATION_REQUIRED",
           "DEVICE_NOT_FOUND",
+          "USER_NOT_FOUND",
           "DEVICE_KEY_IN_USE",
           "DEVICE_LINK_INVALID",
           "DATABASE_ERROR",

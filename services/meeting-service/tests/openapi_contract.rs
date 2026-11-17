@@ -380,6 +380,8 @@ fn every_v2_route_is_documented() {
         // Blueprint Section 2 — account sessions and the security audit
         ("get", "/api/v2/me/sessions"),
         ("post", "/api/v2/me/sessions/revoke-all"),
+        ("post", "/api/v2/me/sessions/revoke-others"),
+        ("post", "/api/v2/admin/users/{userId}/sessions/revoke"),
         ("post", "/api/v2/me/sessions/{sessionId}/revoke"),
         ("get", "/api/v2/admin/audit-events"),
         // Blueprint Section 9 — personal account profile

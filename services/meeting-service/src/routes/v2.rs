@@ -688,8 +688,16 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::account_sessions::revoke_all_my_sessions),
         )
         .route(
+            "/me/sessions/revoke-others",
+            post(crate::handlers::v2::account_sessions::revoke_other_sessions),
+        )
+        .route(
             "/me/sessions/:session_id/revoke",
             post(crate::handlers::v2::account_sessions::revoke_my_session),
+        )
+        .route(
+            "/admin/users/:user_id/sessions/revoke",
+            post(crate::handlers::v2::account_sessions::admin_revoke_user_sessions),
         )
         .route(
             "/admin/audit-events",

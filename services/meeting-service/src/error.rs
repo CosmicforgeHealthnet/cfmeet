@@ -184,6 +184,8 @@ pub enum ErrorCode {
     DeviceDeclarationRequired,
     /// Multi-device policy: the device does not exist or is not the caller's.
     DeviceNotFound,
+    /// Gap audit A20: an administrator named an account that does not exist.
+    UserNotFound,
     /// Multi-device policy: the device key is already bound to another live device.
     DeviceKeyInUse,
     /// Multi-device policy: the linking challenge does not exist, is not the caller's,
@@ -311,6 +313,7 @@ impl ErrorCode {
             ErrorCode::DeviceDeclarationRefused => "DEVICE_DECLARATION_REFUSED",
             ErrorCode::DeviceDeclarationRequired => "DEVICE_DECLARATION_REQUIRED",
             ErrorCode::DeviceNotFound => "DEVICE_NOT_FOUND",
+            ErrorCode::UserNotFound => "USER_NOT_FOUND",
             ErrorCode::DeviceKeyInUse => "DEVICE_KEY_IN_USE",
             ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
@@ -432,7 +435,7 @@ impl ErrorCode {
             ErrorCode::WebDeviceLimitReached
             | ErrorCode::DeviceDeclarationRefused
             | ErrorCode::DeviceKeyInUse => StatusCode::CONFLICT,
-            ErrorCode::DeviceNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::DeviceNotFound | ErrorCode::UserNotFound => StatusCode::NOT_FOUND,
             ErrorCode::DeviceLinkInvalid => StatusCode::GONE,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
@@ -782,6 +785,7 @@ mod tests {
             ErrorCode::DeviceNotFound,
             ErrorCode::DeviceKeyInUse,
             ErrorCode::DeviceLinkInvalid,
+            ErrorCode::UserNotFound,
         ];
         for c in all {
             let s = c.as_str();
