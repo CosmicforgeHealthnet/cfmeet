@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.19.0"
+      "description": "cfmeet.calling.http-api 1.20.0"
     },
     {
       "name": "privacy-relay",
@@ -25816,6 +25816,69 @@
         ]
       }
     },
+    "/v1/calls/{call_id}/quality": {
+      "get": {
+        "operationId": "getCallQuality",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Per-participant call quality",
+        "description": "Requires calls.read. C8: per-participant aggregates (sample count, average / maximum jitter, packet loss and round-trip time, average / minimum estimated MOS, last observation) of the quality samples of the Call.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The quality summary.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.CallQualitySummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.ServiceUnavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.getCallQuality",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
     "/v1/calls/{call_id}/recording-authorizations": {
       "get": {
         "operationId": "listRecordingAuthorizations",
@@ -26582,6 +26645,88 @@
         },
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.issueSessionMediaCredential",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/sessions/{session_id}/quality-samples": {
+      "post": {
+        "operationId": "recordCallQualitySample",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Report a session's call-quality sample",
+        "description": "Requires calls.write. C8: records jitter, packet loss and round-trip time measured by a client on one live session (not ENDED) of a Call whose media is live, and returns the server-computed estimated MOS. Values are validated (finite, bounded); a session holds at most 720 samples (409 beyond). Stored as an immutable call quality record of the session.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.SessionId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.QualitySampleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The recorded sample.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.QualitySampleResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.recordCallQualitySample",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
         ]
@@ -54639,6 +54784,123 @@
           }
         ]
       },
+      "calling.calling.control.v1.CallQualitySummary": {
+        "description": "C8: per-participant aggregates of the quality samples of a Call (participants without samples are absent).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "callId",
+          "participants"
+        ],
+        "properties": {
+          "callId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "participantId",
+                "sampleCount",
+                "jitterMs",
+                "packetLossPercent",
+                "rttMs",
+                "mosEstimate",
+                "lastObservedAt"
+              ],
+              "properties": {
+                "participantId": {
+                  "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+                },
+                "sampleCount": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "jitterMs": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "avg",
+                    "max"
+                  ],
+                  "properties": {
+                    "avg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "max": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "packetLossPercent": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "avg",
+                    "max"
+                  ],
+                  "properties": {
+                    "avg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "max": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "rttMs": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "avg",
+                    "max"
+                  ],
+                  "properties": {
+                    "avg": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "max": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "mosEstimate": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "avg",
+                    "min"
+                  ],
+                  "properties": {
+                    "avg": {
+                      "type": "number",
+                      "minimum": 1,
+                      "maximum": 4.5
+                    },
+                    "min": {
+                      "type": "number",
+                      "minimum": 1,
+                      "maximum": 4.5
+                    }
+                  }
+                },
+                "lastObservedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
       "calling.calling.control.v1.CallTransfer": {
         "description": "An application transfer of a Call (kept out of the Call state).",
         "type": "object",
@@ -55252,6 +55514,102 @@
           },
           "capabilities": {
             "$ref": "#/components/schemas/calling.calling.common.v1.CallMediaCapabilities"
+          }
+        }
+      },
+      "calling.calling.control.v1.QualitySampleRequest": {
+        "description": "C8: one client measurement of a session's media path over a short window ending now. Bounded and finite; the server computes the estimated MOS.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "jitterMs",
+          "packetLossPercent",
+          "rttMs"
+        ],
+        "properties": {
+          "jitterMs": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000,
+            "description": "Interarrival jitter in milliseconds."
+          },
+          "packetLossPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Lost packets in percent of expected packets."
+          },
+          "rttMs": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 60000,
+            "description": "Round-trip time in milliseconds."
+          },
+          "intervalSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300,
+            "default": 10,
+            "description": "Length of the observation window."
+          }
+        }
+      },
+      "calling.calling.control.v1.QualitySampleResult": {
+        "description": "C8: the stored sample (values rounded to two decimals) with the server-computed estimated MOS (simplified ITU-T G.107 E-model, 1.0-4.5).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "qualityRecordId",
+          "callId",
+          "sessionId",
+          "participantId",
+          "jitterMs",
+          "packetLossPercent",
+          "rttMs",
+          "mosEstimate",
+          "observedFrom",
+          "observedTo"
+        ],
+        "properties": {
+          "qualityRecordId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "callId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "participantId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "jitterMs": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "packetLossPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "rttMs": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 60000
+          },
+          "mosEstimate": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 4.5
+          },
+          "observedFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "observedTo": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

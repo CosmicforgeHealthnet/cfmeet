@@ -87,6 +87,10 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /v1/calls/{call_id}/screen-share/stop", Probe::Body),
     ("POST /v1/calls/{call_id}/participants", Probe::Body),
     (
+        "POST /v1/calls/{call_id}/sessions/{session_id}/quality-samples",
+        Probe::Body,
+    ),
+    (
         "POST /v1/calls/{call_id}/sessions/{session_id}/media-credentials",
         Probe::Body,
     ),

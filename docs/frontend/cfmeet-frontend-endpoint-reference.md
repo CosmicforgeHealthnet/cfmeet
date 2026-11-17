@@ -16,10 +16,10 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 273 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.4.0 | 73 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.19.0 | 135 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.20.0 | 137 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.17.0 | 99 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **653** |
+| **Total** | | | **655** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -647,7 +647,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.4.
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.19.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.20.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 
@@ -742,7 +742,9 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.19.0**; b
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/v1/calls/{call_id}/quality` | platform credential (server-side only) | Per-participant call quality | 200, 401, 403, 404, 429, 503 | AUTHENTICATION_FAILED, INSUFFICIENT_SCOPE, RATE_LIMITED, SERVICE_UNAVAILABLE | `calling/http/v1.openapi.json#getCallQuality` |
 | POST | `/v1/calls/{call_id}/sessions/{session_id}/media-credentials` | platform credential (server-side only) | Issue a media credential for a session | 200, 400, 401, 403, 404, 409, 422, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_EVIDENCE_REQUIRED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, CAPABILITY_UNAVAILABLE, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, PARTICIPANT_LIMIT_EXCEEDED, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#issueSessionMediaCredential` |
+| POST | `/v1/calls/{call_id}/sessions/{session_id}/quality-samples` | platform credential (server-side only) | Report a session's call-quality sample | 201, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#recordCallQualitySample` |
 | POST | `/v1/calls/{call_id}/sessions/{session_id}/remove` | platform credential (server-side only) | Remove one session from a call | 200, 400, 401, 403, 404, 409, 429, 503 | ANSWERED_ELSEWHERE, AUTHENTICATION_FAILED, CALL_RESOURCE_STATE_CONFLICT, CALL_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, INSUFFICIENT_SCOPE, INVITATION_NOT_ACTIONABLE, MEDIA_UNAVAILABLE, RATE_LIMITED, SERVICE_UNAVAILABLE, STALE_CALL_VERSION, TARGET_UNAVAILABLE, VALIDATION_ERROR | `calling/http/v1.openapi.json#removeCallSession` |
 
 ### Call Queues

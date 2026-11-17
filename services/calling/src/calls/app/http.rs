@@ -76,6 +76,11 @@ pub fn routes() -> Router<AppState> {
             "/v1/calls/:call_id/sessions/:session_id/remove",
             post(remove_session),
         )
+        .route(
+            "/v1/calls/:call_id/sessions/:session_id/quality-samples",
+            post(quality_sample),
+        )
+        .route("/v1/calls/:call_id/quality", get(quality_summary))
         .route("/v1/blocks", post(create_block).get(list_blocks))
         .route("/v1/blocks/:block_id", delete(release_block))
         .route(
@@ -845,6 +850,60 @@ async fn media_credentials(
         )
         .await?;
     Ok(respond(StatusCode::OK, credential, false))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct QualitySampleBody {
+    jitter_ms: f64,
+    packet_loss_percent: f64,
+    rtt_ms: f64,
+    #[serde(default)]
+    interval_seconds: Option<i64>,
+}
+
+/// `POST /v1/calls/:call_id/sessions/:session_id/quality-samples` (C8, calls.write): one
+/// client measurement of the session's media path.
+async fn quality_sample(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path((call_id, session_id)): Path<(String, String)>,
+    body: Result<Json<QualitySampleBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_id = CallId::from_uuid(uuid_path(&call_id)?);
+    let session_id = CallSessionId::from_uuid(uuid_path(&session_id)?);
+    let b = parse_body(body)?;
+    let recorded = state
+        .app
+        .record_quality_sample(
+            &CallCommandContext::customer(&ctx),
+            call_id,
+            session_id,
+            super::quality::QualitySample {
+                jitter_ms: b.jitter_ms,
+                packet_loss_percent: b.packet_loss_percent,
+                rtt_ms: b.rtt_ms,
+                interval_seconds: b.interval_seconds,
+            },
+        )
+        .await?;
+    Ok(respond(StatusCode::CREATED, recorded, false))
+}
+
+/// `GET /v1/calls/:call_id/quality` (C8, calls.read): per-participant quality aggregates.
+async fn quality_summary(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path(call_id): Path<String>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_READ)?;
+    let call_id = CallId::from_uuid(uuid_path(&call_id)?);
+    let summary = state
+        .app
+        .quality_summary(CallScope::of_platform(&ctx), call_id)
+        .await?;
+    Ok(respond(StatusCode::OK, summary, false))
 }
 
 async fn remove_session(

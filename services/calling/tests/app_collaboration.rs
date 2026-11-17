@@ -880,3 +880,140 @@ async fn invitations_are_authorized_version_checked_and_limited() {
     let r = invite(&a, call, alice, &[groups[3]], version).await;
     assert_eq!(r.json["error"]["code"], "CALL_STATE_CONFLICT", "{}", r.text);
 }
+
+// ---------------------------------------------------------------------------------------
+// C8 — per-participant call-quality samples
+// ---------------------------------------------------------------------------------------
+
+async fn sample(a: &AppWorld, call: Uuid, session: Uuid, body: Value) -> common::TestResponse {
+    a.post(
+        &format!("/v1/calls/{call}/sessions/{session}/quality-samples"),
+        body,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn quality_samples_are_validated_bounded_and_summarized_per_participant() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let (call, caller, callee) = a.connected_call("VIDEO").await;
+    let caller_session = a.session_on(call, caller.endpoint).await.unwrap();
+    let callee_session = a.session_on(call, callee.endpoint).await.unwrap();
+
+    let r = sample(
+        &a,
+        call,
+        caller_session,
+        json!({ "jitterMs": 4.25, "packetLossPercent": 0.5, "rttMs": 60 }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    common::contracts::check(
+        "calling/control/v1.schema.json#/$defs/QualitySampleResult",
+        &r.json,
+    );
+    let mos = r.json["mosEstimate"].as_f64().unwrap();
+    assert!(mos > 4.0 && mos <= 4.5, "{mos}");
+    assert_eq!(
+        r.json["participantId"],
+        a.participant_of(call, caller.principal).await.to_string()
+    );
+    // A poor path scores lower.
+    let r = sample(
+        &a,
+        call,
+        callee_session,
+        json!({ "jitterMs": 80, "packetLossPercent": 8, "rttMs": 600, "intervalSeconds": 30 }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    assert!(r.json["mosEstimate"].as_f64().unwrap() < mos);
+    let r = sample(
+        &a,
+        call,
+        callee_session,
+        json!({ "jitterMs": 20, "packetLossPercent": 2, "rttMs": 200 }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+
+    // Validation: bounds, finiteness, types and unknown fields; nothing is stored.
+    let before = scalar(&a, "SELECT count(*) FROM call_quality_records").await;
+    for body in [
+        json!({ "jitterMs": -1, "packetLossPercent": 0, "rttMs": 10 }),
+        json!({ "jitterMs": 1, "packetLossPercent": 100.5, "rttMs": 10 }),
+        json!({ "jitterMs": 1, "packetLossPercent": 0, "rttMs": 60001 }),
+        json!({ "jitterMs": 10001, "packetLossPercent": 0, "rttMs": 10 }),
+        json!({ "jitterMs": "1", "packetLossPercent": 0, "rttMs": 10 }),
+        json!({ "jitterMs": 1, "packetLossPercent": 0 }),
+        json!({ "jitterMs": 1, "packetLossPercent": 0, "rttMs": 10, "intervalSeconds": 0 }),
+        json!({ "jitterMs": 1, "packetLossPercent": 0, "rttMs": 10, "mosEstimate": 4.4 }),
+        json!({ "jitterMs": 1, "packetLossPercent": 0, "rttMs": 10, "provider": "x" }),
+    ] {
+        let r = sample(&a, call, caller_session, body.clone()).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}: {}", r.text);
+    }
+    // Unknown session / call: 404.
+    let ok = json!({ "jitterMs": 1, "packetLossPercent": 0, "rttMs": 10 });
+    let r = sample(&a, call, Uuid::new_v4(), ok.clone()).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    let r = sample(&a, Uuid::new_v4(), caller_session, ok.clone()).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    assert_eq!(
+        scalar(&a, "SELECT count(*) FROM call_quality_records").await,
+        before
+    );
+
+    // The summary: per participant, aggregates of its samples only.
+    let r = a.get(&format!("/v1/calls/{call}/quality")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    common::contracts::check(
+        "calling/control/v1.schema.json#/$defs/CallQualitySummary",
+        &r.json,
+    );
+    let participants = r.json["participants"].as_array().unwrap();
+    assert_eq!(participants.len(), 2, "{}", r.text);
+    let callee_participant = a.participant_of(call, callee.principal).await.to_string();
+    let callee_q = participants
+        .iter()
+        .find(|p| p["participantId"] == callee_participant)
+        .unwrap();
+    assert_eq!(callee_q["sampleCount"], 2);
+    assert_eq!(callee_q["jitterMs"]["avg"], 50.0);
+    assert_eq!(callee_q["jitterMs"]["max"], 80.0);
+    assert_eq!(callee_q["packetLossPercent"]["max"], 8.0);
+    assert_eq!(callee_q["rttMs"]["avg"], 400.0);
+    assert!(
+        callee_q["mosEstimate"]["min"].as_f64().unwrap()
+            <= callee_q["mosEstimate"]["avg"].as_f64().unwrap()
+    );
+
+    // Bounded: a session holds at most MAX_SAMPLES_PER_SESSION samples (409 beyond).
+    let max = calling::calls::app::quality::MAX_SAMPLES_PER_SESSION;
+    a.h()
+        .conn()
+        .execute(Statement::from_string(
+            DbBackend::Postgres,
+            format!(
+                "INSERT INTO call_quality_records (id, call_id, session_id, tenant_id, \
+                   application_id, environment_id, observed_from, observed_to, metrics, created_at) \
+                 SELECT gen_random_uuid(), r.call_id, r.session_id, r.tenant_id, r.application_id, \
+                        r.environment_id, r.observed_from, r.observed_to, r.metrics, r.created_at \
+                   FROM call_quality_records r, generate_series(1, {max}) \
+                  WHERE r.session_id = '{caller_session}' LIMIT {max}"
+            ),
+        ))
+        .await
+        .unwrap();
+    let r = sample(&a, call, caller_session, ok.clone()).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+
+    // An ended session (here: the Call ended) cannot report.
+    let (_, version) = a.state(call).await;
+    let r = a.command(call, "end", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = sample(&a, call, callee_session, ok).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+}

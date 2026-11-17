@@ -1,0 +1,6 @@
+{
+  "jitterMs": 4,
+  "packetLossPercent": 1,
+  "rttMs": 60,
+  "mosEstimate": 4.4
+}

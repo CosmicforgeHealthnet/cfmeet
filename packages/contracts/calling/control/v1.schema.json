@@ -84,6 +84,15 @@
     },
     {
       "$ref": "#/$defs/ProviderCallbackAck"
+    },
+    {
+      "$ref": "#/$defs/QualitySampleRequest"
+    },
+    {
+      "$ref": "#/$defs/QualitySampleResult"
+    },
+    {
+      "$ref": "#/$defs/CallQualitySummary"
     }
   ],
   "$defs": {
@@ -1633,6 +1642,219 @@
               "liveInvitationCount": {
                 "type": "integer",
                 "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "QualitySampleRequest": {
+      "description": "C8: one client measurement of a session's media path over a short window ending now. Bounded and finite; the server computes the estimated MOS.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jitterMs",
+        "packetLossPercent",
+        "rttMs"
+      ],
+      "properties": {
+        "jitterMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "Interarrival jitter in milliseconds."
+        },
+        "packetLossPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Lost packets in percent of expected packets."
+        },
+        "rttMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "Round-trip time in milliseconds."
+        },
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300,
+          "default": 10,
+          "description": "Length of the observation window."
+        }
+      }
+    },
+    "QualitySampleResult": {
+      "description": "C8: the stored sample (values rounded to two decimals) with the server-computed estimated MOS (simplified ITU-T G.107 E-model, 1.0-4.5).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "qualityRecordId",
+        "callId",
+        "sessionId",
+        "participantId",
+        "jitterMs",
+        "packetLossPercent",
+        "rttMs",
+        "mosEstimate",
+        "observedFrom",
+        "observedTo"
+      ],
+      "properties": {
+        "qualityRecordId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "jitterMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "packetLossPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "rttMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "mosEstimate": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 4.5
+        },
+        "observedFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "observedTo": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "CallQualitySummary": {
+      "description": "C8: per-participant aggregates of the quality samples of a Call (participants without samples are absent).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callId",
+        "participants"
+      ],
+      "properties": {
+        "callId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "participantId",
+              "sampleCount",
+              "jitterMs",
+              "packetLossPercent",
+              "rttMs",
+              "mosEstimate",
+              "lastObservedAt"
+            ],
+            "properties": {
+              "participantId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "sampleCount": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "jitterMs": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "avg",
+                  "max"
+                ],
+                "properties": {
+                  "avg": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              },
+              "packetLossPercent": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "avg",
+                  "max"
+                ],
+                "properties": {
+                  "avg": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              },
+              "rttMs": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "avg",
+                  "max"
+                ],
+                "properties": {
+                  "avg": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "max": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              },
+              "mosEstimate": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "avg",
+                  "min"
+                ],
+                "properties": {
+                  "avg": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 4.5
+                  },
+                  "min": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 4.5
+                  }
+                }
+              },
+              "lastObservedAt": {
+                "type": "string",
+                "format": "date-time"
               }
             }
           }

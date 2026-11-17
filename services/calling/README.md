@@ -680,7 +680,12 @@ app refusals.
   (answered / declined / busy / no_answer / cancelled / failed / timeout),
   `calling_media_admissions_total{source,result,reason}`, `calling_media_reconnects_total`.
   No jitter / RTT / packet loss is invented; the end-of-call quality summary records the
-  admitted sessions, reconnects and connected participants Calling observed.
+  admitted sessions, reconnects and connected participants Calling observed. Clients
+  report what they measured (C8): `POST /v1/calls/{id}/sessions/{session_id}/quality-samples`
+  (jitter ms, packet loss %, RTT ms; finite and bounded; at most 720 samples per live
+  session) stores an immutable quality record of that session with a server-computed
+  estimated MOS (simplified E-model, 1.0–4.5); `GET /v1/calls/{id}/quality` aggregates
+  them per participant; `calling_quality_samples_total{call_kind}`.
 * **Correlation** — `calls.correlation_id` keeps the creating request's correlation id;
   Calling's own later commands for the Call (worker / event-driven transitions,
   TERMINATE / BRIDGE / ANSWER / PROMPT to Telephony, usage) carry it, and worker / event

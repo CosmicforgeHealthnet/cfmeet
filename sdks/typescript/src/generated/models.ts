@@ -309,6 +309,31 @@ export namespace Calling {
     /** Opaque keyset cursor of the next page; null on the last page. */
     nextCursor: string | null;
   };
+  /** C8: per-participant aggregates of the quality samples of a Call (participants without samples are absent). */
+  export type CallQualitySummary = {
+    callId: Uuid;
+    participants: Array<{
+        participantId: Uuid;
+        sampleCount: number;
+        jitterMs: {
+          avg: number;
+          max: number;
+        };
+        packetLossPercent: {
+          avg: number;
+          max: number;
+        };
+        rttMs: {
+          avg: number;
+          max: number;
+        };
+        mosEstimate: {
+          avg: number;
+          min: number;
+        };
+        lastObservedAt: string;
+      }>;
+  };
   /** A recording of ONE canonical Call. Integrity metadata only: never an object-storage key, a bucket, a stored URL, a telephone number or a provider identity (media through media-access). */
   export type CallRecording = {
     recordingId: Uuid;
@@ -967,6 +992,30 @@ export namespace Calling {
   /** Body of POST /v1/enterprise/ivr-flows/{ivr_flow_id}/versions: a new immutable version (not yet active). */
   export type PublishIvrVersionRequest = {
     graph: IvrGraph;
+  };
+  /** C8: one client measurement of a session's media path over a short window ending now. Bounded and finite; the server computes the estimated MOS. */
+  export type QualitySampleRequest = {
+    /** Interarrival jitter in milliseconds. */
+    jitterMs: number;
+    /** Lost packets in percent of expected packets. */
+    packetLossPercent: number;
+    /** Round-trip time in milliseconds. */
+    rttMs: number;
+    /** Length of the observation window. */
+    intervalSeconds?: number;
+  };
+  /** C8: the stored sample (values rounded to two decimals) with the server-computed estimated MOS (simplified ITU-T G.107 E-model, 1.0-4.5). */
+  export type QualitySampleResult = {
+    qualityRecordId: Uuid;
+    callId: Uuid;
+    sessionId: Uuid;
+    participantId: Uuid;
+    jitterMs: number;
+    packetLossPercent: number;
+    rttMs: number;
+    mosEstimate: number;
+    observedFrom: string;
+    observedTo: string;
   };
   /** A call queue. waiting is the number of active entries now. */
   export type Queue = {
@@ -1842,6 +1891,11 @@ export namespace Calling {
       params: { path: { call_id: string } };
       response: AvailableActions;
     };
+    /** GET /v1/calls/{call_id}/quality — scope calls.read; auth PLATFORM_CREDENTIAL; retry SAFE */
+    getCallQuality: {
+      params: { path: { call_id: string } };
+      response: CallQualitySummary;
+    };
     /** GET /v1/enterprise/recordings/{recording_id} — scope enterprise.recording.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     getCallRecording: {
       params: { path: { recording_id: string }; query?: { principalId?: Uuid } };
@@ -2115,6 +2169,11 @@ export namespace Calling {
     publishIvrVersion: {
       params: { path: { ivr_flow_id: string }; body: PublishIvrVersionRequest };
       response: IvrFlowVersion;
+    };
+    /** POST /v1/calls/{call_id}/sessions/{session_id}/quality-samples — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    recordCallQualitySample: {
+      params: { path: { call_id: string; session_id: string }; body: QualitySampleRequest };
+      response: QualitySampleResult;
     };
     /** POST /v1/calls/{call_id}/recording-consent — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     recordRecordingConsent: {
