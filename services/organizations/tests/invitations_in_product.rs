@@ -613,3 +613,137 @@ async fn the_invitation_list_filters_in_the_database_and_pages_with_a_cursor() {
         .await
         .expect_error(400, "VALIDATION_ERROR");
 }
+
+/// Gap audit G11: the OWNER exports the organization's data (no invitation tokens), the
+/// operator exports it in any state, others cannot; an archived organization's
+/// invitations and profile details are purged after the configured retention, once.
+#[tokio::test]
+async fn organizations_export_their_data_and_archived_ones_are_purged() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let owner = Uuid::new_v4();
+    let org = h.create_org(owner, "export-org").await;
+    let id = s(&org["id"]);
+    let admin = Uuid::new_v4();
+    h.add_member(&id, owner, admin, "ADMIN").await;
+    invite(
+        &h,
+        owner,
+        &id,
+        json!({ "email": "pending@example.com", "role": "MEMBER" }),
+    )
+    .await;
+    let export = format!("/internal/v1/organizations/{id}/export");
+    let doc = h.user(owner).get(&export).await.expect(200).clone();
+    assert_eq!(doc["schemaVersion"], 1);
+    assert_eq!(doc["organization"]["id"], json!(id));
+    assert_eq!(doc["memberships"].as_array().unwrap().len(), 2);
+    let invitations = doc["invitations"].as_array().unwrap();
+    assert_eq!(invitations.len(), 2);
+    assert!(invitations.iter().all(|i| i.get("token_hash").is_none()));
+    // An ADMIN (no lifecycle.manage), a stranger and a non-operator service cannot.
+    h.user(admin)
+        .get(&export)
+        .await
+        .expect_error(403, "PERMISSION_DENIED");
+    h.user(Uuid::new_v4())
+        .get(&export)
+        .await
+        .expect_error(404, "ORGANIZATION_NOT_FOUND");
+    // Archived: the owner's route closes, the operator's stays.
+    h.user(owner)
+        .post(
+            &format!("/internal/v1/organizations/{id}/archive"),
+            json!({}),
+        )
+        .await
+        .expect(200);
+    let admin_export = format!("/internal/v1/admin/organizations/{id}/export");
+    let doc = h
+        .by(&h.peers.operator)
+        .get(&admin_export)
+        .await
+        .expect(200)
+        .clone();
+    assert_eq!(doc["organization"]["lifecycle_status"], "ARCHIVED");
+    assert!(h.count(&format!(
+        "SELECT count(*) FROM organization_audit_events WHERE organization_id = '{id}' AND action = 'organization.exported'"
+    )).await >= 2);
+
+    // Purge: not before the retention period, then once.
+    let db = &h.db.conn;
+    assert_eq!(
+        organizations::worker::purge_archived(db, 30, 10)
+            .await
+            .unwrap(),
+        0
+    );
+    h.exec(&format!(
+        "UPDATE organizations SET archived_at = now() - interval '31 days' WHERE id = '{id}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        organizations::worker::purge_archived(db, 30, 10)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        organizations::worker::purge_archived(db, 30, 10)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        h.count(&format!(
+            "SELECT count(*) FROM organization_invitations WHERE organization_id = '{id}'"
+        ))
+        .await,
+        0
+    );
+    assert_eq!(
+        h.count(&format!(
+            "SELECT count(*) FROM organization_memberships WHERE organization_id = '{id}'"
+        ))
+        .await,
+        2,
+        "identifiers stay as evidence"
+    );
+}
+
+/// Gap audit G20: the member list pages past its first page with the cursor, each
+/// membership exactly once.
+#[tokio::test]
+async fn members_page_past_the_first_page() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let owner = Uuid::new_v4();
+    let org = h.create_org(owner, "paged-members-org").await;
+    let id = s(&org["id"]);
+    for _ in 0..4 {
+        h.add_member(&id, owner, Uuid::new_v4(), "MEMBER").await;
+    }
+    let mut seen = vec![];
+    let mut cursor: Option<String> = None;
+    for _ in 0..10 {
+        let path = match &cursor {
+            Some(c) => format!("/internal/v1/organizations/{id}/members?limit=2&cursor={c}"),
+            None => format!("/internal/v1/organizations/{id}/members?limit=2"),
+        };
+        let page = h.user(owner).get(&path).await.expect(200).clone();
+        let items = page["items"].as_array().unwrap();
+        assert!(items.len() <= 2);
+        seen.extend(items.iter().map(|m| m["id"].as_str().unwrap().to_string()));
+        match page["nextCursor"].as_str() {
+            Some(c) => cursor = Some(c.to_string()),
+            None => break,
+        }
+    }
+    let total = seen.len();
+    seen.sort();
+    seen.dedup();
+    assert_eq!((total, seen.len()), (5, 5));
+}

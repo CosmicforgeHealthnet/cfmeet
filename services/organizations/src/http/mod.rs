@@ -124,6 +124,7 @@ pub fn app(state: AppState) -> Router {
             "/organizations/:id/audit-events",
             get(authorization::audit_events),
         )
+        .route("/organizations/:id/export", get(authorization::export))
         .route(
             "/organizations/:id/provisioning",
             get(organizations::provisioning),
@@ -179,6 +180,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/admin/organizations/:id/audit-events",
             get(authorization::admin_audit_events),
+        )
+        .route(
+            "/admin/organizations/:id/export",
+            get(authorization::admin_export),
         )
         .route(
             "/admin/organizations/:id/owners",

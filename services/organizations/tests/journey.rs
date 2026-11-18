@@ -465,7 +465,13 @@ async fn organization_lifecycle_journey() {
         .unwrap()
         .clone();
     assert_eq!(item["organization"]["lifecycleStatus"], "SUSPENDED");
-    assert_eq!(item["capabilities"], json!([]));
+    // A suspended organization grants nothing, except that OWNERs and ADMINs keep reading
+    // its audit history (1.6.0).
+    let caps = item["capabilities"].as_array().unwrap();
+    assert!(
+        caps.is_empty() || caps == &vec![json!("organization.audit.read")],
+        "{caps:?}"
+    );
     // Idempotent suspend.
     h.user(new_owner)
         .post(

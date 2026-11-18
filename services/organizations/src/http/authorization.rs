@@ -532,3 +532,96 @@ fn audit_items(rows: &[AuditRow], limit: i64) -> ApiResult<Response> {
         json!({ "items": items, "nextCursor": next }),
     ))
 }
+
+#[derive(Debug, FromQueryResult)]
+struct ExportDoc {
+    doc: Value,
+}
+
+/// Most audit events an export carries (newest first).
+pub const EXPORT_AUDIT_LIMIT: i64 = 10_000;
+
+/// Gap audit G11: everything the Organizations Service holds about one organization, as
+/// one JSON document: the organization and its profile, policies, memberships (with
+/// history), teams and team memberships, invitations (never their token) and the newest
+/// audit events. Identifiers only for people: names and emails of accounts live with
+/// the Account service.
+async fn export_document(state: &AppState, id: Uuid) -> ApiResult<Value> {
+    let row: Option<ExportDoc> = db::one(
+        &state.db,
+        "SELECT jsonb_build_object( \
+           'schemaVersion', 1, \
+           'exportedAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
+           'organization', (SELECT to_jsonb(o) FROM organizations o WHERE o.id = $1), \
+           'profile', (SELECT to_jsonb(p) FROM organization_profiles p WHERE p.organization_id = $1), \
+           'policies', (SELECT COALESCE(jsonb_agg(to_jsonb(x)), '[]'::jsonb) FROM organization_policies x WHERE x.organization_id = $1), \
+           'memberships', (SELECT COALESCE(jsonb_agg(to_jsonb(m) ORDER BY m.created_at), '[]'::jsonb) FROM organization_memberships m WHERE m.organization_id = $1), \
+           'membershipHistory', (SELECT COALESCE(jsonb_agg(to_jsonb(h)), '[]'::jsonb) FROM organization_membership_history h WHERE h.organization_id = $1), \
+           'teams', (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.created_at), '[]'::jsonb) FROM organization_teams t WHERE t.organization_id = $1), \
+           'teamMemberships', (SELECT COALESCE(jsonb_agg(to_jsonb(tm)), '[]'::jsonb) FROM organization_team_members tm WHERE tm.organization_id = $1), \
+           'invitations', (SELECT COALESCE(jsonb_agg(to_jsonb(i) - 'token_hash' ORDER BY i.created_at), '[]'::jsonb) FROM organization_invitations i WHERE i.organization_id = $1), \
+           'auditEvents', (SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a.seq DESC), '[]'::jsonb) FROM \
+               (SELECT * FROM organization_audit_events WHERE organization_id = $1 ORDER BY seq DESC LIMIT $2) a) \
+         ) AS doc",
+        vec![id.into(), EXPORT_AUDIT_LIMIT.into()],
+    )
+    .await?;
+    let doc = row.map(|r| r.doc).unwrap_or(Value::Null);
+    if doc["organization"].is_null() {
+        return Err(ApiError::new(ErrorCode::OrganizationNotFound));
+    }
+    Ok(doc)
+}
+
+/// `GET /internal/v1/organizations/{id}/export` — gap audit G11: the organization's data
+/// for its OWNER (`organization.lifecycle.manage`). Audited.
+pub async fn export(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationRead)?;
+    let user = caller.user()?;
+    authorize(&state.db, id, user, Capability::LifecycleManage, false).await?;
+    let doc = export_document(&state, id).await?;
+    let _ = user;
+    store::audit(
+        &state.db,
+        &caller.as_user(),
+        Utc::now(),
+        Some(id),
+        "organization.exported",
+        "ORGANIZATION",
+        Some(id),
+        json!({}),
+    )
+    .await?;
+    Ok(respond(StatusCode::OK, doc))
+}
+
+/// `GET /internal/v1/admin/organizations/{id}/export` — gap audit G11: the operator's
+/// export of an organization in any lifecycle state, archived included
+/// (`organization.administer`). Audited.
+pub async fn admin_export(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    store::org(&state.db, id, false)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    let doc = export_document(&state, id).await?;
+    store::audit(
+        &state.db,
+        &caller.as_operator(),
+        Utc::now(),
+        Some(id),
+        "organization.exported",
+        "ORGANIZATION",
+        Some(id),
+        json!({ "byOperator": true }),
+    )
+    .await?;
+    Ok(respond(StatusCode::OK, doc))
+}
