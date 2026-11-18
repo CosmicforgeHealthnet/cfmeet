@@ -75,6 +75,14 @@ class OtpRoute(unittest.TestCase):
             checks = journey(cr)
         self.assertEqual(checks['sign_in_email_recorded'], 'FAIL')
 
+    def test_the_route_is_recorded_not_judged(self):
+        """Production run 44218158768: every check PASS with sign_in_route NEW, yet failed."""
+        checks = journey(FakeCr(['NEW|%s|ROUTED' % uuid.uuid4()],
+                                service_rows='[{"status": "ACCEPTED", "provider": "resend"}]'))
+        self.assertEqual(checks['sign_in_route'], 'NEW')
+        self.assertTrue(eo.journey_passed(checks))
+        self.assertFalse(eo.journey_passed(dict(checks, sign_in_email_recorded='FAIL')))
+
     def test_the_address_never_reaches_sql_unescaped(self):
         self.assertNotIn("x'y", eo.address_hash_sql("x'y@example.com"))
 
