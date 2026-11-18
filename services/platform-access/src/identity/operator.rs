@@ -927,7 +927,7 @@ mod tests {
     fn the_action_vocabulary_is_the_tables() {
         // Kept in step with migrations 000003 / 000004 / 000005 / 000006 / 000008 (an
         // unknown code is refused there).
-        assert_eq!(OperatorAction::ALL.len(), 28);
+        assert_eq!(OperatorAction::ALL.len(), 29);
         assert_eq!(AuditTargetKind::ALL.len(), 7);
     }
 }
