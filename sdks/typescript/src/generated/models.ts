@@ -2576,6 +2576,8 @@ export namespace Communications {
     favorite: boolean;
     notifications: "ALL" | "MUTED" | "MENTIONS";
     version: number;
+    /** The contact's calling principal id while the relationship is CONNECTED (null otherwise). Lets a client match a contact to a call participant, for example to hide people already in a call from "Add people". */
+    principalId?: string | null;
   };
   export type ContactList = {
     schemaVersion?: 1;

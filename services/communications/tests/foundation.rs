@@ -469,6 +469,10 @@ async fn aliases_are_per_owner_and_removal_preserves_preferences_but_revokes_per
     let cb = h.state.list_contacts(&b, 10, Uuid::nil()).await.unwrap();
     let aid = Uuid::parse_str(ca["data"][0]["contactId"].as_str().unwrap()).unwrap();
     let bid = Uuid::parse_str(cb["data"][0]["contactId"].as_str().unwrap()).unwrap();
+    // A CONNECTED contact names the other person's calling principal (so clients can tell
+    // which contacts are already in a call), and only theirs.
+    assert_eq!(ca["data"][0]["principalId"], json!(b.principal_id));
+    assert_eq!(cb["data"][0]["principalId"], json!(a.principal_id));
     h.state.patch_contact(&a,aid,json!({"expectedVersion":1,"alias":"My saved name","favorite":true,"notifications":"MUTED"}),Uuid::new_v4()).await.unwrap();
     assert_eq!(
         h.state.contact_view(&a, aid).await.unwrap()["alias"],
@@ -492,6 +496,15 @@ async fn aliases_are_per_owner_and_removal_preserves_preferences_but_revokes_per
         .remove_contact(&a, aid, Uuid::new_v4())
         .await
         .unwrap();
+    // Once the relationship has ended the principal is no longer shown.
+    assert_eq!(
+        h.state
+            .contact_view(&b, bid)
+            .await
+            .map(|v| v["principalId"].clone())
+            .unwrap_or(Value::Null),
+        Value::Null
+    );
     assert!(
         !h.state
             .check_policy(&h.scope, &check(Action::MessageSend, &a, &b))
