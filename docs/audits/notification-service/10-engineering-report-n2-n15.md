@@ -411,6 +411,18 @@ The legacy paths are not retired: they are the failover and rollback target of e
 
 Q11, Q14 and Q15 remain COMPLETED as recorded in Document 9 §7.8 (verified: the certify evidence of run 43792702821 and the activation runs 43788212474 / 43788404790 are unchanged). Q1–Q4 and Q17–Q18 need E1 (email baselines on a working transport). Q16 (7-day memory minimum) is still a single sample; the dark release adds 512 MiB of limits (§4).
 
+**Final record (2026-11-18 02:58 UTC, `diagnose` 44227694037, after the clean OTP acceptance 44227457993 on `d4ec628`).**
+
+| Category / channel | Through the service | Outcome |
+|---|---|---|
+| `AUTH_VERIFICATION` email (CRITICAL) | 8 sign-in codes, each under one X6 lease and completed with X7 | Resend: 2 `DELIVERED`, 1 `ACCEPTED`, 5 `DELAYED` |
+| `SECURITY_DEVICE_STEP_UP` email (CRITICAL) | 1 step-up code (the acceptance's account deletion), leased and completed | `DELIVERED` |
+| `ORGANIZATION_UPDATES` in-app | 7 deliveries, 7 inbox items | `SENT` |
+| Resend webhooks | 25 signed events forwarded by Meeting to the service callback | accepted |
+| Web Push | 0 registrations in production | nothing to deliver |
+
+The OTP acceptance 44227457993 passed every check with the code decided `NEW`. The two codes lost in the incident remain `EXPIRED`; there is no other failure.
+
 ## 8. Verdict
 
 **`CFMEET_UNIFIED_NOTIFICATION_SERVICE_PRODUCTION_ACTIVE` — for in-app and email.** The basis:
@@ -418,11 +430,11 @@ Q11, Q14 and Q15 remain COMPLETED as recorded in Document 9 §7.8 (verified: the
 - the service is released and certified, and every activation of §4.4 is recorded;
 - real production delivery has been accepted:
   - in-app: `notifications-acceptance` 7/7;
-  - email: real sign-in codes through the CRITICAL lane, Resend DELIVERED with signed webhooks, and the fallback drill DELIVERED.
+  - email: real sign-in and step-up codes through the CRITICAL lane, Resend DELIVERED with signed webhooks, and the fallback drill DELIVERED.
 
 **Qualified, and not claimed beyond this:**
 - **Web Push is live but has no delivery evidence.** Production has no browser push registration to deliver to.
 - **APNs and FCM are not configured.** Their credentials do not exist (§5).
-- **No delivery is evidenced yet for meeting invitations, organization invitations, meeting notifications or the device notices.** They run on the service, but no real one has occurred since the re-promotion.
+- **No delivery is evidenced yet for meeting invitations, organization invitations, meeting notifications or the device-linked notice.** They run on the service, but no real one has occurred since the re-promotion. Sign-in and step-up codes are evidenced.
 - **No time-based acceptance window has passed (§6).** `OPERATIONALLY_ACCEPTED` and `LEGACY_RETIRED` are not claimed.
 
