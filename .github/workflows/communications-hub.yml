@@ -139,4 +139,4 @@ jobs:
             cargo build --manifest-path "services/$service/Cargo.toml" --workspace --bins --locked
           done
       - name: Real backend journey with isolated owner databases and signed service authentication
-        run: cargo test --manifest-path certification/Cargo.toml --locked --features personal-communications-e2e --test personal_communications -- --nocapture
+        run: cargo test --manifest-path certification/Cargo.toml --locked --features personal-communications-e2e --test personal_communications -- --nocapture --test-threads=2
