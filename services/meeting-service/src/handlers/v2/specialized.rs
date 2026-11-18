@@ -4,7 +4,7 @@
 use axum::{extract::State, http::StatusCode, Json};
 use uuid::Uuid;
 
-use super::{V2Json, V2Path};
+use super::{V2Json, V2Path, V2Query};
 use crate::{dto::v2::*, error::ApiResult, services::actor::ActorContext, state::AppState};
 
 // ---------------------------- profile policy -------------------------------
@@ -78,8 +78,9 @@ pub async fn update_profile_policy(
 /// custom fields) are required or accepted is set by the meeting profile. Repeating a request with
 /// the same `idempotencyKey` returns 200 with the existing registration and no token. Returns
 /// REGISTRATION_DISABLED (404) when registration is not available for the space and
-/// REGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled; rate-limited per
-/// meeting space.
+/// REGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's
+/// registration deadline has passed, and REGISTRATION_FULL when its capacity is reached;
+/// rate-limited per meeting space.
 #[utoipa::path(
     post, path = "/api/v2/meeting-spaces/{id}/registrations", tag = "Registrations (v2)", operation_id = "v2_register",
     params(("id" = Uuid, Path, description = "Meeting space id")),
@@ -89,7 +90,7 @@ pub async fn update_profile_policy(
         (status = 200, description = "Idempotent repeat", body = RegistrationCreated),
         (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
         (status = 404, description = "REGISTRATION_DISABLED", body = ErrorEnvelope),
-        (status = 409, description = "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE", body = ErrorEnvelope),
+        (status = 409, description = "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL", body = ErrorEnvelope),
         (status = 429, description = "RATE_LIMITED", body = ErrorEnvelope),
     ),
     security((), ("bearer_auth" = []))
@@ -115,12 +116,13 @@ pub async fn register(
 
 /// Registrations of a meeting space (organizer view).
 ///
-/// Returns up to 500 registrations of the space, newest first, including cancelled ones, with the
-/// attendee details collected at registration. Admission tokens are never returned. Requires a
+/// Returns the registrations of the space, newest first, including cancelled ones, with the
+/// attendee details collected at registration, `limit` (1-500, default 100) at a time; pass
+/// `nextCursor` as `after` for the next page. Admission tokens are never returned. Requires a
 /// signed-in owner, host or co-host of the space and webinar mode enabled.
 #[utoipa::path(
     get, path = "/api/v2/meeting-spaces/{id}/registrations", tag = "Registrations (v2)", operation_id = "v2_list_registrations",
-    params(("id" = Uuid, Path, description = "Meeting space id")),
+    params(("id" = Uuid, Path, description = "Meeting space id"), RegistrationListQuery),
     responses(
         (status = 200, description = "Registrations", body = RegistrationListResponse),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
@@ -131,9 +133,16 @@ pub async fn list_registrations(
     State(state): State<AppState>,
     actor: ActorContext,
     V2Path(id): V2Path<Uuid>,
+    V2Query(q): V2Query<RegistrationListQuery>,
 ) -> ApiResult<Json<RegistrationListResponse>> {
+    let (registrations, next_cursor) = state
+        .meeting
+        .registrations
+        .list(&actor, id, q.after, q.limit)
+        .await?;
     Ok(Json(RegistrationListResponse {
-        registrations: state.meeting.registrations.list(&actor, id).await?,
+        registrations,
+        next_cursor,
     }))
 }
 

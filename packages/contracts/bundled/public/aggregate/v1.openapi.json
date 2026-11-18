@@ -23008,7 +23008,7 @@
           "meetings"
         ],
         "summary": "Registrations of a meeting space (organizer view).",
-        "description": "Returns up to 500 registrations of the space, newest first, including cancelled ones, with the\nattendee details collected at registration. Admission tokens are never returned. Requires a\nsigned-in owner, host or co-host of the space and webinar mode enabled.",
+        "description": "Returns the registrations of the space, newest first, including cancelled ones, with the\nattendee details collected at registration, `limit` (1-500, default 100) at a time; pass\n`nextCursor` as `after` for the next page. Admission tokens are never returned. Requires a\nsigned-in owner, host or co-host of the space and webinar mode enabled.",
         "operationId": "v2_list_registrations",
         "parameters": [
           {
@@ -23019,6 +23019,33 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Last registration id of the previous page.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-500 (default 100).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
             }
           }
         ],
@@ -23060,7 +23087,7 @@
           "meetings"
         ],
         "summary": "Register for a webinar / town hall (public when the profile enables registration).",
-        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled; rate-limited per\nmeeting space.",
+        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
         "operationId": "v2_register",
         "parameters": [
           {
@@ -23126,7 +23153,7 @@
             }
           },
           "409": {
-            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE",
+            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL",
             "content": {
               "application/json": {
                 "schema": {
@@ -72359,6 +72386,7 @@
           "INTELLIGENCE_PROVIDER_UNAVAILABLE",
           "REGISTRATION_DISABLED",
           "REGISTRATION_CLOSED",
+          "REGISTRATION_FULL",
           "REGISTRATION_NOT_FOUND",
           "ADMISSION_TOKEN_INVALID",
           "BACKSTAGE_ACCESS_DENIED",
@@ -75703,6 +75731,14 @@
           "registrations"
         ],
         "properties": {
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Pass as `after` to get the next page; `null` on the last page."
+          },
           "registrations": {
             "type": "array",
             "items": {
@@ -75722,11 +75758,31 @@
           "tokenMaxUses"
         ],
         "properties": {
+          "capacity": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gap audit M10: most active registrations accepted (per occurrence, or for the\nwhole series); 0 = no limit. At most 100000.",
+            "minimum": 0
+          },
+          "closesMinutesBeforeStart": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gap audit M10: registration closes this many minutes before the occurrence's\nscheduled start (0 = open until the occurrence ends).",
+            "minimum": 0
+          },
           "customFields": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/meetings.CustomRegistrationField"
             }
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Gap audit M10: registration closes at this time, whatever the occurrence."
           },
           "email": {
             "$ref": "#/components/schemas/meetings.FieldRequirement"

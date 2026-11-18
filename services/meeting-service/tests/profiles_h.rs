@@ -1801,3 +1801,106 @@ async fn gap_viewers_do_not_see_other_attendees_in_the_roster() {
         .await;
     assert!(all.as_array().unwrap().len() >= 3, "{all}");
 }
+
+/// Gap audit M10: registration has a capacity and a deadline, and the organizer's list
+/// pages with a cursor instead of stopping at 500.
+#[tokio::test]
+async fn h_m10_registration_capacity_deadline_and_paging() {
+    let app = app!();
+    let owner = app.user("owner").await;
+    let (sid, cid) = live(&app, &owner, webinar()).await;
+    let (s, v) = set_profile(
+        &app,
+        &owner,
+        sid,
+        json!({ "registration": { "capacity": 2 } }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    let mut ids = vec![];
+    for name in ["Ann", "Ben"] {
+        let (s, v) = register(
+            &app,
+            sid,
+            json!({ "displayName": name, "conferenceId": cid }),
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        ids.push(v["registrationId"].as_str().unwrap().to_string());
+    }
+    let (s, v) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Cat", "conferenceId": cid }),
+    )
+    .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "REGISTRATION_FULL".into()),
+        "{v}"
+    );
+
+    // A cancellation frees a place.
+    let (s, v) = app
+        .delete(
+            format!("/api/v2/meeting-spaces/{sid}/registrations/{}", ids[0]),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let (s, v) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Cat", "conferenceId": cid }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+
+    // Paging: one at a time, newest first, every registration exactly once.
+    let mut seen = vec![];
+    let mut after: Option<String> = None;
+    loop {
+        let uri = match &after {
+            Some(a) => format!("/api/v2/meeting-spaces/{sid}/registrations?limit=1&after={a}"),
+            None => format!("/api/v2/meeting-spaces/{sid}/registrations?limit=1"),
+        };
+        let (s, v) = app.get(uri, Auth::Bearer(&owner.token)).await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        let page = v["registrations"].as_array().unwrap();
+        assert!(page.len() <= 1);
+        seen.extend(
+            page.iter()
+                .map(|r| r["id"].as_str().unwrap().to_string()),
+        );
+        match v["nextCursor"].as_str() {
+            Some(n) => after = Some(n.to_string()),
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 3, "{seen:?}");
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 3);
+
+    // A passed deadline closes registration.
+    let (s, v) = set_profile(
+        &app,
+        &owner,
+        sid,
+        json!({ "registration": { "capacity": 0, "deadline": "2020-01-01T00:00:00Z" } }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = register(
+        &app,
+        sid,
+        json!({ "displayName": "Dan", "conferenceId": cid }),
+    )
+    .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "REGISTRATION_CLOSED".into()),
+        "{v}"
+    );
+}

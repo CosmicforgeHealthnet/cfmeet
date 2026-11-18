@@ -4575,13 +4575,17 @@ class RegistrationListResponse {
   const RegistrationListResponse.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory RegistrationListResponse.create({required List<RegistrationView> registrations}) =>
+  factory RegistrationListResponse.create({String? nextCursor, required List<RegistrationView> registrations}) =>
       RegistrationListResponse.fromJson(<String, Object?>{
+        if (nextCursor != null) 'nextCursor': nextCursor,
         'registrations': registrations.map((e) => e.toJson()).toList(),
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Pass as `after` to get the next page; `null` on the last page.
+  String? get nextCursor => json['nextCursor'] as String?;
 
   List<RegistrationView> get registrations => (json['registrations']! as List<Object?>).map((e) => RegistrationView.fromJson(e! as Map<String, Object?>)).toList();
 
@@ -4593,9 +4597,12 @@ class RegistrationProfile {
   const RegistrationProfile.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory RegistrationProfile.create({required List<CustomRegistrationField> customFields, required FieldRequirement email, required bool enabled, required FieldRequirement organization, required int tokenMaxUses, required int tokenTtlHours}) =>
+  factory RegistrationProfile.create({int? capacity, int? closesMinutesBeforeStart, required List<CustomRegistrationField> customFields, String? deadline, required FieldRequirement email, required bool enabled, required FieldRequirement organization, required int tokenMaxUses, required int tokenTtlHours}) =>
       RegistrationProfile.fromJson(<String, Object?>{
+        if (capacity != null) 'capacity': capacity,
+        if (closesMinutesBeforeStart != null) 'closesMinutesBeforeStart': closesMinutesBeforeStart,
         'customFields': customFields.map((e) => e.toJson()).toList(),
+        if (deadline != null) 'deadline': deadline,
         'email': email,
         'enabled': enabled,
         'organization': organization,
@@ -4606,7 +4613,16 @@ class RegistrationProfile {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
+  /// Gap audit M10: most active registrations accepted (per occurrence, or for the whole series); 0 = no limit. At most 100000.
+  int? get capacity => (json['capacity'] as num?)?.toInt();
+
+  /// Gap audit M10: registration closes this many minutes before the occurrence's scheduled start (0 = open until the occurrence ends).
+  int? get closesMinutesBeforeStart => (json['closesMinutesBeforeStart'] as num?)?.toInt();
+
   List<CustomRegistrationField> get customFields => (json['customFields']! as List<Object?>).map((e) => CustomRegistrationField.fromJson(e! as Map<String, Object?>)).toList();
+
+  /// Gap audit M10: registration closes at this time, whatever the occurrence.
+  String? get deadline => json['deadline'] as String?;
 
   FieldRequirement get email => json['email']! as String;
 

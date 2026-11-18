@@ -63,6 +63,19 @@ pub struct TranscriptionJobListResponse {
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationListResponse {
     pub registrations: Vec<RegistrationView>,
+    /// Pass as `after` to get the next page; `null` on the last page.
+    pub next_cursor: Option<Uuid>,
+}
+
+/// Paging of the organizer's registration list (gap audit M10).
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct RegistrationListQuery {
+    /// Last registration id of the previous page.
+    pub after: Option<Uuid>,
+    /// Page size, 1-500 (default 100).
+    pub limit: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

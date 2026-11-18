@@ -472,6 +472,20 @@ impl RegistrationService {
             inc(&OM.registrations_rejected);
             return Err(Self::disabled());
         }
+        // Gap audit M10: registration deadline (absolute, or before the occurrence).
+        let closed = |at: chrono::DateTime<Utc>| Utc::now() >= at;
+        let before_start = conference
+            .as_ref()
+            .and_then(|c| c.scheduled_start_at)
+            .filter(|_| rp.closes_minutes_before_start > 0)
+            .map(|start| start - Duration::minutes(rp.closes_minutes_before_start as i64));
+        if rp.deadline.is_some_and(closed) || before_start.is_some_and(closed) {
+            inc(&OM.registrations_rejected);
+            return Err(ApiError::domain(
+                ErrorCode::RegistrationClosed,
+                "Registration for this session is closed",
+            ));
+        }
         // Flood protection: per meeting space (registration is pre-identity).
         self.core
             .collab_limiter
@@ -584,6 +598,30 @@ impl RegistrationService {
         let invitation_id = Uuid::new_v4();
         let registration_id = Uuid::new_v4();
         let txn = self.core.db.begin().await?;
+        // Gap audit M10: capacity, counted under a per-space lock so two requests never
+        // both take the last place.
+        if rp.capacity > 0 {
+            txn.execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT pg_advisory_xact_lock(hashtext('webinar-registrations:' || $1::text))",
+                [space.id.into()],
+            ))
+            .await?;
+            let mut held = webinar_registrations::Entity::find()
+                .filter(webinar_registrations::Column::MeetingSpaceId.eq(space.id))
+                .filter(webinar_registrations::Column::Status.eq("REGISTERED"));
+            held = match conference.as_ref() {
+                Some(c) => held.filter(webinar_registrations::Column::ConferenceId.eq(c.id)),
+                None => held.filter(webinar_registrations::Column::ConferenceId.is_null()),
+            };
+            if held.count(&txn).await? >= rp.capacity as u64 {
+                inc(&OM.registrations_rejected);
+                return Err(ApiError::domain(
+                    ErrorCode::RegistrationFull,
+                    "This session is fully booked",
+                ));
+            }
+        }
         // Gap audit M4: an address is held by whoever registered it first only until its
         // verified owner shows up. A signed-in account whose verified email is the
         // registered one reclaims it: the earlier registration (possibly made by someone
@@ -746,21 +784,50 @@ impl RegistrationService {
         Ok(space)
     }
 
+    /// Gap audit M10: newest first, `limit` (1-500, default 100) at a time; `after` is the
+    /// last registration id of the previous page. Returns the page and the next cursor.
     pub async fn list(
         &self,
         ctx: &ActorContext,
         space_id: Uuid,
-    ) -> ApiResult<Vec<RegistrationView>> {
+        after: Option<Uuid>,
+        limit: Option<u64>,
+    ) -> ApiResult<(Vec<RegistrationView>, Option<Uuid>)> {
         let space = self.host_space(ctx, space_id).await?;
-        Ok(webinar_registrations::Entity::find()
-            .filter(webinar_registrations::Column::MeetingSpaceId.eq(space.id))
+        let limit = limit.unwrap_or(100).clamp(1, 500);
+        let mut q = webinar_registrations::Entity::find()
+            .filter(webinar_registrations::Column::MeetingSpaceId.eq(space.id));
+        if let Some(after) = after {
+            let cursor = self.scoped(space.id, after).await.map_err(|_| {
+                ApiError::domain(
+                    ErrorCode::ValidationError,
+                    "after is not a registration of this space",
+                )
+            })?;
+            q = q.filter(
+                sea_orm::Condition::any()
+                    .add(webinar_registrations::Column::CreatedAt.lt(cursor.created_at))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(webinar_registrations::Column::CreatedAt.eq(cursor.created_at))
+                            .add(webinar_registrations::Column::Id.lt(cursor.id)),
+                    ),
+            );
+        }
+        let rows = q
             .order_by_desc(webinar_registrations::Column::CreatedAt)
-            .limit(500)
+            .order_by_desc(webinar_registrations::Column::Id)
+            .limit(limit + 1)
             .all(&self.core.db)
-            .await?
-            .iter()
-            .map(RegistrationView::of)
-            .collect())
+            .await?;
+        let more = rows.len() as u64 > limit;
+        let page: Vec<_> = rows.into_iter().take(limit as usize).collect();
+        let next = if more {
+            page.last().map(|r| r.id)
+        } else {
+            None
+        };
+        Ok((page.iter().map(RegistrationView::of).collect(), next))
     }
 
     async fn scoped(&self, space_id: Uuid, id: Uuid) -> ApiResult<webinar_registrations::Model> {
