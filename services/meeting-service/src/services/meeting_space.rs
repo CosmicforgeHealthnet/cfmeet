@@ -1121,7 +1121,19 @@ impl MeetingSpaceService {
         let updated = am.update(&txn).await?;
 
         if timezone_changed {
+            // Gap audit M3: attendees of the moved occurrences are told.
+            let upcoming =
+                crate::services::notifications::upcoming_occurrences(&txn, updated.id, Utc::now())
+                    .await?;
             recurrence::follow_space_timezone(&txn, &updated, &self.core.config).await?;
+            crate::services::notifications::announce_series_change(
+                &txn,
+                &self.core.config.notifications,
+                updated.id,
+                &upcoming,
+                ctx.user_id(),
+            )
+            .await?;
         }
 
         let audit_actor = AuditActor::from(ctx);
@@ -1224,7 +1236,17 @@ impl MeetingSpaceService {
         am.updated_at = Set(now);
         let updated = am.update(&txn).await?;
         // No new occurrences: end the series and cancel unstarted future occurrences.
+        let upcoming = crate::services::notifications::upcoming_occurrences(&txn, id, now).await?;
         let cancelled = recurrence::stop_series_for_archive(&txn, id, now).await?;
+        // Gap audit M3: the next occurrences' attendees are told.
+        crate::services::notifications::announce_series_change(
+            &txn,
+            &self.core.config.notifications,
+            id,
+            &upcoming,
+            ctx.user_id(),
+        )
+        .await?;
         let ended = conferences
             .end_live_for_archive(&txn, id, &audit_actor, reason)
             .await?;

@@ -845,3 +845,78 @@ async fn s11_a_poison_or_suppressed_recipient_never_blocks_the_others() {
     assert_eq!(h.tick().await.sent, 0);
     assert_eq!(h.mail.sent().len(), 1);
 }
+
+/// Gap audit M3: series-level changes are announced per occurrence with the existing
+/// durable notices: a timezone move reschedules the next occurrences, and ending the
+/// series cancels them (they stay, cancelled, instead of vanishing silently).
+#[tokio::test]
+async fn m3_series_changes_are_announced() {
+    let h = some!(Harness::new(true).await);
+    let app = &h.app;
+    let owner = app.user("owner").await;
+    let space = app
+        .create_space(
+            &owner,
+            json!({ "title": "Daily standup", "timezone": "Europe/London" }),
+        )
+        .await;
+    let sid = uuid(&space["id"]);
+    let start = (Utc::now() + Duration::days(1))
+        .naive_utc()
+        .date()
+        .and_hms_opt(9, 0, 0)
+        .unwrap();
+    let (s, v) = app
+        .call(
+            axum::http::Method::PUT,
+            &format!("/api/v2/meeting-spaces/{sid}/recurrence"),
+            Auth::Bearer(&owner.token),
+            Some(json!({ "rrule": "FREQ=DAILY;COUNT=5", "startLocal": start, "durationMinutes": 15 })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let count = |kind: &'static str| {
+        let app = app;
+        async move {
+            app.scalar(&format!(
+                "SELECT count(*) FROM meeting_notifications WHERE meeting_space_id = '{sid}' AND kind = '{kind}'"
+            ))
+            .await
+        }
+    };
+    assert_eq!(count("CONFERENCE_RESCHEDULED").await, 0);
+
+    // Timezone move: same wall-clock time elsewhere, every upcoming occurrence moves.
+    let (_, current) = app
+        .get(
+            format!("/api/v2/meeting-spaces/{sid}"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    let (s, v) = app
+        .patch(
+            format!("/api/v2/meeting-spaces/{sid}"),
+            Auth::Bearer(&owner.token),
+            json!({ "version": current["version"], "timezone": "America/New_York" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(count("CONFERENCE_RESCHEDULED").await, 5);
+
+    // Ending the series cancels the remaining occurrences, each announced once.
+    let (s, v) = app
+        .delete(
+            format!("/api/v2/meeting-spaces/{sid}/recurrence"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert!(s.is_success(), "{s} {v}");
+    assert_eq!(count("CONFERENCE_CANCELLED").await, 5);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_sessions WHERE meeting_space_id = '{sid}' AND status = 'CANCELLED'"
+        ))
+        .await,
+        5
+    );
+}

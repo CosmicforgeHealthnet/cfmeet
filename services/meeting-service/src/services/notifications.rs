@@ -806,6 +806,84 @@ pub async fn record_cancelled<C: ConnectionTrait>(
     Ok(())
 }
 
+/// Gap audit M3: how far ahead, and how many, occurrences a series-level change announces.
+pub const SERIES_NOTICE_HORIZON_DAYS: i64 = 30;
+pub const SERIES_NOTICE_MAX: u64 = 20;
+
+/// Gap audit M3: the space's unstarted v2 occurrences within the notice horizon (soonest
+/// first), captured before a series-level change.
+pub async fn upcoming_occurrences<C: ConnectionTrait>(
+    conn: &C,
+    space_id: Uuid,
+    now: DateTime<Utc>,
+) -> ApiResult<Vec<conference_sessions::Model>> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+    Ok(conference_sessions::Entity::find()
+        .filter(conference_sessions::Column::MeetingSpaceId.eq(space_id))
+        .filter(conference_sessions::Column::Status.eq(crate::domain::ConferenceStatus::Created))
+        .filter(conference_sessions::Column::Origin.eq(crate::domain::RecordOrigin::V2))
+        .filter(conference_sessions::Column::ScheduledStartAt.gt(now))
+        .filter(
+            conference_sessions::Column::ScheduledStartAt
+                .lte(now + chrono::Duration::days(SERIES_NOTICE_HORIZON_DAYS)),
+        )
+        .order_by_asc(conference_sessions::Column::ScheduledStartAt)
+        .limit(SERIES_NOTICE_MAX)
+        .all(conn)
+        .await?)
+}
+
+/// Gap audit M3: after a series-level change (series edited or ended, timezone moved,
+/// exception, space archived), announce what happened to each occurrence captured
+/// before it: cancelled → a cancellation notice; moved, or replaced by a re-generated
+/// occurrence → a reschedule notice (paired in order). Same durable jobs, dedupe keys and
+/// Notification Service routing as single-occurrence notices; no-op when disabled.
+pub async fn announce_series_change<C: ConnectionTrait>(
+    conn: &C,
+    config: &NotificationConfig,
+    space_id: Uuid,
+    before: &[conference_sessions::Model],
+    actor_user_id: Option<Uuid>,
+) -> ApiResult<()> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    if !config.email_enabled || before.is_empty() {
+        return Ok(());
+    }
+    let now = Utc::now();
+    let ids: Vec<Uuid> = before.iter().map(|c| c.id).collect();
+    let still: std::collections::HashMap<Uuid, conference_sessions::Model> =
+        conference_sessions::Entity::find()
+            .filter(conference_sessions::Column::Id.is_in(ids.clone()))
+            .all(conn)
+            .await?
+            .into_iter()
+            .map(|c| (c.id, c))
+            .collect();
+    let mut replacements = upcoming_occurrences(conn, space_id, now)
+        .await?
+        .into_iter()
+        .filter(|c| !ids.contains(&c.id));
+    for old in before {
+        match still.get(&old.id) {
+            Some(now_row) if now_row.status == crate::domain::ConferenceStatus::Cancelled => {
+                record_cancelled(conn, config, now_row, actor_user_id).await?;
+            }
+            Some(now_row) if now_row.scheduled_start_at != old.scheduled_start_at => {
+                record_rescheduled(conn, config, old, now_row, actor_user_id).await?;
+            }
+            Some(_) => {}
+            None => {
+                if let Some(new) = replacements.next() {
+                    if new.scheduled_start_at != old.scheduled_start_at {
+                        record_rescheduled(conn, config, old, &new, actor_user_id).await?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// One reminder per conference and scheduled start, for v2 occurrences of active spaces
 /// starting within the lead time. Idempotent across instances and ticks.
 pub async fn enqueue_due_reminders(
