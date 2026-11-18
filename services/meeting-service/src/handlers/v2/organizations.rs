@@ -2519,3 +2519,39 @@ pub async fn update_organization_policy(
     )
     .await
 }
+
+/// Meeting spaces of an organization (managers).
+///
+/// Gap audit G13: lists every meeting space of the organization, whatever its access policy or
+/// security profile (INVITE_ONLY, healthcare and high-security spaces included), newest first,
+/// `limit` (1-200, default 50) at a time; pass `nextCursor` as `after` for the next page. Archived
+/// spaces are left out unless `includeArchived=true`. Only governance fields are returned: no
+/// passcodes, invitations, participants or content. Requires `meetings.organization.manage` in
+/// the organization (Organizations authoritative mode); anyone else gets ORGANIZATION_NOT_FOUND
+/// or PERMISSION_DENIED as for other organization operations.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/meeting-spaces", tag = "Organizations (v2)", operation_id = "v2_list_organization_meeting_spaces",
+    params(("id" = Uuid, Path, description = "Organization id"), OrganizationMeetingSpacesQuery),
+    responses(
+        (status = 200, description = "Meeting spaces", body = OrganizationMeetingSpacePage),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_organization_meeting_spaces(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+    super::V2Query(q): super::V2Query<OrganizationMeetingSpacesQuery>,
+) -> ApiResult<Json<OrganizationMeetingSpacePage>> {
+    Ok(Json(
+        state
+            .meeting
+            .spaces
+            .list_for_organization(&actor, id, &q)
+            .await?,
+    ))
+}

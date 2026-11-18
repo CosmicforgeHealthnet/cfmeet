@@ -279,6 +279,46 @@ pub struct MeetingSpaceListResponse {
     pub next_cursor: Option<String>,
 }
 
+/// Gap audit G13: one meeting space of an organization, as its managers oversee it
+/// (whatever its access policy or security profile). Governance fields only: no
+/// passcode, invitation, participant or content data.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationMeetingSpace {
+    pub id: Uuid,
+    pub title: String,
+    pub owner_user_id: Option<Uuid>,
+    pub meeting_type: MeetingType,
+    pub access_policy: AccessPolicy,
+    pub security_profile: SecurityProfile,
+    pub status: SpaceStatus,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// `GET /api/v2/organizations/{id}/meeting-spaces` page (gap audit G13).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationMeetingSpacePage {
+    pub items: Vec<OrganizationMeetingSpace>,
+    /// Pass as `after` for the next page; `null` on the last page.
+    pub next_cursor: Option<Uuid>,
+}
+
+/// Paging and filter of an organization's meeting spaces (gap audit G13).
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct OrganizationMeetingSpacesQuery {
+    /// Last space id of the previous page.
+    pub after: Option<Uuid>,
+    /// Page size, 1-200 (default 50).
+    pub limit: Option<u64>,
+    /// Include archived spaces (default false).
+    pub include_archived: Option<bool>,
+}
+
 /// `GET /api/v2/meeting-spaces` paging (both optional; omitting both keeps the legacy
 /// complete list).
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]

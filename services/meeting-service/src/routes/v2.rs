@@ -563,6 +563,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(organizations::list_organization_members),
         )
         .route(
+            "/organizations/:id/meeting-spaces",
+            get(organizations::list_organization_meeting_spaces),
+        )
+        .route(
             "/organizations/:id/members/me/leave",
             post(organizations::leave_organization),
         )

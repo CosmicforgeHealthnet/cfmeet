@@ -682,6 +682,89 @@ impl MeetingSpaceService {
     /// MTG-018: a constant number of queries (spaces, memberships, canonical conferences)
     /// for any page. `page = None` keeps the legacy complete list; `Some((cursor, limit))`
     /// returns one page and the next cursor.
+    /// Gap audit G13: every meeting space of `organization` (INVITE_ONLY, healthcare and
+    /// high-security ones included), newest first, for a caller the Organizations Service
+    /// grants `meetings.organization.manage` there now. Governance fields only. Outside
+    /// authoritative mode this is FEATURE_DISABLED; Organizations unreachable is 503.
+    pub async fn list_for_organization(
+        &self,
+        actor: &ActorContext,
+        organization: Uuid,
+        q: &crate::dto::v2::OrganizationMeetingSpacesQuery,
+    ) -> ApiResult<crate::dto::v2::OrganizationMeetingSpacePage> {
+        use crate::dto::v2::{OrganizationMeetingSpace, OrganizationMeetingSpacePage};
+        let authority = crate::services::organization_policy::authoritative(&self.core)
+            .ok_or_else(|| {
+                ApiError::domain(
+                    ErrorCode::FeatureDisabled,
+                    "Organization oversight needs the Organizations Service",
+                )
+            })?;
+        let user = actor
+            .registered()
+            .ok_or_else(|| permission_denied("Sign in to oversee organization meetings"))?;
+        crate::services::workspaces::require_organization_capability(
+            authority,
+            &crate::services::organizations_authority::ActingUser::of(user),
+            organization,
+            crate::services::workspaces::OrganizationFeature::Meetings,
+            Some(MEETINGS_ORGANIZATION_MANAGE),
+        )
+        .await?;
+        let limit = q.limit.unwrap_or(50).clamp(1, 200);
+        let mut find = meeting_spaces::Entity::find()
+            .filter(meeting_spaces::Column::OrganizationId.eq(organization))
+            .filter(meeting_spaces::Column::Status.ne(SpaceStatus::Deleted));
+        if !q.include_archived.unwrap_or(false) {
+            find = find.filter(meeting_spaces::Column::Status.ne(SpaceStatus::Archived));
+        }
+        if let Some(after) = q.after {
+            let cursor = meeting_spaces::Entity::find_by_id(after)
+                .filter(meeting_spaces::Column::OrganizationId.eq(organization))
+                .one(&self.core.db)
+                .await?
+                .ok_or_else(|| validation("after is not a meeting space of this organization"))?;
+            find = find.filter(
+                sea_orm::Condition::any()
+                    .add(meeting_spaces::Column::CreatedAt.lt(cursor.created_at))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(meeting_spaces::Column::CreatedAt.eq(cursor.created_at))
+                            .add(meeting_spaces::Column::Id.lt(cursor.id)),
+                    ),
+            );
+        }
+        let rows = find
+            .order_by_desc(meeting_spaces::Column::CreatedAt)
+            .order_by_desc(meeting_spaces::Column::Id)
+            .limit(limit + 1)
+            .all(&self.core.db)
+            .await?;
+        let more = rows.len() as u64 > limit;
+        let items: Vec<OrganizationMeetingSpace> = rows
+            .into_iter()
+            .take(limit as usize)
+            .map(|s| OrganizationMeetingSpace {
+                id: s.id,
+                title: s.title,
+                owner_user_id: s.owner_user_id,
+                meeting_type: s.meeting_type,
+                access_policy: s.access_policy,
+                security_profile: s.security_profile,
+                status: s.status,
+                created_at: s.created_at,
+                updated_at: s.updated_at,
+                archived_at: s.archived_at,
+            })
+            .collect();
+        let next_cursor = if more {
+            items.last().map(|i| i.id)
+        } else {
+            None
+        };
+        Ok(OrganizationMeetingSpacePage { items, next_cursor })
+    }
+
     pub async fn list_for_actor(
         &self,
         ctx: &ActorContext,

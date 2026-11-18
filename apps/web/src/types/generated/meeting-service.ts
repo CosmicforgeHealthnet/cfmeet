@@ -2115,6 +2115,31 @@ export interface OrganizationLifecycleRequest {
   expectedVersion?: number | null;
 }
 
+/**
+ * Gap audit G13: one meeting space of an organization, as its managers oversee it
+ * (whatever its access policy or security profile). Governance fields only: no
+ * passcode, invitation, participant or content data.
+ */
+export interface OrganizationMeetingSpace {
+  accessPolicy: AccessPolicy;
+  archivedAt?: string | null;
+  createdAt: string;
+  id: string;
+  meetingType: MeetingType;
+  ownerUserId?: string | null;
+  securityProfile: SecurityProfile;
+  status: SpaceStatus;
+  title: string;
+  updatedAt: string;
+}
+
+/** `GET /api/v2/organizations/{id}/meeting-spaces` page (gap audit G13). */
+export interface OrganizationMeetingSpacePage {
+  items: Array<OrganizationMeetingSpace>;
+  /** Pass as `after` for the next page; `null` on the last page. */
+  nextCursor?: string | null;
+}
+
 
 export interface OrganizationMemberResponse {
   createdAt: string;
@@ -4014,6 +4039,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}/audit-events": "v2_list_organization_audit_events",
   "GET /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_get",
   "GET /api/v2/organizations/{id}/invitations": "v2_list_organization_invitations",
+  "GET /api/v2/organizations/{id}/meeting-spaces": "v2_list_organization_meeting_spaces",
   "GET /api/v2/organizations/{id}/members": "v2_list_organization_members",
   "GET /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_get",
   "GET /api/v2/organizations/{id}/policies": "v2_get_organization_policy",

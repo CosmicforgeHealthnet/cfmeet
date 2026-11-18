@@ -19100,6 +19100,118 @@
         ]
       }
     },
+    "/api/v2/organizations/{id}/meeting-spaces": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Meeting spaces of an organization (managers).",
+        "description": "Gap audit G13: lists every meeting space of the organization, whatever its access policy or\nsecurity profile (INVITE_ONLY, healthcare and high-security spaces included), newest first,\n`limit` (1-200, default 50) at a time; pass `nextCursor` as `after` for the next page. Archived\nspaces are left out unless `includeArchived=true`. Only governance fields are returned: no\npasscodes, invitations, participants or content. Requires `meetings.organization.manage` in\nthe organization (Organizations authoritative mode); anyone else gets ORGANIZATION_NOT_FOUND\nor PERMISSION_DENIED as for other organization operations.",
+        "operationId": "v2_list_organization_meeting_spaces",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Last space id of the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "description": "Include archived spaces (default false).",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting spaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMeetingSpacePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations/{id}/members": {
       "get": {
         "tags": [
@@ -28213,6 +28325,80 @@
             "type": "integer",
             "format": "int64",
             "description": "Optional organization `version` the change is based on.",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationMeetingSpace": {
+        "type": "object",
+        "description": "Gap audit G13: one meeting space of an organization, as its managers oversee it\n(whatever its access policy or security profile). Governance fields only: no\npasscode, invitation, participant or content data.",
+        "required": [
+          "id",
+          "title",
+          "meetingType",
+          "accessPolicy",
+          "securityProfile",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "accessPolicy": {
+            "$ref": "#/components/schemas/AccessPolicy"
+          },
+          "archivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meetingType": {
+            "$ref": "#/components/schemas/MeetingType"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "securityProfile": {
+            "$ref": "#/components/schemas/SecurityProfile"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SpaceStatus"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationMeetingSpacePage": {
+        "type": "object",
+        "description": "`GET /api/v2/organizations/{id}/meeting-spaces` page (gap audit G13).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationMeetingSpace"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as `after` for the next page; `null` on the last page.",
             "nullable": true
           }
         }

@@ -2816,6 +2816,13 @@
     },
     {
       "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/meeting-spaces",
+      "class": "EXCLUDED",
+      "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
       "method": "PUT",
       "path": "/api/v2/organizations/{id}/members/{userId}",
       "class": "EXCLUDED",

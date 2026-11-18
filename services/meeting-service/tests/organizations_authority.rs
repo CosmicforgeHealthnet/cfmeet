@@ -4807,3 +4807,56 @@ async fn gap_membership_patch_accepts_the_members_user_id() {
     );
     assert_eq!(r.acting_user, Some(owner.id.to_string()));
 }
+
+/// Gap audit G13: an organization's managers list all of its meeting spaces, INVITE_ONLY
+/// and healthcare ones included (governance fields only), page by page; members,
+/// outsiders and other organizations' admins cannot.
+#[tokio::test]
+async fn g13_managers_list_every_organization_meeting_space() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let admin = app.user("g13-admin").await;
+    let employee = app.user("g13-employee").await;
+    let outsider = app.user("g13-outsider").await;
+    let rival = app.user("g13-rival").await;
+    let org = fake.add_org("g13", &[(admin.id, "ADMIN"), (employee.id, "MEMBER")]);
+    let _other = fake.add_org("g13-rival", &[(rival.id, "ADMIN")]);
+    let mut ids = vec![];
+    for body in [
+        json!({ "title": "Board", "accessPolicy": "INVITE_ONLY" }),
+        json!({ "title": "Clinic", "meetingType": "HEALTHCARE", "securityProfile": "HEALTHCARE", "accessPolicy": "HEALTHCARE_APPOINTMENT", "accessConfig": { "appointmentRef": "A-1" } }),
+        json!({ "title": "All hands", "accessPolicy": "ORGANIZATION_ONLY" }),
+    ] {
+        let (s, v) = create_org_space(&app, &employee, org, body).await;
+        assert_eq!(s, StatusCode::CREATED, "{v}");
+        ids.push(v["id"].as_str().unwrap().to_string());
+    }
+    let uri = |q: &str| format!("/api/v2/organizations/{org}/meeting-spaces{q}");
+    let mut seen = vec![];
+    let mut after = String::new();
+    loop {
+        let (s, v) = app
+            .get(uri(&format!("?limit=2{after}")), Auth::Bearer(&admin.token))
+            .await;
+        assert_eq!(s, StatusCode::OK, "{v}");
+        for item in v["items"].as_array().unwrap() {
+            assert!(item.get("passcode").is_none());
+            seen.push(item["id"].as_str().unwrap().to_string());
+        }
+        match v["nextCursor"].as_str() {
+            Some(n) => after = format!("&after={n}"),
+            None => break,
+        }
+    }
+    seen.sort();
+    ids.sort();
+    assert_eq!(seen, ids);
+    for who in [&employee, &outsider, &rival] {
+        let (s, v) = app.get(uri(""), Auth::Bearer(&who.token)).await;
+        assert!(
+            s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+            "{s} {v}"
+        );
+    }
+}

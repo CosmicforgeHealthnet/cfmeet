@@ -84,7 +84,7 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 160 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 161 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
@@ -97,9 +97,9 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 160 
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
 | `LEGACY_DIRECT_INGRESS` | 43 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
-| `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 2 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
+| `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 3 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **160** | | |
+| **Total** | **161** | | |
 
 #### `CALENDAR_FILE_DIRECT_INGRESS` (2)
 
@@ -303,10 +303,11 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 160 
 | GET | `/v1/calling/media/rtc/v1/validate` | `validateMedia` | `cfmeet.calling.http-api` |
 | GET | `/v1/calling/media/rtc/validate` | `validateMediaLegacy` | `cfmeet.calling.http-api` |
 
-#### `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` (2)
+#### `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` (3)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
+| GET | `/api/v2/organizations/{id}/meeting-spaces` | `v2_list_organization_meeting_spaces` | `cfmeet.meeting-service.http-api` |
 | GET | `/api/v2/organizations/{id}/members` | `v2_list_organization_members` | `cfmeet.meeting-service.http-api` |
 | PUT | `/api/v2/organizations/{id}/members/{userId}` | `v2_upsert_organization_member` | `cfmeet.meeting-service.http-api` |
 
