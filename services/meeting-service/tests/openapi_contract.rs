@@ -121,6 +121,11 @@ fn every_v2_route_is_documented() {
         ("post", "/api/v2/admin/organizations"),
         ("patch", "/api/v2/admin/organizations/{id}"),
         ("get", "/api/v2/organizations/{id}/members"),
+        ("get", "/api/v2/organizations/{id}/meeting-spaces"),
+        ("get", "/api/v2/organizations/{id}/export"),
+        ("post", "/api/v2/meeting-spaces/{id}/members/team"),
+        ("get", "/api/v2/organizations/{id}/meeting-profile-policy"),
+        ("put", "/api/v2/organizations/{id}/meeting-profile-policy"),
         ("put", "/api/v2/organizations/{id}/members/{userId}"),
         ("get", "/api/v2/me/organizations"),
         // Blueprint Section 8 — workspace context (per request; no switch endpoint)
@@ -148,6 +153,19 @@ fn every_v2_route_is_documented() {
         (
             "post",
             "/api/v2/organizations/{id}/messaging/members/resolve",
+        ),
+        // Gap audit G6 / G7 — organization moderation and team channels
+        (
+            "get",
+            "/api/v2/organizations/{id}/messaging/moderation/{path}",
+        ),
+        (
+            "post",
+            "/api/v2/organizations/{id}/messaging/moderation/{path}",
+        ),
+        (
+            "put",
+            "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel",
         ),
         // Section 17 (ORG-006): Section 6 teams and policies through the Organizations relay
         ("get", "/api/v2/organizations/{id}/teams"),
@@ -213,6 +231,7 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/conferences/{id}/messages"),
         ("post", "/api/v2/conferences/{id}/messages"),
         ("delete", "/api/v2/conferences/{id}/messages/{messageId}"),
+        ("patch", "/api/v2/conferences/{id}/messages/{messageId}"),
         (
             "post",
             "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction",
@@ -333,6 +352,7 @@ fn every_v2_route_is_documented() {
         ),
         ("get", "/api/v2/conferences/{id}/artifacts"),
         ("post", "/api/v2/conferences/{id}/artifacts/reports"),
+        ("get", "/api/v2/conferences/{id}/exports/{artifactType}"),
         // Part J — attendance contract
         ("get", "/api/v2/conferences/{id}/attendance"),
         ("get", "/api/v2/conferences/{id}/artifacts/{artifactId}"),
@@ -380,11 +400,38 @@ fn every_v2_route_is_documented() {
         // Blueprint Section 2 — account sessions and the security audit
         ("get", "/api/v2/me/sessions"),
         ("post", "/api/v2/me/sessions/revoke-all"),
+        ("post", "/api/v2/me/sessions/revoke-others"),
+        ("get", "/api/v2/me/data-export"),
+        ("post", "/api/v2/me/account/delete"),
+        ("get", "/api/v2/me/mfa"),
+        ("post", "/api/v2/me/mfa/totp/setup"),
+        ("post", "/api/v2/me/mfa/totp/confirm"),
+        ("post", "/api/v2/me/mfa/disable"),
+        ("post", "/api/v2/admin/users/{userId}/sessions/revoke"),
+        ("get", "/api/v2/admin/identity-duplicates"),
+        ("post", "/api/v2/admin/identity-duplicates/enforce"),
+        (
+            "post",
+            "/api/v2/admin/organizations/{id}/provisioning/retry",
+        ),
+        (
+            "get",
+            "/api/v2/admin/organizations/{id}/service-bindings/{service}",
+        ),
+        (
+            "post",
+            "/api/v2/admin/organizations/{id}/service-bindings/{service}/rotate",
+        ),
+        ("get", "/api/v2/admin/organization-event-delivery"),
+        ("post", "/api/v2/admin/organization-event-delivery/replay"),
         ("post", "/api/v2/me/sessions/{sessionId}/revoke"),
         ("get", "/api/v2/admin/audit-events"),
         // Blueprint Section 9 — personal account profile
         ("get", "/api/v2/me/profile"),
         ("patch", "/api/v2/me/profile"),
+        ("put", "/api/v2/me/avatar"),
+        ("delete", "/api/v2/me/avatar"),
+        ("get", "/api/v2/avatars/{avatarId}"),
         // Multi-device policy — linked devices, linking challenges, security log
         ("get", "/api/v2/me/device-policy"),
         ("get", "/api/v2/me/devices"),
@@ -420,6 +467,19 @@ fn every_v2_route_is_documented() {
             "delete",
             "/api/v2/notifications/devices/{accountDeviceId}/push",
         ),
+        // Backend gap closure: in-product organization invitations, operator owner
+        // recovery and the registrant's own cancellation.
+        ("get", "/api/v2/me/organization-invitations"),
+        (
+            "post",
+            "/api/v2/organization-invitations/{invitationId}/accept",
+        ),
+        (
+            "post",
+            "/api/v2/organization-invitations/{invitationId}/decline",
+        ),
+        ("post", "/api/v2/admin/organizations/{id}/owners"),
+        ("post", "/api/v2/registrations/cancel"),
     ];
     for (method, path) in expected {
         assert!(
@@ -648,11 +708,13 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
             );
             if let Some(body) = op.get("requestBody") {
                 let types: Vec<_> = body["content"].as_object().unwrap().keys().collect();
-                assert_eq!(
-                    types,
-                    ["application/json"],
-                    "{method} {path} request content"
-                );
+                // Gap audit A22: an avatar upload is the image itself.
+                let expected = if path == "/api/v2/me/avatar" {
+                    ["image/png"]
+                } else {
+                    ["application/json"]
+                };
+                assert_eq!(types, expected, "{method} {path} request content");
                 assert!(
                     method != "get" && method != "delete",
                     "{method} {path} must not take a body"
@@ -665,6 +727,11 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
                     // Blueprint Section 10: RFC 5545 exports are the only non-JSON success.
                     if path.ends_with("/calendar.ics") && status == "200" {
                         assert_eq!(types, ["text/calendar"], "{method} {path} {status}");
+                        continue;
+                    }
+                    // Gap audit A22: the public avatar address serves the image itself.
+                    if path == "/api/v2/avatars/{avatarId}" && status == "200" {
+                        assert_eq!(types, ["image/png"], "{method} {path} {status}");
                         continue;
                     }
                     assert_eq!(types, ["application/json"], "{method} {path} {status}");

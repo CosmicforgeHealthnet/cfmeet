@@ -11,6 +11,14 @@
 //! at build time: only allow-listed public operations, no internal security scheme,
 //! every reference resolved offline. The engineering Swagger selector of the Meeting
 //! Service is unchanged.
+//!
+//! P11: what is SERVED is the embedded document reduced to the operations this
+//! deployment actually routes (the route table: disabled families such as numbering /
+//! SMS / privacy relay removed, WebSocket channels only with WebSockets on, nothing at
+//! all while public routing is off). A family without a routable operation is served
+//! with empty `paths` and `info.x-cfmeet-family-enabled: false`. The static contracts in
+//! `packages/contracts` are unchanged; components stay as published (unreferenced ones
+//! are harmless).
 
 use axum::{
     extract::{Path, State},
@@ -64,7 +72,7 @@ pub const DOCS: &[(&str, &str, &str)] = &[
 ];
 pub const AGGREGATE: &str = public_doc!("aggregate");
 
-fn json_doc(body: &'static str) -> Response {
+fn json_doc(body: String) -> Response {
     (
         [
             (header::CONTENT_TYPE, "application/json"),
@@ -75,16 +83,91 @@ fn json_doc(body: &'static str) -> Response {
         .into_response()
 }
 
-pub async fn aggregate() -> Response {
-    json_doc(AGGREGATE)
+/// The served documents of one deployment: `(domain or "aggregate", JSON)`.
+#[derive(Debug, Clone, Default)]
+pub struct PublishedDocs {
+    docs: Vec<(&'static str, String)>,
 }
 
-pub async fn domain_doc(Path(file): Path<String>) -> Response {
+impl PublishedDocs {
+    pub fn get(&self, domain: &str) -> Option<&str> {
+        self.docs
+            .iter()
+            .find(|(d, _)| *d == domain)
+            .map(|(_, b)| b.as_str())
+    }
+}
+
+const METHODS: &[&str] = &[
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
+
+/// `body` with only the `(method, path)` operations in `routable`; `None` = keep the
+/// document's own enabled marker unset (aggregate).
+pub fn reduce(
+    body: &str,
+    routable: &std::collections::HashSet<(String, String)>,
+    family: Option<bool>,
+) -> String {
+    let mut doc: Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => return body.to_string(),
+    };
+    if let Some(paths) = doc.get_mut("paths").and_then(Value::as_object_mut) {
+        paths.retain(|path, item| {
+            if let Some(ops) = item.as_object_mut() {
+                ops.retain(|key, _| {
+                    !METHODS.contains(&key.as_str())
+                        || routable.contains(&(key.to_ascii_uppercase(), path.clone()))
+                });
+                ops.keys().any(|k| METHODS.contains(&k.as_str()))
+            } else {
+                false
+            }
+        });
+    }
+    if let Some(enabled) = family {
+        doc["info"]["x-cfmeet-family-enabled"] = json!(enabled);
+    }
+    serde_json::to_string(&doc).unwrap_or_else(|_| body.to_string())
+}
+
+/// Builds the served documents from the route table.
+pub fn publish(routes: &crate::routing::RouteTable) -> PublishedDocs {
+    let routable: std::collections::HashSet<(String, String)> = routes
+        .definitions()
+        .map(|r| (r.method.as_str().to_string(), r.pattern.clone()))
+        .collect();
+    let mut docs = vec![("aggregate", reduce(AGGREGATE, &routable, None))];
+    for (domain, _, body) in DOCS {
+        let enabled = routes.definitions().any(|r| r.domain == *domain);
+        docs.push((domain, reduce(body, &routable, Some(enabled))));
+    }
+    PublishedDocs { docs }
+}
+
+fn published(state: &AppState) -> &PublishedDocs {
+    state.published_docs.get_or_init(|| publish(&state.routes))
+}
+
+pub async fn aggregate(State(state): State<AppState>) -> Response {
+    json_doc(
+        published(&state)
+            .get("aggregate")
+            .unwrap_or("{}")
+            .to_string(),
+    )
+}
+
+pub async fn domain_doc(State(state): State<AppState>, Path(file): Path<String>) -> Response {
     let Some(domain) = file.strip_suffix(".json") else {
         return ApiError::Code(ErrorCode::NotFound).into_response();
     };
-    match DOCS.iter().find(|(d, _, _)| *d == domain) {
-        Some((_, _, body)) => json_doc(body),
+    match published(&state)
+        .get(domain)
+        .filter(|_| domain != "aggregate")
+    {
+        Some(body) => json_doc(body.to_string()),
         None => ApiError::Code(ErrorCode::NotFound).into_response(),
     }
 }

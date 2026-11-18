@@ -256,6 +256,48 @@
     },
     {
       "domain": "calling",
+      "method": "GET",
+      "path": "/v1/calls/{call_id}/quality",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "DELETE",
+      "path": "/v1/calls/{call_id}/history",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/participants/{participant_id}/rejoin",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/host",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/participants/{participant_id}/remove",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/participants/{participant_id}/mute",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/sessions/{session_id}/quality-samples",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
       "method": "POST",
       "path": "/v1/calls/{call_id}/transfer",
       "class": "PUBLIC_CUSTOMER"
@@ -1363,6 +1405,13 @@
     {
       "domain": "meetings",
       "method": "POST",
+      "path": "/api/v1/auth/oauth/google/native",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
       "path": "/api/v1/auth/refresh",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
@@ -1385,6 +1434,13 @@
       "domain": "meetings",
       "method": "POST",
       "path": "/api/v1/auth/otp/verify-link",
+      "class": "EXCLUDED",
+      "reason": "LEGACY_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v1/auth/mfa/verify",
       "class": "EXCLUDED",
       "reason": "LEGACY_DIRECT_INGRESS"
     },
@@ -1607,6 +1663,12 @@
       "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/conferences/{id}/artifacts/reports",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/exports/{artifactType}",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -1834,6 +1896,12 @@
     {
       "domain": "meetings",
       "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/messages/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "PATCH",
       "path": "/api/v2/conferences/{id}/messages/{messageId}",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -2245,6 +2313,55 @@
     {
       "domain": "meetings",
       "method": "POST",
+      "path": "/api/v2/me/sessions/revoke-others",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/data-export",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/account/delete",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/mfa",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/mfa/totp/setup",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/mfa/totp/confirm",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/mfa/disable",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
       "path": "/api/v2/me/sessions/{sessionId}/revoke",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_APP_ACCOUNT"
@@ -2384,6 +2501,27 @@
     },
     {
       "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/me/avatar",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/me/avatar",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/avatars/{avatarId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
       "method": "GET",
       "path": "/api/v2/meeting-spaces",
       "class": "PUBLIC_CUSTOMER"
@@ -2469,6 +2607,12 @@
     },
     {
       "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/members/team",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
       "method": "DELETE",
       "path": "/api/v2/meeting-spaces/{id}/members/{memberId}",
       "class": "PUBLIC_CUSTOMER"
@@ -2537,6 +2681,12 @@
       "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/meeting-spaces/{id}/registrations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/registrations/cancel",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -2672,6 +2822,34 @@
     },
     {
       "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/meeting-spaces",
+      "class": "EXCLUDED",
+      "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/export",
+      "class": "EXCLUDED",
+      "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/meeting-profile-policy",
+      "class": "EXCLUDED",
+      "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/organizations/{id}/meeting-profile-policy",
+      "class": "EXCLUDED",
+      "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
       "method": "PUT",
       "path": "/api/v2/organizations/{id}/members/{userId}",
       "class": "EXCLUDED",
@@ -2751,6 +2929,27 @@
       "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/organization-invitations/decline",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/organization-invitations",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organization-invitations/{invitationId}/accept",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organization-invitations/{invitationId}/decline",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_ORGANIZATIONS"
     },
@@ -2870,6 +3069,27 @@
       "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/organizations/{id}/messaging/members/resolve",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/messaging/moderation/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/messaging/moderation/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_ORGANIZATIONS"
     },
@@ -3083,6 +3303,12 @@
       "domain": "messaging",
       "method": "GET",
       "path": "/v1/conversations/{conversationId}/bans",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/owner",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -3499,6 +3725,36 @@
       "domain": "messaging",
       "method": "GET",
       "path": "/v1/messaging/invitations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/forward",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/invite-links",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/invite-links",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/invite-links/join",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -4309,6 +4565,12 @@
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/contacts/{contactId}/calls",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/calls/{callId}/participants",
       "class": "PUBLIC_CUSTOMER"
     },
     {

@@ -26,6 +26,10 @@ pub const STEP_UP_TOKEN_TTL_SECS: u64 = 5 * 60;
 pub enum StepUpPurpose {
     DeactivateAccount,
     ChangeEmail,
+    /// Gap audit A2: deleting (anonymizing) the account.
+    DeleteAccount,
+    /// Gap audit A1: turning the authenticator-app second factor off.
+    DisableMfa,
 }
 
 impl StepUpPurpose {
@@ -33,6 +37,8 @@ impl StepUpPurpose {
         match self {
             StepUpPurpose::DeactivateAccount => "DEACTIVATE_ACCOUNT",
             StepUpPurpose::ChangeEmail => "CHANGE_EMAIL",
+            StepUpPurpose::DeleteAccount => "DELETE_ACCOUNT",
+            StepUpPurpose::DisableMfa => "DISABLE_MFA",
         }
     }
 
@@ -41,6 +47,8 @@ impl StepUpPurpose {
         match self {
             StepUpPurpose::DeactivateAccount => "deactivate your CF Meet account",
             StepUpPurpose::ChangeEmail => "change the email address of your CF Meet account",
+            StepUpPurpose::DeleteAccount => "permanently delete your CF Meet account",
+            StepUpPurpose::DisableMfa => "turn off two-step sign-in for your CF Meet account",
         }
     }
 }

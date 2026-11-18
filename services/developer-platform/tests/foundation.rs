@@ -105,7 +105,9 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
     assert_eq!(
         h.count(
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
-             AND tablename <> 'developer_platform_seaql_migrations' AND tablename !~ '^devplat_'"
+             AND tablename NOT IN ('developer_platform_seaql_migrations', \
+                                   'developer_platform_gap_closure_seaql_migrations') \
+             AND tablename !~ '^devplat_'"
         )
         .await,
         0

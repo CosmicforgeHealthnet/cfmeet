@@ -78,6 +78,8 @@ pub enum ErrorCode {
     ArtifactDeleted,
     ArtifactAccessDenied,
     ArtifactStorageUnavailable,
+    /// Gap audit M13: no artefact bucket is configured in this deployment.
+    ArtifactStorageNotConfigured,
     ArtifactIntegrityFailed,
     TranscriptionDisabled,
     TranscriptionNotAllowed,
@@ -88,6 +90,8 @@ pub enum ErrorCode {
     IntelligenceProviderUnavailable,
     RegistrationDisabled,
     RegistrationClosed,
+    /// Gap audit M10: the registration capacity is reached.
+    RegistrationFull,
     RegistrationNotFound,
     AdmissionTokenInvalid,
     BackstageAccessDenied,
@@ -184,6 +188,12 @@ pub enum ErrorCode {
     DeviceDeclarationRequired,
     /// Multi-device policy: the device does not exist or is not the caller's.
     DeviceNotFound,
+    /// Gap audit A1: the sign-in needs the account's second factor (see `mfaTicket`).
+    MfaRequired,
+    /// Gap audit A20: an administrator named an account that does not exist.
+    UserNotFound,
+    /// Gap audit A22: no such (current) avatar image.
+    AvatarNotFound,
     /// Multi-device policy: the device key is already bound to another live device.
     DeviceKeyInUse,
     /// Multi-device policy: the linking challenge does not exist, is not the caller's,
@@ -258,6 +268,7 @@ impl ErrorCode {
             ErrorCode::ArtifactDeleted => "ARTIFACT_DELETED",
             ErrorCode::ArtifactAccessDenied => "ARTIFACT_ACCESS_DENIED",
             ErrorCode::ArtifactStorageUnavailable => "ARTIFACT_STORAGE_UNAVAILABLE",
+            ErrorCode::ArtifactStorageNotConfigured => "ARTIFACT_STORAGE_NOT_CONFIGURED",
             ErrorCode::ArtifactIntegrityFailed => "ARTIFACT_INTEGRITY_FAILED",
             ErrorCode::TranscriptionDisabled => "TRANSCRIPTION_DISABLED",
             ErrorCode::TranscriptionNotAllowed => "TRANSCRIPTION_NOT_ALLOWED",
@@ -268,6 +279,7 @@ impl ErrorCode {
             ErrorCode::IntelligenceProviderUnavailable => "INTELLIGENCE_PROVIDER_UNAVAILABLE",
             ErrorCode::RegistrationDisabled => "REGISTRATION_DISABLED",
             ErrorCode::RegistrationClosed => "REGISTRATION_CLOSED",
+            ErrorCode::RegistrationFull => "REGISTRATION_FULL",
             ErrorCode::RegistrationNotFound => "REGISTRATION_NOT_FOUND",
             ErrorCode::AdmissionTokenInvalid => "ADMISSION_TOKEN_INVALID",
             ErrorCode::BackstageAccessDenied => "BACKSTAGE_ACCESS_DENIED",
@@ -311,6 +323,9 @@ impl ErrorCode {
             ErrorCode::DeviceDeclarationRefused => "DEVICE_DECLARATION_REFUSED",
             ErrorCode::DeviceDeclarationRequired => "DEVICE_DECLARATION_REQUIRED",
             ErrorCode::DeviceNotFound => "DEVICE_NOT_FOUND",
+            ErrorCode::UserNotFound => "USER_NOT_FOUND",
+            ErrorCode::AvatarNotFound => "AVATAR_NOT_FOUND",
+            ErrorCode::MfaRequired => "MFA_REQUIRED",
             ErrorCode::DeviceKeyInUse => "DEVICE_KEY_IN_USE",
             ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
@@ -380,6 +395,7 @@ impl ErrorCode {
             ErrorCode::ArtifactDeleted => StatusCode::GONE,
             ErrorCode::ArtifactAccessDenied => StatusCode::FORBIDDEN,
             ErrorCode::ArtifactStorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ErrorCode::ArtifactStorageNotConfigured => StatusCode::NOT_IMPLEMENTED,
             ErrorCode::ArtifactIntegrityFailed => StatusCode::CONFLICT,
             ErrorCode::TranscriptionDisabled => StatusCode::NOT_FOUND,
             ErrorCode::TranscriptionNotAllowed => StatusCode::FORBIDDEN,
@@ -389,7 +405,7 @@ impl ErrorCode {
             ErrorCode::IntelligenceNotAllowed => StatusCode::FORBIDDEN,
             ErrorCode::IntelligenceProviderUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorCode::RegistrationDisabled => StatusCode::NOT_FOUND,
-            ErrorCode::RegistrationClosed => StatusCode::CONFLICT,
+            ErrorCode::RegistrationClosed | ErrorCode::RegistrationFull => StatusCode::CONFLICT,
             ErrorCode::RegistrationNotFound => StatusCode::NOT_FOUND,
             ErrorCode::AdmissionTokenInvalid => StatusCode::GONE,
             ErrorCode::BackstageAccessDenied => StatusCode::FORBIDDEN,
@@ -425,14 +441,16 @@ impl ErrorCode {
             ErrorCode::OrganizationPolicyRestricted
             | ErrorCode::ReauthenticationRequired
             | ErrorCode::EmailVerificationRequired => StatusCode::FORBIDDEN,
-            ErrorCode::DeviceProofInvalid => StatusCode::UNAUTHORIZED,
+            ErrorCode::DeviceProofInvalid | ErrorCode::MfaRequired => StatusCode::UNAUTHORIZED,
             ErrorCode::DeviceReplacementPending
             | ErrorCode::DeviceNotTrusted
             | ErrorCode::DeviceDeclarationRequired => StatusCode::FORBIDDEN,
             ErrorCode::WebDeviceLimitReached
             | ErrorCode::DeviceDeclarationRefused
             | ErrorCode::DeviceKeyInUse => StatusCode::CONFLICT,
-            ErrorCode::DeviceNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::DeviceNotFound | ErrorCode::UserNotFound | ErrorCode::AvatarNotFound => {
+                StatusCode::NOT_FOUND
+            }
             ErrorCode::DeviceLinkInvalid => StatusCode::GONE,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
@@ -482,6 +500,11 @@ pub enum ApiError {
     /// Phase 2 semantic domain error with a stable public code.
     #[error("{code:?}: {message}")]
     Domain { code: ErrorCode, message: String },
+
+    /// Gap audit A1: `401 MFA_REQUIRED` with the one-time `mfaTicket` that
+    /// `POST /api/v1/auth/mfa/verify` redeems with the second factor.
+    #[error("MFA_REQUIRED")]
+    MfaRequired { ticket: String },
 
     /// `RATE_LIMITED` with retry semantics (`Retry-After` header + body field).
     #[error("RATE_LIMITED: {message}")]
@@ -542,6 +565,18 @@ impl IntoResponse for ApiError {
             )
                 .into_response();
         }
+        if let ApiError::MfaRequired { ticket } = self {
+            let body = Json(json!({
+                "success": false,
+                "error": {
+                    "code": ErrorCode::MfaRequired.as_str(),
+                    "message": "Enter the code from your authenticator app to finish signing in",
+                    "requestId": current_request_id(),
+                    "mfaTicket": ticket,
+                }
+            }));
+            return (StatusCode::UNAUTHORIZED, body).into_response();
+        }
         if let ApiError::InvalidFields { message, details } = self {
             let body = Json(json!({
                 "success": false,
@@ -590,7 +625,9 @@ impl IntoResponse for ApiError {
                 (StatusCode::TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS", msg)
             }
             ApiError::Domain { code, message } => (code.status(), code.as_str(), message),
-            ApiError::RateLimited { .. } | ApiError::InvalidFields { .. } => {
+            ApiError::RateLimited { .. }
+            | ApiError::InvalidFields { .. }
+            | ApiError::MfaRequired { .. } => {
                 unreachable!("handled above")
             }
         };
@@ -782,6 +819,8 @@ mod tests {
             ErrorCode::DeviceNotFound,
             ErrorCode::DeviceKeyInUse,
             ErrorCode::DeviceLinkInvalid,
+            ErrorCode::UserNotFound,
+            ErrorCode::MfaRequired,
         ];
         for c in all {
             let s = c.as_str();

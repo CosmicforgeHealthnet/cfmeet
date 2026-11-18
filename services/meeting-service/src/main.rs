@@ -176,6 +176,15 @@ async fn main() -> anyhow::Result<()> {
         panic!("Account hardening migration is required (account-hardening-migration up)");
     }
 
+    // Backend gap audit: case-insensitive identity, authenticator MFA, avatars and calendar
+    // invites live in their own additive history (`gap-closure-migration up`).
+    if !migration::gap_closure_ready(&state.db)
+        .await
+        .expect("Gap-closure migration readiness")
+    {
+        panic!("Gap-closure migration is required (gap-closure-migration up)");
+    }
+
     // Blueprint Section 4: which store answers organization questions (the client
     // configuration was validated when the meeting domain was built; misconfiguration
     // stopped startup there).
@@ -225,6 +234,24 @@ async fn main() -> anyhow::Result<()> {
                     .is_err()
                 {
                     tracing::warn!("Account Communications events deferred");
+                }
+            }
+        });
+    }
+
+    // Gap audit A10: sign-ins past their absolute lifetime end everywhere (once a minute).
+    {
+        let sweep_state = state.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                tick.tick().await;
+                match backend::services::account_security::sweep_expired_sessions(&sweep_state)
+                    .await
+                {
+                    Ok(0) => {}
+                    Ok(n) => tracing::info!("ended {n} expired account sign-in(s)"),
+                    Err(e) => tracing::warn!("expired sign-in sweep deferred: {e}"),
                 }
             }
         });
@@ -346,11 +373,22 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Start meeting auto-end worker (always runs)
-    let _meeting_auto_end_worker = spawn_meeting_auto_end_worker(db.clone());
+    let _meeting_auto_end_worker = spawn_meeting_auto_end_worker(
+        db.clone(),
+        Some(state.meeting.core.rtc.clone()),
+        Some(std::sync::Arc::new(
+            backend::services::compat::CompatService::new(state.meeting.core.clone()),
+        )),
+    );
     tracing::info!("✅ Meeting auto-end worker started");
 
     // Start meeting auto-start worker (always runs)
-    let _meeting_auto_start_worker = spawn_meeting_auto_start_worker(db.clone());
+    let _meeting_auto_start_worker = spawn_meeting_auto_start_worker(
+        db.clone(),
+        Some(std::sync::Arc::new(
+            backend::services::compat::CompatService::new(state.meeting.core.clone()),
+        )),
+    );
     tracing::info!("✅ Meeting auto-start worker started");
 
     // Phase 2 meeting domain workers (v2 conferences only; legacy workers above keep

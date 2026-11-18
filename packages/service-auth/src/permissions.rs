@@ -236,6 +236,12 @@ pub enum InternalPermission {
     /// meeting membership / lifecycle changes and import legacy meeting chat.
     #[serde(rename = "messaging-meeting.sync")]
     MessagingMeetingSync,
+    /// Messaging (gap audit G6 / G7): organization governance in an organization's own
+    /// FIRST_PARTY Messaging scope — moderation by organization moderators (reports and
+    /// moderation actions, attributed to the moderator's principal) and team channels
+    /// synchronized from an Organizations team snapshot.
+    #[serde(rename = "messaging-organization.govern")]
+    MessagingOrganizationGovern,
     /// Messaging (Part V H §103): apply a versioned Privacy Relay communication-authority
     /// update (context status / revocation) to the conversations bound to that context.
     #[serde(rename = "messaging-context-authority.apply")]
@@ -420,6 +426,10 @@ pub enum InternalPermission {
     /// Notification Service only.
     #[serde(rename = "account-route-lease.claim")]
     AccountRouteLeaseClaim,
+    /// Calling: operator review of abuse reports (list the open queue, resolve a report
+    /// as REVIEWED / DISMISSED or reopen it; audited). Operator tooling only.
+    #[serde(rename = "calling-abuse-reports.review")]
+    CallingAbuseReportsReview,
     /// Communications Hub (roadmap N10, Phase 4.2): export the Hub's notification
     /// preferences (account switches, conversation and contact notification levels, with
     /// their row versions) and the matching change-feed entries for the one-off copy and
@@ -805,6 +815,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Resolve meeting conversations, apply version-fenced meeting membership / lifecycle and import legacy meeting chat",
     },
     PermissionDefinition {
+        permission: InternalPermission::MessagingOrganizationGovern,
+        name: "messaging-organization.govern",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Organization moderation (reports, moderation actions by an organization moderator) and team channels synchronized from a team snapshot, in an organization's own scope",
+    },
+    PermissionDefinition {
         permission: InternalPermission::MessagingContextAuthorityApply,
         name: "messaging-context-authority.apply",
         receiver: services::MESSAGING,
@@ -904,9 +922,11 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::DeveloperUsageRecord,
         name: "developer-usage.record",
         receiver: services::DEVELOPER_PLATFORM,
-        grantable_to: &[services::API_GATEWAY],
+        // P6: Calling counts the requests of its DIRECT routes (the gateway's are counted
+        // by the gateway; never both).
+        grantable_to: &[services::API_GATEWAY, services::CALLING],
         sensitive: false,
-        description: "Record durable daily API request accounting of application environments",
+        description: "Record durable daily API request accounting of application environments (the API Gateway for forwarded requests, Calling for its direct routes)",
     },
     PermissionDefinition {
         permission: InternalPermission::DeveloperEventPublish,
@@ -1145,6 +1165,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Claim CRITICAL send leases on, and report completed sends for, Account notification route decisions (fencing tokens; no code or address)",
     },
     PermissionDefinition {
+        permission: InternalPermission::CallingAbuseReportsReview,
+        name: "calling-abuse-reports.review",
+        receiver: services::CALLING,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: true,
+        description: "List Calling abuse reports across scopes and resolve them (REVIEWED / DISMISSED / reopen), operator-audited; bounded codes and opaque ids only, never free text or contact data; operator tooling only",
+    },
+    PermissionDefinition {
         permission: InternalPermission::CommunicationsPreferencesExport,
         name: "communications-preferences.export",
         receiver: services::COMMUNICATIONS,
@@ -1219,6 +1247,7 @@ impl InternalPermission {
         InternalPermission::PlatformPrincipalEnsure,
         InternalPermission::MessagingApplicationDelegate,
         InternalPermission::MessagingMeetingSync,
+        InternalPermission::MessagingOrganizationGovern,
         InternalPermission::MessagingContextAuthorityApply,
         InternalPermission::MessagingSmsBridgeDeliver,
         InternalPermission::SmsBridgeSubmit,
@@ -1259,6 +1288,7 @@ impl InternalPermission {
         InternalPermission::CommunicationsRestrictionsRead,
         InternalPermission::OrganizationInvitationsRead,
         InternalPermission::AccountRouteLeaseClaim,
+        InternalPermission::CallingAbuseReportsReview,
         InternalPermission::CommunicationsPreferencesExport,
     ];
 
@@ -1543,6 +1573,10 @@ mod tests {
                     &[services::MEETING_SERVICE][..]
                 ),
                 ("messaging-meeting.sync", &[services::MEETING_SERVICE][..]),
+                (
+                    "messaging-organization.govern",
+                    &[services::MEETING_SERVICE][..]
+                ),
                 (
                     "messaging-context-authority.apply",
                     &[services::PRIVACY_RELAY][..]
@@ -2006,6 +2040,16 @@ mod tests {
             assert_eq!(d.grantable_to, &[services::OPERATOR_CONSOLE], "{}", d.name);
             assert_eq!(d.sensitive, sensitive, "{}", d.name);
         }
+        // P6: API request accounting by the gateway and by Calling (direct routes) only.
+        assert_eq!(
+            DeveloperUsageRecord.definition().grantable_to,
+            &[services::API_GATEWAY, services::CALLING]
+        );
+        // Calling abuse-report review: received by Calling, operator tooling only.
+        let review = CallingAbuseReportsReview.definition();
+        assert_eq!(review.receiver, services::CALLING);
+        assert_eq!(review.grantable_to, &[services::OPERATOR_CONSOLE]);
+        assert!(review.sensitive);
         // Owner APIs: each received by its authority, grantable to the service ONLY.
         // Addresses (X1, X2) are sensitive; X5 never returns the email (not sensitive).
         for (p, receiver, sensitive) in [

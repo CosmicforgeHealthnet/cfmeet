@@ -57,7 +57,7 @@ a mutating token twice.
 | Variable | Where | Values | Default |
 |---|---|---|---|
 | `SERVICE_AUTH_REQUEST_BINDING_MODE` | every receiver | `off` / `accept` / `require` | `accept` |
-| `SERVICE_AUTH_REQUEST_BINDING` | every signer | `off` / `emit` | `off` |
+| `SERVICE_AUTH_REQUEST_BINDING` | every signer | `off` / `emit` | `emit` (since P8; `off` before) |
 | `SERVICE_AUTH_REPLAY_GUARD` | every receiver | `on` / `off` | `on` |
 | `SERVICE_AUTH_REPLAY_CACHE_CAPACITY` | every receiver | entries | `100000` |
 
@@ -71,6 +71,19 @@ Receiver modes:
 * `require`: tokens without the claims are refused (`request_binding_missing`); a receiver
   code path that verifies without the request (`verify_headers`) is refused
   (`request_binding_unchecked`).
+
+## Current state (P8)
+
+Step 1 is complete and step 2 is now the default: a signer emits the claims unless
+`SERVICE_AUTH_REQUEST_BINDING=off` is set (the explicit opt-out, e.g. while a receiver that
+rewrites paths is investigated). Receivers stay in `accept` by default; `require` remains an
+explicit per-receiver decision (step 3), because out-of-band callers that sign with
+`sign` (no request) would be refused. The production release templates
+(`infra/calling/production/coordinated_release.py`) and the Part VI compose manifest set both
+variables explicitly (`emit` / `accept`), so a deployment's behaviour does not depend on a
+library default. Binding needs no extra configuration beyond that: the internal client binds
+the path of the joined URL, and the private service URLs carry no path prefix (a proxy in
+front of a receiver must not rewrite the request path).
 
 ## Rollout (three steps, never out of order)
 

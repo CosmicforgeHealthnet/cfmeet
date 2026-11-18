@@ -101,6 +101,15 @@ pub fn app(state: AppState) -> Router {
             post(invitations::decline),
         )
         // X5 (contract `organizations/notification-owner/v1`, Notification Service only).
+        .route("/organization-invitations/mine", get(invitations::mine))
+        .route(
+            "/organization-invitations/:invitation_id/accept",
+            post(invitations::accept_by_id),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/decline",
+            post(invitations::decline_by_id),
+        )
         .route(
             "/organization-invitations/:invitation_id/invitee/resolve",
             post(invitations::resolve_invitee),
@@ -115,6 +124,7 @@ pub fn app(state: AppState) -> Router {
             "/organizations/:id/audit-events",
             get(authorization::audit_events),
         )
+        .route("/organizations/:id/export", get(authorization::export))
         .route(
             "/organizations/:id/provisioning",
             get(organizations::provisioning),
@@ -166,6 +176,18 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/admin/organizations/:id",
             patch(organizations::admin_update),
+        )
+        .route(
+            "/admin/organizations/:id/audit-events",
+            get(authorization::admin_audit_events),
+        )
+        .route(
+            "/admin/organizations/:id/export",
+            get(authorization::admin_export),
+        )
+        .route(
+            "/admin/organizations/:id/owners",
+            post(members::admin_appoint_owner),
         )
         .route(
             "/admin/organizations/:id/provisioning/retry",

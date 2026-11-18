@@ -105,11 +105,23 @@ pub fn app(state: AppState) -> Router {
             state.clone(),
             middleware::require_delegated_application,
         ));
+    // `/internal/v1/organization-moderation/v1/messaging/...`: the SAME moderation
+    // handlers for an organization moderator relayed by the Meeting Service
+    // (`messaging-organization.govern`, gap audit G6).
+    let organization_moderation = Router::new()
+        .nest("/v1/messaging", crate::moderation::http::customer_routes())
+        .fallback(not_found)
+        .method_not_allowed_fallback(method_not_allowed)
+        .layer(from_fn_with_state(
+            state.clone(),
+            middleware::require_organization_moderation,
+        ));
     let internal = Router::new()
         .nest(
             "/internal/v1",
             Router::new()
                 .nest("/delegated", delegated)
+                .nest("/organization-moderation", organization_moderation)
                 .merge(crate::communications::routes())
                 .merge(crate::notifications::routes())
                 .merge(crate::integrations::http::internal_routes())

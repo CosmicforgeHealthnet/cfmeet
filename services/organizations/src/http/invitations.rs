@@ -127,6 +127,12 @@ pub struct CreateBody {
     /// 1–120 printable characters without `@`.
     #[serde(default)]
     pub invitee_hint: Option<String>,
+    /// The invitee's CF Meet account, when the caller already resolved it (the Meeting
+    /// Service does for invitations addressed by CF Meet ID). The invitee can then find and
+    /// answer the invitation in the product, and the `invitation.created` notification
+    /// reaches them, without the emailed link.
+    #[serde(default)]
+    pub invitee_user_id: Option<Uuid>,
 }
 
 /// A caller-provided invitee hint: trimmed, 1–120 characters, no control characters and
@@ -219,8 +225,8 @@ pub async fn create(
     let inv: InvitationRow = db::one(
         &txn,
         &format!(
-            "INSERT INTO organization_invitations (id, organization_id, token_hash, email_normalized, email_hint, role, status, invited_by, created_at, expires_at, version) \
-             VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8, $9, 1) RETURNING {INVITATION_COLUMNS}"
+            "INSERT INTO organization_invitations (id, organization_id, token_hash, email_normalized, email_hint, role, status, invited_by, created_at, expires_at, version, invitee_user_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8, $9, 1, $10) RETURNING {INVITATION_COLUMNS}"
         ),
         vec![
             Uuid::new_v4().into(),
@@ -232,6 +238,7 @@ pub async fn create(
             user.into(),
             now.into(),
             (now + Duration::days(INVITATION_TTL_DAYS)).into(),
+            req.invitee_user_id.into(),
         ],
     )
     .await?
@@ -260,10 +267,35 @@ pub async fn create(
 pub struct ListQuery {
     #[serde(default)]
     pub status: Option<String>,
+    /// The previous page's `nextCursor` (opaque).
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// Page size 1–200 (default 50).
+    #[serde(default)]
+    pub limit: Option<i64>,
 }
 
-/// `GET /internal/v1/organizations/{id}/invitations?status` — newest first (200 max);
-/// requires `organization.members.invite` for the actor.
+/// `<created_at micros>.<id>` of the last item of a page.
+fn invitation_cursor(row: &InvitationRow) -> String {
+    format!("{}.{}", row.created_at.timestamp_micros(), row.id)
+}
+
+fn parse_invitation_cursor(raw: &str) -> Result<(DateTime<Utc>, Uuid), ApiError> {
+    raw.split_once('.')
+        .and_then(|(t, id)| {
+            Some((
+                DateTime::<Utc>::from_timestamp_micros(t.parse().ok()?)?,
+                Uuid::parse_str(id).ok()?,
+            ))
+        })
+        .ok_or_else(|| ApiError::validation("cursor must be a previous page's nextCursor"))
+}
+
+/// `GET /internal/v1/organizations/{id}/invitations?status&cursor&limit` — newest first,
+/// paged (`limit` 1–200, default 50 with a cursor and 200 without; `nextCursor` while
+/// more remain). `status` is the
+/// effective status: a PENDING invitation past its expiry counts as EXPIRED. Requires
+/// `organization.members.invite` for the actor.
 pub async fn list(
     State(state): State<AppState>,
     caller: Caller,
@@ -282,24 +314,54 @@ pub async fn list(
             ));
         }
     }
+    // Callers that do not page keep the former page of up to 200 (now with a cursor).
+    let limit = if q.limit.is_none() && q.cursor.is_none() {
+        200
+    } else {
+        super::page_limit(q.limit)?
+    };
+    let after = q
+        .cursor
+        .as_deref()
+        .map(parse_invitation_cursor)
+        .transpose()?;
     authorize(&state.db, id, user, Capability::MembersInvite, false).await?;
     let now = db::now(&state.db).await?;
+    // The effective status in SQL: PENDING means not yet expired; EXPIRED includes a
+    // PENDING invitation past its expiry that the sweeper has not recorded yet.
     let rows: Vec<InvitationRow> = db::all(
         &state.db,
-        &format!("SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE organization_id = $1 ORDER BY created_at DESC, id DESC LIMIT 200"),
-        vec![id.into()],
+        &format!(
+            "SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE organization_id = $1 \
+               AND ($2::text IS NULL \
+                    OR ($2 = 'PENDING' AND status = 'PENDING' AND expires_at > $3) \
+                    OR ($2 = 'EXPIRED' AND (status = 'EXPIRED' OR (status = 'PENDING' AND expires_at <= $3))) \
+                    OR ($2 NOT IN ('PENDING', 'EXPIRED') AND status = $2)) \
+               AND ($4::timestamptz IS NULL OR (created_at, id) < ($4, $5)) \
+             ORDER BY created_at DESC, id DESC LIMIT $6"
+        ),
+        vec![
+            id.into(),
+            q.status.clone().into(),
+            now.into(),
+            after.map(|a| a.0).into(),
+            after.map(|a| a.1).into(),
+            (limit + 1).into(),
+        ],
     )
     .await?;
-    let items: Vec<Value> = rows
-        .iter()
-        .filter(|r| {
-            q.status
-                .as_deref()
-                .is_none_or(|s| r.effective_status(now) == s)
-        })
-        .map(|r| r.to_json(now))
-        .collect();
-    Ok(respond(StatusCode::OK, json!({ "items": items })))
+    let more = rows.len() as i64 > limit;
+    let page = &rows[..rows.len().min(limit as usize)];
+    let items: Vec<Value> = page.iter().map(|r| r.to_json(now)).collect();
+    let next = if more {
+        page.last().map(invitation_cursor)
+    } else {
+        None
+    };
+    Ok(respond(
+        StatusCode::OK,
+        json!({ "items": items, "nextCursor": next }),
+    ))
 }
 
 /// `POST /internal/v1/organizations/{id}/invitations/{invitationId}/revoke` — idempotent.
@@ -341,7 +403,15 @@ pub struct TokenBody {
     pub token: String,
 }
 
-/// The PENDING invitation of `token`, with its organization row locked first.
+/// How an invitation is located: by its one-time token (the emailed link), or by its id
+/// for the signed-in invitee it is addressed to (in-product answer).
+#[derive(Clone, Copy)]
+enum Locate<'a> {
+    Token(&'a str),
+    Id(Uuid),
+}
+
+/// The organization row (locked first) and the invitation (locked) of `token`.
 async fn locked_by_token(
     txn: &DatabaseTransaction,
     token: &str,
@@ -367,10 +437,65 @@ async fn locked_by_token(
     )
     .await?
     .ok_or_else(invalid)?;
+    Ok((org, inv))
+}
+
+/// The organization row (locked first) and the invitation (locked) with `id`.
+async fn locked_by_id(
+    txn: &DatabaseTransaction,
+    id: Uuid,
+) -> Result<(store::OrgRow, InvitationRow), ApiError> {
+    let found: InvitationRow = db::one(
+        txn,
+        &format!("SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE id = $1"),
+        vec![id.into()],
+    )
+    .await?
+    .ok_or_else(invalid)?;
+    let org = store::org(txn, found.organization_id, true)
+        .await?
+        .ok_or_else(invalid)?;
+    let inv: InvitationRow = db::one(
+        txn,
+        &format!(
+            "SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE id = $1 FOR UPDATE"
+        ),
+        vec![id.into()],
+    )
+    .await?
+    .ok_or_else(invalid)?;
+    Ok((org, inv))
+}
+
+/// The PENDING invitation located by `how`, checked against the acting user. A token
+/// holder must be the invited account (by its recorded account, or its verified email); an
+/// id is answerable only by the account it is addressed to, and anyone else learns nothing
+/// (`INVITATION_INVALID`, as for an unknown id).
+async fn locate(
+    txn: &DatabaseTransaction,
+    how: Locate<'_>,
+    user: Uuid,
+    verified: Option<&str>,
+    require_verified_for_token: bool,
+) -> Result<(store::OrgRow, InvitationRow), ApiError> {
+    let (org, inv) = match how {
+        Locate::Token(token) => locked_by_token(txn, token).await?,
+        Locate::Id(id) => locked_by_id(txn, id).await?,
+    };
     if inv.status != "PENDING" {
         return Err(invalid());
     }
-    Ok((org, inv))
+    let by_account = inv.invitee_user_id == Some(user);
+    let by_email = verified.is_some_and(|e| e == inv.email_normalized);
+    match how {
+        Locate::Id(_) if !(by_account || by_email) => Err(invalid()),
+        Locate::Token(_) if by_account || by_email => Ok((org, inv)),
+        Locate::Token(_) if verified.is_none() && require_verified_for_token => {
+            Err(verified_email_required())
+        }
+        Locate::Token(_) if verified.is_some() => Err(email_mismatch()),
+        _ => Ok((org, inv)),
+    }
 }
 
 /// Records the expiry (committed) and answers `INVITE_EXPIRED`.
@@ -392,27 +517,87 @@ fn email_mismatch() -> ApiError {
     )
 }
 
-/// `POST /internal/v1/organization-invitations/accept` — `{token}` for the acting user
-/// whose verified email must equal the invited one. Single use.
-pub async fn accept(
-    State(state): State<AppState>,
-    caller: Caller,
-    headers: HeaderMap,
-    body: Bytes,
+fn verified_email_required() -> ApiError {
+    ApiError::with_message(
+        ErrorCode::PermissionDenied,
+        "A verified email address (X-CF-Acting-User-Verified-Email) is required to accept an invitation.",
+    )
+}
+
+/// Whether the inviter could still issue `inv` now: an ACTIVE member whose role and the
+/// organization policy still allow inviting at the invited role.
+async fn inviter_still_backs<C: ConnectionTrait>(
+    c: &C,
+    inv: &InvitationRow,
+) -> Result<bool, ApiError> {
+    let role = Role::parse(&inv.role).unwrap_or(Role::Admin);
+    match authorize(
+        c,
+        inv.organization_id,
+        inv.invited_by,
+        Capability::MembersInvite,
+        false,
+    )
+    .await
+    {
+        Ok(access) => Ok(can_invite(access.membership.role(), role)),
+        Err(e)
+            if matches!(
+                e.code,
+                ErrorCode::OrganizationNotFound
+                    | ErrorCode::MembershipRequired
+                    | ErrorCode::PermissionDenied
+                    | ErrorCode::PolicyRestricted
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Revokes the PENDING invitations `inviter` issued in `organization` that they could no
+/// longer issue as `role` (all of them when the membership is no longer `active`). Each
+/// revocation is a normal `invitation.revoked` change with its audit record.
+pub async fn revoke_unbacked(
+    txn: &DatabaseTransaction,
+    ctx: &OpContext,
+    now: DateTime<Utc>,
+    organization: Uuid,
+    inviter: Uuid,
+    role: Role,
+    active: bool,
+) -> Result<u64, ApiError> {
+    let pending: Vec<InvitationRow> = db::all(
+        txn,
+        &format!("SELECT {INVITATION_COLUMNS} FROM organization_invitations WHERE organization_id = $1 AND invited_by = $2 AND status = 'PENDING' ORDER BY id FOR UPDATE"),
+        vec![organization.into(), inviter.into()],
+    )
+    .await?;
+    let mut revoked = 0;
+    for inv in pending {
+        let invited = Role::parse(&inv.role).unwrap_or(Role::Admin);
+        if !active || !can_invite(role, invited) {
+            decide(txn, ctx, now, &inv, "REVOKED", None).await?;
+            revoked += 1;
+        }
+    }
+    Ok(revoked)
+}
+
+async fn accept_invitation(
+    state: &AppState,
+    caller: &Caller,
+    headers: &HeaderMap,
+    raw: &Value,
+    how: Locate<'_>,
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationWrite)?;
     let user = caller.user()?;
-    let (req, raw): (TokenBody, Value) = parse(&body)?;
-    let verified = caller.verified_email.clone().ok_or_else(|| {
-        ApiError::with_message(
-            ErrorCode::PermissionDenied,
-            "A verified email address (X-CF-Acting-User-Verified-Email) is required to accept an invitation.",
-        )
-    })?;
     let idem = idempotency::from_headers(
-        &headers,
+        headers,
         format!("invitation.accept:{}:{user}", caller.service()),
-        &raw,
+        raw,
     )?;
     let txn = state.db.begin().await?;
     if let Some(i) = &idem {
@@ -423,10 +608,7 @@ pub async fn accept(
             ));
         }
     }
-    let (org, inv) = locked_by_token(&txn, &req.token).await?;
-    if inv.email_normalized != verified {
-        return Err(email_mismatch());
-    }
+    let (org, inv) = locate(&txn, how, user, caller.verified_email.as_deref(), true).await?;
     let now = db::now(&txn).await?;
     let ctx = caller.as_user();
     if inv.expires_at <= now {
@@ -436,6 +618,13 @@ pub async fn accept(
         LifecycleStatus::Active => {}
         LifecycleStatus::Suspended => return Err(ApiError::new(ErrorCode::OrganizationSuspended)),
         LifecycleStatus::Archived => return Err(ApiError::new(ErrorCode::OrganizationArchived)),
+    }
+    // An invitation is only as good as its inviter: one whose inviter was removed,
+    // suspended or demoted (or whom the policy no longer lets invite) is revoked.
+    if !inviter_still_backs(&txn, &inv).await? {
+        decide(&txn, &ctx, now, &inv, "REVOKED", None).await?;
+        txn.commit().await?;
+        return Ok(ApiError::new(ErrorCode::InvitationInvalid).into_response());
     }
     // A pending GUEST invitation is not honoured once the policy disallows guests (it
     // stays pending; revoking or re-allowing is the organization's decision).
@@ -476,25 +665,15 @@ pub async fn accept(
     Ok(respond(StatusCode::OK, doc))
 }
 
-/// `POST /internal/v1/organization-invitations/decline` — `{token}`; a supplied verified
-/// email must match the invited one.
-pub async fn decline(
-    State(state): State<AppState>,
-    caller: Caller,
-    body: Bytes,
+async fn decline_invitation(
+    state: &AppState,
+    caller: &Caller,
+    how: Locate<'_>,
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::OrganizationWrite)?;
     let user = caller.user()?;
-    let (req, _): (TokenBody, Value) = parse(&body)?;
     let txn = state.db.begin().await?;
-    let (_, inv) = locked_by_token(&txn, &req.token).await?;
-    if caller
-        .verified_email
-        .as_ref()
-        .is_some_and(|e| *e != inv.email_normalized)
-    {
-        return Err(email_mismatch());
-    }
+    let (_, inv) = locate(&txn, how, user, caller.verified_email.as_deref(), false).await?;
     let now = db::now(&txn).await?;
     let ctx = caller.as_user();
     if inv.expires_at <= now {
@@ -503,6 +682,89 @@ pub async fn decline(
     let row = decide(&txn, &ctx, now, &inv, "DECLINED", Some(user)).await?;
     txn.commit().await?;
     Ok(respond(StatusCode::OK, row.to_json(now)))
+}
+
+/// `POST /internal/v1/organization-invitations/accept` — `{token}` for the acting user,
+/// who must be the invited account (its recorded account or verified email). Single use.
+pub async fn accept(
+    State(state): State<AppState>,
+    caller: Caller,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let (req, raw): (TokenBody, Value) = parse(&body)?;
+    accept_invitation(&state, &caller, &headers, &raw, Locate::Token(&req.token)).await
+}
+
+/// `POST /internal/v1/organization-invitations/decline` — `{token}`; a supplied verified
+/// email must match the invited one.
+pub async fn decline(
+    State(state): State<AppState>,
+    caller: Caller,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let (req, _): (TokenBody, Value) = parse(&body)?;
+    decline_invitation(&state, &caller, Locate::Token(&req.token)).await
+}
+
+/// `POST /internal/v1/organization-invitations/{invitationId}/accept` — the signed-in
+/// invitee answers an invitation addressed to them (recorded account or verified email),
+/// without the emailed token. Body: empty or `{}`.
+pub async fn accept_by_id(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(invitation_id): Path<Uuid>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let (_, raw): (EmptyBody, Value) = parse(&body)?;
+    accept_invitation(&state, &caller, &headers, &raw, Locate::Id(invitation_id)).await
+}
+
+/// `POST /internal/v1/organization-invitations/{invitationId}/decline` — as `accept_by_id`.
+pub async fn decline_by_id(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(invitation_id): Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let _: (EmptyBody, Value) = parse(&body)?;
+    decline_invitation(&state, &caller, Locate::Id(invitation_id)).await
+}
+
+/// `GET /internal/v1/organization-invitations/mine` — the acting user's PENDING,
+/// unexpired invitations to ACTIVE organizations: those recorded for their account and
+/// those addressed to their verified email. Newest first, at most 100. Each item carries
+/// the organization's id and name; never another person's data.
+pub async fn mine(State(state): State<AppState>, caller: Caller) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationRead)?;
+    let user = caller.user()?;
+    let now = db::now(&state.db).await?;
+    let rows: Vec<InvitationRow> = db::all(
+        &state.db,
+        &format!(
+            "SELECT {} FROM organization_invitations i JOIN organizations o ON o.id = i.organization_id \
+             WHERE i.status = 'PENDING' AND i.expires_at > $3 AND o.lifecycle_status = 'ACTIVE' \
+               AND (i.invitee_user_id = $1 OR ($2::text IS NOT NULL AND i.email_normalized = $2)) \
+             ORDER BY i.created_at DESC, i.id DESC LIMIT 100",
+            INVITATION_COLUMNS
+                .split(", ")
+                .map(|c| format!("i.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        vec![user.into(), caller.verified_email.clone().into(), now.into()],
+    )
+    .await?;
+    let mut items = Vec::with_capacity(rows.len());
+    for r in &rows {
+        let mut doc = r.to_json(now);
+        if let Some(org) = store::org(&state.db, r.organization_id, false).await? {
+            doc["organization"] = json!({ "id": org.id, "name": org.name, "slug": org.slug });
+        }
+        items.push(doc);
+    }
+    Ok(respond(StatusCode::OK, json!({ "items": items })))
 }
 
 /// The `cfmeet-user:<uuid>` account reference of the Notification Service contracts.

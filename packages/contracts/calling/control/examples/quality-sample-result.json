@@ -1,0 +1,12 @@
+{
+  "qualityRecordId": "3f0c2b1a-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
+  "callId": "8d3e2a1c-0b6f-4c1e-9a49-6f0e3f2d1c7a",
+  "sessionId": "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "participantId": "8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d",
+  "jitterMs": 4.25,
+  "packetLossPercent": 0.5,
+  "rttMs": 60,
+  "mosEstimate": 4.34,
+  "observedFrom": "2026-11-17T10:00:00.000Z",
+  "observedTo": "2026-11-17T10:00:10.000Z"
+}

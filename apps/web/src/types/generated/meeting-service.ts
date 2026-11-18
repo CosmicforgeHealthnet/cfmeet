@@ -100,6 +100,20 @@ export interface AddOrganizationTeamMemberRequest {
   userId?: string | null;
 }
 
+/** Gap audit G7: add every active member of one of the space's organization teams. */
+export interface AddTeamMembersRequest {
+  role: Role;
+  teamId: string;
+}
+
+/** Result of adding a team (gap audit G7). */
+export interface AddTeamMembersResponse {
+  /** Members added now. */
+  added: Array<MemberResponse>;
+  /** Team members skipped: already members, the owner, you, or not an active account. */
+  skipped: number;
+}
+
 /**
  * Support-assisted email change (admin only): the owner lost access to the old address
  * and was verified by support outside the product.
@@ -157,6 +171,12 @@ export interface AdminPaginationMeta {
   page: number;
   total: number;
   total_pages: number;
+}
+
+
+export interface AdminRevokeSessionsRequest {
+  /** Why the sessions are ended (1-500 characters; recorded in the security audit). */
+  reason: string;
 }
 
 /** Request to update a user (admin only) */
@@ -326,6 +346,17 @@ export interface ApiKeyResponse {
   updated_at: string;
   usage_limit: number;
   used_count: number;
+}
+
+/** `POST /api/v2/admin/organizations/{id}/owners` (platform administrators). */
+export interface AppointOrganizationOwnerRequest {
+  /**
+   * Why the administrator intervenes (1–500 characters; recorded in the organization's
+   * audit history).
+   */
+  reason: string;
+  /** The account that becomes an ACTIVE OWNER. */
+  userId: string;
 }
 
 
@@ -532,6 +563,12 @@ export interface BreakoutView {
   closedAt?: string | null;
   closingAt?: string | null;
   conferenceId: string;
+  /**
+   * Gap audit M17: timed rooms only — the length set at creation, and once open, when
+   * the room closes by itself.
+   */
+  durationSeconds?: number | null;
+  endsAt?: string | null;
   id: string;
   name: string;
   openedAt?: string | null;
@@ -605,6 +642,12 @@ export interface BusinessOrganizationPage {
   items: Array<BusinessOrganization>;
   /** Pass as `cursor` for the next page; null on the last page. */
   nextCursor?: string | null;
+}
+
+/** `POST /api/v2/registrations/cancel` request: the registration's admission token. */
+export interface CancelOwnRegistrationRequest {
+  /** The admission token returned when registering (`reg_…`). */
+  token: string;
 }
 
 
@@ -890,9 +933,16 @@ export interface CreateBreakoutsRequest {
   capacity?: number | null;
   /** Number of automatically numbered rooms ("Room N"). */
   count?: number | null;
+  /**
+   * Gap audit M17: timed rooms. Once opened, a room closes by itself after this many
+   * seconds (60-14400), with a `warningSeconds` countdown first.
+   */
+  durationSeconds?: number | null;
   /** Named rooms. Mutually exclusive with `count`. */
   names?: Array<string> | null;
   recordingPolicy?: BreakoutRecordingPolicy | null;
+  /** Countdown before a timed room closes (0-600, default 60). */
+  warningSeconds?: number | null;
 }
 
 /** `POST /api/v2/organizations`. */
@@ -1114,6 +1164,12 @@ export interface DeclareDeviceRequest {
   publicKey: string;
 }
 
+/** Gap audit A2: the confirmation of an account deletion. */
+export interface DeleteAccountRequest {
+  /** A step-up token for purpose `DELETE_ACCOUNT` (`POST /api/v2/me/step-up/verify`). */
+  stepUpToken: string;
+}
+
 
 export interface DenyRequest {
   all?: boolean;
@@ -1259,6 +1315,11 @@ export interface DuplicateMeetingSpaceRequest {
   title?: string | null;
 }
 
+/** Gap audit M17: the new text of an edited message. */
+export interface EditMessageRequest {
+  body: string;
+}
+
 
 export interface EmailChangeConfirmRequest {
   /** The 6-digit code emailed to the NEW address. */
@@ -1317,7 +1378,7 @@ export interface ErrorBody {
 }
 
 /** Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5). */
-export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "DATABASE_ERROR" | "INTERNAL_ERROR";
+export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_STORAGE_NOT_CONFIGURED" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_FULL" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "MFA_REQUIRED" | "USER_NOT_FOUND" | "AVATAR_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "DATABASE_ERROR" | "INTERNAL_ERROR";
 
 /** OpenAPI description of the public error envelope. */
 export interface ErrorEnvelope {
@@ -1365,6 +1426,14 @@ export interface GoogleExchangeRequest {
   exchange_code: string;
 }
 
+/** Gap audit A4: a native Google ID token. */
+export interface GoogleNativeRequest {
+  /** The ID token returned by the Google Sign-In SDK. */
+  idToken: string;
+  /** The nonce the token was requested with, if any. */
+  nonce?: string | null;
+}
+
 
 export interface HandRaiseResponse {
   changed: boolean;
@@ -1373,8 +1442,22 @@ export interface HandRaiseResponse {
   raisedAt?: string | null;
 }
 
+/** Gap audit A17: the case-insensitive uniqueness report. */
+export interface IdentityDuplicatesReport {
+  email: IdentityUniqueness;
+  username: IdentityUniqueness;
+}
+
 
 export type IdentityType = "REGISTERED_USER" | "INVITED_EXTERNAL" | "GUEST" | "PHONE" | "SERVICE" | "BOT";
+
+/** Gap audit A17: case-insensitive uniqueness of one identity field. */
+export interface IdentityUniqueness {
+  /** Accounts that differ only by case, grouped (at most 100 groups); empty when none. */
+  duplicateGroups: Array<Array<string>>;
+  /** True when the database enforces it (the unique index exists). */
+  enforced: boolean;
+}
 
 /** API response wrapper for instant meeting */
 export interface InstantMeetingApiResponse {
@@ -1430,6 +1513,13 @@ export interface InvitationResponse {
 
 
 export type InvitationStatus = "ACTIVE" | "REVOKED";
+
+/** The organization an invitation for the signed-in account comes from. */
+export interface InvitingOrganization {
+  id: string;
+  name: string;
+  slug: string;
+}
 
 
 export interface JoinConferenceRequest {
@@ -1803,11 +1893,45 @@ export interface MessageView {
   conferenceId: string;
   createdAt: string;
   deleted: boolean;
+  /** Gap audit M17: when the sender last edited the message (`null`: never edited). */
+  editedAt?: string | null;
   id: string;
   kind: MessageKind;
   recipientParticipantId?: string | null;
   senderDisplayName: string;
   senderParticipantId: string;
+}
+
+/** Gap audit A1: a code from the authenticator app. */
+export interface MfaConfirmRequest {
+  code: string;
+}
+
+/** Gap audit A1: the confirmation of turning two-step sign-in off. */
+export interface MfaDisableRequest {
+  /** A step-up token for purpose `DISABLE_MFA`. */
+  stepUpToken: string;
+}
+
+/** Gap audit A1: the recovery codes (shown once). */
+export interface MfaRecoveryCodes {
+  recoveryCodes: Array<string>;
+}
+
+/** Gap audit A1: the authenticator enrolment secret (shown once). */
+export interface MfaSetupResponse {
+  /** The `otpauth://` URI to show as a QR code. */
+  otpauthUri: string;
+  /** The base32 secret for manual entry. */
+  secret: string;
+}
+
+/** Gap audit A1: the second factor of a parked sign-in. */
+export interface MfaVerifyRequest {
+  /** A 6-digit authenticator code, or a recovery code (`xxxxx-xxxxx`). */
+  code: string;
+  /** The `mfaTicket` of the `401 MFA_REQUIRED` answer. */
+  mfaTicket: string;
 }
 
 
@@ -1868,6 +1992,26 @@ export interface MyCollaborationState {
   role: Role;
   screenShareLocked: boolean;
   videoLocked: boolean;
+}
+
+/** A pending invitation addressed to the signed-in account. */
+export interface MyOrganizationInvitation {
+  createdAt: string;
+  expiresAt: string;
+  id: string;
+  invitedBy?: string | null;
+  inviteeEmailHint: string;
+  organization?: InvitingOrganization | null;
+  organizationId: string;
+  /** The role the invitation offers: ADMIN, MANAGER, MEMBER or GUEST. */
+  role: string;
+  /** Always PENDING in this list. */
+  status: string;
+}
+
+/** Pending invitations addressed to the signed-in account (newest first, at most 100). */
+export interface MyOrganizationInvitationList {
+  items: Array<MyOrganizationInvitation>;
 }
 
 
@@ -1954,6 +2098,8 @@ export interface OrganizationInvitation {
 export interface OrganizationInvitationList {
   /** Invitations (masked invitee email; never a token). */
   items: Array<OrganizationInvitation>;
+  /** The cursor of the next page; absent or null on the last page. */
+  nextCursor?: string | null;
 }
 
 /** `POST /api/v2/organization-invitations/accept` and `/decline`. */
@@ -1981,6 +2127,40 @@ export interface OrganizationLegalRegistration {
 export interface OrganizationLifecycleRequest {
   /** Optional organization `version` the change is based on. */
   expectedVersion?: number | null;
+}
+
+/**
+ * Gap audit G17: the organization layer of the meeting profile policy. Sparse, in the
+ * same shape as a space override; every value set binds the organization's spaces.
+ */
+export interface OrganizationMeetingProfilePolicy {
+  organizationId: string;
+  policy: Record<string, unknown>;
+}
+
+/**
+ * Gap audit G13: one meeting space of an organization, as its managers oversee it
+ * (whatever its access policy or security profile). Governance fields only: no
+ * passcode, invitation, participant or content data.
+ */
+export interface OrganizationMeetingSpace {
+  accessPolicy: AccessPolicy;
+  archivedAt?: string | null;
+  createdAt: string;
+  id: string;
+  meetingType: MeetingType;
+  ownerUserId?: string | null;
+  securityProfile: SecurityProfile;
+  status: SpaceStatus;
+  title: string;
+  updatedAt: string;
+}
+
+/** `GET /api/v2/organizations/{id}/meeting-spaces` page (gap audit G13). */
+export interface OrganizationMeetingSpacePage {
+  items: Array<OrganizationMeetingSpace>;
+  /** Pass as `after` for the next page; `null` on the last page. */
+  nextCursor?: string | null;
 }
 
 
@@ -2664,6 +2844,12 @@ export interface PublicMeetingInfoResponse {
   title: string;
 }
 
+/** Replace the organization layer (gap audit G17). */
+export interface PutOrganizationMeetingProfilePolicyRequest {
+  /** Sparse profile policy, e.g. `{"recording": {"allowed": false}}`; `{}` clears it. */
+  policy: Record<string, unknown>;
+}
+
 
 export interface QualityIngestResponse {
   accepted: number;
@@ -2918,12 +3104,26 @@ export interface RegistrationCreated {
 
 
 export interface RegistrationListResponse {
+  /** Pass as `after` to get the next page; `null` on the last page. */
+  nextCursor?: string | null;
   registrations: Array<RegistrationView>;
 }
 
 
 export interface RegistrationProfile {
+  /**
+   * Gap audit M10: most active registrations accepted (per occurrence, or for the
+   * whole series); 0 = no limit. At most 100000.
+   */
+  capacity?: number;
+  /**
+   * Gap audit M10: registration closes this many minutes before the occurrence's
+   * scheduled start (0 = open until the occurrence ends).
+   */
+  closesMinutesBeforeStart?: number;
   customFields: Array<CustomRegistrationField>;
+  /** Gap audit M10: registration closes at this time, whatever the occurrence. */
+  deadline?: string | null;
   email: FieldRequirement;
   enabled: boolean;
   organization: FieldRequirement;
@@ -2960,6 +3160,14 @@ export interface RegistrationView {
 
 export interface RemoveParticipantRequest {
   reason?: string | null;
+}
+
+/** Gap audit G10: which dead-lettered organization events to replay. */
+export interface ReplayOrganizationEventsRequest {
+  /** One consumer's dead letters only (for example `cfmeet.meeting-service`). */
+  destination?: string | null;
+  /** Only these events (at most 500); empty: every dead letter (of the destination). */
+  eventIds?: Array<string>;
 }
 
 
@@ -3252,7 +3460,7 @@ export interface StartTranscriptionRequest {
 }
 
 /** What the confirmation is for; a token for one purpose never authorizes another. */
-export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL";
+export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT" | "DISABLE_MFA";
 
 
 export interface StepUpRequest {
@@ -3766,6 +3974,7 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/conferences/{id}/questions/{questionId}/pin": "v2_unpin_question",
   "DELETE /api/v2/conferences/{id}/questions/{questionId}/vote": "v2_unvote_question",
   "DELETE /api/v2/conferences/{id}/spotlights/{participantId}": "v2_remove_spotlight",
+  "DELETE /api/v2/me/avatar": "v2_remove_my_avatar",
   "DELETE /api/v2/meeting-spaces/{id}/members/{memberId}": "v2_revoke_member",
   "DELETE /api/v2/meeting-spaces/{id}/recurrence": "v2_end_recurrence",
   "DELETE /api/v2/meeting-spaces/{id}/registrations/{registrationId}": "v2_cancel_registration",
@@ -3793,7 +4002,11 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/admin/audit-events": "v2_admin_list_account_audit_events",
   "GET /api/v2/admin/chat-migration": "v2_chat_migration_status",
   "GET /api/v2/admin/compat/legacy-meetings/{id}/shadow": "v2_shadow_compare",
+  "GET /api/v2/admin/identity-duplicates": "v2_admin_identity_duplicates",
+  "GET /api/v2/admin/organization-event-delivery": "v2_admin_organization_event_delivery",
   "GET /api/v2/admin/organizations": "v2_admin_list_organizations",
+  "GET /api/v2/admin/organizations/{id}/service-bindings/{service}": "v2_admin_get_organization_service_binding",
+  "GET /api/v2/avatars/{avatarId}": "v2_get_avatar",
   "GET /api/v2/conferences/{id}": "v2_get_conference",
   "GET /api/v2/conferences/{id}/artifacts": "v2_list_artifacts",
   "GET /api/v2/conferences/{id}/artifacts/{artifactId}": "v2_get_artifact",
@@ -3803,6 +4016,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/conferences/{id}/collaboration": "v2_collaboration_state",
   "GET /api/v2/conferences/{id}/consents/requirements": "v2_consent_requirements",
   "GET /api/v2/conferences/{id}/events": "v2_replay_events",
+  "GET /api/v2/conferences/{id}/exports/{artifactType}": "v2_export_report",
   "GET /api/v2/conferences/{id}/hand-raise": "v2_raised_hands",
   "GET /api/v2/conferences/{id}/messages": "v2_list_messages",
   "GET /api/v2/conferences/{id}/participants": "v2_list_participants",
@@ -3820,10 +4034,13 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/conferences/{id}/transcripts/{artifactId}": "v2_get_transcript",
   "GET /api/v2/conferences/{id}/waiting-room": "v2_get_waiting_room",
   "GET /api/v2/me/conferences": "v2_my_conferences",
+  "GET /api/v2/me/data-export": "v2_export_my_data",
   "GET /api/v2/me/device-links": "v2_list_pending_device_links",
   "GET /api/v2/me/device-links/{linkId}": "v2_get_device_link",
   "GET /api/v2/me/device-policy": "v2_get_my_device_policy",
   "GET /api/v2/me/devices": "v2_list_my_devices",
+  "GET /api/v2/me/mfa": "v2_get_my_mfa",
+  "GET /api/v2/me/organization-invitations": "v2_my_organization_invitations",
   "GET /api/v2/me/organizations": "v2_my_organizations",
   "GET /api/v2/me/profile": "v2_get_my_profile",
   "GET /api/v2/me/security-events": "v2_list_my_security_events",
@@ -3850,8 +4067,12 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}": "v2_get_business_organization",
   "GET /api/v2/organizations/{id}/audit-events": "v2_list_organization_audit_events",
   "GET /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_get",
+  "GET /api/v2/organizations/{id}/export": "v2_export_organization",
   "GET /api/v2/organizations/{id}/invitations": "v2_list_organization_invitations",
+  "GET /api/v2/organizations/{id}/meeting-profile-policy": "v2_get_organization_meeting_profile_policy",
+  "GET /api/v2/organizations/{id}/meeting-spaces": "v2_list_organization_meeting_spaces",
   "GET /api/v2/organizations/{id}/members": "v2_list_organization_members",
+  "GET /api/v2/organizations/{id}/messaging/moderation/{path}": "v2_organization_messaging_moderation_get",
   "GET /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_get",
   "GET /api/v2/organizations/{id}/policies": "v2_get_organization_policy",
   "GET /api/v2/organizations/{id}/provisioning": "v2_get_organization_provisioning",
@@ -3870,6 +4091,7 @@ export const CONTRACT_OPERATIONS = {
   "PATCH /api/v2/conferences/{id}/breakouts/{breakoutId}/assignments": "v2_patch_breakout_assignments",
   "PATCH /api/v2/conferences/{id}/chat-policy": "v2_update_chat_policy",
   "PATCH /api/v2/conferences/{id}/collaboration-policy": "v2_update_collaboration_policy",
+  "PATCH /api/v2/conferences/{id}/messages/{messageId}": "v2_edit_message",
   "PATCH /api/v2/conferences/{id}/participants/{participantId}/role": "v2_change_role",
   "PATCH /api/v2/me/profile": "v2_update_my_profile",
   "PATCH /api/v2/meeting-spaces/{id}": "v2_update_meeting_space",
@@ -3889,7 +4111,9 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v1/api/meetings/{id}/join": "api_join_meeting",
   "POST /api/v1/auth/email-change/revert": "revert_email_change",
   "POST /api/v1/auth/logout": "logout",
+  "POST /api/v1/auth/mfa/verify": "verify_mfa",
   "POST /api/v1/auth/oauth/google/exchange": "oauth_google_exchange",
+  "POST /api/v1/auth/oauth/google/native": "oauth_google_native",
   "POST /api/v1/auth/otp/request": "request_otp",
   "POST /api/v1/auth/otp/verify": "verify_otp",
   "POST /api/v1/auth/otp/verify-link": "verify_otp_link",
@@ -3910,7 +4134,13 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/admin/chat-migration/parity-runs": "v2_chat_migration_parity",
   "POST /api/v2/admin/chat-migration/transitions": "v2_chat_migration_transition",
   "POST /api/v2/admin/compat/backfill": "v2_run_backfill",
+  "POST /api/v2/admin/identity-duplicates/enforce": "v2_admin_identity_duplicates_enforce",
+  "POST /api/v2/admin/organization-event-delivery/replay": "v2_admin_replay_organization_events",
   "POST /api/v2/admin/organizations": "v2_create_organization",
+  "POST /api/v2/admin/organizations/{id}/owners": "v2_appoint_organization_owner",
+  "POST /api/v2/admin/organizations/{id}/provisioning/retry": "v2_admin_retry_organization_provisioning",
+  "POST /api/v2/admin/organizations/{id}/service-bindings/{service}/rotate": "v2_admin_rotate_organization_service_binding",
+  "POST /api/v2/admin/users/{userId}/sessions/revoke": "v2_admin_revoke_user_sessions",
   "POST /api/v2/conferences/{id}/artifacts/reports": "v2_generate_report",
   "POST /api/v2/conferences/{id}/artifacts/{artifactId}/access": "v2_artifact_access",
   "POST /api/v2/conferences/{id}/backstage": "v2_enter_backstage",
@@ -3973,6 +4203,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/conferences/{id}/waiting-room/deny": "v2_deny",
   "POST /api/v2/instant-meetings": "v2_create_instant_meeting",
   "POST /api/v2/invitations/{token}/resolve": "v2_resolve_invitation",
+  "POST /api/v2/me/account/delete": "v2_delete_my_account",
   "POST /api/v2/me/device-links": "v2_create_device_link",
   "POST /api/v2/me/device-links/{linkId}/approve": "v2_approve_device_link",
   "POST /api/v2/me/device-links/{linkId}/cancel": "v2_cancel_device_link",
@@ -3983,7 +4214,11 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/me/devices/{deviceId}/revoke": "v2_revoke_my_device",
   "POST /api/v2/me/email/change/request": "v2_request_email_change",
   "POST /api/v2/me/email/change/verify": "v2_confirm_email_change",
+  "POST /api/v2/me/mfa/disable": "v2_disable_my_mfa",
+  "POST /api/v2/me/mfa/totp/confirm": "v2_confirm_my_totp",
+  "POST /api/v2/me/mfa/totp/setup": "v2_setup_my_totp",
   "POST /api/v2/me/sessions/revoke-all": "v2_revoke_all_my_sessions",
+  "POST /api/v2/me/sessions/revoke-others": "v2_revoke_other_account_sessions",
   "POST /api/v2/me/sessions/{sessionId}/revoke": "v2_revoke_my_session",
   "POST /api/v2/me/step-up/request": "v2_request_step_up",
   "POST /api/v2/me/step-up/verify": "v2_verify_step_up",
@@ -3994,6 +4229,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/meeting-spaces/{id}/invitations": "v2_create_invitation",
   "POST /api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke": "v2_revoke_invitation",
   "POST /api/v2/meeting-spaces/{id}/members": "v2_add_member",
+  "POST /api/v2/meeting-spaces/{id}/members/team": "v2_add_team_members",
   "POST /api/v2/meeting-spaces/{id}/owner-transfer": "v2_transfer_owner",
   "POST /api/v2/meeting-spaces/{id}/registrations": "v2_register",
   "POST /api/v2/messaging/client-sessions/revoke-all": "v2_messaging_revoke_all_sessions",
@@ -4010,6 +4246,8 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/notifications/read": "v2_notifications_mark_read",
   "POST /api/v2/organization-invitations/accept": "v2_accept_organization_invitation",
   "POST /api/v2/organization-invitations/decline": "v2_decline_organization_invitation",
+  "POST /api/v2/organization-invitations/{invitationId}/accept": "v2_accept_my_organization_invitation",
+  "POST /api/v2/organization-invitations/{invitationId}/decline": "v2_decline_my_organization_invitation",
   "POST /api/v2/organizations": "v2_create_business_organization",
   "POST /api/v2/organizations/{id}/archive": "v2_archive_business_organization",
   "POST /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_post",
@@ -4017,6 +4255,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/invitations/{invitationId}/revoke": "v2_revoke_organization_invitation",
   "POST /api/v2/organizations/{id}/members/me/leave": "v2_leave_organization",
   "POST /api/v2/organizations/{id}/messaging/members/resolve": "v2_organization_messaging_resolve_members",
+  "POST /api/v2/organizations/{id}/messaging/moderation/{path}": "v2_organization_messaging_moderation_post",
   "POST /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_post",
   "POST /api/v2/organizations/{id}/messaging/session-tokens": "v2_organization_messaging_session_token",
   "POST /api/v2/organizations/{id}/ownership-transfer": "v2_transfer_organization_ownership",
@@ -4025,15 +4264,19 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/teams": "v2_create_organization_team",
   "POST /api/v2/organizations/{id}/teams/{teamId}/archive": "v2_archive_organization_team",
   "POST /api/v2/organizations/{id}/teams/{teamId}/members": "v2_add_organization_team_member",
+  "POST /api/v2/registrations/cancel": "v2_cancel_own_registration",
   "PUT /api/v1/meetings/{id}": "update_meeting",
+  "PUT /api/v2/me/avatar": "v2_upload_my_avatar",
   "PUT /api/v2/meeting-spaces/{id}/recurrence": "v2_set_recurrence",
   "PUT /api/v2/meeting-spaces/{id}/recurrence/exceptions": "v2_set_recurrence_exception",
   "PUT /api/v2/messaging/relay/{path}": "v2_messaging_relay_put",
   "PUT /api/v2/notifications/devices/{accountDeviceId}/push": "v2_notifications_push_register",
   "PUT /api/v2/notifications/preferences": "v2_notifications_preferences_update",
   "PUT /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_put",
+  "PUT /api/v2/organizations/{id}/meeting-profile-policy": "v2_put_organization_meeting_profile_policy",
   "PUT /api/v2/organizations/{id}/members/{userId}": "v2_upsert_organization_member",
   "PUT /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_put",
+  "PUT /api/v2/organizations/{id}/teams/{teamId}/messaging-channel": "v2_organization_team_messaging_channel",
 } as const;
 
 export type ContractOperation = keyof typeof CONTRACT_OPERATIONS;

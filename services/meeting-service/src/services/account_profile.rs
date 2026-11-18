@@ -18,8 +18,8 @@
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbBackend, EntityTrait, QueryFilter,
-    QuerySelect, Set, Statement, TransactionTrait,
+    ActiveModelTrait, ConnectionTrait, DbBackend, EntityTrait, QuerySelect, Set, Statement,
+    TransactionTrait,
 };
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -245,12 +245,10 @@ pub async fn apply<C: TransactionTrait>(
         .ok_or(ApplyError::NotFound)?;
     if let Some(name) = &change.username {
         if name != &user.username {
-            let taken = users::Entity::find()
-                .filter(users::Column::Username.eq(name.as_str()))
-                .filter(users::Column::Id.ne(user_id))
-                .one(&txn)
-                .await?
-                .is_some();
+            let taken =
+                crate::services::account_security::username_taken(&txn, name, Some(user_id))
+                    .await
+                    .map_err(ApplyError::Db)?;
             if taken {
                 return Err(ApplyError::UsernameTaken);
             }

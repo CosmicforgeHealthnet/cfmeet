@@ -81,8 +81,8 @@ impl RevokeReason {
 /// Runtime policy read once from the environment (no secret values).
 #[derive(Debug, Clone)]
 pub struct AuthPolicy {
-    /// `exchange_code` (one-time code, ACC-005) or `legacy_query` (tokens in the redirect
-    /// URL, kept only until the live web client adopts the exchange endpoint).
+    /// `exchange_code` (one-time code, ACC-005; the default) or `legacy_query` (tokens in
+    /// the redirect URL; explicit opt-in only).
     pub google_token_delivery: GoogleTokenDelivery,
     /// Require the browser-binding cookie set by the OAuth start redirect.
     pub google_browser_binding: bool,
@@ -90,9 +90,9 @@ pub struct AuthPolicy {
     /// `x-real-ip`). Unset: per-address limits are off (the proxy address would be shared).
     pub client_ip_header: Option<axum::http::HeaderName>,
     /// ACC-022: the `status` string of the v1 sign-in responses (register, login, Google
-    /// sign-in/exchange, `GET/PATCH /api/v1/users/me`). `ACCOUNT_STATUS_FORMAT=canonical`
-    /// returns the contract value (`pending_verification`); the default `legacy` keeps the
-    /// historical `pendingverification` spelling until every deployed client accepts both.
+    /// sign-in/exchange, `GET/PATCH /api/v1/users/me`). By default the contract value
+    /// (`pending_verification`); `ACCOUNT_STATUS_FORMAT=legacy` keeps the historical
+    /// `pendingverification` spelling (explicit opt-in only; both clients accept both).
     /// Admin APIs and `/api/v2/me/profile` always use the canonical value.
     pub status_format: AccountStatusFormat,
     /// ACC-026: self-deactivation needs a step-up confirmation (an emailed code, see
@@ -186,8 +186,10 @@ impl AuthPolicy {
             .to_ascii_lowercase()
             .as_str()
         {
-            "exchange_code" => GoogleTokenDelivery::ExchangeCode,
-            _ => GoogleTokenDelivery::LegacyQuery,
+            // Gap audit A3: the one-time exchange code is the default (both first-party
+            // clients redeem it); tokens in the redirect URL only on explicit opt-in.
+            "legacy_query" => GoogleTokenDelivery::LegacyQuery,
+            _ => GoogleTokenDelivery::ExchangeCode,
         };
         let google_browser_binding = !matches!(
             get("GOOGLE_OAUTH_BROWSER_BINDING")
@@ -207,8 +209,10 @@ impl AuthPolicy {
             .to_ascii_lowercase()
             .as_str()
         {
-            "canonical" => AccountStatusFormat::Canonical,
-            _ => AccountStatusFormat::Legacy,
+            // Gap audit A18: the contract spelling is the default (both first-party clients
+            // accept both); the historical `pendingverification` only on explicit opt-in.
+            "legacy" => AccountStatusFormat::Legacy,
+            _ => AccountStatusFormat::Canonical,
         };
         let deactivation_requires_reauth = !matches!(
             get("ACCOUNT_DEACTIVATION_REQUIRE_REAUTH")
@@ -352,11 +356,242 @@ pub async fn open_session_by_reference(
     environment_id: Uuid,
     reference: &str,
 ) -> ApiResult<Option<Uuid>> {
-    Ok(list_sessions(db, user_id, false, None)
+    // Gap audit A21: every open session is considered, not only the newest 100.
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id FROM account_sessions \
+              WHERE user_id = $1 AND revoked_at IS NULL AND absolute_expires_at > now()",
+            [user_id.into()],
+        ))
+        .await?;
+    for row in rows {
+        let id: Uuid = row.try_get("", "id")?;
+        if session_reference(environment_id, id) == reference {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+/// Gap audit A17: whether `name` is taken by another account, regardless of case
+/// (`Alice` and `alice` are one username).
+pub async fn username_taken<C: ConnectionTrait>(
+    db: &C,
+    name: &str,
+    except: Option<Uuid>,
+) -> ApiResult<bool> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS x FROM users WHERE LOWER(username) = LOWER($1) \
+               AND ($2::uuid IS NULL OR id <> $2) LIMIT 1",
+            [name.into(), except.into()],
+        ))
         .await?
-        .into_iter()
-        .map(|s| s.session_id)
-        .find(|id| session_reference(environment_id, *id) == reference))
+        .is_some())
+}
+
+/// Gap audit A13: tells the account owner of a security event by email (best effort:
+/// queued in the durable email ledger; a failure is logged, never returned). Accounts
+/// without a deliverable address (guests) get nothing.
+pub async fn notify_security(
+    state: &AppState,
+    user_id: Uuid,
+    notice: crate::services::email::SecurityNotice,
+    dedupe: &str,
+) {
+    let user = match users::Entity::find_by_id(user_id).one(&state.db).await {
+        Ok(Some(u)) if u.role != users::UserRole::Guest && !u.email.trim().is_empty() => u,
+        Ok(_) => return,
+        Err(e) => {
+            tracing::warn!(%user_id, "security notice skipped: {e}");
+            return;
+        }
+    };
+    if let Err(e) = state
+        .email_service
+        .send_security_notice(&user.email, &user.username, notice, dedupe)
+        .await
+    {
+        tracing::warn!(%user_id, notice = notice.key(), "security notice not queued: {e}");
+    }
+}
+
+/// Gap audit A17: case-insensitive uniqueness of one identity field.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityUniqueness {
+    /// True when the database enforces it (the unique index exists).
+    pub enforced: bool,
+    /// Accounts that differ only by case, grouped (at most 100 groups); empty when none.
+    pub duplicate_groups: Vec<Vec<Uuid>>,
+}
+
+/// Gap audit A17: the case-insensitive uniqueness report.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityDuplicatesReport {
+    pub email: IdentityUniqueness,
+    pub username: IdentityUniqueness,
+}
+
+pub async fn identity_report<C: ConnectionTrait>(db: &C) -> ApiResult<IdentityDuplicatesReport> {
+    let mut out = Vec::new();
+    for (column, index) in [
+        ("email", "uq_users_email_lower"),
+        ("username", "uq_users_username_lower"),
+    ] {
+        let enforced = db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 AS x FROM pg_indexes WHERE tablename = 'users' AND indexname = $1",
+                [index.into()],
+            ))
+            .await?
+            .is_some();
+        let rows = db
+            .query_all(Statement::from_string(
+                DbBackend::Postgres,
+                format!(
+                    "SELECT array_agg(id ORDER BY created_at) AS ids FROM users \
+                      GROUP BY LOWER({column}) HAVING count(*) > 1 LIMIT 100"
+                ),
+            ))
+            .await?;
+        let mut groups = Vec::new();
+        for r in rows {
+            groups.push(r.try_get::<Vec<Uuid>>("", "ids")?);
+        }
+        out.push(IdentityUniqueness {
+            enforced,
+            duplicate_groups: groups,
+        });
+    }
+    let username = out.pop().expect("two fields");
+    let email = out.pop().expect("two fields");
+    Ok(IdentityDuplicatesReport { email, username })
+}
+
+/// Gap audit A17: creates each case-insensitive unique index whose field has no
+/// case-only duplicates left (idempotent).
+pub async fn enforce_identity_uniqueness<C: ConnectionTrait>(db: &C) -> ApiResult<()> {
+    db.execute(Statement::from_string(
+        DbBackend::Postgres,
+        "SELECT ensure_case_insensitive_identity()",
+    ))
+    .await?;
+    Ok(())
+}
+
+/// How long after deactivating their own account a person can sign back in to reactivate
+/// it (gap audit A16).
+pub const SELF_REACTIVATION_DAYS: i64 = 30;
+
+/// Gap audit A16: whether the account's most recent status change is its owner's own
+/// deactivation, made less than [`SELF_REACTIVATION_DAYS`] ago. An account an
+/// administrator deactivated or suspended is never reactivated by signing in.
+pub async fn self_reactivation_allowed<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+) -> ApiResult<bool> {
+    let row = db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT event_type, actor_kind, actor_user_id, \
+                    occurred_at > now() - make_interval(days => $2) AS recent \
+             FROM account_security_events \
+             WHERE user_id = $1 AND outcome = 'SUCCESS' \
+               AND event_type IN ('ACCOUNT_DEACTIVATED', 'ACCOUNT_STATUS_CHANGED', 'ACCOUNT_REACTIVATED') \
+             ORDER BY seq DESC LIMIT 1",
+            [user_id.into(), (SELF_REACTIVATION_DAYS as i32).into()],
+        ))
+        .await?;
+    let Some(row) = row else { return Ok(false) };
+    let kind: String = row.try_get("", "event_type")?;
+    let actor: String = row.try_get("", "actor_kind")?;
+    let actor_user: Option<Uuid> = row.try_get("", "actor_user_id")?;
+    let recent: bool = row.try_get("", "recent")?;
+    Ok(kind == "ACCOUNT_DEACTIVATED" && actor == "USER" && actor_user == Some(user_id) && recent)
+}
+
+/// Whether an account with this id exists.
+pub async fn user_exists<C: ConnectionTrait>(db: &C, user_id: Uuid) -> ApiResult<bool> {
+    Ok(users::Entity::find_by_id(user_id).one(db).await?.is_some())
+}
+
+/// Gap audit A21: whether `session_id` is one of the user's sessions (open or ended),
+/// whatever its age.
+pub async fn owns_session<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> ApiResult<bool> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS x FROM account_sessions WHERE id = $1 AND user_id = $2",
+            [session_id.into(), user_id.into()],
+        ))
+        .await?
+        .is_some())
+}
+
+/// Gap audit A21: the most sign-ins an account keeps open at once
+/// (`ACCOUNT_MAX_OPEN_SESSIONS`, default 50, at least 5). Signing in past it ends the
+/// least recently used sign-ins (SUPERSEDED), never the new one.
+pub fn max_open_sessions() -> i64 {
+    static MAX: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *MAX.get_or_init(|| {
+        std::env::var("ACCOUNT_MAX_OPEN_SESSIONS")
+            .ok()
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .unwrap_or(50)
+            .max(5)
+    })
+}
+
+/// Ends the user's open sign-ins beyond [`max_open_sessions`] (least recently used
+/// first, `keep` excepted) and fans each end out. Returns how many ended.
+pub async fn enforce_session_cap(state: &AppState, user_id: Uuid, keep: Uuid) -> ApiResult<u64> {
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = 'SUPERSEDED' \
+              WHERE id IN (SELECT id FROM account_sessions \
+                            WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL \
+                              AND absolute_expires_at > now() \
+                            ORDER BY COALESCE(last_refreshed_at, created_at) DESC, id \
+                            OFFSET $3) \
+                AND revoked_at IS NULL \
+              RETURNING id",
+            [
+                user_id.into(),
+                keep.into(),
+                (max_open_sessions() - 1).into(),
+            ],
+        ))
+        .await?;
+    let mut ended = 0;
+    for row in rows {
+        let session_id: Uuid = row.try_get("", "id")?;
+        record_event_best_effort(
+            &state.db,
+            SecurityEvent::new("SESSION_REVOKED", Outcome::Success)
+                .by_user(user_id)
+                .session(session_id)
+                .detail(json!({"trigger":"SESSION_CAP"})),
+        )
+        .await;
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user_id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of a superseded sign-in failed: {e}");
+        }
+        ended += 1;
+    }
+    Ok(ended)
 }
 
 pub fn normalize_email(email: &str) -> String {
@@ -606,6 +841,10 @@ pub async fn start_session(
         .await?
         .ok_or_else(|| ApiError::InternalError("session was not created".into()))?;
     let auth_time: i64 = row.try_get("", "auth_time")?;
+    // Gap audit A21: a bounded number of open sign-ins per account.
+    if let Err(e) = enforce_session_cap(state, user.id, session_id).await {
+        tracing::warn!(user_id = %user.id, "session cap not enforced: {e}");
+    }
     let (access_token, refresh_token) = state.jwt_service.session_tokens(
         user.id,
         &role_claim(user),
@@ -675,6 +914,20 @@ pub async fn rotate_session(
         .await?;
         txn.commit().await?;
         tracing::warn!(%session_id, "refresh token reuse detected; session revoked");
+        // Gap audit A10: a stolen refresh token ends the sign-in everywhere, including the
+        // Hub, Messaging and Calling credentials tied to it (best effort; durable events).
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user.id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of a reused sign-in failed: {e}");
+        }
+        notify_security(
+            state,
+            user.id,
+            crate::services::email::SecurityNotice::RefreshTokenReuse,
+            &session_id.to_string(),
+        )
+        .await;
         return Err(ApiError::Unauthorized(
             "This session has ended. Please sign in again.".into(),
         ));
@@ -696,6 +949,36 @@ pub async fn rotate_session(
         session_id,
         next,
     )
+}
+
+/// Gap audit A10: sign-ins past their absolute lifetime are recorded EXPIRED and their
+/// end is fanned out like any other (Hub, Messaging and Calling credentials of the sign-in
+/// end with it). Bounded per call; multi-instance safe (`SKIP LOCKED`).
+pub async fn sweep_expired_sessions(state: &AppState) -> ApiResult<u64> {
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET revoked_at = now(), revoke_reason = 'EXPIRED' \
+              WHERE id IN (SELECT id FROM account_sessions \
+                            WHERE revoked_at IS NULL AND absolute_expires_at <= now() \
+                            ORDER BY absolute_expires_at LIMIT 200 FOR UPDATE SKIP LOCKED) \
+              RETURNING id, user_id",
+            [],
+        ))
+        .await?;
+    let mut ended = 0;
+    for row in rows {
+        let session_id: Uuid = row.try_get("", "id")?;
+        let user_id: Uuid = row.try_get("", "user_id")?;
+        if let Err(e) =
+            crate::services::communications::session_ended(state, user_id, session_id).await
+        {
+            tracing::error!(%session_id, "fan-out of an expired sign-in failed: {e}");
+        }
+        ended += 1;
+    }
+    Ok(ended)
 }
 
 /// Revoke one of the user's sessions. `false` if it was not open or not theirs.
@@ -1141,6 +1424,8 @@ mod tests {
             typ: Some("access".into()),
             sid: sid.then(|| Uuid::new_v4().to_string()),
             rti: None,
+            iss: None,
+            aud: None,
         }
     }
 
@@ -1207,9 +1492,16 @@ mod tests {
     }
 
     #[test]
-    fn account_status_format_is_legacy_until_switched() {
+    fn account_status_format_is_canonical_unless_legacy_is_chosen() {
         use crate::models::users::UserStatus;
-        let legacy = AuthPolicy::from_lookup(|_| None).status_format;
+        assert_eq!(
+            AuthPolicy::from_lookup(|_| None).status_format,
+            AccountStatusFormat::Canonical
+        );
+        let legacy = AuthPolicy::from_lookup(|k| {
+            (k == "ACCOUNT_STATUS_FORMAT").then(|| " Legacy ".to_string())
+        })
+        .status_format;
         assert_eq!(legacy, AccountStatusFormat::Legacy);
         assert_eq!(
             legacy.render(&UserStatus::PendingVerification),
@@ -1236,9 +1528,20 @@ mod tests {
     }
 
     #[test]
-    fn policy_defaults_keep_live_client_compatibility_and_bind_browsers() {
+    fn policy_defaults_use_the_exchange_code_and_bind_browsers() {
         let p = AuthPolicy::from_lookup(|_| None);
-        assert_eq!(p.google_token_delivery, GoogleTokenDelivery::LegacyQuery);
+        assert_eq!(p.google_token_delivery, GoogleTokenDelivery::ExchangeCode);
+        assert_eq!(p.status_format, AccountStatusFormat::Canonical);
+        let legacy = AuthPolicy::from_lookup(|k| match k {
+            "GOOGLE_OAUTH_TOKEN_DELIVERY" => Some("legacy_query".into()),
+            "ACCOUNT_STATUS_FORMAT" => Some("legacy".into()),
+            _ => None,
+        });
+        assert_eq!(
+            legacy.google_token_delivery,
+            GoogleTokenDelivery::LegacyQuery
+        );
+        assert_eq!(legacy.status_format, AccountStatusFormat::Legacy);
         assert!(p.google_browser_binding);
         assert!(p.client_ip_header.is_none());
         let p = AuthPolicy::from_lookup(|k| match k {

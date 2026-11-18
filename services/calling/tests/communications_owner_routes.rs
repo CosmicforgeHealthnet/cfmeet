@@ -42,6 +42,7 @@ const PARTICIPATION: &str = "/internal/v1/communications/calls/participation";
 const HISTORY: &str = "/internal/v1/communications/calls/history";
 const VERIFY: &str = "/internal/v1/communications/endpoints/verify";
 const REVOKE: &str = "/internal/v1/communications/endpoints/revoke";
+const INVITE: &str = "/internal/v1/communications/calls/participants";
 
 /// The Hub's policy endpoint: denies DIRECT_CALL to the scripted targets.
 #[derive(Clone, Default)]
@@ -203,6 +204,12 @@ fn bodies(principal: Uuid, endpoint: Uuid) -> Vec<(&'static str, Value)> {
         (
             REVOKE,
             json!({"principalId": principal, "endpointId": endpoint}),
+        ),
+        (
+            INVITE,
+            json!({"idempotencyKey": "k-2", "actingPrincipalId": principal,
+                   "callId": Uuid::new_v4(), "invitingParticipantId": Uuid::new_v4(),
+                   "targetPrincipalIds": [Uuid::new_v4()], "expectedVersion": 1}),
         ),
     ]
 }
@@ -717,4 +724,50 @@ async fn endpoint_verify_and_revoke_see_only_the_delegated_users_endpoints() {
     )
     .await;
     assert_eq!(r.json["status"], "REVOKED", "{}", r.text);
+}
+
+/// The Hub adds the delegated user's resolved contacts to a running call through the
+/// canonical invite path; the inviting participant must be the user's own participant,
+/// and a replay answers from the command record.
+#[tokio::test]
+async fn invite_adds_people_to_the_delegated_users_running_call() {
+    let Some((w, hub)) = world(true).await else {
+        return;
+    };
+    let (call, _caller, _callee) = w.connected_call("VIDEO").await;
+    let me = w.w.initiator.id().as_uuid();
+    let them = w.w.recipient.id().as_uuid();
+    let third = w.principal("invite-third").await;
+    let third_id = third.id().as_uuid();
+    let _third_device = w.device(&third, "third-main").await;
+    let mine = w.participant_of(call, me).await;
+    let theirs = w.participant_of(call, them).await;
+    let version = w.state(call).await.1;
+    let body = |inviter: Uuid, key: &str| {
+        json!({"idempotencyKey": key, "actingPrincipalId": me, "callId": call,
+               "invitingParticipantId": inviter, "targetPrincipalIds": [third_id],
+               "expectedVersion": version})
+    };
+    // Another party's participant cannot be used to invite in the user's name.
+    let r = hub_as(&w, me, INVITE, body(theirs, "inv-0")).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    // Personal policy applies to each target.
+    hub.deny(third_id);
+    let r = hub_as(&w, me, INVITE, body(mine, "inv-1")).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    hub.allow(third_id);
+    let r = hub_as(&w, me, INVITE, body(mine, "inv-2")).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["schemaVersion"], 1, "{}", r.text);
+    assert_eq!(r.json["replayed"], false);
+    assert_eq!(
+        w.w.count(&format!(
+            "SELECT count(*) FROM call_participants WHERE call_id = '{call}' AND principal_id = '{third_id}'"
+        ))
+        .await,
+        1
+    );
+    let replay = hub_as(&w, me, INVITE, body(mine, "inv-2")).await;
+    assert_eq!(replay.status, StatusCode::OK, "{}", replay.text);
+    assert_eq!(replay.json["replayed"], true, "{}", replay.text);
 }

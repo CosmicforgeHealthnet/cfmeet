@@ -20,13 +20,13 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 
 | Status | P0 | P1 | P2 | P3 | Total |
 |---|---:|---:|---:|---:|---:|
-| `CLOSED` | 2 | 16 | 29 | 17 | 64 |
-| `CLOSED_OWNER_ACTIVATION` | 0 | 7 | 4 | 1 | 12 |
+| `CLOSED` | 2 | 17 | 29 | 17 | 65 |
+| `CLOSED_OWNER_ACTIVATION` | 0 | 8 | 4 | 1 | 13 |
 | `FRONTEND_CORRECTED` | 1 | 9 | 11 | 4 | 25 |
 | `FRONTEND_REMAINING` | 0 | 6 | 4 | 3 | 13 |
 | `DEPRECATED_WITH_MIGRATION` | 0 | 2 | 2 | 0 | 4 |
 | `OWNER_DECISION` | 1 | 5 | 12 | 4 | 22 |
-| `EXTERNAL_BLOCKED` | 0 | 3 | 4 | 1 | 8 |
+| `EXTERNAL_BLOCKED` | 0 | 1 | 4 | 1 | 6 |
 | `NOT_APPLICABLE` | 0 | 0 | 0 | 1 | 1 |
 | `BACKEND_FOLLOW_UP` | 0 | 0 | 0 | 0 | 0 |
 | **Total** | 4 | 48 | 66 | 31 | **149** |
@@ -119,7 +119,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | MSG-009 | P2 | BACKEND | Meeting links and calls in chat exist only as Hub timeline cards (not chat messages), with no realtime and no card for m | `CLOSED` | 23f42c92: owed call cards for parties without a profile (Hub calls.rs materialize_call_cards) + deduplicated, version-monotonic communications.timeline.changed -> Messaging messaging.timeline.changed (members only, live + replay); tests: Hub unified.rs call_cards_reach_parties_without_a_profile_and_timeline_changes_are_nudged_once, messaging realtime_receipts_timeline.rs hub_timeline_nudges_reach_members_once_per_version; chat lines stay client-composed (E2EE rule) |
 | MSG-010 | P2 | BACKEND | Hub ↔ owner integration is not tested end-to-end in CI; Hub tests use simulated owners | `CLOSED` | 9592564c (merged 6bacc77d); CI: Hub 42387489562 (real-process journey), meeting-service 42387493644, platform-access 42387505519 |
 | MSG-012 | P2 | FRONTEND | Meeting chat migration cutover would break mobile in-meeting chat (v1 chat refused after cutover; dormant v2 mobile clie | `FRONTEND_CORRECTED` | 57407e77 mobile in-meeting chat on v2 |
-| MSG-013 | P1 | EXTERNAL_DEPENDENCY | PRIVATE_E2EE is correctly gated off in production pending independent review; key transparency is unwitnessed | `EXTERNAL_BLOCKED` | OPEN |
+| MSG-013 | P1 | EXTERNAL_DEPENDENCY | PRIVATE_E2EE was gated off in production pending independent review; key transparency is unwitnessed | `CLOSED_OWNER_ACTIVATION` | Personal PRIVATE_E2EE is enabled in production under the owner's release record (ADR 0060, `activate-personal-encryption`; [activation record](../operations/CFMEET_PRODUCTION_ACTIVATION_AND_BACKEND_CLOSURE.md)). The record states `independentAssessment: NOT_PERFORMED` and accepts `KEY_TRANSPARENCY_UNWITNESSED`: an independent assessment and a witness remain open follow-ups, not a production block |
 | MSG-014 | P2 | FRONTEND | Web E2EE journey fails in CI at multi-device history recovery (known frontend issue #37) | `CLOSED` | c0fcedce |
 | MSG-015 | P3 | SHARED_CONTRACT | Documentation drift: ADR 0053 scope and the native API map contradict the code | `CLOSED` | ADR 0053 updated for organization conversations in the organization scope (final closure); native API map and handoff note corrected earlier |
 | MSG-016 | P3 | BACKEND | Hub hygiene: `block-events` ingress has no producer; inbox shows conversations the viewer has left | `CLOSED` | 9592564c (merged 6bacc77d); CI: Hub 42387489562 (real-process journey), meeting-service 42387493644, platform-access 42387505519 |
@@ -167,7 +167,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | PLT-002 | P1 | BACKEND | Legacy meeting-service API keys are stored and matched in plaintext; the usage counter races | `CLOSED` | fb490003 |
 | PLT-003 | P1 | BACKEND | Three webhook systems; meeting-service "webhooks" are registered but never delivered, while the web UI promises real-tim | `DEPRECATED_WITH_MIGRATION` | DEPRECATED_WITH_MIGRATION (docs/api/legacy-meeting-webhooks-deprecation.md: never delivered, every answer says so with Deprecation/Sunset headers; DP delivery rejected as a second ownership model; web panel wording is frontend) |
 | PLT-004 | P1 | PRODUCT_DECISION | Two unrelated API-credential systems; the web developer page documents the legacy one with the wrong host and key format | `DEPRECATED_WITH_MIGRATION` | DEPRECATED_WITH_MIGRATION (docs/api/legacy-api-keys-deprecation.md; web page change is Section 17) |
-| PLT-005 | P1 | INFRASTRUCTURE | API Gateway and Developer Platform are not deployed; SDK and public-doc base URL assumes the gateway at `api.cfmeet.com` | `EXTERNAL_BLOCKED` | EXTERNAL: activation checklist done; needs internal-TLS decision and deployment approval |
+| PLT-005 | P1 | INFRASTRUCTURE | API Gateway and Developer Platform were not deployed when audited; SDK and public-doc base URL assumes the gateway at `api.cfmeet.com` | `CLOSED` | Both are deployed to production by the coordinated release and certified live ([final production certification](../operations/cfmeet-final-production-certification.md): `developer-platform` and `api-gateway` PASS; `activate-developer-platform` and `activate-gateway-routing` recorded); the gateway serves the activated families at `api.cfmeet.com` |
 | PLT-006 | P2 | SHARED_CONTRACT | Three Swagger renderers publish contradictory "public" surfaces; calling's Swagger UI is unhardened | `CLOSED` | 3a90d077 (merged 8920d20c) |
 | PLT-007 | P2 | SHARED_CONTRACT | Contract quality gates and the private catalogue skip the Developer Platform, Gateway and Communications contracts | `CLOSED` | 90c2397e, f07b1b39 |
 | PLT-008 | P2 | BACKEND | Credential lifecycle lacks last-used tracking and expiry warnings | `CLOSED` | c53b6084 (last use, expiringSoon); 9bb7f35e: credential.expiring_soon / credential.expired worker sweep (services/developer-platform/src/control/credential_lifecycle.rs, worker.rs; migration m20261203_000014; catalog + webhook schema); tests services/developer-platform/tests/credential_lifecycle.rs (thresholds, dedupe, crash recovery, outage + delivery retry, scope authz, schedule) |

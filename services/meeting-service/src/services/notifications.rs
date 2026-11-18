@@ -110,6 +110,8 @@ pub struct OutgoingEmail {
     pub subject: String,
     pub html: String,
     pub text: String,
+    /// Gap audit M14: RFC 5545 calendar invite, attached as `invite.ics`.
+    pub calendar: Option<String>,
 }
 
 /// Why an email was not handed to the delivery queue.
@@ -152,7 +154,7 @@ pub trait NotificationMail: Send + Sync {
 }
 
 async fn enqueue_mail<C: ConnectionTrait>(conn: &C, email: OutgoingEmail) -> Result<(), MailError> {
-    crate::services::email_delivery::enqueue(
+    crate::services::email_delivery::enqueue_with_calendar(
         conn,
         crate::services::email_delivery::NewEmail {
             category: email.category,
@@ -164,6 +166,7 @@ async fn enqueue_mail<C: ConnectionTrait>(conn: &C, email: OutgoingEmail) -> Res
             text: email.text,
             expires_at: None,
         },
+        email.calendar,
     )
     .await
     .map(|_| ())
@@ -613,6 +616,40 @@ async fn meeting_invitation_inner(
         )
     ));
     let link = format!("{}/invite#{token}", ctx.app_url);
+    // Gap audit M14: a scheduled occurrence comes with its calendar invite. The link opens
+    // CF Meet; the invitation token never goes into the calendar file.
+    let calendar = conference.as_ref().and_then(|c| {
+        let start = c.scheduled_start_at?;
+        let end = c
+            .scheduled_end_at
+            .unwrap_or(start + chrono::Duration::hours(1));
+        let event = crate::services::ics::IcsEvent {
+            uid: format!("conference-{}@cfmeet.com", c.id.simple()),
+            sequence: c.version.saturating_sub(1),
+            summary: title.clone(),
+            description: Some(format!(
+                "{inviter} invited you. Open the invitation email to join."
+            )),
+            url: Some(ctx.app_url.clone()),
+            start,
+            end,
+            status: crate::services::ics::IcsStatus::Confirmed,
+            rrule: None,
+            exdates: vec![],
+            recurrence_id: None,
+            created: None,
+            last_modified: chrono::Utc::now(),
+        };
+        Some(crate::services::ics::render(
+            &crate::services::ics::IcsCalendar {
+                timezone: space.timezone.parse().ok(),
+                name: Some(title.clone()),
+                events: vec![event],
+                timezone_until: Some(end),
+            },
+            chrono::Utc::now(),
+        ))
+    });
     let subject = clean(&format!("Invitation: {title}"), 160);
     let template = render(&NotificationBody {
         subject: &subject,
@@ -632,6 +669,7 @@ async fn meeting_invitation_inner(
         subject,
         html: template.html,
         text: template.text,
+        calendar,
     };
     // Routing fence (Document 4 §9.3): LEGACY_ONLY (or no fence history) is today's path.
     let sent = match fence::current_mode(&ctx.db, MeetingCategory::MeetingInvitation).await? {
@@ -738,6 +776,7 @@ pub async fn send_organization_invitation(
         subject,
         html: template.html,
         text: template.text,
+        calendar: None,
     };
     // Routing fence (Document 4 §9.3): LEGACY_ONLY (or no fence history) is today's path.
     let sent = match fence::current_mode(&ctx.db, MeetingCategory::OrganizationInvitation).await {
@@ -1132,6 +1171,84 @@ pub async fn record_cancelled<C: ConnectionTrait>(
         start,
     )
     .await?;
+    Ok(())
+}
+
+/// Gap audit M3: how far ahead, and how many, occurrences a series-level change announces.
+pub const SERIES_NOTICE_HORIZON_DAYS: i64 = 30;
+pub const SERIES_NOTICE_MAX: u64 = 20;
+
+/// Gap audit M3: the space's unstarted v2 occurrences within the notice horizon (soonest
+/// first), captured before a series-level change.
+pub async fn upcoming_occurrences<C: ConnectionTrait>(
+    conn: &C,
+    space_id: Uuid,
+    now: DateTime<Utc>,
+) -> ApiResult<Vec<conference_sessions::Model>> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+    Ok(conference_sessions::Entity::find()
+        .filter(conference_sessions::Column::MeetingSpaceId.eq(space_id))
+        .filter(conference_sessions::Column::Status.eq(crate::domain::ConferenceStatus::Created))
+        .filter(conference_sessions::Column::Origin.eq(crate::domain::RecordOrigin::V2))
+        .filter(conference_sessions::Column::ScheduledStartAt.gt(now))
+        .filter(
+            conference_sessions::Column::ScheduledStartAt
+                .lte(now + chrono::Duration::days(SERIES_NOTICE_HORIZON_DAYS)),
+        )
+        .order_by_asc(conference_sessions::Column::ScheduledStartAt)
+        .limit(SERIES_NOTICE_MAX)
+        .all(conn)
+        .await?)
+}
+
+/// Gap audit M3: after a series-level change (series edited or ended, timezone moved,
+/// exception, space archived), announce what happened to each occurrence captured
+/// before it: cancelled → a cancellation notice; moved, or replaced by a re-generated
+/// occurrence → a reschedule notice (paired in order). Same durable jobs, dedupe keys and
+/// Notification Service routing as single-occurrence notices; no-op when disabled.
+pub async fn announce_series_change<C: ConnectionTrait>(
+    conn: &C,
+    config: &NotificationConfig,
+    space_id: Uuid,
+    before: &[conference_sessions::Model],
+    actor_user_id: Option<Uuid>,
+) -> ApiResult<()> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+    if !config.email_enabled || before.is_empty() {
+        return Ok(());
+    }
+    let now = Utc::now();
+    let ids: Vec<Uuid> = before.iter().map(|c| c.id).collect();
+    let still: std::collections::HashMap<Uuid, conference_sessions::Model> =
+        conference_sessions::Entity::find()
+            .filter(conference_sessions::Column::Id.is_in(ids.clone()))
+            .all(conn)
+            .await?
+            .into_iter()
+            .map(|c| (c.id, c))
+            .collect();
+    let mut replacements = upcoming_occurrences(conn, space_id, now)
+        .await?
+        .into_iter()
+        .filter(|c| !ids.contains(&c.id));
+    for old in before {
+        match still.get(&old.id) {
+            Some(now_row) if now_row.status == crate::domain::ConferenceStatus::Cancelled => {
+                record_cancelled(conn, config, now_row, actor_user_id).await?;
+            }
+            Some(now_row) if now_row.scheduled_start_at != old.scheduled_start_at => {
+                record_rescheduled(conn, config, old, now_row, actor_user_id).await?;
+            }
+            Some(_) => {}
+            None => {
+                if let Some(new) = replacements.next() {
+                    if new.scheduled_start_at != old.scheduled_start_at {
+                        record_rescheduled(conn, config, old, &new, actor_user_id).await?;
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1583,6 +1700,7 @@ async fn deliver(
                 subject: email.0,
                 html: email.1,
                 text: email.2,
+                calendar: None,
             })
             .await;
         if let Err(refused @ (MailError::InvalidAddress | MailError::Suppressed)) = sent {
@@ -1796,6 +1914,7 @@ mod tests {
             subject: "s".into(),
             html: "h".into(),
             text: "t".into(),
+            calendar: None,
         };
         m.send(e.clone()).await.unwrap();
         m.set_failing(true);

@@ -129,6 +129,7 @@ impl UnifiedMessageStore {
             body: m["managed"]["text"].as_str().unwrap_or("").to_string(),
             created_at: created,
             deleted_at: (!active).then(|| parse_time(&m["lifecycleChangedAt"]).unwrap_or(created)),
+            edited_at: parse_time(&m["editedAt"]),
         }))
     }
 
@@ -279,6 +280,7 @@ impl MessageStore for UnifiedMessageStore {
             body: m.body,
             created_at: created,
             deleted_at: None,
+            edited_at: None,
         })
     }
 
@@ -412,6 +414,56 @@ impl MessageStore for UnifiedMessageStore {
             Err(e) => return Err(chat_error(&e)),
         };
         self.to_stored(conference_id, &v["message"], scope).await
+    }
+
+    async fn edit(
+        &self,
+        txn: &DatabaseTransaction,
+        conference_id: Uuid,
+        message_id: Uuid,
+        sender_participant_id: Uuid,
+        body: &str,
+    ) -> ApiResult<()> {
+        let um = &self.um;
+        let Some((mid, _, _, scoped)) = Self::resolve_id(txn, conference_id, message_id).await?
+        else {
+            return Err(ApiError::domain(
+                ErrorCode::MessageNotFound,
+                "Message not found",
+            ));
+        };
+        let Some((conversation_id, _, _)) =
+            self.conversation_for(txn, conference_id, scoped).await?
+        else {
+            return Err(ApiError::domain(
+                ErrorCode::MessageNotFound,
+                "Message not found",
+            ));
+        };
+        use sea_orm::EntityTrait;
+        let participant =
+            crate::models::conference_participants::Entity::find_by_id(sender_participant_id)
+                .one(&um.db)
+                .await?
+                .ok_or_else(|| ApiError::domain(ErrorCode::MessageNotFound, "Message not found"))?;
+        let (principal, kind) = um.principal_for_participant(&participant).await?;
+        um.gateway
+            .call(
+                Peer::Messaging,
+                Some(Acting {
+                    principal_id: principal,
+                    kind,
+                }),
+                Method::PATCH,
+                &format!(
+                    "/internal/v1/delegated/v1/conversations/{conversation_id}/messages/{mid}"
+                ),
+                &[],
+                Some(&json!({ "text": body })),
+            )
+            .await
+            .map_err(|e| chat_error(&e))?;
+        Ok(())
     }
 
     async fn soft_delete(

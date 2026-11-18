@@ -104,6 +104,16 @@ on throwaway databases (CI: Service boundaries → per-service database roles; w
 | `APP_URL` | meeting-service | App/join URLs used by backend flows |
 | `GOOGLE_REDIRECT_URL` | meeting-service | OAuth callback |
 | `NEXT_PUBLIC_API_URL` | web | Meeting Service API base URL including `/api/v1` |
+| `API_GATEWAY_REDIS_URL` | api-gateway | **Not set in production** (quotas are per instance and reset on restart). It cannot be wired by configuration alone: outside `local` / `test` the gateway refuses `redis://` (`QuotaSettings::validate_for`) and its `redis` crate is built without a TLS feature, so `rediss://` cannot connect either, and the production Redis (`cfmeet-calling-redis`) has no TLS listener. Needs a code change first (TLS feature, or an explicit private-network exception). |
+
+## Monitoring
+
+Production Prometheus, Alertmanager and the blackbox / heartbeat exporters are deployed by
+the coordinated release (after every `release`, and by `deploy-monitoring`) from
+`infra/monitoring`; alert delivery is driven by the production environment secrets
+`CFMEET_ALERT_WEBHOOK_URL` / `CFMEET_ALERT_SLACK_WEBHOOK_URL`. An hourly read-only
+synthetic check of the public API runs from `cfmeet-production-synthetic-checks.yml`. See
+[`docs/operations/monitoring-alerts.md`](../../docs/operations/monitoring-alerts.md).
 
 ## Monorepo deployment roots
 

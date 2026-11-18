@@ -254,6 +254,7 @@ catalogue 572.
 | 10, 12 | `verification/callback`, `admin/phone-recovery` | IMPLEMENTED as fail-closed 503 `DEPENDENCY_NOT_CONFIGURED` (phone deferred) |
 | 11 | `admin/metrics` | IMPLEMENTED (observability scope; aggregate counts only) |
 | 13 | `admin/suspend` | IMPLEMENTED (`communications-profile.suspend`, sensitive, audited); not granted in production |
+| 13a | `admin/reports/list`, `admin/reports/review` | IMPLEMENTED (gap audit S4; `communications-profile.suspend`): the operator queue of profile reports in the delegated scope (reason, public CF Meet IDs, report count, review) and a one-time review (DISMISSED with NO_VIOLATION, or ACTIONED with ABUSE / SECURITY / LEGAL / OTHER and optional `holdTarget`, which applies the operator hold); audited `PROFILE_REPORT_REVIEWED` |
 
 ## Section 17 — errors and events
 

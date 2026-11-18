@@ -132,6 +132,7 @@
         "platform-principal.ensure",
         "messaging-application.delegate",
         "messaging-meeting.sync",
+        "messaging-organization.govern",
         "messaging-context-authority.apply",
         "messaging-sms-bridge.deliver",
         "sms-bridge.submit",
@@ -172,6 +173,7 @@
         "communications-restrictions.read",
         "organization-invitations.read",
         "account-route-lease.claim",
+        "calling-abuse-reports.review",
         "communications-preferences.export"
       ]
     }

@@ -158,6 +158,10 @@ export namespace Calling {
     screenShare: ScreenShare | null;
     /** Whether this caller may read the call's recordings and recording authorizations (GET /v1/calls/{call_id}/recordings, /recording-authorizations): the credential holds enterprise.recording.read. Request recordings only when true; otherwise those routes answer 403. 1.17.0. */
     canViewRecordings: boolean;
+    /** 1.21.0: the Call's host participant (the creator unless the role was transferred; while the host is not present, the longest-standing present participant); null once nobody is active. */
+    hostParticipantId: Uuid | null;
+    /** 1.21.0: participants the host muted (no audio publishing until unmuted). */
+    mutedParticipantIds: Array<Uuid>;
   }) & (CallCore);
   /** Fields of every Call representation (HTTP API, call-control results). Provider-independent: no provider or carrier identifiers, execution bindings, media identities, telephone numbers or protected contact data. */
   export type CallCore = {
@@ -309,6 +313,31 @@ export namespace Calling {
     /** Opaque keyset cursor of the next page; null on the last page. */
     nextCursor: string | null;
   };
+  /** C8: per-participant aggregates of the quality samples of a Call (participants without samples are absent). */
+  export type CallQualitySummary = {
+    callId: Uuid;
+    participants: Array<{
+        participantId: Uuid;
+        sampleCount: number;
+        jitterMs: {
+          avg: number;
+          max: number;
+        };
+        packetLossPercent: {
+          avg: number;
+          max: number;
+        };
+        rttMs: {
+          avg: number;
+          max: number;
+        };
+        mosEstimate: {
+          avg: number;
+          min: number;
+        };
+        lastObservedAt: string;
+      }>;
+  };
   /** A recording of ONE canonical Call. Integrity metadata only: never an object-storage key, a bucket, a stored URL, a telephone number or a provider identity (media through media-access). */
   export type CallRecording = {
     recordingId: Uuid;
@@ -385,10 +414,12 @@ export namespace Calling {
   export type CallTransferFailureReason = "TARGET_DECLINED" | "TARGET_NO_ANSWER" | "TARGET_UNAVAILABLE" | "MEDIA_PATH_LOST" | "CALL_ENDED" | "CANCELLED";
   /** Application transfer lifecycle, kept out of the Call state (the Call is TRANSFERRING while a transfer is active). */
   export type CallTransferState = "REQUESTED" | "RINGING_TARGET" | "ACCEPTED" | "COMPLETED" | "FAILED" | "CANCELLED";
-  /** Body of cancel, end, hold, resume and session removal: the expected Call version and nothing else (no state, reason or permission can be sent). */
+  /** Body of cancel, end, hold, resume and session removal: the expected Call version and, for end / hold / resume only, the acting participant (no state, reason or permission can be sent). */
   export type CommandRequest = {
     /** The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION. */
     expectedVersion: number;
+    /** 1.8.0: end / hold / resume only (cancel and session removal refuse it, 400). The participant acting for everyone. In a group Call (more than two participants, ever) only its host may end or hold / resume it for everyone (another participant: 403 CALL_NOT_AUTHORIZED; it leaves by removing its session instead). Absent: the application backend acting on its own authority (unchanged). */
+    actingParticipantId?: Uuid;
   };
   /** A call as listed and as returned by call-control commands. */
   export type CommonCallSummary = CallCore;
@@ -733,6 +764,20 @@ export namespace Calling {
   export type HistoryDestinationType = "EXTENSION" | "RING_GROUP" | "QUEUE" | "IVR" | "VOICEMAIL";
   /** Direction of a Call relative to the principal whose history it is. */
   export type HistoryDirection = "INBOUND" | "OUTBOUND";
+  /** Body of POST /v1/calls/{call_id}/participants/{participant_id}/remove (1.8.0): the acting participant, which must be the Call's host. */
+  export type HostActionRequest = {
+    /** The Call's host. */
+    actingParticipantId: Uuid;
+  };
+  /** Result of a host operation (1.8.0): the Call after the command and what changed (hostParticipantId for TRANSFER_HOST; participantId plus removed / muted for the participant operations). */
+  export type HostControlResult = {
+    call: CommonCallSummary;
+    operation: "TRANSFER_HOST" | "REMOVE_PARTICIPANT" | "MUTE_PARTICIPANT" | "UNMUTE_PARTICIPANT";
+    hostParticipantId?: Uuid;
+    participantId?: Uuid;
+    removed?: boolean;
+    muted?: boolean;
+  };
   /** An exception date (holiday, special hours). It governs its whole local date: the date's weekly windows, and a previous day's window crossing midnight, do not apply on it. No global holiday calendar is used. */
   export type HoursException = {
     /** Local date YYYY-MM-DD. */
@@ -916,6 +961,12 @@ export namespace Calling {
     expiresAt: string;
     capabilities: CallMediaCapabilities;
   };
+  /** Body of POST /v1/calls/{call_id}/participants/{participant_id}/mute (1.8.0): the host mutes (true) or unmutes (false) the participant's audio. */
+  export type MuteParticipantRequest = {
+    /** The Call's host. */
+    actingParticipantId: Uuid;
+    muted: boolean;
+  };
   /** The outcome of a Call for ONE logical participant, derived from Call evidence only (participant, ring offers on every device, session connection intervals, the Call's state) — never from a push, a realtime signal or a client acknowledgement, and never stored as a flag. OUTBOUND: ANSWERED, NOT_ANSWERED (ended unanswered), IN_PROGRESS. INBOUND, first match wins: ANSWERED (an offer accepted on any … */
   export type ParticipantOutcome = "ANSWERED" | "NOT_ANSWERED" | "MISSED" | "DECLINED" | "ANSWERED_ELSEWHERE" | "RINGING" | "NOT_REACHED" | "IN_PROGRESS";
   /** The typed enterprise call policy (§18). Every hook is a typed field; unknown fields are refused. publicForwardingAllowed requires forwardingAllowed and externalPublicCallingAllowed; public effects still pass every Part E gate (routing policy, live telecom, ContactReference verification, destination country, spend, Privacy Relay, Telephony route). */
@@ -967,6 +1018,30 @@ export namespace Calling {
   /** Body of POST /v1/enterprise/ivr-flows/{ivr_flow_id}/versions: a new immutable version (not yet active). */
   export type PublishIvrVersionRequest = {
     graph: IvrGraph;
+  };
+  /** C8: one client measurement of a session's media path over a short window ending now. Bounded and finite; the server computes the estimated MOS. */
+  export type QualitySampleRequest = {
+    /** Interarrival jitter in milliseconds. */
+    jitterMs: number;
+    /** Lost packets in percent of expected packets. */
+    packetLossPercent: number;
+    /** Round-trip time in milliseconds. */
+    rttMs: number;
+    /** Length of the observation window. */
+    intervalSeconds?: number;
+  };
+  /** C8: the stored sample (values rounded to two decimals) with the server-computed estimated MOS (simplified ITU-T G.107 E-model, 1.0-4.5). */
+  export type QualitySampleResult = {
+    qualityRecordId: Uuid;
+    callId: Uuid;
+    sessionId: Uuid;
+    participantId: Uuid;
+    jitterMs: number;
+    packetLossPercent: number;
+    rttMs: number;
+    mosEstimate: number;
+    observedFrom: string;
+    observedTo: string;
   };
   /** A call queue. waiting is the number of active entries now. */
   export type Queue = {
@@ -1178,6 +1253,18 @@ export namespace Calling {
     capabilities: EndpointCapabilities;
     pushTargetRef?: Uuid | null;
   };
+  /** Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on. */
+  export type RejoinRequest = {
+    endpointId: Uuid;
+  };
+  /** Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer. */
+  export type RejoinResult = {
+    call: CommonCallSummary;
+    operation: "REJOIN";
+    participantId: Uuid;
+    sessionId: Uuid;
+    rejoined: boolean;
+  };
   /** Body of PATCH /v1/enterprise/ivr-flows/{ivr_flow_id}. */
   export type RenameIvrFlowRequest = {
     /** The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing. */
@@ -1325,6 +1412,13 @@ export namespace Calling {
   };
   /** Where public-network spend of enterprise calls is accounted: the application's Part E telecom spend limits (one spend authority, referenced — never duplicated). */
   export type SpendPolicy = "APPLICATION_TELECOM_LIMITS";
+  /** Body of POST /v1/calls/{call_id}/host (1.8.0): the current host hands the host role to another active participant. */
+  export type TransferHostRequest = {
+    /** The current host. */
+    actingParticipantId: Uuid;
+    /** The new host (an active participant). */
+    hostParticipantId: Uuid;
+  };
   /** Body of POST /v1/calls/{call_id}/transfer (Idempotency-Key required): the participant who hands its place over, and the principal who takes it. The same Call continues; no second Call is created. Part F: exactly one target — a principal, an enterprise extension or a typed enterprise destination; an enterprise Call's policy must permit transfers (else 403). */
   export type TransferRequest = ({
     transferringParticipantId: Uuid;
@@ -1579,7 +1673,7 @@ export namespace Calling {
     data: Array<WebhookDelivery>;
     nextCursor: string | null;
   };
-  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired";
+  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "call.kind_changed" | "call.screen_share_started" | "call.screen_share_stopped" | "call.participant_added" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.started" | "recording.stopped" | "recording.failed" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired";
   export type WebhookList = {
     data: Array<Webhook>;
     nextCursor: string | null;
@@ -1652,7 +1746,14 @@ export namespace Calling {
     };
     /** POST /v1/calls/{call_id}/abuse-reports — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     createAbuseReport: {
-      params: { path: { call_id: string }; body: { [key: string]: unknown } };
+      params: { path: { call_id: string }; body: {
+          /** The reporting principal (a participant of the call). */
+          principalId: Uuid;
+          category: "UNWANTED" | "HARASSMENT" | "SPAM" | "FRAUD_SUSPECTED" | "OTHER";
+          commentCode?: string;
+          /** C5: the reported participant. Derived by the server in a two-party call (naming it there must name the other party); in a call of more than two people the reporter names it, and it must be another participant of that call (else 400, nothing stored). */
+          reportedPrincipalId?: Uuid;
+        } };
       response: { [key: string]: unknown };
     };
     /** POST /v1/blocks — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
@@ -1835,6 +1936,11 @@ export namespace Calling {
       params: { path: { call_id: string } };
       response: AvailableActions;
     };
+    /** GET /v1/calls/{call_id}/quality — scope calls.read; auth PLATFORM_CREDENTIAL; retry SAFE */
+    getCallQuality: {
+      params: { path: { call_id: string } };
+      response: CallQualitySummary;
+    };
     /** GET /v1/enterprise/recordings/{recording_id} — scope enterprise.recording.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     getCallRecording: {
       params: { path: { recording_id: string }; query?: { principalId?: Uuid } };
@@ -1929,6 +2035,11 @@ export namespace Calling {
     getWebhook: {
       params: { path: { webhook_id: string } };
       response: Webhook;
+    };
+    /** DELETE /v1/calls/{call_id}/history — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    hideCallFromHistory: {
+      params: { path: { call_id: string }; query: { principalId: Uuid } };
+      response: void;
     };
     /** POST /v1/calls/{call_id}/hold — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     holdCall: {
@@ -2077,7 +2188,7 @@ export namespace Calling {
     };
     /** GET /v1/enterprise/voicemail/mailboxes — scope enterprise.config.read; auth PLATFORM_CREDENTIAL; retry SAFE */
     listVoicemailMailboxes: {
-      params: { query?: { limit?: number; cursor?: string; status?: "ACTIVE" | "DISABLED" } };
+      params: { query?: { limit?: number; cursor?: string; status?: "ACTIVE" | "DISABLED"; ownerType?: "PRINCIPAL" | "EXTENSION" | "QUEUE" | "RING_GROUP"; ownerId?: Uuid } };
       response: VoicemailMailboxList;
       item: NonNullable<(VoicemailMailboxList)["mailboxes"]>[number];
     };
@@ -2104,10 +2215,20 @@ export namespace Calling {
       params: { body: SignalingCredentialRequest };
       response: SignalingCredential;
     };
+    /** POST /v1/calls/{call_id}/participants/{participant_id}/mute — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    muteCallParticipant: {
+      params: { path: { call_id: string; participant_id: string }; body: MuteParticipantRequest };
+      response: HostControlResult;
+    };
     /** POST /v1/enterprise/ivr-flows/{ivr_flow_id}/versions — scope enterprise.config.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     publishIvrVersion: {
       params: { path: { ivr_flow_id: string }; body: PublishIvrVersionRequest };
       response: IvrFlowVersion;
+    };
+    /** POST /v1/calls/{call_id}/sessions/{session_id}/quality-samples — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    recordCallQualitySample: {
+      params: { path: { call_id: string; session_id: string }; body: QualitySampleRequest };
+      response: QualitySampleResult;
     };
     /** POST /v1/calls/{call_id}/recording-consent — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     recordRecordingConsent: {
@@ -2130,10 +2251,20 @@ export namespace Calling {
       params: { body: RegisterEndpointRequest };
       response: Endpoint;
     };
+    /** POST /v1/calls/{call_id}/participants/{participant_id}/rejoin — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    rejoinCall: {
+      params: { path: { call_id: string; participant_id: string }; body: RejoinRequest };
+      response: RejoinResult;
+    };
     /** DELETE /v1/blocks/{block_id} — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     releaseBlock: {
       params: { path: { block_id: string } };
       response: { [key: string]: unknown };
+    };
+    /** POST /v1/calls/{call_id}/participants/{participant_id}/remove — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    removeCallParticipant: {
+      params: { path: { call_id: string; participant_id: string }; body: HostActionRequest };
+      response: HostControlResult;
     };
     /** POST /v1/calls/{call_id}/sessions/{session_id}/remove — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     removeCallSession: {
@@ -2220,6 +2351,11 @@ export namespace Calling {
       params: { path: { call_id: string }; body: TransferRequest; idempotencyKey?: string };
       response: TransferResult;
     };
+    /** POST /v1/calls/{call_id}/host — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    transferCallHost: {
+      params: { path: { call_id: string }; body: TransferHostRequest };
+      response: HostControlResult;
+    };
     /** PATCH /v1/enterprise/departments/{department_id} — scope enterprise.config.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     updateDepartment: {
       params: { path: { department_id: string }; body: UpdateDepartmentRequest };
@@ -2286,6 +2422,16 @@ export namespace Communications {
     projectionVersion?: number;
     data: Array<TimelineEntry>;
     nextCursor: string | null;
+  };
+  export type AddContactsToCall = {
+    /** Contact ids (GET /api/v2/communications/contacts) of CONNECTED contacts. */
+    targetContactIds: Array<string>;
+    /** The caller's own participant id in the call. */
+    invitingParticipantId: string;
+    /** The call's current version. */
+    expectedVersion: number;
+    /** Idempotency anchor: a retry returns the same result. */
+    clientRequestId: string;
   };
   export type BackendCapability = {
     available: boolean;
@@ -2409,6 +2555,7 @@ export namespace Communications {
     conversationId: string;
     contextClass: "GROUP";
     securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null;
+    /** The group's title for MANAGED conversations. Always null for PRIVATE_E2EE conversations (personal end-to-end encrypted chats): the server never holds their metadata; clients show the title they decrypt locally (gap audit S16). */
     title?: string | null;
     avatarRef?: string | null;
     memberCount?: number | null;
@@ -2490,6 +2637,14 @@ export namespace Communications {
     version: number;
     expiresAt?: string;
     relationship?: RelationshipState;
+  };
+  export type ContactsAddedToCall = {
+    schemaVersion: 1;
+    callId: string;
+    /** Calling's call summary (state, version). */
+    call?: { [key: string]: unknown };
+    addedContactIds: Array<string>;
+    replayed: boolean;
   };
   export type ContactsPage = {
     schemaVersion: 1;
@@ -2678,6 +2833,7 @@ export namespace Communications {
     createdAt?: string;
     securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null;
     kind?: "IMAGE" | "DOCUMENT" | "FILE" | "VOICE_NOTE" | "VIDEO" | null;
+    /** The sanitized file name for MANAGED attachments. Always null for PRIVATE_E2EE attachments: the name travels inside the encrypted message and is shown from the client's decrypted copy (gap audit S16). */
     fileName?: string | null;
     mediaType?: string | null;
     metadataLocation?: "SERVER" | "ENCRYPTED_DESCRIPTOR" | null;
@@ -2802,6 +2958,8 @@ export namespace Communications {
     directChatPolicy: "CONNECTIONS" | "NOBODY";
     publicProfileVisibility: "PUBLIC" | "CONNECTIONS" | "HIDDEN";
     presenceVisibility: "CONNECTIONS" | "NOBODY";
+    /** Who may add this person to groups (gap audit S9; previously the contact-request permission decided). Optional on update: absent keeps the current value. Always present when read. */
+    groupInvitationPolicy?: "CONNECTIONS" | "NOBODY";
   };
   export type PrivacyUpdate = {
     expectedVersion: number;
@@ -2946,6 +3104,11 @@ export namespace Communications {
     addContactListMember: {
       params: { path: { listId: string; contactId: string }; idempotencyKey?: string };
       response: ContactListMembership;
+    };
+    /** POST /api/v2/communications/calls/{callId}/participants; auth MEETING_SESSION; retry IDEMPOTENT */
+    addContactsToCall: {
+      params: { path: { callId: string }; body: AddContactsToCall; idempotencyKey?: string };
+      response: ContactsAddedToCall;
     };
     /** PUT /api/v2/communications/contacts/{contactId}/favorite; auth MEETING_SESSION; retry IDEMPOTENT */
     addFavoriteContact: {
@@ -3996,7 +4159,7 @@ export namespace DeveloperPlatform {
     completedAt: string | null;
   };
   /** The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families. */
-  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired" | "meeting.created" | "meeting.started" | "meeting.ended" | "participant.joined" | "participant.left" | "artifact.ready" | "artifact.deleted" | "number.reservation_changed" | "number.assignment_changed" | "number.binding_changed" | "number.port_changed" | "number.release_changed" | "number.lifecycle_changed" | "number.suspended" | "number.restored" | "credential.created" | "credential.rotated" | "credential.revoked" | "credential.expiring_soon" | "credential.expired" | "production_access.requested" | "production_access.approved" | "production_access.rejected";
+  export type WebhookEventType = "call.requested" | "call.incoming" | "call.ringing" | "call.ring_cancelled" | "call.accepted" | "call.declined" | "call.cancelled" | "call.answered" | "call.connected" | "call.route_changed" | "call.held" | "call.resumed" | "call.transfer_started" | "call.transferred" | "call.transfer_failed" | "call.ended" | "call.failed" | "call.no_answer" | "call.busy" | "call.answered_elsewhere" | "call.invitation_expired" | "call.kind_changed" | "call.screen_share_started" | "call.screen_share_stopped" | "call.participant_added" | "voicemail.received" | "voicemail.ready" | "voicemail.deleted" | "recording.started" | "recording.stopped" | "recording.failed" | "recording.ready" | "recording.deleted" | "relay.created" | "relay.updated" | "relay.revoked" | "relay.expired" | "relay.participant_changed" | "usage.recorded" | "limit.warning" | "limit.exceeded" | "sms.received" | "sms.requested" | "sms.submitted" | "sms.delivered" | "sms.failed" | "sms.unknown" | "sms.blocked" | "conversation.created" | "conversation.updated" | "conversation.member_added" | "conversation.member_removed" | "message.created" | "message.deleted" | "message.moderated" | "message.expired" | "meeting.created" | "meeting.started" | "meeting.ended" | "participant.joined" | "participant.left" | "artifact.ready" | "artifact.deleted" | "number.reservation_changed" | "number.assignment_changed" | "number.binding_changed" | "number.port_changed" | "number.release_changed" | "number.lifecycle_changed" | "number.suspended" | "number.restored" | "credential.created" | "credential.rotated" | "credential.revoked" | "credential.expiring_soon" | "credential.expired" | "production_access.requested" | "production_access.approved" | "production_access.rejected";
 
   /** Typed parameters and response of every REST operation of this domain. */
   export interface Operations {
@@ -4457,6 +4620,18 @@ export namespace Meetings {
     /** Registered CF Meet user. Exactly one of `userId` / `email`. */
     userId?: string | null;
   };
+  /** Gap audit G7: add every active member of one of the space's organization teams. */
+  export type AddTeamMembersRequest = {
+    role: Role;
+    teamId: string;
+  };
+  /** Result of adding a team (gap audit G7). */
+  export type AddTeamMembersResponse = {
+    /** Members added now. */
+    added: Array<MemberResponse>;
+    /** Team members skipped: already members, the owner, you, or not an active account. */
+    skipped: number;
+  };
   export type AdmissionState = "WAITING" | "ADMITTED" | "DENIED" | "REMOVED" | "BANNED";
   export type AdmitRequest = {
     /** Admit every participant currently WAITING. */
@@ -4636,6 +4811,9 @@ export namespace Meetings {
     closedAt?: string | null;
     closingAt?: string | null;
     conferenceId: string;
+    /** Gap audit M17: timed rooms only — the length set at creation, and once open, when the room closes by itself. */
+    durationSeconds?: number | null;
+    endsAt?: string | null;
     id: string;
     name: string;
     openedAt?: string | null;
@@ -4654,6 +4832,11 @@ export namespace Meetings {
     skipped: Array<SkippedParticipant>;
     /** Already in the requested state (idempotent retry). */
     unchanged: Array<string>;
+  };
+  /** `POST /api/v2/registrations/cancel` request: the registration's admission token. */
+  export type CancelOwnRegistrationRequest = {
+    /** The admission token returned when registering (`reg_…`). */
+    token: string;
   };
   export type ChangedResponse = {
     changed: boolean;
@@ -4839,9 +5022,13 @@ export namespace Meetings {
     capacity?: number | null;
     /** Number of automatically numbered rooms ("Room N"). */
     count?: number | null;
+    /** Gap audit M17: timed rooms. Once opened, a room closes by itself after this many seconds (60-14400), with a `warningSeconds` countdown first. */
+    durationSeconds?: number | null;
     /** Named rooms. Mutually exclusive with `count`. */
     names?: Array<string> | null;
     recordingPolicy?: BreakoutRecordingPolicy | null;
+    /** Countdown before a timed room closes (0-600, default 60). */
+    warningSeconds?: number | null;
   };
   export type CreateConferenceRequest = {
     scheduledEndAt?: string | null;
@@ -4918,6 +5105,10 @@ export namespace Meetings {
   export type DuplicateMeetingSpaceRequest = {
     title?: string | null;
   };
+  /** Gap audit M17: the new text of an edited message. */
+  export type EditMessageRequest = {
+    body: string;
+  };
   /** What happened to a requested invitation email. */
   export type EmailDelivery = "DISABLED" | "ACCEPTED" | "FAILED";
   export type ErrorBody = {
@@ -4932,7 +5123,7 @@ export namespace Meetings {
     retryAfterSeconds?: number | null;
   };
   /** Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5). */
-  export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "DATABASE_ERROR" | "INTERNAL_ERROR";
+  export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_STORAGE_NOT_CONFIGURED" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_FULL" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "MFA_REQUIRED" | "USER_NOT_FOUND" | "AVATAR_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "DATABASE_ERROR" | "INTERNAL_ERROR";
   /** OpenAPI description of the public error envelope. */
   export type ErrorEnvelope = {
     error: ErrorBody;
@@ -5173,6 +5364,8 @@ export namespace Meetings {
     conferenceId: string;
     createdAt: string;
     deleted: boolean;
+    /** Gap audit M17: when the sender last edited the message (`null`: never edited). */
+    editedAt?: string | null;
     id: string;
     kind: MessageKind;
     recipientParticipantId?: string | null;
@@ -5634,10 +5827,18 @@ export namespace Meetings {
     registrationId: string;
   };
   export type RegistrationListResponse = {
+    /** Pass as `after` to get the next page; `null` on the last page. */
+    nextCursor?: string | null;
     registrations: Array<RegistrationView>;
   };
   export type RegistrationProfile = {
+    /** Gap audit M10: most active registrations accepted (per occurrence, or for the whole series); 0 = no limit. At most 100000. */
+    capacity?: number;
+    /** Gap audit M10: registration closes this many minutes before the occurrence's scheduled start (0 = open until the occurrence ends). */
+    closesMinutesBeforeStart?: number;
     customFields: Array<CustomRegistrationField>;
+    /** Gap audit M10: registration closes at this time, whatever the occurrence. */
+    deadline?: string | null;
     email: FieldRequirement;
     enabled: boolean;
     organization: FieldRequirement;
@@ -6004,6 +6205,11 @@ export namespace Meetings {
       params: { path: { id: string }; body: AddMemberRequest };
       response: MemberResponse;
     };
+    /** POST /api/v2/meeting-spaces/{id}/members/team; auth MEETING_SESSION; retry NO_RETRY */
+    v2AddTeamMembers: {
+      params: { path: { id: string }; body: AddTeamMembersRequest };
+      response: AddTeamMembersResponse;
+    };
     /** POST /api/v2/conferences/{id}/waiting-room/admit — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2Admit: {
       params: { path: { id: string }; body: AdmitRequest };
@@ -6068,6 +6274,11 @@ export namespace Meetings {
     v2CancelConference: {
       params: { path: { id: string } };
       response: ConferenceActionResponse;
+    };
+    /** POST /api/v2/registrations/cancel; auth ANONYMOUS; retry NO_RETRY */
+    v2CancelOwnRegistration: {
+      params: { body: CancelOwnRegistrationRequest };
+      response: RegistrationView;
     };
     /** DELETE /api/v2/meeting-spaces/{id}/registrations/{registrationId}; auth MEETING_SESSION; retry IDEMPOTENT */
     v2CancelRegistration: {
@@ -6169,6 +6380,11 @@ export namespace Meetings {
       params: { path: { id: string }; body?: DuplicateMeetingSpaceRequest };
       response: MeetingSpaceResponse;
     };
+    /** PATCH /api/v2/conferences/{id}/messages/{messageId}; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    v2EditMessage: {
+      params: { path: { id: string; messageId: string }; body: EditMessageRequest };
+      response: MessageView;
+    };
     /** POST /api/v2/conferences/{id}/end — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2EndConference: {
       params: { path: { id: string } };
@@ -6188,6 +6404,11 @@ export namespace Meetings {
     v2EnterBreakout: {
       params: { path: { id: string; breakoutId: string } };
       response: MediaContextResponse;
+    };
+    /** GET /api/v2/conferences/{id}/exports/{artifactType}; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
+    v2ExportReport: {
+      params: { path: { id: string; artifactType: string } };
+      response: { [key: string]: unknown };
     };
     /** POST /api/v2/conferences/{id}/artifacts/reports; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2GenerateReport: {
@@ -6332,7 +6553,7 @@ export namespace Meetings {
     };
     /** GET /api/v2/meeting-spaces/{id}/registrations; auth MEETING_SESSION; retry SAFE */
     v2ListRegistrations: {
-      params: { path: { id: string } };
+      params: { path: { id: string }; query?: { after?: string | null; limit?: number | null } };
       response: RegistrationListResponse;
     };
     /** GET /api/v2/conferences/{id}/transcripts; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry SAFE */
@@ -6747,6 +6968,10 @@ export namespace Messaging {
       threads?: boolean;
       reactions?: boolean;
       pins?: boolean;
+      /** S11: server-side forwarding of MANAGED messages (default true). */
+      forwarding?: boolean;
+      /** S11: forwarded copies show their original sender (default false). */
+      forwardShowsOriginalSender?: boolean;
     };
     backups?: {
       enabled?: boolean;
@@ -6992,6 +7217,8 @@ export namespace Messaging {
   export type ClientTokenRequest = {
     deviceId: Uuid;
     ttlSeconds?: number;
+    /** First-party relays only (others: INSUFFICIENT_SCOPE). The relay's opaque reference of the VERIFIED account session the token is issued for; ending that account session (POST /v1/messaging/session-devices/revoke) ends this client session too, and no other. */
+    accountSessionRef?: string;
   };
   /** An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. */
   export type CommitRequest = {
@@ -7056,6 +7283,8 @@ export namespace Messaging {
     /** Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches. */
     avatarRef?: string | null;
     inbox?: ConversationInbox;
+    /** S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows. */
+    announcementOnly?: boolean;
   };
   /** A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117). */
   export type ConversationEvent = {
@@ -7123,6 +7352,12 @@ export namespace Messaging {
     title?: string;
     /** Section 13: opaque avatar reference (MANAGED only). */
     avatarRef?: string;
+  };
+  export type CreateInviteLinkRequest = {
+    /** Default 604800 (7 days). */
+    expiresInSeconds?: number;
+    maxUses?: number;
+    role?: "MEMBER" | "READ_ONLY";
   };
   /** Bridge a MANAGED conversation to one external party by SMS. The number is passed to the SMS Gateway once and never stored by Messaging. A PRIVATE_E2EE conversation is never bridged (E2EE_CONVERSATION_NOT_BRIDGEABLE). */
   export type CreateSmsBridgeRequest = {
@@ -7215,6 +7450,10 @@ export namespace Messaging {
       threads: boolean;
       reactions: boolean;
       pins: boolean;
+      /** S11: server-side forwarding of MANAGED messages (default true). */
+      forwarding?: boolean;
+      /** S11: forwarded copies show their original sender (default false). */
+      forwardShowsOriginalSender?: boolean;
     };
     attachments?: {
       enabled: boolean;
@@ -7307,6 +7546,10 @@ export namespace Messaging {
   export type ExportRequest = {
     conversationId: Uuid;
   };
+  export type ForwardMessageRequest = {
+    targetConversationId: Uuid;
+    clientMessageId: Uuid;
+  };
   /** A device-to-device history transfer. Messaging relays an opaque sealed history between two ACTIVE devices of one principal; it holds no key that opens it (no recovery key, no escrow) and deletes the sealed bytes on completion, cancellation, revocation or expiry. */
   export type HistoryTransfer = {
     transferId: Uuid;
@@ -7353,6 +7596,39 @@ export namespace Messaging {
         contextClass: ContextClass;
         securityProfile: SecurityProfile;
       }>;
+  };
+  /** S12: a group join link (never its token). */
+  export type InviteLink = {
+    inviteLinkId: Uuid;
+    conversationId: Uuid;
+    role: "MEMBER" | "READ_ONLY";
+    maxUses: number | null;
+    useCount: number;
+    expiresAt: string;
+    createdByPrincipalId: Uuid | null;
+    createdAt: string;
+    revokedAt: string | null;
+    status: "ACTIVE" | "EXPIRED" | "EXHAUSTED" | "REVOKED";
+  };
+  /** S12: a new join link with its token, returned only here (stored as SHA-256). */
+  export type InviteLinkCreated = {
+    inviteLinkId: Uuid;
+    conversationId: Uuid;
+    role: "MEMBER" | "READ_ONLY";
+    maxUses: number | null;
+    useCount: number;
+    expiresAt: string;
+    createdByPrincipalId: Uuid | null;
+    createdAt: string;
+    revokedAt: string | null;
+    status: "ACTIVE" | "EXPIRED" | "EXHAUSTED" | "REVOKED";
+    token: string;
+  };
+  export type InviteLinkList = {
+    inviteLinks: Array<InviteLink>;
+  };
+  export type JoinInviteLinkRequest = {
+    token: string;
   };
   export type KeyPackageClaim = {
     reservationId: Uuid;
@@ -7420,8 +7696,8 @@ export namespace Messaging {
     joinedAt: string;
     sendRestrictedUntil: string | null;
     version: number;
-    /** How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration. */
-    authoritySource: "API" | "INVITATION" | "MEETING";
+    /** How the membership came to be: an administrator or the application backend (API), an accepted invitation, the meeting integration, an invite link (INVITE_LINK) or an organization team snapshot (ORGANIZATION_TEAM, G7). */
+    authoritySource: "API" | "INVITATION" | "MEETING" | "INVITE_LINK" | "ORGANIZATION_TEAM";
     invitedByPrincipalId: Uuid | null;
     invitationExpiresAt: string | null;
   };
@@ -7469,6 +7745,8 @@ export namespace Messaging {
       tenantId: Uuid;
       applicationId: Uuid;
       environmentId: Uuid;
+      /** S2: the sender's franking commitment (HMAC-SHA256, see SendMessageRequest.frankingCommitment). */
+      frankingCommitment?: string | null;
     };
     managed?: {
       text: string | null;
@@ -7484,6 +7762,10 @@ export namespace Messaging {
     replyToMessageId?: Uuid | null;
     /** The root of the reply thread (the first message replied to). */
     threadRootId?: Uuid | null;
+    /** S11: a server-side forward (the source conversation and message are never disclosed). */
+    forwarded?: boolean;
+    /** S11: the original sender, only when the policy shows it (messages.forwardShowsOriginalSender). */
+    forwardedFromPrincipalId?: Uuid | null;
   };
   export type MessageDeletion = {
     messageId: Uuid;
@@ -7532,6 +7814,8 @@ export namespace Messaging {
     reason: string;
     effectiveUntil: string | null;
     createdAt: string;
+    /** G6: the organization moderator (their principal in the organization's scope) an organization moderation request was relayed for; null for an application moderator credential. */
+    moderatorPrincipalId?: Uuid | null;
   };
   export type ModerationActionList = {
     actions: Array<ModerationAction>;
@@ -7738,7 +8022,8 @@ export namespace Messaging {
           ciphertextSha256: string | null;
           acceptanceDigest: string | null;
           reporterDisclosure: string | null;
-          verification: "REPORTER_ATTESTED_UNVERIFIABLE" | "NO_PLAINTEXT_AVAILABLE";
+          verification: "FRANKING_VERIFIED" | "FRANKING_MISMATCH" | "REPORTER_ATTESTED_UNVERIFIABLE" | "NO_PLAINTEXT_AVAILABLE";
+          frankingCommitment?: string | null;
         };
         managed?: {
           text: string | null;
@@ -7763,10 +8048,12 @@ export namespace Messaging {
     messageIds?: Array<Uuid>;
     reportedPrincipalId?: Uuid;
     note?: string;
-    /** PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest; presented as unverifiable). */
+    /** PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest). Unverifiable unless the message was franked and the disclosure carries its frankingKey (S2). */
     disclosure?: Array<{
         messageId: Uuid;
         text: string;
+        /** S2: the message's franking key the reporter's device decrypted (unpadded base64url, 32 bytes); with it the disclosure is verified against the sender's commitment. */
+        frankingKey?: string;
       }>;
   };
   export type ReportSummary = {
@@ -7836,6 +8123,8 @@ export namespace Messaging {
     replyToMessageId?: Uuid;
     /** Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate … */
     mentionedPrincipalIds?: Array<Uuid>;
+    /** S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY). */
+    frankingCommitment?: string;
   };
   export type SmsBridge = {
     bridgeId: Uuid;
@@ -7971,6 +8260,8 @@ export namespace Messaging {
     title?: string | null;
     /** Section 13: a new avatar reference; null clears it (MANAGED only, owner). */
     avatarRef?: string | null;
+    /** S13 (owner): announcement-only on / off; GROUP and CHANNEL only. */
+    announcementOnly?: boolean;
   };
   /** Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost. */
   export type UsageSummary = {
@@ -8102,6 +8393,11 @@ export namespace Messaging {
       params: { headers: { "cf-acting-principal": Uuid }; body: HistoryTransferRequest };
       response: HistoryTransfer;
     };
+    /** POST /v1/conversations/{conversationId}/invite-links — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    createInviteLink: {
+      params: { path: { conversationId: Uuid }; headers?: { "cf-acting-principal"?: Uuid }; body: CreateInviteLinkRequest };
+      response: InviteLinkCreated;
+    };
     /** POST /v1/messaging/legal-holds — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     createLegalHold: {
       params: { body: LegalHoldRequest };
@@ -8151,6 +8447,11 @@ export namespace Messaging {
     finalizeBackup: {
       params: { path: { backupId: Uuid }; headers: { "cf-acting-principal": Uuid } };
       response: Backup;
+    };
+    /** POST /v1/conversations/{conversationId}/messages/{messageId}/forward — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
+    forwardMessage: {
+      params: { path: { conversationId: Uuid; messageId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: ForwardMessageRequest };
+      response: Message;
     };
     /** GET /v1/conversations/{conversationId}/attachments/{attachmentId} — scope attachments.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
     getAttachment: {
@@ -8267,6 +8568,11 @@ export namespace Messaging {
       params: {};
       response: RealtimeTicket;
     };
+    /** POST /v1/messaging/invite-links/join — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
+    joinInviteLink: {
+      params: { headers: { "cf-acting-principal": Uuid }; body: JoinInviteLinkRequest };
+      response: Member;
+    };
     /** GET /v1/messaging/audit — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry SAFE */
     listAudit: {
       params: { query?: { action?: string; targetKind?: string; targetId?: Uuid; before?: string; limit?: number } };
@@ -8297,6 +8603,11 @@ export namespace Messaging {
     listInvitations: {
       params: { headers: { "cf-acting-principal": Uuid } };
       response: InvitationList;
+    };
+    /** GET /v1/conversations/{conversationId}/invite-links — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry SAFE */
+    listInviteLinks: {
+      params: { path: { conversationId: Uuid }; headers?: { "cf-acting-principal"?: Uuid } };
+      response: InviteLinkList;
     };
     /** GET /v1/messaging/legal-holds — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry SAFE */
     listLegalHolds: {
@@ -8439,6 +8750,11 @@ export namespace Messaging {
       params: { path: { deviceId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: RevokeDeviceRequest };
       response: Device;
     };
+    /** POST /v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    revokeInviteLink: {
+      params: { path: { conversationId: Uuid; inviteLinkId: Uuid }; headers?: { "cf-acting-principal"?: Uuid } };
+      response: InviteLink;
+    };
     /** PUT /v1/messaging/history-transfers/{transferId}/sealed-history — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry IDEMPOTENT */
     sealHistoryTransfer: {
       params: { path: { transferId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: SealedHistoryUpload };
@@ -8468,6 +8784,18 @@ export namespace Messaging {
     submitMlsCommit: {
       params: { path: { conversationId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: CommitRequest };
       response: Message;
+    };
+    /** POST /v1/conversations/{conversationId}/owner — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    transferConversationOwnership: {
+      params: { path: { conversationId: Uuid }; headers?: { "cf-acting-principal"?: Uuid }; body: {
+          /** The new owner (an ACTIVE member). */
+          principalId: string;
+        } };
+      response: {
+      conversationId: string;
+      ownerPrincipalId: string;
+      changed: boolean;
+    };
     };
     /** DELETE /v1/conversations/{conversationId}/bans/{principalId} — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     unbanMember: {

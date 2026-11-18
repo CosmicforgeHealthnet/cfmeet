@@ -56,6 +56,11 @@ use crate::{
 // Pure policy
 // ---------------------------------------------------------------------------
 
+/// Gap audit M6: the most WAITING entries one conference holds at a time.
+pub const MAX_WAITING: u64 = 1000;
+/// Gap audit M6: a WAITING entry older than this is expired by the scheduler.
+pub const WAITING_TTL_MINUTES: i64 = 60;
+
 #[derive(Debug, Clone)]
 pub struct WaitingInput {
     pub policy: WaitingRoomPolicy,
@@ -334,7 +339,8 @@ impl AdmissionService {
     /// count once; the seat is released when the last live session ends (leave, expiry,
     /// replacement, removal, ban, conference end). ADMITTED itself stays the persistent
     /// admission authorization that lets a participant rejoin without waiting again.
-    /// The dedicated viewer pool keeps its admitted-audience count.
+    /// The dedicated viewer pool counts the same way (gap audit M11): a viewer who leaves
+    /// frees a seat for the next one.
     ///
     /// Every seat-taking path runs under the conference row lock (`lock_conference`),
     /// so two requests can never both take the last seat.
@@ -348,6 +354,21 @@ impl AdmissionService {
         let mut q = conference_participants::Entity::find()
             .filter(conference_participants::Column::ConferenceId.eq(conference_id))
             .filter(conference_participants::Column::AdmissionState.eq(AdmissionState::Admitted));
+        let live = Query::select()
+            .column(participant_sessions::Column::ConferenceParticipantId)
+            .from(participant_sessions::Entity)
+            .and_where(participant_sessions::Column::ConferenceId.eq(conference_id))
+            .and_where(
+                participant_sessions::Column::State
+                    .is_in([SessionState::Pending, SessionState::Connected]),
+            )
+            .and_where(
+                participant_sessions::Column::ExpiresAt
+                    .is_null()
+                    .or(participant_sessions::Column::ExpiresAt.gt(Utc::now())),
+            )
+            .to_owned();
+        q = q.filter(conference_participants::Column::Id.in_subquery(live));
         let limit = if viewer_pool {
             q = q.filter(conference_participants::Column::Role.eq(Role::Viewer));
             space.viewer_capacity
@@ -355,21 +376,6 @@ impl AdmissionService {
             if space.viewer_capacity > 0 {
                 q = q.filter(conference_participants::Column::Role.ne(Role::Viewer));
             }
-            let live = Query::select()
-                .column(participant_sessions::Column::ConferenceParticipantId)
-                .from(participant_sessions::Entity)
-                .and_where(participant_sessions::Column::ConferenceId.eq(conference_id))
-                .and_where(
-                    participant_sessions::Column::State
-                        .is_in([SessionState::Pending, SessionState::Connected]),
-                )
-                .and_where(
-                    participant_sessions::Column::ExpiresAt
-                        .is_null()
-                        .or(participant_sessions::Column::ExpiresAt.gt(Utc::now())),
-                )
-                .to_owned();
-            q = q.filter(conference_participants::Column::Id.in_subquery(live));
             space.interactive_capacity
         };
         if q.count(conn).await? >= limit as u64 {
@@ -384,15 +390,12 @@ impl AdmissionService {
     /// Seat check for an already-ADMITTED participant that is (re)connecting: one that
     /// still holds a seat (another live device, or the session a reconnect replaces)
     /// needs no new seat; one whose sessions have all ended takes a free seat again.
-    /// The dedicated viewer pool counts admitted viewers, so a rejoin needs no new seat.
+    /// Viewers follow the same rule (gap audit M11).
     async fn ensure_seat<C: ConnectionTrait>(
         conn: &C,
         space: &meeting_spaces::Model,
         participant: &conference_participants::Model,
     ) -> ApiResult<()> {
-        if participant.role == Role::Viewer && space.viewer_capacity > 0 {
-            return Ok(());
-        }
         let now = Utc::now();
         let holds_seat = Self::active_sessions(conn, participant.id)
             .await?
@@ -936,6 +939,22 @@ impl AdmissionService {
             _ if wait => AdmissionState::Waiting,
             _ => AdmissionState::Admitted,
         };
+        // Gap audit M6: a bounded waiting room. A new knock is refused once the conference
+        // already has MAX_WAITING entries waiting (a flood of guest knocks can never bury
+        // the host's queue); WAITING entries also expire (scheduler) and can be withdrawn.
+        if target == AdmissionState::Waiting && previous_state != Some(AdmissionState::Waiting) {
+            let waiting = conference_participants::Entity::find()
+                .filter(conference_participants::Column::ConferenceId.eq(conference_id))
+                .filter(conference_participants::Column::AdmissionState.eq(AdmissionState::Waiting))
+                .count(&txn)
+                .await?;
+            if waiting >= MAX_WAITING {
+                return Err(ApiError::domain(
+                    ErrorCode::RateLimited,
+                    "The waiting room is full; try again later",
+                ));
+            }
+        }
         let newly_admitted =
             target == AdmissionState::Admitted && previous_state != Some(AdmissionState::Admitted);
         if newly_admitted && !exempt {
@@ -1394,6 +1413,19 @@ impl AdmissionService {
         }
         let sessions = q.all(&txn).await?;
         let now = Utc::now();
+        // Gap audit M6: someone still WAITING who leaves withdraws their knock (it no
+        // longer sits in the host's queue).
+        let withdrawn = participant.admission_state == AdmissionState::Waiting;
+        if withdrawn {
+            let mut am: conference_participants::ActiveModel = participant.clone().into();
+            am.admission_state = Set(AdmissionState::Denied);
+            am.denied_at = Set(Some(now));
+            am.denied_by = Set(Some("self:withdrawn".into()));
+            am.denial_reason_code = Set(Some("WITHDRAWN".into()));
+            am.version = Set(participant.version + 1);
+            am.updated_at = Set(now);
+            am.update(&txn).await?;
+        }
         for s in &sessions {
             let mut am: participant_sessions::ActiveModel = s.clone().into();
             am.state = Set(SessionState::Disconnected);
@@ -1402,7 +1434,7 @@ impl AdmissionService {
             am.updated_at = Set(now);
             am.update(&txn).await?;
         }
-        if !sessions.is_empty() {
+        if !sessions.is_empty() || withdrawn {
             let mut payload = participant_payload(&participant);
             payload["sessionIds"] = json!(sessions.iter().map(|s| s.id).collect::<Vec<_>>());
             emit(
@@ -1419,7 +1451,7 @@ impl AdmissionService {
             .await?;
         }
         txn.commit().await?;
-        Ok(sessions.len() as u64)
+        Ok(sessions.len() as u64 + u64::from(withdrawn))
     }
 
     pub async fn me(
@@ -1455,7 +1487,9 @@ impl AdmissionService {
         Ok((txn, conference, space, authority, pctx))
     }
 
-    /// Admitted participants (roster) — visible to anyone with conference authority.
+    /// Admitted participants (roster) — visible to anyone with conference authority. Gap
+    /// audit M5: a VIEWER (a webinar / town-hall attendee) sees only the people running the
+    /// session (presenters and above) and themselves, never the other attendees.
     pub async fn roster(
         &self,
         ctx: &ActorContext,
@@ -1463,15 +1497,23 @@ impl AdmissionService {
     ) -> ApiResult<Vec<conference_participants::Model>> {
         let conference = find_conference(&self.core.db, conference_id).await?;
         let space = find_space(&self.core.db, conference.meeting_space_id).await?;
-        conference_authority(&self.core.db, &space, conference_id, ctx)
+        let authority = conference_authority(&self.core.db, &space, conference_id, ctx)
             .await?
             .ok_or_else(|| permission_denied("You are not part of this conference"))?;
-        Ok(conference_participants::Entity::find()
+        let list = conference_participants::Entity::find()
             .filter(conference_participants::Column::ConferenceId.eq(conference_id))
             .filter(conference_participants::Column::AdmissionState.eq(AdmissionState::Admitted))
             .order_by_asc(conference_participants::Column::AdmittedAt)
             .all(&self.core.db)
-            .await?)
+            .await?;
+        if authority.role != Role::Viewer {
+            return Ok(list);
+        }
+        let me = authority.participant.as_ref().map(|p| p.id);
+        Ok(list
+            .into_iter()
+            .filter(|p| Some(p.id) == me || p.role.rank() >= Role::Presenter.rank())
+            .collect())
     }
 
     pub async fn waiting_room(

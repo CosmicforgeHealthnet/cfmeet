@@ -52,6 +52,17 @@ pub async fn legacy_webhooks(request: Request, next: Next) -> Response {
     response
 }
 
+/// Gap audit M15: every legacy `/api/v1` meeting, participant and meeting-chat route
+/// (the whole surface is deprecated in favour of `/api/v2`, not only its creates). An
+/// answer that already carries the headers (a create route) is left as is.
+pub async fn legacy_meetings(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    if !response.headers().contains_key("deprecation") {
+        apply(&mut response, MEETING_CREATE_LINK);
+    }
+    response
+}
+
 /// `POST /api/v1/meetings`, `POST /api/v1/meetings/instant`, `POST /api/v1/api/meetings`
 /// (MTG-017 / DATA-008: legacy v1 creation is deprecated in favour of `/api/v2`).
 pub async fn legacy_meeting_create(request: Request, next: Next) -> Response {

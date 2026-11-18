@@ -16,8 +16,8 @@ use crate::services::email_delivery::{self, category, Enqueued, NewEmail};
 use crate::services::step_up::StepUpPurpose;
 use crate::templates::email::{
     email_change_code_email, email_changed_new_address_email, email_changed_old_address_email,
-    email_in_use_notice_email, new_sign_in_email, notification_email, sign_in_code_email,
-    step_up_code_email, welcome_email, EmailTemplate, RequestDetails,
+    email_in_use_notice_email, new_sign_in_email, notification_email, security_notice_email,
+    sign_in_code_email, step_up_code_email, welcome_email, EmailTemplate, RequestDetails,
 };
 
 /// Every one-time code is valid 10 minutes (`services::otp::CODE_TTL_SECS`).
@@ -247,6 +247,29 @@ impl EmailService {
             Some(username),
             "New sign-in to your CF Meet account",
             new_sign_in_email(username, details, &sessions_url),
+            Some(Utc::now() + Duration::days(2)),
+        )
+        .await
+        .map(|e| e.id)
+    }
+
+    /// Gap audit A13: one security notice (`dedupe` makes a retried event send once).
+    pub async fn send_security_notice(
+        &self,
+        to_email: &str,
+        username: &str,
+        notice: SecurityNotice,
+        dedupe: &str,
+    ) -> ApiResult<Uuid> {
+        let sessions_url = format!("{}/settings/sessions", self.app_url.trim_end_matches('/'));
+        let (subject, what) = notice.text();
+        self.enqueue_template(
+            category::NOTIFICATION,
+            Some(format!("security-notice:{}:{dedupe}", notice.key())),
+            to_email,
+            Some(username),
+            subject,
+            security_notice_email(username, subject, what, &sessions_url),
             Some(Utc::now() + Duration::days(2)),
         )
         .await
@@ -527,5 +550,86 @@ mod passwordless_tests {
         assert_eq!(hex::encode(h.finalize()), SIGN_IN_PARITY_DIGEST);
         assert_eq!(CODE_TTL_TEXT, "10 minutes");
         assert_eq!(CODE_TTL.num_minutes(), 10);
+    }
+}
+
+/// Gap audit A13: security events the account owner is told of by email.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecurityNotice {
+    /// A Google identity was linked to the account.
+    GoogleLinked,
+    /// A replayed refresh token ended a sign-in (a copy of it was used elsewhere).
+    RefreshTokenReuse,
+    /// Every sign-in of the account was ended.
+    SignedOutEverywhere,
+    /// The account was deactivated.
+    Deactivated,
+    /// The owner signed back in to an account they had deactivated (gap audit A16).
+    Reactivated,
+    /// The first device of the account became trusted (gap audit A6).
+    FirstDeviceTrusted,
+    /// The account was deleted (gap audit A2).
+    Deleted,
+    /// Two-step sign-in was turned on (gap audit A1).
+    MfaEnabled,
+    /// Two-step sign-in was turned off (gap audit A1).
+    MfaDisabled,
+}
+
+impl SecurityNotice {
+    pub fn key(self) -> &'static str {
+        match self {
+            SecurityNotice::GoogleLinked => "google-linked",
+            SecurityNotice::RefreshTokenReuse => "refresh-reuse",
+            SecurityNotice::SignedOutEverywhere => "signed-out-everywhere",
+            SecurityNotice::Deactivated => "deactivated",
+            SecurityNotice::Reactivated => "reactivated",
+            SecurityNotice::FirstDeviceTrusted => "first-device-trusted",
+            SecurityNotice::Deleted => "deleted",
+            SecurityNotice::MfaEnabled => "mfa-enabled",
+            SecurityNotice::MfaDisabled => "mfa-disabled",
+        }
+    }
+
+    /// Subject and the one-sentence account of what happened.
+    pub fn text(self) -> (&'static str, &'static str) {
+        match self {
+            SecurityNotice::GoogleLinked => (
+                "Google sign-in was added to your CF Meet account",
+                "A Google account was just linked to your CF Meet account, so it can now be used to sign in.",
+            ),
+            SecurityNotice::RefreshTokenReuse => (
+                "A CF Meet sign-in was ended for your protection",
+                "A saved sign-in of your CF Meet account was used from two places at once, which can mean it was copied. We ended that sign-in.",
+            ),
+            SecurityNotice::SignedOutEverywhere => (
+                "You were signed out of CF Meet everywhere",
+                "Every sign-in of your CF Meet account was just ended, on every device.",
+            ),
+            SecurityNotice::Deactivated => (
+                "Your CF Meet account was deactivated",
+                "Your CF Meet account was just deactivated and every sign-in was ended. You can sign in again within 30 days to reactivate it. Contact support if you did not do this.",
+            ),
+            SecurityNotice::Reactivated => (
+                "Your CF Meet account was reactivated",
+                "You signed in to your deactivated CF Meet account, so it is active again. Contact support if this was not you.",
+            ),
+            SecurityNotice::FirstDeviceTrusted => (
+                "A device is now trusted on your CF Meet account",
+                "The first device of your CF Meet account was just set up as a trusted device. Trusted devices can approve new devices and sign out others.",
+            ),
+            SecurityNotice::Deleted => (
+                "Your CF Meet account was deleted",
+                "Your CF Meet account was just deleted: your profile and sign-ins were removed and this address is no longer linked to it. Contact support at once if you did not do this.",
+            ),
+            SecurityNotice::MfaEnabled => (
+                "Two-step sign-in was turned on for your CF Meet account",
+                "Signing in to your CF Meet account now also needs a code from your authenticator app (or a recovery code).",
+            ),
+            SecurityNotice::MfaDisabled => (
+                "Two-step sign-in was turned off for your CF Meet account",
+                "Signing in to your CF Meet account no longer needs a code from your authenticator app.",
+            ),
+        }
     }
 }

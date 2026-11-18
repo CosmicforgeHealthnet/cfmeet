@@ -3100,6 +3100,18 @@ async fn cfmeet_first_party_baseline_enables_attachments_for_cfmeet_only() {
     conforms("messaging/common/v1.schema.json#/$defs/PolicyView", &o.json);
     assert!(o.json["applicationBaseline"].is_null(), "{}", o.text);
     assert_eq!(o.json["effective"]["attachments"]["enabled"], false);
+    // Gap audit S6: secure backups are on for CF Meet only.
+    assert_eq!(
+        v.json["effective"]["backups"]["enabled"], true,
+        "{}",
+        v.text
+    );
+    assert_eq!(v.json["effective"]["backups"]["retainCount"], 2);
+    assert_eq!(
+        o.json["effective"]["backups"]["enabled"], false,
+        "{}",
+        o.text
+    );
 
     // Upload + scan + download for a member of a CF Meet conversation.
     let (conv, people) = e.managed_group(&cfmeet, 2).await;
@@ -3230,4 +3242,57 @@ async fn cfmeet_first_party_baseline_enables_attachments_for_cfmeet_only() {
             .await,
         1
     );
+}
+
+/// Gap audit S7: in CF Meet's environment each uploader has a rolling 24-hour volume;
+/// another account is unaffected, and the window rolls.
+#[tokio::test]
+async fn cfmeet_uploaders_have_a_daily_volume() {
+    use messaging::conversations::policy::{
+        register_baseline, ApplicationBaseline, CFMEET_ATTACHMENT_MAX_BYTES,
+    };
+    // The smallest allowed cap: one maximum-size file per account per day. (Only this
+    // test and the CF Meet baseline test, which uploads a few KiB, use the baseline.)
+    std::env::set_var(
+        "MESSAGING_CFMEET_UPLOADER_DAILY_BYTES",
+        CFMEET_ATTACHMENT_MAX_BYTES.to_string(),
+    );
+    let Some(e) = env().await else { return };
+    let cfmeet = e.h.customer(ALL_SCOPES);
+    e.h.set_policy(
+        &cfmeet,
+        json!({ "contexts": { "GROUP": { "allowedProfiles": ["MANAGED"], "defaultProfile": "MANAGED" } } }),
+    )
+    .await;
+    let s = cfmeet.context.scope;
+    register_baseline(
+        e.h.conn(),
+        s.tenant_id,
+        s.application_id,
+        s.environment_id,
+        ApplicationBaseline::CfMeetFirstParty,
+        e.h.now(),
+    )
+    .await
+    .unwrap();
+    let (conv, people) = e.managed_group(&cfmeet, 2).await;
+    let (alice, bob) = (people[0], people[1]);
+    let body = |size: i64| json!({ "kind": "IMAGE", "size": size, "sha256": "ab".repeat(32), "mediaType": "image/png", "fileName": "p.png" });
+    let r = e
+        .intent(
+            &cfmeet,
+            &conv,
+            alice,
+            body(CFMEET_ATTACHMENT_MAX_BYTES - 100),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let r = e.intent(&cfmeet, &conv, alice, body(4096)).await;
+    assert_eq!(r.reason(), "UPLOADER_DAILY_VOLUME", "{}", r.text);
+    let r = e.intent(&cfmeet, &conv, bob, body(4096)).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    // A day later the window has rolled.
+    e.h.clock.advance(chrono::Duration::hours(25));
+    let r = e.intent(&cfmeet, &conv, alice, body(4096)).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
 }

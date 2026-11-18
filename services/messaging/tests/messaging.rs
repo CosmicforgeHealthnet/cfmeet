@@ -755,14 +755,6 @@ async fn muted_members_and_closed_conversations_cannot_send() {
         )
         .await;
     assert_eq!(r.reason(), "NOT_ADMIN");
-    let r = h
-        .delete(
-            &c,
-            Some(people[0]),
-            &format!("/v1/conversations/{cid}/members/{}", people[0]),
-        )
-        .await;
-    assert_eq!(r.reason(), "OWNER_CANNOT_BE_REMOVED");
     let v = h
         .get(&c, Some(people[0]), &format!("/v1/conversations/{cid}"))
         .await;
@@ -1342,4 +1334,125 @@ async fn one_account_with_mobile_and_two_web_devices_replaces_its_mobile() {
             .await;
         assert_eq!(n, 0, "{phrase}");
     }
+}
+
+/// Gap audit S3: the owner hands a group over (becoming ADMIN), only the owner may, and an
+/// owner who leaves passes ownership to the most senior member; nobody removes the owner.
+#[tokio::test]
+async fn group_ownership_transfers_and_the_owner_can_leave() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 3).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let (owner, a, b) = (people[0], people[1], people[2]);
+    let owner_of = |v: &common::Response| v.json["ownerPrincipalId"].clone();
+    // Only the owner transfers.
+    let r = h
+        .post(
+            &c,
+            Some(a),
+            &format!("/v1/conversations/{cid}/owner"),
+            json!({ "principalId": a }),
+        )
+        .await;
+    assert_eq!(r.reason(), "OWNER_ONLY", "{}", r.text);
+    let r = h
+        .post(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/owner"),
+            json!({ "principalId": a }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["ownerPrincipalId"], json!(a));
+    let v = h
+        .get(&c, Some(a), &format!("/v1/conversations/{cid}"))
+        .await;
+    assert_eq!(owner_of(&v), json!(a), "{}", v.text);
+    // The previous owner is now an ADMIN and cannot remove the new owner.
+    let r = h
+        .delete(
+            &c,
+            Some(owner),
+            &format!("/v1/conversations/{cid}/members/{a}"),
+        )
+        .await;
+    assert_eq!(r.reason(), "OWNER_CANNOT_BE_REMOVED", "{}", r.text);
+    // The owner leaves: the most senior remaining member (the ADMIN) becomes owner.
+    let r = h
+        .delete(&c, Some(a), &format!("/v1/conversations/{cid}/members/{a}"))
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    let v = h
+        .get(&c, Some(owner), &format!("/v1/conversations/{cid}"))
+        .await;
+    assert_eq!(owner_of(&v), json!(owner), "{}", v.text);
+    let _ = b;
+}
+
+/// Gap audit S5: published events past retention are pruned (each conversation keeps its
+/// newest event), and replay from before the retained window asks for a resync.
+#[tokio::test]
+async fn old_conversation_events_are_pruned_and_replay_asks_for_resync() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, people) = h.managed_group(&c, 2).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    for text in ["one", "two", "three"] {
+        let r = h
+            .post(
+                &c,
+                Some(people[0]),
+                &format!("/v1/conversations/{cid}/messages"),
+                json!({ "clientMessageId": Uuid::new_v4(), "text": text }),
+            )
+            .await;
+        assert!(r.status.is_success(), "{}", r.text);
+    }
+    let in_conv =
+        format!("SELECT count(*) FROM messaging_outbox_events WHERE conversation_id = '{cid}'");
+    let total = h.scalar(&in_conv).await;
+    assert!(total >= 4, "{total}");
+    use sea_orm::ConnectionTrait;
+    h.db.conn
+        .execute_unprepared(&format!(
+            "UPDATE messaging_outbox_events SET status = 'PUBLISHED', published_at = now(), \
+             occurred_at = now() - interval '100 days' WHERE conversation_id = '{cid}'"
+        ))
+        .await
+        .unwrap();
+    // An event still owed to the webhook relay is kept; settle the relay first.
+    h.db.conn
+        .execute_unprepared(
+            "UPDATE messaging_webhook_relay SET status = 'RELAYED', relayed_at = now()",
+        )
+        .await
+        .unwrap();
+    let pruned =
+        messaging::events::outbox::prune_published(&h.state.db, chrono::Utc::now(), 90, 1000)
+            .await
+            .unwrap();
+    assert_eq!(pruned as i64, total - 1);
+    assert_eq!(h.scalar(&in_conv).await, 1, "the newest event is kept");
+    let r = h
+        .get(
+            &c,
+            Some(people[1]),
+            &format!("/v1/conversations/{cid}/events?after=0"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["syncRequired"], true, "{}", r.text);
+    // Within retention nothing goes.
+    assert_eq!(
+        messaging::events::outbox::prune_published(&h.state.db, chrono::Utc::now(), 365, 1000)
+            .await
+            .unwrap(),
+        0
+    );
 }

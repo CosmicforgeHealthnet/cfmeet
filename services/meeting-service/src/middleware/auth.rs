@@ -64,6 +64,13 @@ pub async fn auth_middleware(
             .one(&state.db)
             .await?
             .ok_or_else(|| ApiError::Unauthorized("Guest participant not found".to_string()))?;
+        // Gap audit A23: a guest removed by the host loses API access at once, not when
+        // the token expires (its media were already ended by the kick).
+        if participant.status == crate::models::participants::ParticipantStatus::Kicked {
+            return Err(ApiError::Unauthorized(
+                "You were removed from this meeting".to_string(),
+            ));
+        }
 
         // Create auth context for guest
         // We set status to Active as guests don't have account status

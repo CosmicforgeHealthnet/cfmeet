@@ -922,7 +922,8 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
         )
         .await;
     assert!(s.is_client_error(), "{v}");
-    // Logout ends every Messaging session of the account; the login is then refused.
+    // Logout ends the Messaging sessions of this sign-in (gap audit A11: bound to the
+    // account session, not account-wide); the login is then refused.
     const ACTIVE: &str = "SELECT count(*) FROM messaging_client_sessions WHERE status = 'ACTIVE'";
     assert_eq!(world.m_scalar(ACTIVE).await, 1);
     let (s, v) = app
@@ -935,9 +936,17 @@ async fn meeting_chat_migrates_to_unified_messaging_across_real_services() {
         "logout revoked the Messaging session"
     );
     assert_eq!(
-        app.scalar("SELECT count(*) FROM communication_session_revocations WHERE status = 'DONE'")
+        world
+            .m_scalar("SELECT count(*) FROM messaging_client_sessions WHERE revoked_reason = 'ACCOUNT_SESSION_ENDED'")
             .await,
-        1
+        1,
+        "ended through the sign-in binding"
+    );
+    assert_eq!(
+        app.scalar("SELECT count(*) FROM communication_session_revocations")
+            .await,
+        0,
+        "a session-bound logout queues no account-wide Messaging revocation"
     );
     let (s, _) = app
         .post(

@@ -18,6 +18,8 @@
 //!   "delete for me" markers.
 
 pub mod e2ee;
+pub mod forward;
+pub mod franking;
 pub mod http;
 pub mod keys;
 pub mod managed;
@@ -99,6 +101,12 @@ pub struct MessageRow {
     pub channel: String,
     pub reply_to_message_id: Option<Uuid>,
     pub thread_root_id: Option<Uuid>,
+    /// S11: set on a server-side forward (MANAGED); never shown to members.
+    pub forwarded_from_message_id: Option<Uuid>,
+    /// S11: the original sender, only when policy showed it at forward time.
+    pub forwarded_sender_principal_id: Option<Uuid>,
+    /// S2: the sender's franking commitment (PRIVATE_E2EE, optional).
+    pub franking_commitment: Option<String>,
 }
 
 pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.message_kind, m.security_profile, \
@@ -106,7 +114,9 @@ pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.messag
      m.mls_ciphertext, m.ciphertext_sha256, m.acceptance_digest, m.managed_sealed, m.managed_seal_nonce, \
      m.managed_seal_key_id, m.attachment_count, m.lifecycle, m.lifecycle_reason, m.edit_count, m.edited_at, \
      m.created_at, m.tenant_id, m.application_id, m.environment_id, m.security_provenance, m.original_created_at, \
-     m.managed_presentation, m.channel, m.reply_to_message_id, m.thread_root_id";
+     m.managed_presentation, m.channel, m.reply_to_message_id, m.thread_root_id, \
+     m.forwarded_from_message_id, m.forwarded_sender_principal_id, \
+     (SELECT f.commitment FROM messaging_message_frankings f WHERE f.message_id = m.id) AS franking_commitment";
 
 impl MessageRow {
     pub fn profile(&self) -> SecurityProfile {
@@ -150,6 +160,9 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         "channel": row.channel,
         "replyToMessageId": row.reply_to_message_id,
         "threadRootId": row.thread_root_id,
+        // S11: provenance only (the source conversation and message are never disclosed).
+        "forwarded": row.forwarded_from_message_id.is_some(),
+        "forwardedFromPrincipalId": row.forwarded_sender_principal_id,
     });
     match row.profile() {
         SecurityProfile::PrivateE2ee => {
@@ -164,6 +177,7 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
                 "ciphertext": if show { row.mls_ciphertext.as_deref().map(b64) } else { None },
                 "ciphertextSha256": row.ciphertext_sha256,
                 "acceptanceDigest": row.acceptance_digest,
+                "frankingCommitment": row.franking_commitment,
             });
         }
         SecurityProfile::Managed => {
@@ -281,6 +295,9 @@ pub struct SendRequest {
     /// only; at most [`MAX_MENTIONS`]). PRIVATE_E2EE mentions stay inside the ciphertext.
     #[serde(default)]
     pub mentioned_principal_ids: Vec<Uuid>,
+    /// S2, PRIVATE_E2EE only: the sender's franking commitment ([`franking`]).
+    #[serde(default)]
+    pub franking_commitment: Option<String>,
 }
 
 impl SendRequest {
@@ -434,6 +451,21 @@ pub(crate) async fn same_attachments<C: ConnectionTrait>(
 
 /// Checks shared by both profiles, before the transaction: membership, lifecycle,
 /// sending policy, mute, abuse limits.
+/// S13: in an announcement-only conversation only OWNER / ADMIN members send (and edit
+/// and forward into it). Everyone else keeps reading (and reacting, as policy allows).
+pub(crate) fn require_announcement_sender(
+    conversation: &ConversationRow,
+    member: &Membership,
+) -> Result<()> {
+    if conversation.announcement_only && !member.is_admin() {
+        return Err(Error::reason(
+            ErrorCode::SendRestricted,
+            "ANNOUNCEMENT_ONLY",
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) async fn send_prelude(
     state: &AppState,
     ctx: &TrustedContext,
@@ -460,6 +492,7 @@ pub(crate) async fn send_prelude(
             "READ_ONLY_MEMBER",
         ));
     }
+    require_announcement_sender(&conversation, &member)?;
     crate::safety::abuse::require_not_restricted(state, ctx, acting.principal_id).await?;
     // Tenant fairness first (one environment cannot monopolize shared capacity), then
     // the principal's own velocity.

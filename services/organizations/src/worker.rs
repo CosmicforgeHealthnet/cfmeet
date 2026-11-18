@@ -36,6 +36,8 @@ pub struct WorkerReport {
     pub idempotency_swept: u64,
     pub invitations_expired: u64,
     pub events_delivered: u64,
+    /// Gap audit G11: archived organizations purged this pass.
+    pub organizations_purged: u64,
 }
 
 /// Expires due PENDING invitations (at most `limit`).
@@ -84,6 +86,72 @@ pub async fn expire_invitations(db: &DatabaseConnection, limit: i64) -> Result<u
     Ok(due.len() as u64)
 }
 
+/// Gap audit G11: days after archival when an organization's personal data is purged
+/// (`ORGANIZATIONS_ARCHIVE_PURGE_DAYS`; unset or 0 = never — the retention period is an
+/// owner decision).
+pub fn archive_purge_days() -> Option<i64> {
+    std::env::var("ORGANIZATIONS_ARCHIVE_PURGE_DAYS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|d| *d > 0)
+}
+
+/// Gap audit G11: purges organizations archived more than `days` ago (at most `limit` per
+/// pass): their invitations (with invitee addresses) are deleted and the profile's
+/// contact, address and legal details are cleared, in one transaction with an
+/// `organization.purged` audit event. Identifiers, memberships, teams and the
+/// append-only audit and history stay as evidence; the organization stays ARCHIVED.
+pub async fn purge_archived(db: &DatabaseConnection, days: i64, limit: i64) -> Result<u64, DbErr> {
+    use sea_orm::TransactionTrait;
+    #[derive(Debug, sea_orm::FromQueryResult)]
+    struct Due {
+        id: Uuid,
+    }
+    let due: Vec<Due> = db::all(
+        db,
+        "SELECT o.id FROM organizations o WHERE o.lifecycle_status = 'ARCHIVED' \
+           AND o.archived_at < now() - make_interval(days => $1::int) \
+           AND NOT EXISTS (SELECT 1 FROM organization_audit_events a \
+                            WHERE a.organization_id = o.id AND a.action = 'organization.purged') \
+         ORDER BY o.archived_at LIMIT $2",
+        vec![(days as i32).into(), limit.into()],
+    )
+    .await?;
+    let mut purged = 0;
+    for org in due {
+        let txn = db.begin().await?;
+        let invitations = db::exec(
+            &txn,
+            "DELETE FROM organization_invitations WHERE organization_id = $1",
+            vec![org.id.into()],
+        )
+        .await?;
+        db::exec(
+            &txn,
+            "UPDATE organization_profiles SET description = NULL, city = NULL, operating_address = NULL, \
+                    logo_ref = NULL, public_contact_email = NULL, legal_registered_name = NULL, \
+                    legal_registration_number = NULL, legal_incorporated_on = NULL, legal_verification = NULL \
+              WHERE organization_id = $1",
+            vec![org.id.into()],
+        )
+        .await?;
+        crate::store::audit(
+            &txn,
+            &crate::store::OpContext::system("cfmeet.organizations"),
+            chrono::Utc::now(),
+            Some(org.id),
+            "organization.purged",
+            "ORGANIZATION",
+            Some(org.id),
+            serde_json::json!({ "afterDays": days, "invitationsDeleted": invitations }),
+        )
+        .await?;
+        txn.commit().await?;
+        purged += 1;
+    }
+    Ok(purged)
+}
+
 /// One pass of the loop.
 pub async fn run_once(
     db: &DatabaseConnection,
@@ -102,6 +170,10 @@ pub async fn run_once(
     )
     .await?;
     let invitations_expired = expire_invitations(db, 200).await?;
+    let organizations_purged = match archive_purge_days() {
+        Some(days) => purge_archived(db, days, 20).await?,
+        None => 0,
+    };
     let mut events_delivered = 0;
     if dispatcher.enabled() {
         let lease = Uuid::new_v4();
@@ -127,6 +199,7 @@ pub async fn run_once(
         idempotency_swept,
         invitations_expired,
         events_delivered,
+        organizations_purged,
     })
 }
 

@@ -6,7 +6,8 @@
 //! emptiness it is ended with `EMPTY_TIMEOUT` through the canonical end path (LIVE →
 //! ENDING → provider termination → ENDED, `conference.ending` / `conference.ended`).
 //!
-//! **Presence** (per tick, for a bounded batch of LIVE v2 INSTANT conferences, least
+//! **Presence** (per tick, for a bounded batch of LIVE v2 conferences without a scheduled
+//! end — INSTANT ones and any other without `scheduled_end_at` — least
 //! recently checked first):
 //! * provider participant control available (LiveKit): the provider room's participants
 //!   (recorders excluded) are the authority for "someone is in the media room"; a
@@ -23,6 +24,10 @@
 //! joined is empty from its start, and a restart never shortens an interval). When it is
 //! at least the timeout old, [`ConferenceService::end_if_still_empty`] re-checks under the
 //! conference row lock (a join racing the sweeper resets the interval instead).
+//!
+//! A LIVE conference that has no scheduled end (an unscheduled or start-only conference)
+//! is swept exactly like an instant one: nothing else would ever end it once everyone
+//! has left (the scheduler only ends conferences past their scheduled end).
 //!
 //! Scheduled and recurring conferences keep their own lifecycle (scheduled end + grace);
 //! no subscription- or plan-based duration limit exists (owner decision): a conference
@@ -187,7 +192,8 @@ impl EmptyConferenceSweeper {
                                         WHERE ps.conference_id = c.id), c.created_at)) AS baseline
                FROM conference_sessions c
                LEFT JOIN conference_presence p ON p.conference_id = c.id
-              WHERE c.status = 'LIVE' AND c.origin = 'V2' AND c.kind = 'INSTANT'
+              WHERE c.status = 'LIVE' AND c.origin = 'V2'
+                AND (c.kind = 'INSTANT' OR c.scheduled_end_at IS NULL)
               ORDER BY p.last_checked_at ASC NULLS FIRST, c.id
               LIMIT $1",
             [BATCH.into()],

@@ -333,6 +333,9 @@ pub async fn require_platform_credential(
         .cloned()
         .unwrap_or_else(RequestContext::generate);
     let headers = request.headers();
+    // P6: only the direct path is counted as platform API usage here (the gateway counts
+    // what it forwards; organization-forwarded traffic is first-party).
+    let direct = !headers.contains_key(&cf_service_auth::headers::SERVICE_AUTHORIZATION);
     let authenticated = if headers.contains_key(&cf_service_auth::headers::SERVICE_AUTHORIZATION) {
         // A service token AND a customer credential: never forwarded, never mixed.
         if headers.contains_key(header::AUTHORIZATION) {
@@ -458,8 +461,42 @@ pub async fn require_platform_credential(
         }
     }
 
+    let accounting = state
+        .direct_usage
+        .clone()
+        .filter(|_| direct)
+        .map(|accountant| {
+            let matched = request
+                .extensions()
+                .get::<MatchedPath>()
+                .map(|m| m.as_str().to_string());
+            (
+                accountant,
+                matched,
+                request.method().as_str().to_string(),
+                ctx.environment_id().as_uuid(),
+                ctx.environment_kind().as_str(),
+                ctx.credential_id().as_uuid(),
+                ctx.service_account_id().as_uuid(),
+            )
+        });
     request.extensions_mut().insert(ctx);
-    next.run(request).await
+    let response = next.run(request).await;
+    if let Some((accountant, matched, method, environment_id, kind, credential, account)) =
+        accounting
+    {
+        accountant.record(&crate::usage::direct::DirectRequest {
+            environment_id,
+            environment_kind: kind,
+            credential_id: credential,
+            service_account_id: account,
+            method: &method,
+            matched: matched.as_deref(),
+            status: response.status().as_u16(),
+            at: state.clock.now(),
+        });
+    }
+    response
 }
 
 #[cfg(test)]

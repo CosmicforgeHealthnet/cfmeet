@@ -10,6 +10,7 @@
 //! | Class | Action | Bound (env, default) |
 //! |---|---|---|
 //! | `CALL_RECORD` | Minimize display metadata of terminal Calls | `CALLING_RETENTION_CALL_DISPLAY_DAYS` 365 |
+//! | `CALL_HISTORY` | Purge terminal Calls from every participant's history | `CALLING_RETENTION_CALL_HISTORY_DAYS` 400 |
 //! | `CALL_EVENT` | Retain (outbox source, transition evidence) | — (`CALLING_RETENTION_CALL_EVENTS_DAYS` must stay unset) |
 //! | `CALL_USAGE` | Retain (immutable usage facts) | — |
 //! | `SPEND_EVIDENCE` | Retain | — |
@@ -48,6 +49,7 @@ text_enum!(
     /// A class of stored data with its own retention policy.
     DataClass {
         CallRecord = "CALL_RECORD",
+        CallHistory = "CALL_HISTORY",
         CallEvent = "CALL_EVENT",
         CallUsage = "CALL_USAGE",
         SpendEvidence = "SPEND_EVIDENCE",
@@ -120,6 +122,7 @@ const SECONDS_PER_DAY: u64 = 86_400;
 
 /// Default bounds (platform conventions, days).
 pub const DEFAULT_CALL_DISPLAY_DAYS: u64 = 365;
+pub const DEFAULT_CALL_HISTORY_DAYS: u64 = 400;
 pub const DEFAULT_WEBHOOK_HISTORY_DAYS: u64 = 90;
 pub const DEFAULT_INCIDENTS_DAYS: u64 = 365;
 pub const DEFAULT_MEDIA_PROVIDER_EVENTS_DAYS: u64 = 30;
@@ -136,6 +139,7 @@ pub const CALL_EVENTS_DAYS_VAR: &str = "CALLING_RETENTION_CALL_EVENTS_DAYS";
 /// | Variable | Default | Meaning |
 /// |---|---|---|
 /// | `CALLING_RETENTION_CALL_DISPLAY_DAYS` | 365 | display metadata of a terminal Call is minimized this long after it ended |
+/// | `CALLING_RETENTION_CALL_HISTORY_DAYS` | 400 | a terminal Call leaves every participant's history this long after it ended |
 /// | `CALLING_RETENTION_CALL_EVENTS_DAYS` | unset | must stay unset: call events are retained (startup refuses a value) |
 /// | `CALLING_RETENTION_WEBHOOK_HISTORY_DAYS` | 90 | terminal webhook deliveries (+ attempts) and delivery-less events are deleted after this |
 /// | `CALLING_RETENTION_INCIDENTS_DAYS` | 365 | RESOLVED Calling incidents are deleted this long after resolution |
@@ -145,6 +149,7 @@ pub const CALL_EVENTS_DAYS_VAR: &str = "CALLING_RETENTION_CALL_EVENTS_DAYS";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetentionSettings {
     pub call_display: Duration,
+    pub call_history: Duration,
     pub webhook_history: Duration,
     pub incidents: Duration,
     pub media_provider_events: Duration,
@@ -156,6 +161,7 @@ impl Default for RetentionSettings {
     fn default() -> Self {
         Self {
             call_display: days(DEFAULT_CALL_DISPLAY_DAYS),
+            call_history: days(DEFAULT_CALL_HISTORY_DAYS),
             webhook_history: days(DEFAULT_WEBHOOK_HISTORY_DAYS),
             incidents: days(DEFAULT_INCIDENTS_DAYS),
             media_provider_events: days(DEFAULT_MEDIA_PROVIDER_EVENTS_DAYS),
@@ -216,6 +222,10 @@ impl RetentionSettings {
                 "CALLING_RETENTION_CALL_DISPLAY_DAYS",
                 DEFAULT_CALL_DISPLAY_DAYS,
             )?,
+            call_history: day_bound(
+                "CALLING_RETENTION_CALL_HISTORY_DAYS",
+                DEFAULT_CALL_HISTORY_DAYS,
+            )?,
             webhook_history: day_bound(
                 "CALLING_RETENTION_WEBHOOK_HISTORY_DAYS",
                 DEFAULT_WEBHOOK_HISTORY_DAYS,
@@ -274,6 +284,14 @@ pub fn policies(settings: &RetentionSettings) -> Vec<RetentionPolicy> {
             "CALLING_RETENTION_CALL_DISPLAY_DAYS",
             "terminal Calls: participant display names and the enterprise entry label are erased; \
              ids, state, outcome, timestamps, principal / ContactReference relations and evidence links stay",
+        ),
+        policy(
+            C::CallHistory,
+            A::Minimize,
+            Some(settings.call_history),
+            "CALLING_RETENTION_CALL_HISTORY_DAYS",
+            "terminal Calls leave every participant's history (GET /v1/calls?principalId=, \
+             GET /v1/calling/history); the canonical Call, its events and usage stay retained",
         ),
         policy(
             C::WebhookDeliveryHistory,
@@ -394,6 +412,11 @@ mod tests {
             assert_eq!(DataClass::parse(class.as_str()), Some(*class));
         }
         assert_eq!(s.policy(DataClass::CallRecord).days(), Some(365));
+        assert_eq!(s.policy(DataClass::CallHistory).days(), Some(400));
+        assert_eq!(
+            s.policy(DataClass::CallHistory).action,
+            RetentionAction::Minimize
+        );
         assert_eq!(
             s.policy(DataClass::CallRecord).action,
             RetentionAction::Minimize
@@ -421,6 +444,7 @@ mod tests {
         assert_eq!(ok.interval, Duration::from_secs(5));
         for (k, v) in [
             ("CALLING_RETENTION_CALL_DISPLAY_DAYS", "0"),
+            ("CALLING_RETENTION_CALL_HISTORY_DAYS", "4000"),
             ("CALLING_RETENTION_INCIDENTS_DAYS", "9999"),
             ("CALLING_RETENTION_MEDIA_PROVIDER_EVENTS_DAYS", "soon"),
             ("CALLING_RETENTION_OPERATOR_AUDIT_DAYS", "-1"),

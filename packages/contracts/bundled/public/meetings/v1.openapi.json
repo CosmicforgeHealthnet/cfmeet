@@ -171,7 +171,7 @@
           "Artifacts (v2)"
         ],
         "summary": "Generate an attendance report, poll report or chat export (policy-gated).",
-        "description": "Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and\nstores it as a READY JSON artifact. Requires the export permission, and the meeting policy must\nallow the requested export type. Anonymous polls stay anonymous and private chat messages are\nnever exported.",
+        "description": "Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and\nstores it as a READY JSON artifact. Requires the export permission, and the meeting policy must\nallow the requested export type. Anonymous polls stay anonymous and private chat messages are\nnever exported. Without artifact storage in the deployment this answers `501\nARTIFACT_STORAGE_NOT_CONFIGURED`; `GET /api/v2/conferences/{id}/exports/{artifactType}`\nreturns the same report directly.",
         "operationId": "v2_generate_report",
         "parameters": [
           {
@@ -208,6 +208,16 @@
           },
           "403": {
             "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "ARTIFACT_STORAGE_NOT_CONFIGURED (use the inline export)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2386,6 +2396,83 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/exports/{artifactType}": {
+      "get": {
+        "tags": [
+          "Artifacts (v2)"
+        ],
+        "summary": "Download an attendance report, poll report or chat export directly.",
+        "description": "Returns the `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` JSON itself instead of storing\nit as an artifact, so it works without artifact storage. Same rules as generating a stored\nreport: the export permission, the meeting policy for that export type, anonymous polls stay\nanonymous and private chat is never exported. Each download is audited.",
+        "operationId": "v2_export_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "artifactType",
+            "in": "path",
+            "description": "ATTENDANCE_REPORT, POLL_REPORT or CHAT_EXPORT",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_export_report",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION",
+          "PARTICIPANT_TOKEN"
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/hand-raise": {
       "get": {
         "tags": [
@@ -3311,6 +3398,102 @@
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN"
         ]
+      },
+      "patch": {
+        "tags": [
+          "Chat (v2)"
+        ],
+        "summary": "Edit my message.",
+        "description": "The sender replaces the text of their own message (1–4000 characters) within 15 minutes of\nsending, while the conference is live; the message then shows `editedAt`. Deleted messages\ncannot be edited, and another person's private message answers MESSAGE_NOT_FOUND. Everyone\nwho can see the message gets a `chat.message_edited` event.",
+        "operationId": "v2_edit_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "description": "Message id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Edited message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MESSAGE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_edit_message",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION",
+          "PARTICIPANT_TOKEN"
+        ]
       }
     },
     "/api/v2/conferences/{id}/participants": {
@@ -3319,7 +3502,7 @@
           "Participants (v2)"
         ],
         "summary": "Admitted participants (roster).",
-        "description": "Returns the participants currently ADMITTED to the conference, ordered by admission time.\nAvailable to admitted participants and to the space owner and members; other callers (including\nwaiting, denied, removed or banned participants) get PERMISSION_DENIED.",
+        "description": "Returns the participants currently ADMITTED to the conference, ordered by admission time.\nAvailable to admitted participants and to the space owner and members; other callers (including\nwaiting, denied, removed or banned participants) get PERMISSION_DENIED. A VIEWER (a webinar or\ntown-hall attendee) sees only the people running the session (presenters and above) and\nthemselves, never the other attendees.",
         "operationId": "v2_list_participants",
         "parameters": [
           {
@@ -8064,6 +8247,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8672,6 +8865,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -9073,6 +9276,16 @@
           },
           "409": {
             "description": "IDEMPOTENCY_CONFLICT / CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9500,6 +9713,100 @@
         ],
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_add_member",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
+    "/api/v2/meeting-spaces/{id}/members/team": {
+      "post": {
+        "tags": [
+          "Members (v2)"
+        ],
+        "summary": "Add a team of the organization.",
+        "description": "Gap audit G7: for a meeting space of an organization, adds every active member of one of\nthe organization's teams with the given role, under the same rules as adding one member\n(managers only; a role you may grant). The Organizations Service decides whether you may see\nthe team. Team members who already belong, the owner, you and inactive accounts are skipped.\nAt most 500 team members.",
+        "operationId": "v2_add_team_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTeamMembersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddTeamMembersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_add_team_members",
         "x-cfmeet-auth": [
           "MEETING_SESSION"
         ]
@@ -10177,7 +10484,7 @@
           "Registrations (v2)"
         ],
         "summary": "Registrations of a meeting space (organizer view).",
-        "description": "Returns up to 500 registrations of the space, newest first, including cancelled ones, with the\nattendee details collected at registration. Admission tokens are never returned. Requires a\nsigned-in owner, host or co-host of the space and webinar mode enabled.",
+        "description": "Returns the registrations of the space, newest first, including cancelled ones, with the\nattendee details collected at registration, `limit` (1-500, default 100) at a time; pass\n`nextCursor` as `after` for the next page. Admission tokens are never returned. Requires a\nsigned-in owner, host or co-host of the space and webinar mode enabled.",
         "operationId": "v2_list_registrations",
         "parameters": [
           {
@@ -10188,6 +10495,33 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Last registration id of the previous page.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-500 (default 100).",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64",
+              "minimum": 0
             }
           }
         ],
@@ -10229,7 +10563,7 @@
           "Registrations (v2)"
         ],
         "summary": "Register for a webinar / town hall (public when the profile enables registration).",
-        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled; rate-limited per\nmeeting space.",
+        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
         "operationId": "v2_register",
         "parameters": [
           {
@@ -10295,7 +10629,7 @@
             }
           },
           "409": {
-            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE",
+            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL",
             "content": {
               "application/json": {
                 "schema": {
@@ -10474,6 +10808,66 @@
         ]
       }
     },
+    "/api/v2/registrations/cancel": {
+      "post": {
+        "tags": [
+          "Registrations (v2)"
+        ],
+        "summary": "Cancel my own registration (with its admission token).",
+        "description": "The registrant cancels their webinar / town-hall registration with the admission token they\nreceived when registering; no sign-in is needed. The token is revoked so it can no longer be used\nto join. An unknown, used-up or revoked token answers REGISTRATION_NOT_FOUND; cancelling an\nalready-cancelled registration returns it unchanged. (A signed-in account whose verified email\nis the registered address can also simply register again: it reclaims the registration and gets\na fresh token.)",
+        "operationId": "v2_cancel_own_registration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelOwnRegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "REGISTRATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_cancel_own_registration",
+        "x-cfmeet-auth": [
+          "ANONYMOUS"
+        ]
+      }
+    },
     "/api/v2/resolve/{identifier}": {
       "get": {
         "tags": [
@@ -10649,6 +11043,46 @@
           }
         },
         "additionalProperties": false
+      },
+      "AddTeamMembersRequest": {
+        "type": "object",
+        "description": "Gap audit G7: add every active member of one of the space's organization teams.",
+        "required": [
+          "teamId",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "teamId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AddTeamMembersResponse": {
+        "type": "object",
+        "description": "Result of adding a team (gap audit G7).",
+        "required": [
+          "added",
+          "skipped"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberResponse"
+            },
+            "description": "Members added now."
+          },
+          "skipped": {
+            "type": "integer",
+            "description": "Team members skipped: already members, the owner, you, or not an active account.",
+            "minimum": 0
+          }
+        }
       },
       "AdmissionState": {
         "type": "string",
@@ -11487,6 +11921,22 @@
             "type": "string",
             "format": "uuid"
           },
+          "durationSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Gap audit M17: timed rooms only — the length set at creation, and once open, when\nthe room closes by itself.",
+            "minimum": 0
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -11564,6 +12014,20 @@
             "description": "Already in the requested state (idempotent retry)."
           }
         }
+      },
+      "CancelOwnRegistrationRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/registrations/cancel` request: the registration's admission token.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The admission token returned when registering (`reg_…`)."
+          }
+        },
+        "additionalProperties": false
       },
       "ChangedResponse": {
         "type": "object",
@@ -12517,6 +12981,15 @@
             "description": "Number of automatically numbered rooms (\"Room N\").",
             "minimum": 0
           },
+          "durationSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Gap audit M17: timed rooms. Once opened, a room closes by itself after this many\nseconds (60-14400), with a `warningSeconds` countdown first.",
+            "minimum": 0
+          },
           "names": {
             "type": [
               "array",
@@ -12540,6 +13013,15 @@
                 "type": "null"
               }
             ]
+          },
+          "warningSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Countdown before a timed room closes (0-600, default 60).",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -12994,6 +13476,19 @@
         },
         "additionalProperties": false
       },
+      "EditMessageRequest": {
+        "type": "object",
+        "description": "Gap audit M17: the new text of an edited message.",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "EmailDelivery": {
         "type": "string",
         "description": "What happened to a requested invitation email.",
@@ -13109,6 +13604,7 @@
           "ARTIFACT_DELETED",
           "ARTIFACT_ACCESS_DENIED",
           "ARTIFACT_STORAGE_UNAVAILABLE",
+          "ARTIFACT_STORAGE_NOT_CONFIGURED",
           "ARTIFACT_INTEGRITY_FAILED",
           "TRANSCRIPTION_DISABLED",
           "TRANSCRIPTION_NOT_ALLOWED",
@@ -13119,6 +13615,7 @@
           "INTELLIGENCE_PROVIDER_UNAVAILABLE",
           "REGISTRATION_DISABLED",
           "REGISTRATION_CLOSED",
+          "REGISTRATION_FULL",
           "REGISTRATION_NOT_FOUND",
           "ADMISSION_TOKEN_INVALID",
           "BACKSTAGE_ACCESS_DENIED",
@@ -13162,6 +13659,9 @@
           "DEVICE_DECLARATION_REFUSED",
           "DEVICE_DECLARATION_REQUIRED",
           "DEVICE_NOT_FOUND",
+          "MFA_REQUIRED",
+          "USER_NOT_FOUND",
+          "AVATAR_NOT_FOUND",
           "DEVICE_KEY_IN_USE",
           "DEVICE_LINK_INVALID",
           "DATABASE_ERROR",
@@ -14389,6 +14889,14 @@
           },
           "deleted": {
             "type": "boolean"
+          },
+          "editedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Gap audit M17: when the sender last edited the message (`null`: never edited)."
           },
           "id": {
             "type": "string",
@@ -16460,6 +16968,14 @@
           "registrations"
         ],
         "properties": {
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Pass as `after` to get the next page; `null` on the last page."
+          },
           "registrations": {
             "type": "array",
             "items": {
@@ -16479,11 +16995,31 @@
           "tokenMaxUses"
         ],
         "properties": {
+          "capacity": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gap audit M10: most active registrations accepted (per occurrence, or for the\nwhole series); 0 = no limit. At most 100000.",
+            "minimum": 0
+          },
+          "closesMinutesBeforeStart": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gap audit M10: registration closes this many minutes before the occurrence's\nscheduled start (0 = open until the occurrence ends).",
+            "minimum": 0
+          },
           "customFields": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CustomRegistrationField"
             }
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Gap audit M10: registration closes at this time, whatever the occurrence."
           },
           "email": {
             "$ref": "#/components/schemas/FieldRequirement"

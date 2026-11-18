@@ -1,11 +1,16 @@
+pub mod account_avatar;
 pub mod account_devices;
+pub mod account_erasure;
 pub mod account_profile;
 pub mod account_security;
 pub mod auth;
+pub mod creation_limits;
 pub mod email;
 pub mod email_change;
 pub mod email_delivery;
+pub mod google_native;
 pub mod livekit;
+pub mod mfa;
 pub mod otp;
 pub mod passwordless;
 pub mod rate_limiter;

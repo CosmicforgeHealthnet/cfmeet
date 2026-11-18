@@ -1164,3 +1164,294 @@ async fn a_new_device_reads_and_cancels_its_own_link_request() {
         StatusCode::GONE
     );
 }
+
+/// Gap audit A5: a password-only (undeclared) sign-in cannot end a trusted device's
+/// sign-in nor sign out everywhere; it can still end itself, and the trusted device can
+/// end it.
+#[tokio::test]
+async fn gap_a_password_only_sign_in_cannot_end_trusted_devices() {
+    let app = app_with_redis!();
+    let e = email();
+    password_user(&app, &e).await;
+    let mut web = Device::web();
+    let (s, v) = sign_in(&app, &e, &mut web).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["device"]["trust"], "TRUSTED");
+    let (legacy, _, legacy_session) = legacy_sign_in(&app, &e).await;
+
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/sessions/{}/revoke", web.session),
+            Auth::Bearer(&legacy),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(code(&v), "DEVICE_NOT_TRUSTED");
+    let (s, v) = app
+        .post(
+            "/api/v2/me/sessions/revoke-all",
+            Auth::Bearer(&legacy),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(code(&v), "DEVICE_NOT_TRUSTED");
+    assert_eq!(me(&app, &web).await, StatusCode::OK);
+
+    // The trusted device ends the password-only sign-in.
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/sessions/{legacy_session}/revoke"),
+            Auth::Bearer(&web.access),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&legacy)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // A password-only sign-in may always end itself.
+    let (legacy2, _, legacy2_session) = legacy_sign_in(&app, &e).await;
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/sessions/{legacy2_session}/revoke"),
+            Auth::Bearer(&legacy2),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+}
+
+/// Gap audit A10: a sign-in past its absolute lifetime is recorded EXPIRED by the sweep.
+#[tokio::test]
+async fn gap_expired_sign_ins_are_swept() {
+    let app = app_with_redis!();
+    let e = email();
+    password_user(&app, &e).await;
+    let (_access, _, session) = legacy_sign_in(&app, &e).await;
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET authenticated_at = now() - interval '31 days', \
+             absolute_expires_at = now() - interval '1 minute' WHERE id = $1",
+            [session.into()],
+        ))
+        .await
+        .unwrap();
+    let ended = backend::services::account_security::sweep_expired_sessions(&app.state)
+        .await
+        .unwrap();
+    assert!(ended >= 1);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE id = '{session}' AND revoke_reason = 'EXPIRED' AND revoked_at IS NOT NULL"
+        ))
+        .await,
+        1
+    );
+}
+
+/// Gap audit A20: a trusted device signs out every other session and stays signed in;
+/// a platform administrator ends every session of an account without suspending it.
+#[tokio::test]
+async fn gap_sign_out_other_sessions_and_admin_session_revocation() {
+    let app = app_with_redis!();
+    let e = email();
+    let user_id = password_user(&app, &e).await;
+    let mut web = Device::web();
+    sign_in(&app, &e, &mut web).await;
+    let (legacy, _, _) = legacy_sign_in(&app, &e).await;
+    let (legacy2, _, _) = legacy_sign_in(&app, &e).await;
+
+    // A password-only sign-in may not do it once the account has a trusted device.
+    let (s, v) = app
+        .post(
+            "/api/v2/me/sessions/revoke-others",
+            Auth::Bearer(&legacy),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "DEVICE_NOT_TRUSTED"),
+        "{v}"
+    );
+
+    let (s, v) = app
+        .post(
+            "/api/v2/me/sessions/revoke-others",
+            Auth::Bearer(&web.access),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["revokedCount"], 2, "{v}");
+    assert_eq!(me(&app, &web).await, StatusCode::OK);
+    for t in [&legacy, &legacy2] {
+        assert_eq!(
+            app.get("/api/v1/users/me", Auth::Bearer(t)).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    // Administrators: refused to others, audited, the account stays active.
+    let (s, _) = app
+        .post(
+            &format!("/api/v2/admin/users/{user_id}/sessions/revoke"),
+            Auth::Bearer(&web.access),
+            json!({ "reason": "support ticket" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let admin = app.admin("session-admin").await;
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/admin/users/{}/sessions/revoke", Uuid::new_v4()),
+            Auth::Bearer(&admin.token),
+            json!({ "reason": "support ticket" }),
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::NOT_FOUND, "USER_NOT_FOUND"),
+        "{v}"
+    );
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/admin/users/{user_id}/sessions/revoke"),
+            Auth::Bearer(&admin.token),
+            json!({ "reason": " " }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{v}");
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/admin/users/{user_id}/sessions/revoke"),
+            Auth::Bearer(&admin.token),
+            json!({ "reason": "support ticket" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["revokedCount"], 1, "{v}");
+    assert_eq!(me(&app, &web).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_security_events WHERE event_type = 'ADMIN_SESSIONS_REVOKED' AND detail->>'targetUserId' = '{user_id}'"
+        ))
+        .await,
+        1
+    );
+    // Not suspended: signing in again works.
+    let (_again, _, _) = legacy_sign_in(&app, &e).await;
+}
+
+/// Gap audit A21: an account keeps at most 50 open sign-ins; signing in past the cap ends
+/// the least recently used ones, and a revoke finds sessions older than the newest 100.
+#[tokio::test]
+async fn gap_open_sign_ins_are_capped_and_old_sessions_stay_revocable() {
+    let app = app_with_redis!();
+    let e = email();
+    let user_id = password_user(&app, &e).await;
+    let (first, _, first_session) = legacy_sign_in(&app, &e).await;
+    // 120 older ended sessions, then 60 open ones (all older than `first`'s last use).
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO account_sessions (id, user_id, auth_method, authenticated_at, absolute_expires_at, current_refresh_id, created_at, revoked_at, revoke_reason) \
+             SELECT gen_random_uuid(), $1, 'PASSWORD', now() - interval '2 days', now() + interval '20 days', gen_random_uuid(), \
+                    now() - interval '2 days' + make_interval(secs => g), \
+                    CASE WHEN g <= 120 THEN now() END, CASE WHEN g <= 120 THEN 'LOGOUT' END \
+               FROM generate_series(1, 180) g",
+            [user_id.into()],
+        ))
+        .await
+        .unwrap();
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_sessions SET created_at = now() - interval '3 days', authenticated_at = now() - interval '3 days' WHERE id = $1",
+            [first_session.into()],
+        ))
+        .await
+        .unwrap();
+    let open = format!(
+        "SELECT count(*) FROM account_sessions WHERE user_id = '{user_id}' AND revoked_at IS NULL"
+    );
+    assert_eq!(app.scalar(&open).await, 61);
+    let (latest, _, _) = legacy_sign_in(&app, &e).await;
+    assert_eq!(app.scalar(&open).await, 50);
+    assert_eq!(
+        app.get("/api/v1/users/me", Auth::Bearer(&first)).await.0,
+        StatusCode::UNAUTHORIZED,
+        "the least recently used sign-in ended"
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_sessions WHERE user_id = '{user_id}' AND revoke_reason = 'SUPERSEDED'"
+        ))
+        .await,
+        12
+    );
+    // The oldest ended session is still found (beyond the newest 100).
+    let oldest: Uuid = {
+        use sea_orm::QueryResult;
+        let row: QueryResult = app
+            .db
+            .conn
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT id FROM account_sessions WHERE user_id = $1 ORDER BY created_at LIMIT 1",
+                [user_id.into()],
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        row.try_get("", "id").unwrap()
+    };
+    let (s, v) = app
+        .post(
+            &format!("/api/v2/me/sessions/{oldest}/revoke"),
+            Auth::Bearer(&latest),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+}
+
+async fn notices(app: &TestApp, email: &str, kind: &str) -> i64 {
+    app.scalar(&format!(
+        "SELECT count(*) FROM email_deliveries WHERE idempotency_key LIKE 'security-notice:{kind}:%' \
+          AND recipient_hash = encode(sha256(convert_to('{email}', 'UTF8')), 'hex')"
+    ))
+    .await
+}
+
+/// Gap audit A6/A13: the owner is told when the first device becomes trusted and when the
+/// account is signed out everywhere; an untrusted second device is not announced as trusted.
+#[tokio::test]
+async fn gap_security_notices_are_queued() {
+    let app = app_with_redis!();
+    let e = email();
+    password_user(&app, &e).await;
+    let mut web = Device::web();
+    sign_in(&app, &e, &mut web).await;
+    assert_eq!(notices(&app, &e, "first-device-trusted").await, 1);
+    let mut second = Device::web();
+    sign_in(&app, &e, &mut second).await;
+    assert_eq!(notices(&app, &e, "first-device-trusted").await, 1);
+    let (s, v) = app
+        .post(
+            "/api/v2/me/sessions/revoke-all",
+            Auth::Bearer(&web.access),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(notices(&app, &e, "signed-out-everywhere").await, 1);
+}

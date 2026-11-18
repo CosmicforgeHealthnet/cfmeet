@@ -8,6 +8,7 @@
 //! | `POST /meeting-conversations/{conversationId}/legacy-imports` | `messaging-meeting.sync` |
 //! | `POST /meeting-conversations/{conversationId}/messages/{messageId}/moderation` | `messaging-meeting.sync` |
 //! | `POST /context-authorities` | `messaging-context-authority.apply` (Privacy Relay) |
+//! | `PUT /team-channels` | `messaging-organization.govern` (Meeting Service, gap audit G7) |
 
 use axum::{
     extract::{Path, State},
@@ -53,6 +54,7 @@ pub fn internal_routes() -> Router<AppState> {
             post(moderate),
         )
         .route("/context-authorities", post(context_authority))
+        .route("/team-channels", put(team_channel))
 }
 
 /// The meeting-sync caller's re-validated first-party scope.
@@ -135,6 +137,42 @@ async fn moderate(
     let view = meeting::moderate_message(&state, &ctx, conversation_id, message_id, body).await?;
     state.wake_outbox();
     Ok(Json(view))
+}
+
+/// Gap audit G7: create / resync a team channel from a team snapshot, in the caller's
+/// (the organization's) first-party scope.
+async fn team_channel(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    Json(body): Json<super::team_channels::TeamSnapshot>,
+) -> Result<impl IntoResponse, ApiError> {
+    caller.require_permission(InternalPermission::MessagingOrganizationGovern)?;
+    let ctx = delegated_context(&state, &caller).await?;
+    if !ctx.first_party {
+        return Err(ApiError::code(
+            crate::error::ErrorCode::DelegatedContextInvalid,
+        ));
+    }
+    body.validate()?;
+    let owner = verify_principal(&state, &ctx, body.owner_principal_id).await?;
+    // Only principals ACTIVE now join; one that is not is reported (and, if it joined by
+    // the team before, removed).
+    let mut inactive = std::collections::BTreeSet::new();
+    for p in body
+        .member_principal_ids
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        if verify_principal(&state, &ctx, *p).await.is_err() {
+            inactive.insert(*p);
+        }
+    }
+    let (status, view) = super::team_channels::sync(&state, &ctx, &owner, body, inactive).await?;
+    state.wake_outbox();
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::OK),
+        Json(view),
+    ))
 }
 
 async fn context_authority(

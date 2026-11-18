@@ -67,7 +67,7 @@
 | Calling and enterprise calling | Strong: 29/42 CI-verified with real LiveKit, Asterisk/SIPp | Web PARTIAL (calls don't end for the callee, page-bound ringing, admin-gated settings). Mobile: none. | Deployed (Enterprise, recording, voicemail on; PSTN off) |
 | Messaging | Strong backend | Web uses basic send/receive only; event re-sync broken; no realtime in production | MANAGED deployed; PRIVATE_E2EE BLOCKED_EXTERNAL (#13) |
 | Communications Hub | Implemented (73 ops), production-verified per the closure report | **No client** | Deployed |
-| Developer Platform and API Gateway | CI-verified | No console | **Not deployed** (PLT-005) |
+| Developer Platform and API Gateway | CI-verified | No console | **Deployed** (not deployed at audit time; PLT-005 since closed, see the [final production certification](../operations/cfmeet-final-production-certification.md)) |
 | PSTN, numbers, SMS, Privacy Relay | Software-complete against simulators | Out of Phase 2 frontend scope | BLOCKED_EXTERNAL |
 
 ## 4. Top findings: what prevents the intended user experience
@@ -141,7 +141,7 @@ All registered routes were extracted statically from source (§10). Counts by se
 1. **The account authority is the least hardened service.** Meeting-service owns accounts that every other service trusts, but uses symmetric JWTs with no token type, has revocation gaps, plaintext legacy secrets, naive timestamps, no audit table and no backup path.
 2. **There is no organization authority.** Meetings, the Developer Platform with Platform Access, and Calling/Numbering each model "organization" differently (ORG-001). Enterprise Calling runs as one shared scope.
 3. **Two meeting generations are live.** v1 and v2 coexist, and mobile is the last v1 writer, so legacy retirement is blocked.
-4. **Part VI is built but undeployed.** The SDKs and public docs point at a gateway that is not serving.
+4. **Part VI was built but undeployed at audit time.** It has since been deployed to production and certified (PLT-005 closed; [final production certification](../operations/cfmeet-final-production-certification.md)).
 5. **Device and revocation fan-out spans four registries** with no account-level revocation event (Journey H FAIL).
 6. **No contract-parity gate for clients.** Every major client defect in this audit is drift that generated types or contract tests would have caught.
 

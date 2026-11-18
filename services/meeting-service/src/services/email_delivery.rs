@@ -165,6 +165,17 @@ fn clean_header(value: &str, max: usize) -> String {
 
 /// Record a message in the durable ledger (QUEUED). Idempotent on `idempotency_key`.
 pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult<Enqueued> {
+    enqueue_with_calendar(conn, email, None).await
+}
+
+/// Gap audit M14: as [`enqueue`], with an RFC 5545 calendar invite sent as an `invite.ics`
+/// attachment (`text/calendar; method=PUBLISH`).
+pub async fn enqueue_with_calendar<C: ConnectionTrait>(
+    conn: &C,
+    email: NewEmail,
+    calendar: Option<String>,
+) -> ApiResult<Enqueued> {
+    let calendar = calendar.filter(|c| !c.is_empty() && c.len() <= 65_536);
     let to = email.to.trim().to_string();
     if !valid_address(&to) {
         return Err(ApiError::BadRequest(
@@ -196,8 +207,8 @@ pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult
         .query_one(Statement::from_sql_and_values(
             DbBackend::Postgres,
             "INSERT INTO email_deliveries (id, category, idempotency_key, recipient_hash, recipient,
-                 recipient_name, subject, html_body, text_body, expires_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 recipient_name, subject, html_body, text_body, expires_at, ics_body)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              ON CONFLICT (idempotency_key) DO NOTHING
              RETURNING id",
             [
@@ -211,6 +222,7 @@ pub async fn enqueue<C: ConnectionTrait>(conn: &C, email: NewEmail) -> ApiResult
                 email.html.into(),
                 email.text.into(),
                 email.expires_at.into(),
+                calendar.into(),
             ],
         ))
         .await?;
@@ -277,6 +289,8 @@ pub struct ProviderMessage<'a> {
     pub subject: &'a str,
     pub html: &'a str,
     pub text: &'a str,
+    /// Gap audit M14: calendar invite attached as `invite.ics`.
+    pub calendar: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,6 +367,14 @@ impl ResendProvider {
         });
         if let Some(r) = m.reply_to {
             body["reply_to"] = json!(r);
+        }
+        if let Some(ics) = m.calendar {
+            use base64::{engine::general_purpose::STANDARD, Engine as _};
+            body["attachments"] = json!([{
+                "filename": "invite.ics",
+                "content": STANDARD.encode(ics.as_bytes()),
+                "content_type": "text/calendar; charset=utf-8; method=PUBLISH",
+            }]);
         }
         body
     }
@@ -495,20 +517,29 @@ impl EmailProvider for SmtpProvider {
         if let Some(r) = m.reply_to.and_then(|r| r.parse::<Mailbox>().ok()) {
             builder = builder.reply_to(r);
         }
-        let email = builder
-            .multipart(
-                MultiPart::alternative()
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_PLAIN)
-                            .body(m.text.to_string()),
-                    )
-                    .singlepart(
-                        SinglePart::builder()
-                            .header(ContentType::TEXT_HTML)
-                            .body(m.html.to_string()),
-                    ),
+        let alternative = MultiPart::alternative()
+            .singlepart(
+                SinglePart::builder()
+                    .header(ContentType::TEXT_PLAIN)
+                    .body(m.text.to_string()),
             )
+            .singlepart(
+                SinglePart::builder()
+                    .header(ContentType::TEXT_HTML)
+                    .body(m.html.to_string()),
+            );
+        let body = match m.calendar {
+            Some(ics) => MultiPart::mixed().multipart(alternative).singlepart(
+                lettre::message::Attachment::new("invite.ics".to_string()).body(
+                    ics.to_string(),
+                    ContentType::parse("text/calendar; charset=utf-8; method=PUBLISH")
+                        .map_err(|_| rejected("INVALID_MESSAGE"))?,
+                ),
+            ),
+            None => alternative,
+        };
+        let email = builder
+            .multipart(body)
             .map_err(|_| rejected("INVALID_MESSAGE"))?;
         match self.mailer.send(email).await {
             Ok(_) => Ok(None),
@@ -539,6 +570,8 @@ impl EmailProvider for SmtpProvider {
 pub struct RecordingProvider {
     pub sent: std::sync::Mutex<Vec<(Uuid, String, String, String)>>,
     pub fail_next: std::sync::Mutex<Vec<ProviderError>>,
+    /// Calendar invite of each accepted message, by ledger id (gap audit M14).
+    pub calendars: std::sync::Mutex<Vec<(Uuid, String)>>,
 }
 
 impl RecordingProvider {
@@ -570,6 +603,12 @@ impl EmailProvider for RecordingProvider {
             m.subject.to_string(),
             m.text.to_string(),
         ));
+        if let Some(ics) = m.calendar {
+            self.calendars
+                .lock()
+                .expect("recording provider")
+                .push((m.id, ics.to_string()));
+        }
         Ok(Some(format!("rec_{}", m.id.simple())))
     }
 }
@@ -656,6 +695,7 @@ struct Claimed {
     text_body: Option<String>,
     attempts: i32,
     expires_at: Option<DateTime<Utc>>,
+    ics_body: Option<String>,
 }
 
 /// Exponential backoff with ±20 % jitter: 5 s, 10 s, 20 s … capped at 15 minutes.
@@ -732,7 +772,7 @@ impl EmailWorker {
                      LIMIT $3
                      FOR UPDATE SKIP LOCKED)
           RETURNING d.id, d.category, d.recipient, d.recipient_name, d.subject, d.html_body,
-                    d.text_body, d.attempts, d.expires_at",
+                    d.text_body, d.attempts, d.expires_at, d.ics_body",
             [
                 self.holder.clone().into(),
                 self.lease_secs.into(),
@@ -758,7 +798,7 @@ impl EmailWorker {
                 "UPDATE email_deliveries
                     SET status = $3, provider = $4,
                         provider_message_id = COALESCE($5, provider_message_id),
-                        html_body = NULL, text_body = NULL,
+                        html_body = NULL, text_body = NULL, ics_body = NULL,
                         lease_holder = NULL, lease_expires_at = NULL,
                         last_error_class = $6, last_error_status = $7,
                         accepted_at = CASE WHEN $8 THEN now() ELSE accepted_at END,
@@ -877,6 +917,7 @@ impl EmailWorker {
                 subject: &job.subject,
                 html,
                 text,
+                calendar: job.ics_body.as_deref(),
             };
             match self.provider.send(&message).await {
                 Ok(provider_id) => {
@@ -1223,7 +1264,8 @@ pub async fn apply_provider_event(
                 "UPDATE email_deliveries
                     SET status = $2, updated_at = now(),
                         delivered_at = CASE WHEN $2 = 'DELIVERED' THEN now() ELSE delivered_at END,
-                        final_at = COALESCE(final_at, now()), html_body = NULL, text_body = NULL
+                        final_at = COALESCE(final_at, now()), html_body = NULL, text_body = NULL,
+                        ics_body = NULL
                   WHERE id = $1 AND status IN ({})",
                 placeholders.join(", ")
             ),
@@ -1328,6 +1370,7 @@ mod tests {
             subject: "Verify",
             html: "<p>1</p>",
             text: "1",
+            calendar: None,
         });
         assert_eq!(b["from"], "CF Meet <no-reply@cfmeet.com>");
         assert_eq!(b["to"][0], "Ada <ada@example.com>");

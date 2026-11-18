@@ -1103,3 +1103,51 @@ async fn events_for_messages_this_ledger_did_not_send_are_handed_to_the_notifica
         .unwrap();
     assert_eq!(recorded, 2);
 }
+
+/// Gap audit M14: a calendar invite travels with the email to the provider (an
+/// `invite.ics` attachment for Resend) and is erased with the bodies once sent.
+#[tokio::test]
+async fn calendar_invites_are_attached_and_erased_after_sending() {
+    let app = app!();
+    let db = app.state.db.clone();
+    let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n".to_string();
+    let queued = email_delivery::enqueue_with_calendar(&db, email("k-ics"), Some(ics.clone()))
+        .await
+        .unwrap();
+    let provider = Arc::new(RecordingProvider::default());
+    let worker = EmailWorker::new(db.clone(), provider.clone(), settings());
+    let r = worker.tick(Utc::now()).await.unwrap();
+    assert_eq!(r.accepted, 1);
+    assert_eq!(
+        provider.calendars.lock().unwrap().clone(),
+        vec![(queued.id, ics.clone())]
+    );
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM email_deliveries WHERE id = '{}' AND ics_body IS NULL",
+            queued.id
+        ))
+        .await,
+        1
+    );
+    let body = email_delivery::ResendProvider::body(&email_delivery::ProviderMessage {
+        id: queued.id,
+        category: "MEETING_INVITATION",
+        from: "CF Meet <no-reply@cfmeet.com>",
+        reply_to: None,
+        to: "ada@example.com",
+        to_name: None,
+        subject: "Invitation",
+        html: "<p>x</p>",
+        text: "x",
+        calendar: Some(&ics),
+    });
+    assert_eq!(body["attachments"][0]["filename"], "invite.ics");
+    use base64::Engine as _;
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(body["attachments"][0]["content"].as_str().unwrap())
+            .unwrap(),
+        ics.as_bytes()
+    );
+}

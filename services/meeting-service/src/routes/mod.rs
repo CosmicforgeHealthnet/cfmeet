@@ -53,10 +53,15 @@ pub fn cors_layer(frontend_urls: &[String]) -> CorsLayer {
 }
 
 fn legacy_writes(router: Router<AppState>, state: &AppState) -> Router<AppState> {
-    router.layer(axum::middleware::from_fn_with_state(
-        state.clone(),
-        legacy_write_guard,
-    ))
+    router
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            legacy_write_guard,
+        ))
+        // Gap audit M15: every legacy meeting / participant answer says it is deprecated.
+        .layer(axum::middleware::from_fn(
+            crate::middleware::deprecation::legacy_meetings,
+        ))
 }
 
 pub fn create_routes(state: AppState) -> Router {

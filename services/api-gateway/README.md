@@ -33,6 +33,13 @@ Anonymous requests carry no token and are rate-limited by the services and the n
 edge. Flags default off:
 `API_GATEWAY_PUBLIC_ROUTING_ENABLED`, `API_GATEWAY_WEBSOCKETS_ENABLED`.
 
+Documentation (`src/docs.rs`): `GET /openapi.json` and `GET /openapi/{domain}.json` serve the
+generated public bundles REDUCED to the operations this deployment routes (P11): families in
+`API_GATEWAY_DISABLED_DOMAINS` (production: numbering, SMS, privacy relay) are served with empty
+`paths` and `info.x-cfmeet-family-enabled: false`, WebSocket channels appear only with
+WebSockets on, and nothing is listed while public routing is off. The static contracts under
+`packages/contracts` are unchanged; `/discovery` reports the same families as enabled / not.
+
 ```bash
 make api-gateway               # services/api-gateway/.env
 make api-gateway-test          # unit, routing, ingress, startup (no database)

@@ -55,3 +55,7 @@ path = "src/lifecycle-delivery-main.rs"
 [[bin]]
 name = "notification-fence-migration"
 path = "src/notification-fence-main.rs"
+
+[[bin]]
+name = "gap-closure-migration"
+path = "src/gap-closure-main.rs"

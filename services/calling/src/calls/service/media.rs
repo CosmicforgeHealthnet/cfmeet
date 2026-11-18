@@ -267,6 +267,7 @@ impl CallService {
             can_subscribe: Set(defaults.can_subscribe),
             policy_version: Set(MEDIA_POLICY_VERSION.to_string()),
             screen_share_started_at: Set(None),
+            host_muted_at: Set(None),
             created_at: Set(at),
             updated_at: Set(at),
         }
@@ -455,7 +456,8 @@ impl CallService {
             .await?
             .map(|p| {
                 MediaPermissions {
-                    can_publish_audio: p.can_publish_audio,
+                    // C4: a participant the host muted publishes no audio until unmuted.
+                    can_publish_audio: p.can_publish_audio && p.host_muted_at.is_none(),
                     can_publish_video: p.can_publish_video,
                     can_publish_data: p.can_publish_data,
                     can_subscribe: p.can_subscribe,

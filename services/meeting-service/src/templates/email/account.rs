@@ -327,3 +327,31 @@ mod tests {
         assert!(g.html.contains("a &amp; b") && g.html.contains("Hi &lt;there&gt;"));
     }
 }
+
+/// Gap audit A13: a security notice (one event on the account the owner should know of),
+/// with a link to review the account's sign-ins.
+pub fn security_notice_email(
+    username: &str,
+    title: &str,
+    what: &str,
+    sessions_url: &str,
+) -> EmailTemplate {
+    let (hi_html, hi_text) = greeting(username);
+    let advice = "If this was you, there is nothing to do. If it was not, review your account's \
+                  signed-in devices now, or contact support:";
+    let html = format!(
+        "{hi_html}{}{}{}",
+        paragraph(&escape_html(what)),
+        paragraph(advice),
+        button("Review signed-in devices", &escape_html(sessions_url)),
+    );
+    let text = format!(
+        "{hi_text}\n\n{}\n\n{advice}\n{}",
+        plain(what),
+        plain(sessions_url)
+    );
+    EmailTemplate {
+        html: wrap_html(title, &html),
+        text: wrap_text(&format!("{title}\n\n{text}")),
+    }
+}

@@ -70,7 +70,7 @@
 | MSG-004 | In production, first-party users can never get realtime: client tokens need a registered MLS device, and device registration is refused in production | P1 | PRODUCT_DECISION | PARTIALLY_IMPLEMENTED | CONFIRMED (code). Production runtime behaviour REQUIRES_VALI | MEDIUM |  | [messaging](#messaging-communications-hub-meeting-chat-realtime) |
 | MSG-005 | Web Messages UI consumes only a fraction of the verified backend (no typing, reactions, edits, replies, pins, unread, receipts, delete, search, block/report, invitations, back-pagination) | P1 | FRONTEND | FRONTEND_ONLY_GAP | CONFIRMED | HIGH |  | [messaging](#messaging-communications-hub-meeting-chat-realtime) |
 | MSG-006 | The Communications Hub (~70 public endpoints) and the unified Chats/Calls journeys have no frontend consumer; mobile has no Unified Messaging at all | P1 | FRONTEND | FRONTEND_ONLY_GAP | CONFIRMED | HIGH | + ACC-009, FE-020 | [messaging](#messaging-communications-hub-meeting-chat-realtime) |
-| MSG-013 | PRIVATE_E2EE is correctly gated off in production pending independent review; key transparency is unwitnessed | P1 | EXTERNAL_DEPENDENCY | EXTERNAL_DEPENDENCY | CONFIRMED | HIGH (external |  | [messaging](#messaging-communications-hub-meeting-chat-realtime) |
+| MSG-013 | PRIVATE_E2EE was gated off in production pending independent review (since enabled under the owner's release record, ADR 0060); key transparency is unwitnessed | P1 | EXTERNAL_DEPENDENCY | CLOSED_OWNER_ACTIVATION | CONFIRMED | HIGH (external |  | [messaging](#messaging-communications-hub-meeting-chat-realtime) |
 | MTG-002 | Mobile live room drives a v2 conference through legacy v1 participant/waiting/chat/media/end endpoints | P1 | FRONTEND | CONTRACT_MISMATCH | CONFIRMED | MEDIUM | + FE-004 | [meetings](cfmeet-meetings-calendar-audit.md) |
 | MTG-003 | Mobile v2 client targets non-existent paths | P1 | FRONTEND | CONTRACT_MISMATCH | CONFIRMED | LOW | + FE-003 | [meetings](cfmeet-meetings-calendar-audit.md) |
 | MTG-004 | Web meeting list and dashboard show the space creation date, not the scheduled date/time | P1 | FRONTEND | FRONTEND_ONLY_GAP | CONFIRMED | LOW |  | [meetings](cfmeet-meetings-calendar-audit.md) |
@@ -88,7 +88,7 @@
 | PLT-002 | Legacy meeting-service API keys are stored and matched in plaintext; the usage counter races | P1 | BACKEND | PARTIALLY_IMPLEMENTED | CONFIRMED | MEDIUM | + SEC-006, DATA-003 | [platform](#platform-developer-platform-gateway-sdks-swagger-admin) |
 | PLT-003 | Three webhook systems; meeting-service "webhooks" are registered but never delivered, while the web UI promises real-time meeting events | P1 | BACKEND | PARTIALLY_IMPLEMENTED | CONFIRMED | MEDIUM | + DATA-007 | [platform](#platform-developer-platform-gateway-sdks-swagger-admin) |
 | PLT-004 | Two unrelated API-credential systems; the web developer page documents the legacy one with the wrong host and key format | P1 | PRODUCT_DECISION | CONTRACT_MISMATCH | CONFIRMED | MEDIUM (consol | + FE-013 | [platform](#platform-developer-platform-gateway-sdks-swagger-admin) |
-| PLT-005 | API Gateway and Developer Platform are not deployed; SDK and public-doc base URL assumes the gateway at `api.cfmeet.com` | P1 | INFRASTRUCTURE | DEFERRED_BY_OWNER | CONFIRMED (not deployed by the repo). REQUIRES_VALIDATION (l | HIGH |  | [platform](#platform-developer-platform-gateway-sdks-swagger-admin) |
+| PLT-005 | API Gateway and Developer Platform were not deployed when audited (since deployed to production, see the PLT-005 entry); SDK and public-doc base URL assumes the gateway at `api.cfmeet.com` | P1 | INFRASTRUCTURE | CLOSED (deployed) | CONFIRMED (not deployed by the repo). REQUIRES_VALIDATION (l | HIGH |  | [platform](#platform-developer-platform-gateway-sdks-swagger-admin) |
 | SEC-001 | Hard-coded JWT signing-secret fallback in meeting-service (account authority) | P1 ¹ | BACKEND | IMPLEMENTED_UNVERIFIED | CONFIRMED (code); REQUIRES_VALIDATION (production env) | LOW | + ACC-018 | [security-data](#security-reliability-production-readiness) |
 | SEC-002 | Access and refresh tokens are interchangeable (refresh token = 7-day bearer token) | P1 | BACKEND | PARTIALLY_IMPLEMENTED | CONFIRMED | MEDIUM | → ACC-001 | [security-data](#security-reliability-production-readiness) |
 | SEC-003 | Logout / password change / reset do not revoke refresh tokens on legacy routes; password change/reset revoke nothing | P1 | BACKEND | PARTIALLY_IMPLEMENTED | CONFIRMED |  | → ACC-002 | [security-data](#security-reliability-production-readiness) |
@@ -1127,7 +1127,7 @@ Commands used included `grep -rn "verify_token\|is_blacklisted\|require_fresh_cr
 - **Actual:**
   - `combined_auth_middleware` (`middleware/api_key.rs:82-100`) accepts any JWT without blacklist, status or epoch checks. It is currently unused (`grep` shows no route usage), but it is a trap for future use.
   - `check_email_verification` is unused.
-  - bcrypt (`DEFAULT_COST`=12, `services/auth.rs:99-102`) silently truncates at 72 bytes, while the maximum password length is 128.
+  - bcrypt (`DEFAULT_COST`=12, `services/auth.rs:99-102`) silently truncates at 72 bytes, while the maximum password length is 128. (Since fixed: the server enforces 8–72, `MAX_PASSWORD_BYTES`; only the generated API descriptions still say 8–128, ACC-025 remainder.)
   - Logout errors after blacklisting if the DB write in `record_logout` fails (`auth.rs:422` uses `?`), so the client sees a failure although the token is revoked.
 - **Evidence:** above.
 - **API/Swagger refs:** –
@@ -2012,6 +2012,8 @@ Not inspected in depth: MLS crypto internals (`packages/messaging-crypto`), SMS 
 - Confidence: CONFIRMED
 
 ### PLT-005 — API Gateway and Developer Platform are not deployed; SDK and public-doc base URL assumes the gateway at `api.cfmeet.com`
+
+> **Status update (closure):** resolved. Both services are deployed to production by the coordinated release and certified live ([final production certification](../operations/cfmeet-final-production-certification.md): `developer-platform` and `api-gateway` PASS; `activate-developer-platform` and `activate-gateway-routing` recorded). The audit text below records the state at audit time.
 - Service/module: `infra/deployment/part-vi`, `.github/workflows/*`, `sdks/generate.py`, `scripts/contracts/public_api.py`.
 - Expected: the public gateway and DP run in staging/production behind the documented host before the SDKs and docs advertise them.
 - Actual:

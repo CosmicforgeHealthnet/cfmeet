@@ -472,6 +472,20 @@ impl RegistrationService {
             inc(&OM.registrations_rejected);
             return Err(Self::disabled());
         }
+        // Gap audit M10: registration deadline (absolute, or before the occurrence).
+        let closed = |at: chrono::DateTime<Utc>| Utc::now() >= at;
+        let before_start = conference
+            .as_ref()
+            .and_then(|c| c.scheduled_start_at)
+            .filter(|_| rp.closes_minutes_before_start > 0)
+            .map(|start| start - Duration::minutes(rp.closes_minutes_before_start as i64));
+        if rp.deadline.is_some_and(closed) || before_start.is_some_and(closed) {
+            inc(&OM.registrations_rejected);
+            return Err(ApiError::domain(
+                ErrorCode::RegistrationClosed,
+                "Registration for this session is closed",
+            ));
+        }
         // Flood protection: per meeting space (registration is pre-identity).
         self.core
             .collab_limiter
@@ -584,6 +598,73 @@ impl RegistrationService {
         let invitation_id = Uuid::new_v4();
         let registration_id = Uuid::new_v4();
         let txn = self.core.db.begin().await?;
+        // Gap audit M10: capacity, counted under a per-space lock so two requests never
+        // both take the last place.
+        if rp.capacity > 0 {
+            txn.execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT pg_advisory_xact_lock(hashtext('webinar-registrations:' || $1::text))",
+                [space.id.into()],
+            ))
+            .await?;
+            let mut held = webinar_registrations::Entity::find()
+                .filter(webinar_registrations::Column::MeetingSpaceId.eq(space.id))
+                .filter(webinar_registrations::Column::Status.eq("REGISTERED"));
+            held = match conference.as_ref() {
+                Some(c) => held.filter(webinar_registrations::Column::ConferenceId.eq(c.id)),
+                None => held.filter(webinar_registrations::Column::ConferenceId.is_null()),
+            };
+            if held.count(&txn).await? >= rp.capacity as u64 {
+                inc(&OM.registrations_rejected);
+                return Err(ApiError::domain(
+                    ErrorCode::RegistrationFull,
+                    "This session is fully booked",
+                ));
+            }
+        }
+        // Gap audit M4: an address is held by whoever registered it first only until its
+        // verified owner shows up. A signed-in account whose verified email is the
+        // registered one reclaims it: the earlier registration (possibly made by someone
+        // else) is cancelled and its token revoked, and the owner gets a fresh token
+        // (this is also how an owner who lost their token recovers it).
+        let verified_owner = email.as_ref().is_some_and(|e| {
+            ctx.registered()
+                .and_then(|r| r.verified_email.as_deref())
+                .is_some_and(|v| v == e)
+        });
+        if let (true, Some(e)) = (verified_owner, email.as_ref()) {
+            let held = webinar_registrations::Entity::find()
+                .filter(webinar_registrations::Column::MeetingSpaceId.eq(space.id))
+                .filter(webinar_registrations::Column::Status.eq("REGISTERED"))
+                .filter(
+                    sea_orm::Condition::all().add(sea_orm::sea_query::Expr::cust_with_values(
+                        "lower(email) = $1 AND COALESCE(conference_id, '00000000-0000-0000-0000-000000000000'::uuid) = $2",
+                        [
+                            sea_orm::Value::from(e.clone()),
+                            sea_orm::Value::from(
+                                conference.as_ref().map(|c| c.id).unwrap_or(Uuid::nil()),
+                            ),
+                        ],
+                    )),
+                )
+                .all(&txn)
+                .await?;
+            for r in held {
+                let mut am: webinar_registrations::ActiveModel = r.clone().into();
+                am.status = Set("CANCELLED".into());
+                am.cancelled_at = Set(Some(now));
+                am.cancelled_by = Set(Some("self:reclaimed-by-verified-owner".into()));
+                am.updated_at = Set(now);
+                am.update(&txn).await?;
+                txn.execute(Statement::from_sql_and_values(
+                    DbBackend::Postgres,
+                    "UPDATE meeting_invitations SET status = 'REVOKED', revoked_at = now(), updated_at = now()
+                      WHERE id = $1 AND status = 'ACTIVE'",
+                    [r.invitation_id.into()],
+                ))
+                .await?;
+            }
+        }
         meeting_invitations::ActiveModel {
             id: Set(invitation_id),
             meeting_space_id: Set(space.id),
@@ -703,21 +784,50 @@ impl RegistrationService {
         Ok(space)
     }
 
+    /// Gap audit M10: newest first, `limit` (1-500, default 100) at a time; `after` is the
+    /// last registration id of the previous page. Returns the page and the next cursor.
     pub async fn list(
         &self,
         ctx: &ActorContext,
         space_id: Uuid,
-    ) -> ApiResult<Vec<RegistrationView>> {
+        after: Option<Uuid>,
+        limit: Option<u64>,
+    ) -> ApiResult<(Vec<RegistrationView>, Option<Uuid>)> {
         let space = self.host_space(ctx, space_id).await?;
-        Ok(webinar_registrations::Entity::find()
-            .filter(webinar_registrations::Column::MeetingSpaceId.eq(space.id))
+        let limit = limit.unwrap_or(100).clamp(1, 500);
+        let mut q = webinar_registrations::Entity::find()
+            .filter(webinar_registrations::Column::MeetingSpaceId.eq(space.id));
+        if let Some(after) = after {
+            let cursor = self.scoped(space.id, after).await.map_err(|_| {
+                ApiError::domain(
+                    ErrorCode::ValidationError,
+                    "after is not a registration of this space",
+                )
+            })?;
+            q = q.filter(
+                sea_orm::Condition::any()
+                    .add(webinar_registrations::Column::CreatedAt.lt(cursor.created_at))
+                    .add(
+                        sea_orm::Condition::all()
+                            .add(webinar_registrations::Column::CreatedAt.eq(cursor.created_at))
+                            .add(webinar_registrations::Column::Id.lt(cursor.id)),
+                    ),
+            );
+        }
+        let rows = q
             .order_by_desc(webinar_registrations::Column::CreatedAt)
-            .limit(500)
+            .order_by_desc(webinar_registrations::Column::Id)
+            .limit(limit + 1)
             .all(&self.core.db)
-            .await?
-            .iter()
-            .map(RegistrationView::of)
-            .collect())
+            .await?;
+        let more = rows.len() as u64 > limit;
+        let page: Vec<_> = rows.into_iter().take(limit as usize).collect();
+        let next = if more {
+            page.last().map(|r| r.id)
+        } else {
+            None
+        };
+        Ok((page.iter().map(RegistrationView::of).collect(), next))
     }
 
     async fn scoped(&self, space_id: Uuid, id: Uuid) -> ApiResult<webinar_registrations::Model> {
@@ -776,6 +886,69 @@ impl RegistrationService {
                 target_type: Some("REGISTRATION"),
                 target_ref: Some(r.id.to_string()),
                 metadata: json!({}),
+            },
+        )
+        .await?;
+        txn.commit().await?;
+        Ok(RegistrationView::of(&updated))
+    }
+
+    /// Gap audit M4: the registrant cancels their own registration with its admission
+    /// token (no sign-in needed). Unknown, used-up or revoked tokens answer
+    /// REGISTRATION_NOT_FOUND; repeating a cancellation is idempotent.
+    pub async fn cancel_own(&self, token: &str) -> ApiResult<RegistrationView> {
+        if token.is_empty() || token.len() > 256 {
+            return Err(ApiError::domain(
+                ErrorCode::RegistrationNotFound,
+                "Registration not found",
+            ));
+        }
+        let txn = self.core.db.begin().await?;
+        let invitation = meeting_invitations::Entity::find()
+            .filter(meeting_invitations::Column::TokenHash.eq(secrets::hash_secret(token)))
+            .one(&txn)
+            .await?;
+        let registration = match invitation {
+            Some(inv) => {
+                webinar_registrations::Entity::find()
+                    .filter(webinar_registrations::Column::InvitationId.eq(inv.id))
+                    .lock_exclusive()
+                    .one(&txn)
+                    .await?
+            }
+            None => None,
+        }
+        .ok_or_else(|| {
+            ApiError::domain(ErrorCode::RegistrationNotFound, "Registration not found")
+        })?;
+        if registration.status == "CANCELLED" {
+            txn.commit().await?;
+            return Ok(RegistrationView::of(&registration));
+        }
+        let now = Utc::now();
+        let mut am: webinar_registrations::ActiveModel = registration.clone().into();
+        am.status = Set("CANCELLED".into());
+        am.cancelled_at = Set(Some(now));
+        am.cancelled_by = Set(Some("self:registrant".into()));
+        am.updated_at = Set(now);
+        let updated = am.update(&txn).await?;
+        txn.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE meeting_invitations SET status = 'REVOKED', revoked_at = now(), updated_at = now()
+              WHERE id = $1 AND status = 'ACTIVE'",
+            [registration.invitation_id.into()],
+        ))
+        .await?;
+        audit(
+            &txn,
+            &crate::services::meeting_events::AuditActor::system("registrant"),
+            AuditRecord {
+                meeting_space_id: registration.meeting_space_id,
+                conference_id: registration.conference_id,
+                action: action::REGISTRATION_CANCEL,
+                target_type: Some("REGISTRATION"),
+                target_ref: Some(registration.id.to_string()),
+                metadata: json!({ "by": "registrant" }),
             },
         )
         .await?;

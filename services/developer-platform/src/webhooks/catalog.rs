@@ -104,9 +104,18 @@ catalog! {
     "call.busy" => Some(scopes::CALLS_READ),
     "call.answered_elsewhere" => Some(scopes::CALLS_READ),
     "call.invitation_expired" => Some(scopes::CALLS_READ),
+    // Calling C11: the live-call collaboration events (upgrade, screen share, participants).
+    "call.kind_changed" => Some(scopes::CALLS_READ),
+    "call.screen_share_started" => Some(scopes::CALLS_READ),
+    "call.screen_share_stopped" => Some(scopes::CALLS_READ),
+    "call.participant_added" => Some(scopes::CALLS_READ),
     "voicemail.received" => Some(scopes::ENTERPRISE_VOICEMAIL_READ),
     "voicemail.ready" => Some(scopes::ENTERPRISE_VOICEMAIL_READ),
     "voicemail.deleted" => Some(scopes::ENTERPRISE_VOICEMAIL_READ),
+    // Calling C11: the recording lifecycle as well as ready / deleted.
+    "recording.started" => Some(scopes::ENTERPRISE_RECORDING_READ),
+    "recording.stopped" => Some(scopes::ENTERPRISE_RECORDING_READ),
+    "recording.failed" => Some(scopes::ENTERPRISE_RECORDING_READ),
     "recording.ready" => Some(scopes::ENTERPRISE_RECORDING_READ),
     "recording.deleted" => Some(scopes::ENTERPRISE_RECORDING_READ),
     "relay.created" => Some(scopes::PRIVACY_SESSIONS_READ),
@@ -234,6 +243,10 @@ const ALLOWED_KEYS: &[(&str, &str, bool)] = &[
     ("failure_category", "failureCategory", false),
     ("failure_reason", "failureReason", false),
     ("reason", "reason", false),
+    ("from_kind", "fromKind", false),
+    ("to_kind", "toKind", false),
+    ("stop_reason", "stopReason", false),
+    ("role", "role", false),
     ("message_id", "messageId", false),
     ("mailbox_id", "mailboxId", false),
     ("recording_id", "recordingId", false),
@@ -330,6 +343,13 @@ pub fn project_calling(envelope: &Value) -> Option<PublicEvent> {
         "VOICEMAIL_RECEIVED" => "voicemail.received",
         "VOICEMAIL_READY" => "voicemail.ready",
         "VOICEMAIL_DELETED" => "voicemail.deleted",
+        "CALL_KIND_CHANGED" => "call.kind_changed",
+        "CALL_SCREEN_SHARE_STARTED" => "call.screen_share_started",
+        "CALL_SCREEN_SHARE_STOPPED" => "call.screen_share_stopped",
+        "CALL_PARTICIPANT_ADDED" => "call.participant_added",
+        "RECORDING_STARTED" => "recording.started",
+        "RECORDING_STOPPED" => "recording.stopped",
+        "RECORDING_FAILED" => "recording.failed",
         "RECORDING_READY" => "recording.ready",
         "RECORDING_DELETED" => "recording.deleted",
         "CALL_USAGE_FINALIZED" => "usage.recorded",
@@ -651,6 +671,60 @@ mod tests {
         let internal = json!({ "event_type": "calling.media-credential-issued",
             "payload": { "event_type": "CALL_MEDIA_CREDENTIAL_ISSUED" } });
         assert_eq!(project(PRODUCER_CALLING, &internal), Ok(None));
+    }
+
+    /// Calling C11: the collaboration and recording lifecycle events Calling emits are
+    /// served here too, with the same ids and codes only.
+    #[test]
+    fn callings_collaboration_and_recording_events_are_public_with_safe_data_only() {
+        let call = "8d3e2a1c-0b6f-4c1e-9a49-6f0e3f2d1c7a";
+        let participant = "11111111-1111-4111-8111-111111111111";
+        let recording = "22222222-2222-4222-8222-222222222222";
+        for (internal, data, public, expected) in [
+            (
+                "CALL_KIND_CHANGED",
+                json!({ "from_kind": "VOICE", "to_kind": "VIDEO", "participants_granted_video": 2 }),
+                "call.kind_changed",
+                json!({ "fromKind": "VOICE", "toKind": "VIDEO" }),
+            ),
+            (
+                "CALL_SCREEN_SHARE_STOPPED",
+                json!({ "participant_id": participant, "stop_reason": "PRESENTER_LEFT" }),
+                "call.screen_share_stopped",
+                json!({ "participantId": participant, "stopReason": "PRESENTER_LEFT" }),
+            ),
+            (
+                "CALL_PARTICIPANT_ADDED",
+                json!({ "participant_id": participant, "principal_kind": "USER",
+                        "role": "RECIPIENT", "display_name_set": true }),
+                "call.participant_added",
+                json!({ "participantId": participant, "role": "RECIPIENT" }),
+            ),
+            (
+                "RECORDING_FAILED",
+                json!({ "recording_id": recording, "reason": "free text is dropped" }),
+                "recording.failed",
+                json!({ "recordingId": recording }),
+            ),
+        ] {
+            let env = json!({ "event_type": "calling.event", "payload": { "event_type": internal,
+                "call_id": call, "call_version": 4, "data": data } });
+            let e = project_calling(&env).unwrap_or_else(|| panic!("{internal} is public"));
+            assert_eq!(e.event_type, public);
+            assert!(definition(public).is_some(), "{public} in the catalog");
+            let mut want = expected.as_object().unwrap().clone();
+            want.insert("callId".into(), json!(call));
+            want.insert("callVersion".into(), json!(4));
+            assert_eq!(Value::Object(e.data), Value::Object(want), "{internal}");
+        }
+        assert_eq!(
+            definition("recording.started").unwrap().scope,
+            Some(scopes::ENTERPRISE_RECORDING_READ)
+        );
+        assert_eq!(
+            definition("call.kind_changed").unwrap().scope,
+            Some(scopes::CALLS_READ)
+        );
     }
 
     #[test]

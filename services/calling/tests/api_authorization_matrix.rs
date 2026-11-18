@@ -86,6 +86,24 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /v1/calls/{call_id}/screen-share", Probe::Body),
     ("POST /v1/calls/{call_id}/screen-share/stop", Probe::Body),
     ("POST /v1/calls/{call_id}/participants", Probe::Body),
+    ("POST /v1/calls/{call_id}/host", Probe::Body),
+    ("DELETE /v1/calls/{call_id}/history", Probe::Query),
+    (
+        "POST /v1/calls/{call_id}/participants/{participant_id}/remove",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/participants/{participant_id}/mute",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/participants/{participant_id}/rejoin",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/sessions/{session_id}/quality-samples",
+        Probe::Body,
+    ),
     (
         "POST /v1/calls/{call_id}/sessions/{session_id}/media-credentials",
         Probe::Body,
@@ -262,6 +280,10 @@ const CLASSIFIED: &[(&str, Probe)] = &[
         Probe::HiddenPath,
     ),
     ("POST /internal/v1/platform/events", Probe::Body),
+    (
+        "POST /internal/v1/abuse-reports/{abuse_report_id}/resolve",
+        Probe::Body,
+    ),
     (
         "POST /internal/v1/webhook-migration/rollback/subscriptions",
         Probe::Body,
@@ -607,6 +629,15 @@ async fn provision() -> Option<Provisioned> {
     )
     .await;
     ids.insert("block_id", id_of(&block, "blockId"));
+    // An abuse report (operator review, C21) on a connected call.
+    let (reported, _, _) = a.connected_call("VOICE").await;
+    let report = send(
+        Method::POST,
+        &format!("/v1/calls/{reported}/abuse-reports"),
+        json!({ "principalId": a.w.initiator.id(), "category": "SPAM" }),
+    )
+    .await;
+    ids.insert("abuse_report_id", id_of(&report, "abuseReportId"));
     // Last (its ring window is fresh): a ringing application call — invitation,
     // sessions, endpoints, signaling credentials.
     let (call, caller_device, callee_device) = a.ringing_call("VOICE").await;
@@ -622,6 +653,10 @@ async fn provision() -> Option<Provisioned> {
         a.session_on(call, caller_device.endpoint).await.unwrap(),
     );
     ids.insert("endpoint_id", callee_device.endpoint);
+    ids.insert(
+        "participant_id",
+        a.participant_of(call, callee_device.principal).await,
+    );
     let caller_signaling = a.signaling_token(&caller_device).await;
     let callee_signaling = a.signaling_token(&callee_device).await;
     Some(Provisioned {
@@ -1015,6 +1050,8 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                     peers.telephony.clone()
                 } else if permission.starts_with("webhook-migration.") {
                     peers.developer_platform.clone()
+                } else if permission == "calling-abuse-reports.review" {
+                    peers.operator_console.clone()
                 } else {
                     peers.privacy_relay.clone()
                 };

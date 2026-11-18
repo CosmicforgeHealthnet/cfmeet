@@ -102,6 +102,31 @@ pub async fn reserve<C: ConnectionTrait>(
             "DAILY_UPLOAD_VOLUME",
         ));
     }
+    // Gap audit S7: in CF Meet's own environment one account cannot fill the shared pool:
+    // each uploader has a daily volume (declared sizes of today's intents, any outcome).
+    if crate::conversations::policy::load_baseline(db, env)
+        .await?
+        .is_some_and(|b| b == crate::conversations::policy::ApplicationBaseline::CfMeetFirstParty)
+    {
+        let since = now - chrono::Duration::hours(24);
+        let used = db::scalar_i64(
+            db,
+            "SELECT COALESCE(sum(declared_size), 0)::bigint FROM messaging_attachments \
+              WHERE environment_id = $1 AND uploader_principal_id = $2 AND created_at > $3",
+            vec![env.into(), uploader.into(), since.into()],
+        )
+        .await?;
+        if used + size > cfmeet_uploader_daily_bytes() {
+            crate::metrics::inc(
+                "messaging_attachment_quota_refusals_total",
+                &[("quota", "uploader_daily")],
+            );
+            return Err(Error::reason(
+                ErrorCode::QuotaExceeded,
+                "UPLOADER_DAILY_VOLUME",
+            ));
+        }
+    }
     db::exec(
         db,
         "UPDATE messaging_storage_usage SET reserved_bytes = reserved_bytes + $2, updated_at = $3 WHERE environment_id = $1",
@@ -109,6 +134,16 @@ pub async fn reserve<C: ConnectionTrait>(
     )
     .await?;
     Ok(())
+}
+
+/// Gap audit S7: what one account may upload in CF Meet's environment per rolling 24
+/// hours (`MESSAGING_CFMEET_UPLOADER_DAILY_BYTES`, default 2 GiB, at least 25 MiB).
+pub fn cfmeet_uploader_daily_bytes() -> i64 {
+    std::env::var("MESSAGING_CFMEET_UPLOADER_DAILY_BYTES")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .unwrap_or(2 * 1024 * 1024 * 1024)
+        .max(crate::conversations::policy::CFMEET_ATTACHMENT_MAX_BYTES)
 }
 
 /// The reservation of a stored object becomes committed usage.

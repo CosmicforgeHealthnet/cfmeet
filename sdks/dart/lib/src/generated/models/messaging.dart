@@ -801,14 +801,18 @@ class ClientTokenRequest {
   const ClientTokenRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ClientTokenRequest.create({required Uuid deviceId, int? ttlSeconds}) =>
+  factory ClientTokenRequest.create({String? accountSessionRef, required Uuid deviceId, int? ttlSeconds}) =>
       ClientTokenRequest.fromJson(<String, Object?>{
+        if (accountSessionRef != null) 'accountSessionRef': accountSessionRef,
         'deviceId': deviceId,
         if (ttlSeconds != null) 'ttlSeconds': ttlSeconds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// First-party relays only (others: INSUFFICIENT_SCOPE). The relay's opaque reference of the VERIFIED account session the token is issued for; ending that account session (POST /v1/messaging/session-devices/revoke) ends this client session too, and no other.
+  String? get accountSessionRef => json['accountSessionRef'] as String?;
 
   Uuid get deviceId => json['deviceId']! as String;
 
@@ -890,8 +894,9 @@ class Conversation {
   const Conversation.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Conversation.create({String? avatarRef, required ContextRef? context, required ContextClass contextClass, required Uuid conversationId, required String createdAt, required Uuid createdByPrincipalId, required Map<String, Object?> encryption, required String? expiresAt, required int? expiryGraceSeconds, ConversationInbox? inbox, required String? lifecycleReason, required LifecycleState lifecycleState, required int memberCount, required List<Map<String, Object?>> members, required bool membersTruncated, required Uuid ownerPrincipalId, required Map<String, Object?> policy, required Uuid? predecessorConversationId, required bool? readReceipts, required int? retentionSeconds, required SecurityProfile securityProfile, required String stateChangedAt, required Uuid? successorConversationId, String? title, required String updatedAt, required int version}) =>
+  factory Conversation.create({bool? announcementOnly, String? avatarRef, required ContextRef? context, required ContextClass contextClass, required Uuid conversationId, required String createdAt, required Uuid createdByPrincipalId, required Map<String, Object?> encryption, required String? expiresAt, required int? expiryGraceSeconds, ConversationInbox? inbox, required String? lifecycleReason, required LifecycleState lifecycleState, required int memberCount, required List<Map<String, Object?>> members, required bool membersTruncated, required Uuid ownerPrincipalId, required Map<String, Object?> policy, required Uuid? predecessorConversationId, required bool? readReceipts, required int? retentionSeconds, required SecurityProfile securityProfile, required String stateChangedAt, required Uuid? successorConversationId, String? title, required String updatedAt, required int version}) =>
       Conversation.fromJson(<String, Object?>{
+        if (announcementOnly != null) 'announcementOnly': announcementOnly,
         if (avatarRef != null) 'avatarRef': avatarRef,
         'context': context?.toJson(),
         'contextClass': contextClass,
@@ -922,6 +927,9 @@ class Conversation {
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows.
+  bool? get announcementOnly => json['announcementOnly'] as bool?;
 
   /// Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches.
   String? get avatarRef => json['avatarRef'] as String?;
@@ -1188,6 +1196,31 @@ class CreateConversationRequest {
 
   /// Section 13: display title (MANAGED only; PRIVATE_E2EE refuses it with CONTENT_REJECTED / DISPLAY_METADATA_MANAGED_ONLY).
   String? get title => json['title'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+class CreateInviteLinkRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const CreateInviteLinkRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory CreateInviteLinkRequest.create({int? expiresInSeconds, int? maxUses, String? role}) =>
+      CreateInviteLinkRequest.fromJson(<String, Object?>{
+        if (expiresInSeconds != null) 'expiresInSeconds': expiresInSeconds,
+        if (maxUses != null) 'maxUses': maxUses,
+        if (role != null) 'role': role,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Default 604800 (7 days).
+  int? get expiresInSeconds => (json['expiresInSeconds'] as num?)?.toInt();
+
+  int? get maxUses => (json['maxUses'] as num?)?.toInt();
+
+  String? get role => json['role'] as String?;
 
   Map<String, Object?> toJson() => json;
 }
@@ -1612,6 +1645,27 @@ class ExportRequest {
   Map<String, Object?> toJson() => json;
 }
 
+class ForwardMessageRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ForwardMessageRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ForwardMessageRequest.create({required Uuid clientMessageId, required Uuid targetConversationId}) =>
+      ForwardMessageRequest.fromJson(<String, Object?>{
+        'clientMessageId': clientMessageId,
+        'targetConversationId': targetConversationId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get clientMessageId => json['clientMessageId']! as String;
+
+  Uuid get targetConversationId => json['targetConversationId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// A device-to-device history transfer. Messaging relays an opaque sealed history between two ACTIVE devices of one principal; it holds no key that opens it (no recovery key, no escrow) and deletes the sealed bytes on completion, cancellation, revocation or expiry.
 class HistoryTransfer {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -1758,6 +1812,137 @@ class InvitationList {
   final Map<String, Object?> json;
 
   List<Map<String, Object?>> get invitations => (json['invitations']! as List<Object?>).map((e) => e! as Map<String, Object?>).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// S12: a group join link (never its token).
+class InviteLink {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const InviteLink.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory InviteLink.create({required Uuid conversationId, required String createdAt, required Uuid? createdByPrincipalId, required String expiresAt, required Uuid inviteLinkId, required int? maxUses, required String? revokedAt, required String role, required String status, required int useCount}) =>
+      InviteLink.fromJson(<String, Object?>{
+        'conversationId': conversationId,
+        'createdAt': createdAt,
+        'createdByPrincipalId': createdByPrincipalId,
+        'expiresAt': expiresAt,
+        'inviteLinkId': inviteLinkId,
+        'maxUses': maxUses,
+        'revokedAt': revokedAt,
+        'role': role,
+        'status': status,
+        'useCount': useCount,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get conversationId => json['conversationId']! as String;
+
+  String get createdAt => json['createdAt']! as String;
+
+  Uuid? get createdByPrincipalId => json['createdByPrincipalId'] as String?;
+
+  String get expiresAt => json['expiresAt']! as String;
+
+  Uuid get inviteLinkId => json['inviteLinkId']! as String;
+
+  int? get maxUses => (json['maxUses'] as num?)?.toInt();
+
+  String? get revokedAt => json['revokedAt'] as String?;
+
+  String get role => json['role']! as String;
+
+  String get status => json['status']! as String;
+
+  int get useCount => (json['useCount']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// S12: a new join link with its token, returned only here (stored as SHA-256).
+class InviteLinkCreated {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const InviteLinkCreated.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory InviteLinkCreated.create({required Uuid conversationId, required String createdAt, required Uuid? createdByPrincipalId, required String expiresAt, required Uuid inviteLinkId, required int? maxUses, required String? revokedAt, required String role, required String status, required String token, required int useCount}) =>
+      InviteLinkCreated.fromJson(<String, Object?>{
+        'conversationId': conversationId,
+        'createdAt': createdAt,
+        'createdByPrincipalId': createdByPrincipalId,
+        'expiresAt': expiresAt,
+        'inviteLinkId': inviteLinkId,
+        'maxUses': maxUses,
+        'revokedAt': revokedAt,
+        'role': role,
+        'status': status,
+        'token': token,
+        'useCount': useCount,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get conversationId => json['conversationId']! as String;
+
+  String get createdAt => json['createdAt']! as String;
+
+  Uuid? get createdByPrincipalId => json['createdByPrincipalId'] as String?;
+
+  String get expiresAt => json['expiresAt']! as String;
+
+  Uuid get inviteLinkId => json['inviteLinkId']! as String;
+
+  int? get maxUses => (json['maxUses'] as num?)?.toInt();
+
+  String? get revokedAt => json['revokedAt'] as String?;
+
+  String get role => json['role']! as String;
+
+  String get status => json['status']! as String;
+
+  String get token => json['token']! as String;
+
+  int get useCount => (json['useCount']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class InviteLinkList {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const InviteLinkList.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory InviteLinkList.create({required List<InviteLink> inviteLinks}) =>
+      InviteLinkList.fromJson(<String, Object?>{
+        'inviteLinks': inviteLinks.map((e) => e.toJson()).toList(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<InviteLink> get inviteLinks => (json['inviteLinks']! as List<Object?>).map((e) => InviteLink.fromJson(e! as Map<String, Object?>)).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class JoinInviteLinkRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const JoinInviteLinkRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory JoinInviteLinkRequest.create({required String token}) =>
+      JoinInviteLinkRequest.fromJson(<String, Object?>{
+        'token': token,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get token => json['token']! as String;
 
   Map<String, Object?> toJson() => json;
 }
@@ -1989,7 +2174,7 @@ class Member {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
-  /// How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration.
+  /// How the membership came to be: an administrator or the application backend (API), an accepted invitation, the meeting integration, an invite link (INVITE_LINK) or an organization team snapshot (ORGANIZATION_TEAM, G7).
   String get authoritySource => json['authoritySource']! as String;
 
   String? get invitationExpiresAt => json['invitationExpiresAt'] as String?;
@@ -2075,7 +2260,7 @@ class Message {
   const Message.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Message.create({required List<Uuid> attachmentIds, String? channel, required Uuid clientMessageId, required Uuid conversationId, required String createdAt, Map<String, Object?>? e2ee, int? editCount, String? editedAt, required MessageKind kind, required MessageLifecycle lifecycle, String? lifecycleReason, Map<String, Object?>? managed, required Uuid messageId, int? mlsEpoch, String? originalCreatedAt, Uuid? replyToMessageId, required SecurityProfile securityProfile, String? securityProvenance, Uuid? senderDeviceId, required Uuid senderPrincipalId, required int sequence, Uuid? targetMessageId, Uuid? threadRootId}) =>
+  factory Message.create({required List<Uuid> attachmentIds, String? channel, required Uuid clientMessageId, required Uuid conversationId, required String createdAt, Map<String, Object?>? e2ee, int? editCount, String? editedAt, bool? forwarded, Uuid? forwardedFromPrincipalId, required MessageKind kind, required MessageLifecycle lifecycle, String? lifecycleReason, Map<String, Object?>? managed, required Uuid messageId, int? mlsEpoch, String? originalCreatedAt, Uuid? replyToMessageId, required SecurityProfile securityProfile, String? securityProvenance, Uuid? senderDeviceId, required Uuid senderPrincipalId, required int sequence, Uuid? targetMessageId, Uuid? threadRootId}) =>
       Message.fromJson(<String, Object?>{
         'attachmentIds': attachmentIds,
         if (channel != null) 'channel': channel,
@@ -2085,6 +2270,8 @@ class Message {
         if (e2ee != null) 'e2ee': e2ee,
         if (editCount != null) 'editCount': editCount,
         if (editedAt != null) 'editedAt': editedAt,
+        if (forwarded != null) 'forwarded': forwarded,
+        if (forwardedFromPrincipalId != null) 'forwardedFromPrincipalId': forwardedFromPrincipalId,
         'kind': kind,
         'lifecycle': lifecycle,
         if (lifecycleReason != null) 'lifecycleReason': lifecycleReason,
@@ -2122,6 +2309,12 @@ class Message {
   int? get editCount => (json['editCount'] as num?)?.toInt();
 
   String? get editedAt => json['editedAt'] as String?;
+
+  /// S11: a server-side forward (the source conversation and message are never disclosed).
+  bool? get forwarded => json['forwarded'] as bool?;
+
+  /// S11: the original sender, only when the policy shows it (messages.forwardShowsOriginalSender).
+  Uuid? get forwardedFromPrincipalId => json['forwardedFromPrincipalId'] as String?;
 
   MessageKind get kind => json['kind']! as String;
 
@@ -2279,7 +2472,7 @@ class ModerationAction {
   const ModerationAction.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ModerationAction.create({required Uuid actionId, required Uuid? conversationId, required String createdAt, required String? effectiveUntil, required String kind, required Uuid? messageId, required Uuid? principalId, required String reason, required Uuid? reportId}) =>
+  factory ModerationAction.create({required Uuid actionId, required Uuid? conversationId, required String createdAt, required String? effectiveUntil, required String kind, required Uuid? messageId, Uuid? moderatorPrincipalId, required Uuid? principalId, required String reason, required Uuid? reportId}) =>
       ModerationAction.fromJson(<String, Object?>{
         'actionId': actionId,
         'conversationId': conversationId,
@@ -2287,6 +2480,7 @@ class ModerationAction {
         'effectiveUntil': effectiveUntil,
         'kind': kind,
         'messageId': messageId,
+        if (moderatorPrincipalId != null) 'moderatorPrincipalId': moderatorPrincipalId,
         'principalId': principalId,
         'reason': reason,
         'reportId': reportId,
@@ -2306,6 +2500,9 @@ class ModerationAction {
   String get kind => json['kind']! as String;
 
   Uuid? get messageId => json['messageId'] as String?;
+
+  /// G6: the organization moderator (their principal in the organization's scope) an organization moderation request was relayed for; null for an application moderator credential.
+  Uuid? get moderatorPrincipalId => json['moderatorPrincipalId'] as String?;
 
   Uuid? get principalId => json['principalId'] as String?;
 
@@ -3030,7 +3227,7 @@ class ReportRequest {
 
   String get category => json['category']! as String;
 
-  /// PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest; presented as unverifiable).
+  /// PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest). Unverifiable unless the message was franked and the disclosure carries its frankingKey (S2).
   List<Map<String, Object?>>? get disclosure => json['disclosure'] == null ? null : (json['disclosure']! as List<Object?>).map((e) => e! as Map<String, Object?>).toList();
 
   List<Uuid>? get messageIds => json['messageIds'] == null ? null : (json['messageIds']! as List<Object?>).map((e) => e! as String).toList();
@@ -3247,13 +3444,14 @@ class SendMessageRequest {
   const SendMessageRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory SendMessageRequest.create({List<Uuid>? attachmentIds, String? ciphertext, required Uuid clientMessageId, Uuid? deviceId, int? epoch, String? kind, String? managedPresentation, List<Uuid>? mentionedPrincipalIds, bool? notify, Uuid? replyToMessageId, Uuid? targetMessageId, String? text}) =>
+  factory SendMessageRequest.create({List<Uuid>? attachmentIds, String? ciphertext, required Uuid clientMessageId, Uuid? deviceId, int? epoch, String? frankingCommitment, String? kind, String? managedPresentation, List<Uuid>? mentionedPrincipalIds, bool? notify, Uuid? replyToMessageId, Uuid? targetMessageId, String? text}) =>
       SendMessageRequest.fromJson(<String, Object?>{
         if (attachmentIds != null) 'attachmentIds': attachmentIds,
         if (ciphertext != null) 'ciphertext': ciphertext,
         'clientMessageId': clientMessageId,
         if (deviceId != null) 'deviceId': deviceId,
         if (epoch != null) 'epoch': epoch,
+        if (frankingCommitment != null) 'frankingCommitment': frankingCommitment,
         if (kind != null) 'kind': kind,
         if (managedPresentation != null) 'managedPresentation': managedPresentation,
         if (mentionedPrincipalIds != null) 'mentionedPrincipalIds': mentionedPrincipalIds,
@@ -3276,6 +3474,9 @@ class SendMessageRequest {
   Uuid? get deviceId => json['deviceId'] as String?;
 
   int? get epoch => (json['epoch'] as num?)?.toInt();
+
+  /// S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY).
+  String? get frankingCommitment => json['frankingCommitment'] as String?;
 
   String? get kind => json['kind'] as String?;
 
@@ -3673,8 +3874,9 @@ class UpdateConversationRequest {
   const UpdateConversationRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory UpdateConversationRequest.create({String? avatarRef, required int expectedVersion, String? expiresAt, String? lifecycleState, String? reason, int? retentionSeconds, String? title}) =>
+  factory UpdateConversationRequest.create({bool? announcementOnly, String? avatarRef, required int expectedVersion, String? expiresAt, String? lifecycleState, String? reason, int? retentionSeconds, String? title}) =>
       UpdateConversationRequest.fromJson(<String, Object?>{
+        if (announcementOnly != null) 'announcementOnly': announcementOnly,
         if (avatarRef != null) 'avatarRef': avatarRef,
         'expectedVersion': expectedVersion,
         if (expiresAt != null) 'expiresAt': expiresAt,
@@ -3686,6 +3888,9 @@ class UpdateConversationRequest {
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// S13 (owner): announcement-only on / off; GROUP and CHANNEL only.
+  bool? get announcementOnly => json['announcementOnly'] as bool?;
 
   /// Section 13: a new avatar reference; null clears it (MANAGED only, owner).
   String? get avatarRef => json['avatarRef'] as String?;

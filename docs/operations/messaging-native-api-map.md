@@ -1,8 +1,8 @@
 # Messaging — native authenticated API map
 
-Generated from the Account relay and Messaging 1.17.0 contract.
-Canonical SDK contract: **97 operations**; audience-filtered public Swagger:
-**81 operations**; native Account transports: **72 operations**.
+Generated from the Account relay and Messaging 1.19.0 contract.
+Canonical SDK contract: **103 operations**; audience-filtered public Swagger:
+**87 operations**; native Account transports: **73 operations**.
 There are no new canonical message/conversation/device endpoints.
 
 CF Meet consumer REST calls use the native path below with the existing Account bearer
@@ -214,3 +214,9 @@ required. Meetings and established permitted service contexts retain independent
 | POST | `/v1/conversations/{conversationId}/invitation/accept` | acceptInvitation | `/api/v2/messaging/relay/v1/conversations/{conversationId}/invitation/accept` | Account session |
 | POST | `/v1/conversations/{conversationId}/invitation/decline` | declineInvitation | `/api/v2/messaging/relay/v1/conversations/{conversationId}/invitation/decline` | Account session |
 | GET | `/v1/messaging/invitations` | listInvitations | `/api/v2/messaging/relay/v1/messaging/invitations` | Account session |
+| POST | `/v1/conversations/{conversationId}/owner` | transferConversationOwnership | `/api/v2/messaging/relay/v1/conversations/{conversationId}/owner` | Account session |
+| POST | `/v1/conversations/{conversationId}/messages/{messageId}/forward` | forwardMessage | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
+| POST | `/v1/conversations/{conversationId}/invite-links` | createInviteLink | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
+| GET | `/v1/conversations/{conversationId}/invite-links` | listInviteLinks | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
+| POST | `/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke` | revokeInviteLink | Not exposed by Account relay | Separate service/application context; not native personal Messaging |
+| POST | `/v1/messaging/invite-links/join` | joinInviteLink | Not exposed by Account relay | Separate service/application context; not native personal Messaging |

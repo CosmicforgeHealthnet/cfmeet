@@ -77,8 +77,10 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // operations (device policy, devices, declaration, revocation, linking, security log) +
     // 9 Document 4 §3.1 Notification Service user operations (U1–U9 relay) + 4
     // passwordless account-security operations (step-up request / verify, email change
-    // request / verify).
-    assert_eq!(probed, 233, "all v2 operations probed");
+    // request / verify) + 7 gap-closure operations (my organization invitations, accept /
+    // decline one by id, operator owner appointment, registrant self-cancel, sign out other
+    // sessions, operator session revocation, identity duplicate report and enforcement, 5 organization operator routes, data export, account deletion, 4 two-step sign-in operations).
+    assert_eq!(probed, 266, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

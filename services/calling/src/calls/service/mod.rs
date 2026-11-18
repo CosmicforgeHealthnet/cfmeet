@@ -38,7 +38,7 @@ pub use commands::{fingerprint, CommandKey, IdempotencyKey, PriorCommand};
 pub(crate) use lifecycle::CallCreator;
 pub use lifecycle::{CreatedCall, NewCall, TransitionOutcome};
 pub(crate) use media::{backoff, NewMediaBinding};
-pub(crate) use participation::{participant_of, session_of};
+pub(crate) use participation::{effective_host_in, host_muted_in, participant_of, session_of};
 pub use queries::{CallDetail, CallPage, ListCallsQuery, ParticipantDetail, SessionDetail};
 pub use records::{ArtifactUsageFact, LegCost, LegUsageFact};
 pub(crate) use routing::{attempt_of, leg_of, route_of};

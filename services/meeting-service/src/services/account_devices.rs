@@ -552,6 +552,45 @@ pub async fn session_device_id<C: ConnectionTrait>(
         .flatten())
 }
 
+/// Gap audit A5: whether the sign-in `session_id` of `user_id` runs on an ACTIVE, TRUSTED
+/// device of the account (a password-only or undeclared sign-in does not).
+pub async fn session_on_trusted_device<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    session_id: Option<Uuid>,
+) -> ApiResult<bool> {
+    let Some(session_id) = session_id else {
+        return Ok(false);
+    };
+    let Some(device) = session_device_id(db, session_id).await? else {
+        return Ok(false);
+    };
+    Ok(find_device(db, user_id, device, false)
+        .await?
+        .is_some_and(|d| d.trusted_and_active()))
+}
+
+/// Gap audit A5: whether the sign-in `session_id` belongs to an ACTIVE, TRUSTED device.
+pub async fn session_belongs_to_trusted_device<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    session_id: Uuid,
+) -> ApiResult<bool> {
+    session_on_trusted_device(db, user_id, Some(session_id)).await
+}
+
+/// Gap audit A5: whether the account has at least one ACTIVE, TRUSTED device.
+pub async fn has_trusted_device<C: ConnectionTrait>(db: &C, user_id: Uuid) -> ApiResult<bool> {
+    Ok(db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 AS x FROM account_devices WHERE user_id = $1 AND trust = 'TRUSTED' AND state = 'ACTIVE' LIMIT 1",
+            [user_id.into()],
+        ))
+        .await?
+        .is_some())
+}
+
 /// The calling sign-in and its device, for the device endpoints.
 #[derive(Debug, Clone)]
 pub struct DeviceCaller {
@@ -956,6 +995,7 @@ pub async fn declare(
         .map(device_row)
         .transpose()?;
     let mut superseded = vec![];
+    let mut bootstrapped = false;
     let device_id = match same_installation {
         Some(d) => {
             // The same installation signing in again: rotate, never a new device.
@@ -1039,6 +1079,7 @@ pub async fn declare(
                 (false, false) => ("UNTRUSTED", "ACTIVE"),
                 (true, false) => ("UNTRUSTED", "REPLACEMENT_PENDING"),
             };
+            bootstrapped = trust == "TRUSTED";
             let id = Uuid::new_v4();
             txn.execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
@@ -1102,6 +1143,16 @@ pub async fn declare(
     }
     txn.commit().await?;
     session_effects(state, user.id, &superseded).await;
+    if bootstrapped {
+        // Gap audit A6: the first trusted device of the account is announced to the owner.
+        crate::services::account_security::notify_security(
+            state,
+            user.id,
+            crate::services::email::SecurityNotice::FirstDeviceTrusted,
+            &device_id.to_string(),
+        )
+        .await;
+    }
     let d = find_device(&state.db, user.id, device_id, false)
         .await?
         .ok_or_else(|| ApiError::InternalError("declared device vanished".into()))?;

@@ -256,7 +256,7 @@ impl ConferenceService {
         Ok((find_conference(&self.core.db, id).await?, enforcement))
     }
 
-    fn terminate_command(c: &conference_sessions::Model) -> OutboxRecord<'static> {
+    pub(crate) fn terminate_command(c: &conference_sessions::Model) -> OutboxRecord<'static> {
         OutboxRecord {
             aggregate_type: "conference",
             aggregate_id: c.id,

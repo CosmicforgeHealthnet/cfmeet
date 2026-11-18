@@ -153,6 +153,21 @@ pub struct MessageFeatures {
     pub threads: bool,
     pub reactions: bool,
     pub pins: bool,
+    /// S11: server-side forwarding of MANAGED messages (default on). Serialized only when
+    /// changed, so existing policy digests stay the same.
+    #[serde(skip_serializing_if = "is_true")]
+    pub forwarding: bool,
+    /// S11: a forwarded copy shows its original sender (default off: provenance only).
+    #[serde(skip_serializing_if = "is_false")]
+    pub forward_shows_original_sender: bool,
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Opt-in secure backups (Appendix I.3): client-encrypted objects the server stores but
@@ -243,6 +258,8 @@ pub fn platform_defaults() -> EffectivePolicy {
             threads: true,
             reactions: true,
             pins: true,
+            forwarding: true,
+            forward_shows_original_sender: false,
         },
         // Attachments exist but are OFF until an application enables them; no commercial
         // storage budget is invented here (deployment limits apply).
@@ -382,6 +399,8 @@ overrides!(MessageFeaturesOverride {
     threads: bool,
     reactions: bool,
     pins: bool,
+    forwarding: bool,
+    forward_shows_original_sender: bool,
 });
 overrides!(AbuseOverride {
     messages_per_minute: i64,
@@ -777,6 +796,12 @@ pub fn resolve(
         if let Some(v) = o.pins {
             t.pins = v;
         }
+        if let Some(v) = o.forwarding {
+            t.forwarding = v;
+        }
+        if let Some(v) = o.forward_shows_original_sender {
+            t.forward_shows_original_sender = v;
+        }
     }
     if let Some(o) = &overrides.abuse {
         let t = &mut p.abuse;
@@ -855,12 +880,33 @@ impl ApplicationBaseline {
         }
     }
 
-    /// `application` layered over this baseline: an attachment setting the application
-    /// left unset takes the baseline's value; everything else is the application's.
+    /// Gap audit S6: the secure-backup settings this baseline contributes. CF Meet's
+    /// personal E2EE chats get opt-in, client-encrypted backups, so losing every device
+    /// need not lose history (the server stores objects it cannot read).
+    pub fn backups(self) -> BackupOverride {
+        match self {
+            Self::CfMeetFirstParty => BackupOverride {
+                enabled: Some(true),
+                max_bytes: Some(256 * 1024 * 1024),
+                retain_count: Some(2),
+            },
+        }
+    }
+
+    /// `application` layered over this baseline: an attachment or backup setting the
+    /// application left unset takes the baseline's value; everything else is the
+    /// application's.
     pub fn under(self, application: &ApplicationPolicy) -> ApplicationPolicy {
         let base = self.attachments();
         let own = application.attachments.clone().unwrap_or_default();
         let mut layered = application.clone();
+        let base_backups = self.backups();
+        let own_backups = application.backups.clone().unwrap_or_default();
+        layered.backups = Some(BackupOverride {
+            enabled: own_backups.enabled.or(base_backups.enabled),
+            max_bytes: own_backups.max_bytes.or(base_backups.max_bytes),
+            retain_count: own_backups.retain_count.or(base_backups.retain_count),
+        });
         layered.attachments = Some(AttachmentOverride {
             enabled: own.enabled.or(base.enabled),
             max_bytes: own.max_bytes.or(base.max_bytes),
@@ -1202,9 +1248,14 @@ mod tests {
                 replies: true,
                 threads: true,
                 reactions: true,
-                pins: true
+                pins: true,
+                forwarding: true,
+                forward_shows_original_sender: false,
             }
         );
+        // S11: the defaults are not serialized, so existing policy digests are unchanged.
+        let v = serde_json::to_value(&p.messages).unwrap();
+        assert!(v.get("forwarding").is_none() && v.get("forwardShowsOriginalSender").is_none());
         assert!(
             !p.editing.revision_history_visible,
             "revisions are kept, not shown, by default"

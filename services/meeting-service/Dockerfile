@@ -30,7 +30,7 @@ COPY packages/notification-client/ /app/packages/notification-client/
 
 # Build for release
 # Build the migration binary from the migration package
-RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration --bin lifecycle-delivery-migration --bin notification-fence-migration
+RUN cargo build --release --jobs 1 -p migration --bin migration --bin account-security-migration --bin meetings-calendar-migration --bin profile-notifications-migration --bin account-hardening-migration --bin organization-integration-migration --bin account-communications-migration --bin lifecycle-delivery-migration --bin notification-fence-migration --bin gap-closure-migration
 # Build the backend binary (and the read-only organization export used by the Blueprint
 # Section 4 cutover runbook) from the root package
 RUN cargo build --release --jobs 1 -p backend --bin backend --bin export_organizations
@@ -40,8 +40,9 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies and apply pending Debian security updates (like every other
+# service image; checked by .github/workflows/dependency-security.yml)
+RUN apt-get update && apt-get -y --no-install-recommends upgrade && apt-get install -y \
     ca-certificates \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
@@ -56,6 +57,7 @@ COPY --from=builder /app/services/meeting-service/target/release/organization-in
 COPY --from=builder /app/services/meeting-service/target/release/account-communications-migration ./account-communications-migration
 COPY --from=builder /app/services/meeting-service/target/release/lifecycle-delivery-migration ./lifecycle-delivery-migration
 COPY --from=builder /app/services/meeting-service/target/release/notification-fence-migration ./notification-fence-migration
+COPY --from=builder /app/services/meeting-service/target/release/gap-closure-migration ./gap-closure-migration
 COPY --from=builder /app/services/meeting-service/target/release/backend ./server
 COPY --from=builder /app/services/meeting-service/target/release/export_organizations ./export-organizations
 

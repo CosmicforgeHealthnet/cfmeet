@@ -49,6 +49,9 @@ pub struct SchedulerTick {
     pub end_requested: u64,
     /// Stale unstarted occurrences expired this tick.
     pub expired: u64,
+    /// Gap audit M6: WAITING entries expired this tick (waited longer than
+    /// `WAITING_TTL_MINUTES`, or their conference finished).
+    pub waiting_expired: u64,
 }
 
 pub struct ConferenceScheduler {
@@ -65,11 +68,46 @@ impl ConferenceScheduler {
         let end_requested = self.auto_end(now).await?;
         let expired = crate::services::calendar::expire_stale(&self.meeting.core.db, now).await?;
         crate::services::idempotency::purge_expired(&self.meeting.core.db, now).await?;
+        let waiting_expired = self.expire_waiting(now).await?;
         Ok(SchedulerTick {
             materialized,
             end_requested,
             expired,
+            waiting_expired,
         })
+    }
+
+    /// Gap audit M6: WAITING entries that waited longer than the TTL, or whose conference is
+    /// no longer LIVE / about to start, leave the queue as DENIED (`WAITING_EXPIRED`).
+    /// Bounded per tick; idempotent.
+    async fn expire_waiting(&self, now: DateTime<Utc>) -> ApiResult<u64> {
+        use sea_orm::{ConnectionTrait, DbBackend, Statement};
+        let result = self
+            .meeting
+            .core
+            .db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "UPDATE conference_participants p
+                    SET admission_state = 'DENIED', denied_at = $1,
+                        denied_by = 'system:waiting-expired', denial_reason_code = 'WAITING_EXPIRED',
+                        version = p.version + 1, updated_at = $1
+                  WHERE p.id IN (
+                        SELECT w.id FROM conference_participants w
+                          JOIN conference_sessions c ON c.id = w.conference_id
+                         WHERE w.admission_state = 'WAITING'
+                           AND (w.requested_at < $1 - make_interval(mins => $2)
+                                OR c.status IN ('ENDED', 'CANCELLED', 'ENDING'))
+                         ORDER BY w.requested_at
+                         LIMIT 500
+                         FOR UPDATE OF w SKIP LOCKED)",
+                [
+                    now.into(),
+                    (crate::services::admission::WAITING_TTL_MINUTES as i32).into(),
+                ],
+            ))
+            .await?;
+        Ok(result.rows_affected())
     }
 
     async fn auto_end(&self, now: DateTime<Utc>) -> ApiResult<u64> {

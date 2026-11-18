@@ -1,6 +1,9 @@
 //! Shared application state (cheap to clone). The gateway holds no database handle.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use crate::{
     config::{service_auth::ServiceAuthRuntime, FeatureFlags, QuotaSettings},
@@ -14,6 +17,9 @@ pub struct AppState {
     pub authority: Arc<dyn CustomerAuthority>,
     pub service_auth: ServiceAuthRuntime,
     pub routes: Arc<RouteTable>,
+    /// The public OpenAPI documents reduced to this deployment's routable operations
+    /// (built once, on first use: the route table never changes after start).
+    pub published_docs: Arc<OnceLock<crate::docs::PublishedDocs>>,
     pub flags: FeatureFlags,
     pub controls: RoutingControls,
     pub quotas: QuotaSettings,
@@ -51,6 +57,7 @@ impl AppState {
             authority,
             service_auth,
             routes: Arc::new(routes),
+            published_docs: Arc::new(OnceLock::new()),
             flags: FeatureFlags::default(),
             controls: RoutingControls::default(),
             quotas: QuotaSettings::default(),

@@ -1725,3 +1725,59 @@ async fn cal16_space_list_paginates_without_changing_the_legacy_list() {
         );
     }
 }
+
+/// Gap audit M2: an occurrence that was prepared (or put in WAITING) but never started
+/// is expired once its start window closed, like an unprepared one, instead of staying
+/// "upcoming" and holding its provider room indefinitely.
+#[tokio::test]
+async fn gap_prepared_but_never_started_occurrences_expire() {
+    let app = app!();
+    let owner = app.user("prep-owner").await;
+    let space = app
+        .create_space(
+            &owner,
+            json!({ "title": "Prepared", "accessPolicy": "PUBLIC" }),
+        )
+        .await;
+    let sid = uuid(&space["id"]);
+    let conf = schedule(
+        &app,
+        &owner,
+        sid,
+        Utc::now().trunc_subsecs(6) + Duration::minutes(5),
+        None,
+    )
+    .await;
+    let cid = uuid(&conf["id"]);
+    let (s, v) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/prepare"),
+            Auth::Bearer(&owner.token),
+            json!({}),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    assert!(
+        matches!(v["status"].as_str(), Some("PREPARING") | Some("WAITING"))
+            || matches!(
+                v["conference"]["status"].as_str(),
+                Some("PREPARING") | Some("WAITING")
+            ),
+        "{v}"
+    );
+    // The occurrence's window closed long ago and nobody started it.
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "UPDATE conference_sessions SET scheduled_start_at = now() - interval '2 days', scheduled_end_at = now() - interval '47 hours' WHERE id='{cid}'"
+        ))
+        .await
+        .unwrap();
+    let scheduler = backend::workers::ConferenceScheduler::new(app.state.meeting.clone());
+    let tick = scheduler.tick(Utc::now().trunc_subsecs(6)).await.unwrap();
+    assert_eq!(tick.expired, 1, "{tick:?}");
+    assert_eq!(
+        app.scalar(&format!("SELECT count(*) FROM conference_sessions WHERE id='{cid}' AND status='CANCELLED' AND cancelled_by='system:expired'")).await,
+        1
+    );
+}

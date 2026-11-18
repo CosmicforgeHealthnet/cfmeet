@@ -518,6 +518,34 @@ pub async fn send_message(
     Ok((axum::http::StatusCode::CREATED, Json(m)))
 }
 
+/// Edit my message.
+///
+/// The sender replaces the text of their own message (1–4000 characters) within 15 minutes of
+/// sending, while the conference is live; the message then shows `editedAt`. Deleted messages
+/// cannot be edited, and another person's private message answers MESSAGE_NOT_FOUND. Everyone
+/// who can see the message gets a `chat.message_edited` event.
+#[utoipa::path(
+    patch, path = "/api/v2/conferences/{id}/messages/{messageId}", tag = "Chat (v2)", operation_id = "v2_edit_message",
+    params(("id" = Uuid, Path, description = "Conference id"), ("messageId" = Uuid, Path, description = "Message id")),
+    request_body = EditMessageRequest,
+    responses((status = 200, description = "Edited message", body = MessageView), (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope), (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope), (status = 404, description = "MESSAGE_NOT_FOUND", body = ErrorEnvelope)),
+    security(("bearer_auth" = []), ("participant_token" = []))
+)]
+pub async fn edit_message(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path((id, mid)): V2Path<(Uuid, Uuid)>,
+    V2Json(req): V2Json<EditMessageRequest>,
+) -> ApiResult<Json<MessageView>> {
+    Ok(Json(
+        state
+            .meeting
+            .messaging
+            .edit_message(&actor, id, mid, &req.body)
+            .await?,
+    ))
+}
+
 /// Delete / hide a message (moderators, or the sender).
 ///
 /// Senders can delete their own messages; moderators with `chat.moderate` can hide main-room and

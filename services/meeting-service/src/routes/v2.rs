@@ -75,6 +75,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(members::list_members).post(members::add_member),
         )
         .route(
+            "/meeting-spaces/:id/members/team",
+            post(members::add_team_members),
+        )
+        .route(
             "/meeting-spaces/:id/members/:member_id",
             patch(members::update_member).delete(members::revoke_member),
         )
@@ -224,7 +228,7 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             "/conferences/:id/messages/:mid",
-            delete(collab::delete_message),
+            delete(collab::delete_message).patch(collab::edit_message),
         )
         .route(
             "/conferences/:id/chat-policy",
@@ -364,6 +368,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(artifacts::generate_report),
         )
         .route(
+            "/conferences/:id/exports/:artifact_type",
+            get(artifacts::export_report),
+        )
+        .route(
             "/conferences/:id/artifacts/:aid",
             get(artifacts::get_artifact).delete(artifacts::delete_artifact),
         )
@@ -417,6 +425,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/meeting-spaces/:id/registrations",
             get(specialized::list_registrations).post(specialized::register),
+        )
+        .route(
+            "/registrations/cancel",
+            post(specialized::cancel_own_registration),
         )
         .route(
             "/meeting-spaces/:id/registrations/:rid",
@@ -518,6 +530,30 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             patch(organizations::update_organization),
         )
         .route(
+            "/admin/organizations/:id/owners",
+            post(organizations::appoint_organization_owner),
+        )
+        .route(
+            "/admin/organizations/:id/provisioning/retry",
+            post(organizations::admin_retry_organization_provisioning),
+        )
+        .route(
+            "/admin/organizations/:id/service-bindings/:service",
+            get(organizations::admin_get_organization_service_binding),
+        )
+        .route(
+            "/admin/organizations/:id/service-bindings/:service/rotate",
+            post(organizations::admin_rotate_organization_service_binding),
+        )
+        .route(
+            "/admin/organization-event-delivery",
+            get(organizations::admin_organization_event_delivery),
+        )
+        .route(
+            "/admin/organization-event-delivery/replay",
+            post(organizations::admin_replay_organization_events),
+        )
+        .route(
             "/organizations",
             post(organizations::create_business_organization),
         )
@@ -529,6 +565,19 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/organizations/:id/members",
             get(organizations::list_organization_members),
+        )
+        .route(
+            "/organizations/:id/meeting-spaces",
+            get(organizations::list_organization_meeting_spaces),
+        )
+        .route(
+            "/organizations/:id/export",
+            get(organizations::export_organization),
+        )
+        .route(
+            "/organizations/:id/meeting-profile-policy",
+            get(organizations::get_organization_meeting_profile_policy)
+                .put(organizations::put_organization_meeting_profile_policy),
         )
         .route(
             "/organizations/:id/members/me/leave",
@@ -592,6 +641,17 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/organizations/:id/messaging/session-tokens",
             post(crate::handlers::v2::organization_messaging::messaging_session_token),
         )
+        // Gap audit G6 / G7: organization moderation and team channels in the
+        // organization's own Messaging scope.
+        .route(
+            "/organizations/:id/messaging/moderation/*path",
+            get(crate::handlers::v2::organization_messaging::moderation_get)
+                .post(crate::handlers::v2::organization_messaging::moderation_post),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/messaging-channel",
+            put(crate::handlers::v2::organization_messaging::team_channel),
+        )
         .route(
             "/organizations/:id/messaging/members/resolve",
             post(crate::handlers::v2::organization_messaging::messaging_resolve_members),
@@ -643,6 +703,18 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(organizations::decline_organization_invitation),
         )
         .route("/me/organizations", get(organizations::my_organizations))
+        .route(
+            "/me/organization-invitations",
+            get(organizations::my_organization_invitations),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/accept",
+            post(organizations::accept_my_organization_invitation),
+        )
+        .route(
+            "/organization-invitations/:invitation_id/decline",
+            post(organizations::decline_my_organization_invitation),
+        )
         // Blueprint Section 8: workspace context (per request; no switch endpoint)
         .route(
             "/me/workspaces",
@@ -658,6 +730,19 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(crate::handlers::v2::account_profile::get_my_profile)
                 .patch(crate::handlers::v2::account_profile::update_my_profile),
         )
+        // Gap audit A22: avatar upload, and the public image address
+        .route(
+            "/me/avatar",
+            put(crate::handlers::v2::account_profile::upload_my_avatar)
+                .delete(crate::handlers::v2::account_profile::remove_my_avatar)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::services::account_avatar::MAX_AVATAR_BYTES,
+                )),
+        )
+        .route(
+            "/avatars/:avatar_id",
+            get(crate::handlers::v2::account_profile::get_avatar),
+        )
         // Blueprint Section 2: account sessions and the security audit
         .route(
             "/me/sessions",
@@ -666,6 +751,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/me/sessions/revoke-all",
             post(crate::handlers::v2::account_sessions::revoke_all_my_sessions),
+        )
+        .route(
+            "/me/sessions/revoke-others",
+            post(crate::handlers::v2::account_sessions::revoke_other_sessions),
         )
         .route(
             "/me/sessions/:session_id/revoke",
@@ -681,12 +770,48 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(crate::handlers::v2::account_identity::verify_step_up),
         )
         .route(
+            "/me/data-export",
+            get(crate::handlers::v2::account_identity::export_my_data),
+        )
+        .route(
+            "/me/account/delete",
+            post(crate::handlers::v2::account_identity::delete_my_account),
+        )
+        .route(
+            "/me/mfa",
+            get(crate::handlers::v2::account_identity::get_my_mfa),
+        )
+        .route(
+            "/me/mfa/totp/setup",
+            post(crate::handlers::v2::account_identity::setup_my_totp),
+        )
+        .route(
+            "/me/mfa/totp/confirm",
+            post(crate::handlers::v2::account_identity::confirm_my_totp),
+        )
+        .route(
+            "/me/mfa/disable",
+            post(crate::handlers::v2::account_identity::disable_my_mfa),
+        )
+        .route(
             "/me/email/change/request",
             post(crate::handlers::v2::account_identity::request_email_change),
         )
         .route(
             "/me/email/change/verify",
             post(crate::handlers::v2::account_identity::confirm_email_change),
+        )
+        .route(
+            "/admin/identity-duplicates",
+            get(crate::handlers::v2::account_sessions::admin_identity_duplicates),
+        )
+        .route(
+            "/admin/identity-duplicates/enforce",
+            post(crate::handlers::v2::account_sessions::admin_enforce_identity_uniqueness),
+        )
+        .route(
+            "/admin/users/:user_id/sessions/revoke",
+            post(crate::handlers::v2::account_sessions::admin_revoke_user_sessions),
         )
         .route(
             "/admin/audit-events",

@@ -449,6 +449,11 @@ impl AppCallService {
             // A PSTN_TO_APP Call: the answered app side is now bridged to the public leg.
             self.after_application_answer(call.id).await;
         }
+        if !answered {
+            // Joining a live Call (an answered transfer, a later group answer): a recording
+            // in progress gives this participant its notice (and asks for its consent).
+            self.recording_notice_on_join(call.id, participant.id).await;
+        }
         Ok(CommandOutcome {
             body,
             replayed: false,
@@ -600,6 +605,9 @@ impl AppCallService {
                 if round.is_empty() || round.iter().any(|i| i.status.is_live()) {
                     return Ok(RingOutcome::Unchanged);
                 }
+                // A direct call whose callee has a forwarding rule or a mailbox gets its
+                // routing context now (BUSY / NO_ANSWER continuation below).
+                self.direct_routing_at_ring_end_in(txn, call).await?;
                 // Enterprise routing first: the next ordered ring-group member or a
                 // fallback takes the SAME Call before any no-answer outcome.
                 match self.enterprise_continue_in(txn, cmd, call).await? {

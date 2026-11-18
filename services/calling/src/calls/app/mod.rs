@@ -16,18 +16,22 @@
 //! [`CallMediaProvider`] only.
 
 pub mod abuse_reports;
+pub mod abuse_review;
 mod auto_end;
 pub mod blocks;
 mod control;
 mod create;
 pub mod enterprise;
 pub mod history;
+mod host;
 pub mod http;
 pub mod incidents;
 mod invite;
 pub mod media;
 mod privacy;
 pub mod public;
+pub mod quality;
+mod rejoin;
 mod ringing;
 mod screen_share;
 mod transfer;

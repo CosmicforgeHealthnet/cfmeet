@@ -147,6 +147,11 @@ impl CallingConfig {
                 "PLATFORM_DEFAULT_MAX_CONCURRENT_COMMUNICATIONS",
                 platform_defaults.max_concurrent_communications,
             )?,
+            call_creations_per_principal_per_minute: non_negative(
+                &non_empty,
+                "CALLING_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE",
+                platform_defaults.call_creations_per_principal_per_minute,
+            )?,
         };
 
         let log_format = match non_empty("LOG_FORMAT").as_deref() {
@@ -260,6 +265,28 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         move |k| map.get(k).cloned()
+    }
+
+    /// C9: the per-principal Call-creation rate is on by default, configurable, `0` = off.
+    #[test]
+    fn call_creation_rate_per_principal_is_on_by_default() {
+        let base = ("DATABASE_URL", "postgres://x/y");
+        let cfg = CallingConfig::from_lookup(lookup(&[base])).unwrap();
+        assert_eq!(
+            cfg.limit_defaults.call_creations_per_principal_per_minute,
+            crate::platform::limits::DEFAULT_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE
+        );
+        let var = "CALLING_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE";
+        for (value, expected) in [("10", 10), ("0", 0)] {
+            let cfg = CallingConfig::from_lookup(lookup(&[base, (var, value)])).unwrap();
+            assert_eq!(
+                cfg.limit_defaults.call_creations_per_principal_per_minute,
+                expected
+            );
+        }
+        for bad in ["-1", "many"] {
+            assert!(CallingConfig::from_lookup(lookup(&[base, (var, bad)])).is_err());
+        }
     }
 
     #[test]

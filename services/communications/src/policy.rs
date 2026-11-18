@@ -249,10 +249,15 @@ impl State {
             // The recipient's per-conversation mute (MENTIONS cannot be inferred from
             // opaque ciphertext, so it suppresses ordinary pushes too).
             if let Some(conversation) = check.conversation_id {
+                // Gap audit S10: "mentions only" lets through a message that mentions the
+                // recipient (Messaging says so for MANAGED messages; never inferred from
+                // ciphertext, so without that signal it suppresses like a mute).
                 let muted: Option<Value> = store::one(&self.store.db,
-                    "SELECT jsonb_build_object('muted',notifications<>'ALL' AND (muted_until IS NULL OR muted_until>now())) doc FROM communication_conversation_preferences WHERE owner_profile_id=$1 AND conversation_id=$2",
+                    "SELECT jsonb_build_object('muted',notifications<>'ALL' AND (muted_until IS NULL OR muted_until>now()),'mentionsOnly',notifications='MENTIONS') doc FROM communication_conversation_preferences WHERE owner_profile_id=$1 AND conversation_id=$2",
                     vec![target.id.into(), conversation.into()]).await?;
-                allowed = allowed && muted.is_none_or(|m| m["muted"] != true);
+                let mention_passes = check.mentioned == Some(true)
+                    && muted.as_ref().is_some_and(|m| m["mentionsOnly"] == true);
+                allowed = allowed && (mention_passes || muted.is_none_or(|m| m["muted"] != true));
             }
         }
         Ok(Decision {
@@ -395,8 +400,11 @@ pub fn decide(action: Action, connected: bool, p: &Privacy) -> bool {
         Action::GroupNotification => true,
         Action::ContactRequest => p.contact_request_permissions == RequestPermission::Everyone,
         Action::PersonalActivity => false, // handled only for a verified active self above
+        // Gap audit S9: its own setting, no longer the contact-request permission.
         Action::GroupInvitation => {
-            connected && p.contact_request_permissions == RequestPermission::Everyone
+            connected
+                && p.group_invitation_policy.unwrap_or(Audience::Connections)
+                    == Audience::Connections
         }
         Action::Presence => connected && p.presence_visibility == Audience::Connections,
         Action::ProfileDiscovery => {
@@ -427,6 +435,24 @@ mod tests {
             assert!(decide(action, true, &p));
         }
     }
+    #[test]
+    fn group_invitations_follow_their_own_setting() {
+        // Gap audit S9: closing contact requests no longer closes group invitations.
+        let closed_requests = Privacy {
+            contact_request_permissions: RequestPermission::Nobody,
+            ..Privacy::default()
+        };
+        assert!(decide(Action::GroupInvitation, true, &closed_requests));
+        assert!(!decide(Action::ContactRequest, true, &closed_requests));
+        let no_groups = Privacy {
+            group_invitation_policy: Some(Audience::Nobody),
+            ..Privacy::default()
+        };
+        assert!(!decide(Action::GroupInvitation, true, &no_groups));
+        assert!(decide(Action::ContactRequest, true, &no_groups));
+        assert!(!decide(Action::GroupInvitation, false, &Privacy::default()));
+    }
+
     #[test]
     fn privacy_restrictions_stay_effective_after_connection_acceptance() {
         let p = Privacy {

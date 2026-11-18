@@ -80,6 +80,20 @@ groups:
           threshold_status: "APPROVAL REQUIRED: messaging-operations-runbook.md §9 lists the lag gauge without a threshold; 10 min is a repository placeholder"
           runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"
 
+      - alert: MessagingMlsRekeyStalled
+        expr: |
+          max(messaging_mls_rekey_stalled_conversations) > 0
+        for: 30m
+        labels:
+          severity: warning
+          approval: required
+          service: messaging
+        annotations:
+          summary: "PRIVATE_E2EE groups waiting more than 15 minutes for a member's re-key commit"
+          description: "After a member removal an end-to-end encrypted group accepts only commits until a member's client commits the removal (backend gap audit S8). Members are offline or their client failed to commit; the group cannot send meanwhile."
+          threshold_status: "APPROVAL REQUIRED: no runbook threshold; 15 min stall + 30 min for are repository placeholders"
+          runbook_url: "docs/architecture/messaging-operations-runbook.md#9-incidents-and-signals-141"
+
       - alert: MessagingMetricsUnavailable
         expr: |
           up{job="messaging"} == 0

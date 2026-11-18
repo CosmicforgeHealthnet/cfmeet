@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Organizations Service internal API",
-    "version": "1.5.0",
+    "version": "1.7.0",
     "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling. 1.3.0 (final closure): organization event delivery to subscribed consumers over signed service HTTP (the Meeting Service, meeting-organization-events.apply) with the operator delivery status GET /internal/v1/admin/event-delivery and dead-letter replay POST /internal/v1/admin/event-delivery/replay (organization.administer); a Messaging service binding per organization scope (GET / PUT / DELETE .../service-bindings/messaging) carried by scopes/resolve as serviceBindings.messaging. 1.5.0 (ADR 0058 Amendment A2, automatic organization service bindings): with ORGANIZATIONS_SERVICE_BINDINGS_ENABLED the provisioning saga creates, reads back, verifies and records each organization's Calling and Messaging bindings through Platform Access (platform-identity.bind-organization-services) and the organization becomes READY only once both are verified; bindings are renewed and re-verified by reconciliation (drift: SERVICE_BINDING_DRIFT), revoked at Platform Access after archive; ServiceBinding gains source (AUTOMATIC / OPERATOR), verifiedAt and credentialExpiresAt; operator credential rotation POST .../service-bindings/{calling|messaging}/rotate (organization.administer)."
   },
   "tags": [
@@ -964,7 +964,7 @@
       "get": {
         "operationId": "listInvitations",
         "summary": "List invitations",
-        "description": "Newest first (at most 200). Requires organization.members.invite for the acting user. A pending invitation past its expiry is reported EXPIRED.",
+        "description": "Newest first (at most 200). Requires organization.members.invite for the acting user. A pending invitation past its expiry is reported EXPIRED. Newest first, paged: limit 1-200 (default 50 when paging, 200 when neither limit nor cursor is given) and nextCursor while more remain. status is the effective status (a PENDING invitation past its expiry counts as EXPIRED).",
         "tags": [
           "Invitations"
         ],
@@ -996,6 +996,19 @@
               ]
             },
             "description": "Status filter."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "The previous page's nextCursor (opaque).",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
           }
         ],
         "responses": {
@@ -1727,7 +1740,7 @@
       "get": {
         "operationId": "listAuditEvents",
         "summary": "List audit events",
-        "description": "Newest first; requires organization.audit.read for the acting user. Audit events are append-only and never contain an email address or a token.",
+        "description": "Newest first; requires organization.audit.read for the acting user. Audit events are append-only and never contain an email address or a token. Filters: action, actorUserId, from, to. OWNERs and ADMINs keep organization.audit.read while the organization is SUSPENDED or ARCHIVED.",
         "tags": [
           "Organizations"
         ],
@@ -1755,6 +1768,45 @@
               "type": "integer"
             },
             "description": "Return events with seq below this cursor."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "Only this action, e.g. membership.updated.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorUserId",
+            "in": "query",
+            "required": false,
+            "description": "Only changes made by this user.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
           }
         ],
         "responses": {
@@ -2120,6 +2172,17 @@
               ]
             },
             "description": "Lifecycle status filter."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Gap audit G10: case-insensitive substring of the organization name or slug (1-100 characters; LIKE wildcards match literally).",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
           }
         ],
         "responses": {
@@ -5035,6 +5098,736 @@
           }
         }
       }
+    },
+    "/internal/v1/organization-invitations/{invitationId}/accept": {
+      "post": {
+        "operationId": "acceptInvitationById",
+        "summary": "Accept an invitation addressed to the acting user",
+        "description": "In-product answer without the emailed token. The invitation must be addressed to the acting user: its recorded invitee account (`inviteeUserId`, set when the caller resolved the account at creation) or X-CF-Acting-User-Verified-Email equal to the invited email; anyone else gets 404 INVITATION_INVALID exactly as for an unknown id. An invitation whose inviter is no longer an ACTIVE member allowed to invite at its role is recorded REVOKED and answers 404 INVITATION_INVALID. Expiry, lifecycle and guest-policy rules are those of acceptInvitation.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InvitationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserVerifiedEmail"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Empty object (or no body)."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The acting user's membership.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Membership"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITE_EXPIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-invitations/{invitationId}/decline": {
+      "post": {
+        "operationId": "declineInvitationById",
+        "summary": "Decline an invitation addressed to the acting user",
+        "description": "As acceptInvitationById, declining. Anyone the invitation is not addressed to gets 404 INVITATION_INVALID.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/InvitationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserVerifiedEmail"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Empty object (or no body)."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The declined invitation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invitation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITE_EXPIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-invitations/mine": {
+      "get": {
+        "operationId": "listMyInvitations",
+        "summary": "The acting user's pending invitations",
+        "description": "PENDING, unexpired invitations to ACTIVE organizations addressed to the acting user: recorded for their account (`inviteeUserId`) or sent to X-CF-Acting-User-Verified-Email. Newest first, at most 100. Each item adds `organization` {id, name, slug}. Never another person's data.",
+        "tags": [
+          "Invitations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserVerifiedEmail"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The acting user's pending invitations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyInvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/owners": {
+      "post": {
+        "operationId": "adminAppointOwner",
+        "summary": "Appoint an organization owner (operator recovery)",
+        "description": "Operator recovery of an organization that lost its owner (for example the only owner's account was deactivated): makes userId an ACTIVE OWNER. An existing membership is promoted and re-activated; otherwise one is created (joinedVia OPERATOR). The reason is recorded in the audit event membership.owner_appointed. Archived organizations are refused (409 ORGANIZATION_ARCHIVED). Idempotent for an ACTIVE OWNER.",
+        "tags": [
+          "Operator administration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUser"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppointOwnerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The appointed OWNER membership.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Membership"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/audit-events": {
+      "get": {
+        "operationId": "adminListAuditEvents",
+        "summary": "An organization's audit history (operator)",
+        "description": "The operator read of an organization's audit history in any lifecycle state, with the filters and paging of listAuditEvents. Requires organization.administer; no acting user.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Return events with seq below this cursor."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "description": "Only this action, e.g. membership.updated.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "actorUserId",
+            "in": "query",
+            "required": false,
+            "description": "Only changes made by this user.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of audit events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/organizations/{id}/export": {
+      "get": {
+        "operationId": "exportOrganization",
+        "summary": "Export an organization",
+        "description": "Gap audit G11: everything the Organizations Service holds about the organization as one JSON document (organization, profile, policies, memberships and their history, teams and team memberships, invitations without their token, the newest 10000 audit events). People appear by user id only. Requires organization.lifecycle.manage (OWNER) for the acting user; recorded as organization.exported.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          },
+          {
+            "$ref": "#/components/parameters/ActingUserRequired"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/admin/organizations/{id}/export": {
+      "get": {
+        "operationId": "adminExportOrganization",
+        "summary": "Export an organization (operator)",
+        "description": "Gap audit G11: the operator's export of an organization in any lifecycle state, archived included (organization.administer). Same document as exportOrganization; recorded as organization.exported.",
+        "tags": [
+          "Organizations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationExport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED, ACTOR_NOT_ALLOWED, PERMISSION_DENIED or MEMBERSHIP_REQUIRED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND (also for organizations the actor may not see) or INVITATION_INVALID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED, ORGANIZATION_ARCHIVED, LAST_OWNER, VERSION_CONFLICT, SLUG_TAKEN or IDEMPOTENCY_CONFLICT.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5256,6 +6049,25 @@
           "status"
         ]
       },
+      "AppointOwnerRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "reason"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
       "ArchiveTeamRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -5405,6 +6217,11 @@
             "maxLength": 120,
             "pattern": "^[^@]+$",
             "description": "Optional display hint stored instead of the masked email (inviteeEmailHint) for an invitation addressed by another identifier; the Meeting Service sends `CF Meet ID <id>` so the invitee's email is never disclosed to the inviter, even masked. 1.4.0."
+          },
+          "inviteeUserId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The invitee's CF Meet account when the caller already resolved it (the Meeting Service does for invitations addressed by CF Meet ID). The invitee can then list and answer the invitation in the product, and the invitation.created notification reaches them."
           }
         },
         "required": [
@@ -6089,6 +6906,13 @@
             "items": {
               "$ref": "#/components/schemas/Invitation"
             }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The cursor of the next page; null on the last page."
           }
         },
         "required": [
@@ -6440,6 +7264,55 @@
           }
         }
       },
+      "MyInvitation": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Invitation"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "organization": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "name",
+                  "slug"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "MyInvitationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MyInvitation"
+            }
+          }
+        }
+      },
       "Organization": {
         "type": "object",
         "additionalProperties": false,
@@ -6537,6 +7410,84 @@
           "memberCount"
         ],
         "description": "An organization. Imported legacy slugs keep the Meeting Service rule; new and changed slugs follow the contract pattern."
+      },
+      "OrganizationExport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "exportedAt",
+          "organization",
+          "policies",
+          "memberships",
+          "membershipHistory",
+          "teams",
+          "teamMemberships",
+          "invitations",
+          "auditEvents"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
+          "exportedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "organization": {
+            "type": "object"
+          },
+          "profile": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "policies": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "memberships": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "membershipHistory": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "teamMemberships": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "invitations": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "auditEvents": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 10000
+          }
+        }
       },
       "OrganizationList": {
         "type": "object",

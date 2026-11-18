@@ -1,35 +1,39 @@
-# Alertmanager routing for CF Meet alerts (SEC-016).
+# Alertmanager routing for CF Meet alerts (SEC-016, backend gap audit P1).
 #
-# PAGING IS NOT CONFIGURED. Every receiver below is deliberately empty (no integration),
-# so a routed alert is accepted and dropped. The owner must choose a paging / ticketing
-# product and supply its credentials through the secret store; nothing secret is ever
-# committed here (scripts/monitoring/check_alert_rules.py rejects URLs and literal keys,
-# tokens or passwords in this file, comments included).
+# DEPLOYED to production by the coordinated release (`release` and `deploy-monitoring`
+# operations, infra/calling/production/monitoring_stack.py) as the container
+# cfmeet-alertmanager on the private network.
 #
-# To enable a receiver: mount the credential as a file from the secret store and add the
-# integration under the receiver, using a *_file field so the value never appears in
-# YAML. The commented templates show the shape with obvious placeholders only.
+# Receivers are driven by secrets, never by values in this file. The release workflow
+# writes the GitHub environment secret CFMEET_ALERT_WEBHOOK_URL (generic Alertmanager
+# webhook JSON) and, optionally, CFMEET_ALERT_SLACK_WEBHOOK_URL (a Slack-compatible
+# incoming webhook) to root-owned files on the VPS; they are mounted read-only below
+# /etc/alertmanager/secrets and read through *_file fields. When a secret is unset its
+# integration is removed from the deployed copy of this file (monitoring_stack.py
+# render_alertmanager), so the stack still starts and alerts are visible in Alertmanager
+# without a notification. No email integration is configured.
 #
-# Validated in CI with amtool check-config (.github/workflows/service-boundaries.yml).
-# Not deployed: running Alertmanager is an owner decision (docs/operations/monitoring-alerts.md).
+# scripts/monitoring/check_alert_rules.py rejects URLs and literal keys, tokens or
+# passwords in this file, comments included. Validated in CI with amtool check-config
+# (.github/workflows/service-boundaries.yml), with and without the integrations.
 
 global:
   resolve_timeout: 5m
 
 route:
-  receiver: unconfigured-default
+  receiver: operations
   group_by: [alertname, service]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
   routes:
     - matchers: ['severity="critical"']
-      receiver: unconfigured-pager
+      receiver: pager
       repeat_interval: 1h
     - matchers: ['severity="warning"']
-      receiver: unconfigured-ticket
+      receiver: operations
     - matchers: ['severity="info"']
-      receiver: unconfigured-info
+      receiver: info-only
       repeat_interval: 24h
 
 # A critical alert silences the warning and info notifications of the same alert name and
@@ -43,24 +47,27 @@ inhibit_rules:
     equal: [alertname, service]
 
 receivers:
-  # Fallback for anything without a severity label (should not happen: the rule checker
-  # requires one).
-  - name: unconfigured-default
+  # CRITICAL: page the operators.
+  - name: pager
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/alert-webhook-url
+        send_resolved: true
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/alert-slack-webhook-url
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.service }})'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}: {{ .Annotations.description }} Runbook: {{ .Annotations.runbook_url }}{{ "\n" }}{{ end }}'
 
-  # CRITICAL: page the on-call engineer. NOT CONFIGURED.
-  - name: unconfigured-pager
-    # pagerduty_configs:
-    #   - routing_key_file: <SECRET_STORE_MOUNT>/<PAGER_INTEGRATION_KEY_FILE>
-    #     send_resolved: true
+  # WARNING and anything without a severity: the operations channel.
+  - name: operations
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/alert-webhook-url
+        send_resolved: true
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/alert-slack-webhook-url
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.service }})'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}: {{ .Annotations.description }} Runbook: {{ .Annotations.runbook_url }}{{ "\n" }}{{ end }}'
 
-  # WARNING: open a ticket / post to the operations channel. NOT CONFIGURED.
-  - name: unconfigured-ticket
-    # webhook_configs:
-    #   - url_file: <SECRET_STORE_MOUNT>/<TICKET_WEBHOOK_URL_FILE>
-    #     send_resolved: true
-
-  # INFO: low-priority channel or no notification at all. NOT CONFIGURED.
-  - name: unconfigured-info
-    # email_configs:
-    #   - to: <OPERATIONS_MAILBOX>
-    #     auth_password_file: <SECRET_STORE_MOUNT>/<SMTP_PASSWORD_FILE>
+  # INFO: visible in Alertmanager only, no notification.
+  - name: info-only

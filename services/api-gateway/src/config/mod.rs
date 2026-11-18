@@ -8,6 +8,7 @@
 //! | `API_GATEWAY_UPSTREAM_TIMEOUT_MS` | no | per-request upstream deadline (100–60000, default 10000) |
 //! | `API_GATEWAY_MAX_BODY_BYTES` | no | request body limit (1024–8388608, default 1048576) |
 //! | `API_GATEWAY_REDIS_URL` | no | Redis for SHARED atomic quota counters across instances (`redis://` local / test, `rediss://` otherwise); unset: per-instance counters (quotas still enforced, limits from the Developer Platform) |
+//! | `API_GATEWAY_REDIS_PRIVATE_NETWORK` | no | `true`: also accept a plaintext `redis://` store on a private host (single-label container name, private / loopback IP) outside local / test (gap audit P5) |
 //! | `API_GATEWAY_REDIS_KEY_PREFIX` | no | key namespace (default `cfgw:`) |
 //! | `API_GATEWAY_REDIS_TIMEOUT_MS` | no | bound of one quota-store call and of one connection attempt (20–5000, default 250); past it the request is counted per instance (`quotas: degraded`) |
 //! | `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` | no | per-token request ceiling of end-user / device traffic (meeting sessions, participant tokens, developer sessions, client tokens, signaling credentials, realtime tickets): `0` (default) off, else 10–100000 requests per token per minute, counted in the same quota store; anonymous requests carry no token and stay with the services and the edge |
@@ -67,12 +68,17 @@ pub struct QuotaSettings {
     pub key_prefix: String,
     /// Bound of one quota-store call / connection attempt.
     pub redis_timeout: Duration,
+    /// Gap audit P5: `API_GATEWAY_REDIS_PRIVATE_NETWORK=true` accepts a plaintext
+    /// `redis://` store on a private host (no dots, or an RFC 1918 / loopback address),
+    /// such as the release's internal `redis` container, outside local / test.
+    pub private_network: bool,
 }
 
 impl Default for QuotaSettings {
     fn default() -> Self {
         Self {
             redis_url: None,
+            private_network: false,
             key_prefix: "cfgw:".into(),
             redis_timeout: Duration::from_millis(250),
         }
@@ -101,14 +107,35 @@ impl QuotaSettings {
     /// TLS (`rediss://`) is required outside local / test runtime environments.
     pub fn validate_for(&self, runtime: RuntimeEnvironment) -> Result<(), ConfigError> {
         match self.redis_url() {
-            Some(url) if url.starts_with("redis://") && !runtime.allows_insecure_transport() => {
+            Some(url)
+                if url.starts_with("redis://")
+                    && !runtime.allows_insecure_transport()
+                    && !(self.private_network && private_host(url)) =>
+            {
                 Err(ConfigError::invalid(
                     "API_GATEWAY_REDIS_URL",
-                    "must use rediss:// (TLS) in staging and production",
+                    "must use rediss:// (TLS) in staging and production, or a private-network \
+                     host with API_GATEWAY_REDIS_PRIVATE_NETWORK=true",
                 ))
             }
             _ => Ok(()),
         }
+    }
+}
+
+/// A host only reachable inside the deployment: a single-label name (a container on the
+/// private network) or a private / loopback IP address.
+fn private_host(url: &str) -> bool {
+    let Some(host) = url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+    else {
+        return false;
+    };
+    match host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_private() || ip.is_loopback(),
+        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback(),
+        Err(_) => !host.contains('.') && !host.is_empty(),
     }
 }
 
@@ -355,6 +382,7 @@ impl ApiGatewayConfig {
                 redis_url,
                 key_prefix,
                 redis_timeout,
+                private_network: flag(&get, "API_GATEWAY_REDIS_PRIVATE_NETWORK")?,
             },
             token_rate_limit_per_minute,
             log_format,
@@ -428,6 +456,36 @@ mod tests {
         assert!(!format!("{cfg:?}").contains("pw-redis-9"));
         assert!(cfg.quotas.validate_for(RuntimeEnvironment::Local).is_ok());
         assert!(cfg
+            .quotas
+            .validate_for(RuntimeEnvironment::Production)
+            .is_err());
+        // Gap audit P5: plaintext only on a private host, and only when asked for.
+        for (url, ok) in [
+            ("redis://redis:6379/3", true),
+            ("redis://10.0.0.7:6379", true),
+            ("redis://cache.example.com:6379", false),
+            ("redis://8.8.8.8:6379", false),
+        ] {
+            let private = ApiGatewayConfig::from_lookup(lookup(&[
+                ("API_GATEWAY_REDIS_URL", url),
+                ("API_GATEWAY_REDIS_PRIVATE_NETWORK", "true"),
+            ]))
+            .unwrap();
+            assert_eq!(
+                private
+                    .quotas
+                    .validate_for(RuntimeEnvironment::Production)
+                    .is_ok(),
+                ok,
+                "{url}"
+            );
+        }
+        let unasked = ApiGatewayConfig::from_lookup(lookup(&[(
+            "API_GATEWAY_REDIS_URL",
+            "redis://redis:6379/3",
+        )]))
+        .unwrap();
+        assert!(unasked
             .quotas
             .validate_for(RuntimeEnvironment::Production)
             .is_err());

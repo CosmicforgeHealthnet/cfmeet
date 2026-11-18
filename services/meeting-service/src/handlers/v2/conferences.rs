@@ -51,6 +51,7 @@ fn action_response(o: ConferenceOutcome) -> Json<ConferenceActionResponse> {
         (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
         (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
         (status = 409, description = "IDEMPOTENCY_CONFLICT / CONFERENCE_STATE_CONFLICT", body = ErrorEnvelope),
+        (status = 429, description = "RATE_LIMITED (per-account creation budget)", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []))
 )]
@@ -61,6 +62,12 @@ pub async fn create_conference(
     headers: HeaderMap,
     V2JsonDigest(req, digest): V2JsonDigest<CreateConferenceRequest, true>,
 ) -> ApiResult<Response> {
+    crate::services::creation_limits::spend(
+        &state,
+        &actor,
+        crate::services::creation_limits::CONFERENCES,
+    )
+    .await?;
     let idempotency = match idempotency_key(&headers)? {
         Some(key) => {
             IdempotencyRequest::new(&actor, format!("v2_create_conference:{id}"), &key, digest)?

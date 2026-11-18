@@ -541,6 +541,29 @@ async fn main() -> anyhow::Result<()> {
     state = state.with_communications(personal);
     state.communications_launch_credential = launch_credential;
     state.legacy_usage_retired = config.legacy_usage_retired;
+    // P6: direct-route platform API request accounting into the Developer Platform.
+    match calling::usage::direct::enabled_from(
+        std::env::var(calling::usage::direct::ENV_SWITCH)
+            .ok()
+            .as_deref(),
+    ) {
+        Ok(true) if developer_platform_configured => {
+            let accountant = Arc::new(calling::usage::direct::DirectUsageAccounting::new(Some(
+                state.service_auth.client_arc(),
+            )));
+            tokio::spawn(accountant.clone().run());
+            state.direct_usage = Some(accountant);
+            tracing::info!("direct-route API requests are counted into the Developer Platform");
+        }
+        Ok(true) => tracing::warn!(
+            "direct-route API request accounting needs CF_DEVELOPER_PLATFORM_BASE_URL: off"
+        ),
+        Ok(false) => tracing::info!("direct-route API request accounting is off"),
+        Err(e) => {
+            tracing::error!(error = %e, "direct usage accounting configuration error");
+            std::process::exit(2);
+        }
+    }
     state.organization_forwarding_enabled = config.organization_forwarding_enabled;
     tracing::info!(
         organization_forwarding = config.organization_forwarding_enabled,

@@ -616,9 +616,13 @@ async fn readiness_reports_the_routing_protocol_only_when_applied() {
     assert_eq!(r.json["routingProtocol"], 1);
     assert_eq!(fence_protocol(h.conn()).await, Some(1));
 
-    // Main history only: ready as before, no routingProtocol.
+    // Main history only (plus the gap-closure history this image requires): ready as
+    // before, no routingProtocol.
     let db = Arc::new(TestDb::empty().await.unwrap());
     migration::Migrator::up(&db.conn, None).await.unwrap();
+    migration::GapClosureMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
     let plain = Harness::on(db.clone(), |_| {});
     let r = ready(&plain).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);

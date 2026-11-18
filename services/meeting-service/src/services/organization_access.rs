@@ -125,6 +125,9 @@ pub struct AccessReport {
     pub applied: u64,
     pub failed: u64,
     pub principals_updated: u64,
+    /// Gap audit G16: changes settled with nothing to apply because no technical scope
+    /// environment was ever recorded for the organization (reported, never silent).
+    pub unscoped: u64,
 }
 
 fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> Statement {
@@ -166,6 +169,29 @@ pub async fn run_once(
         ))
         .all(db)
         .await?;
+        // Gap audit G16: no recorded environment means the worker cannot know which
+        // identities to change. That is reported (log, metric, `unscoped`, and the row's
+        // last_error_class), not silently counted as applied.
+        let unscoped = scopes.is_empty()
+            && db
+                .query_one(stmt(
+                    "SELECT 1 AS x FROM organization_scope_environments WHERE organization_id = $1 LIMIT 1",
+                    vec![row.organization_id.into()],
+                ))
+                .await?
+                .is_none();
+        if unscoped {
+            report.unscoped += 1;
+            crate::services::ops_metrics::inc(
+                &crate::services::ops_metrics::OPS_METRICS.organization_access_unscoped,
+            );
+            tracing::warn!(
+                organization_id = %row.organization_id,
+                user_id = %row.user_id,
+                desired = %row.desired_state,
+                "organization access has no recorded organization environment; nothing could be applied"
+            );
+        }
         let status = principal_status(&row.desired_state);
         let mut failure: Option<PortError> = None;
         for scope in &scopes {
@@ -182,13 +208,14 @@ pub async fn run_once(
                 // Settle only the version this pass applied (a newer event may have arrived).
                 db.execute(stmt(
                     "UPDATE organization_member_access SET applied_state = $3, applied_version = $4, applied_at = now(), \
-                       attempts = 0, last_error_class = NULL, next_attempt_at = now() \
+                       attempts = 0, last_error_class = $5, next_attempt_at = now() \
                      WHERE organization_id = $1 AND user_id = $2 AND membership_version = $4",
                     vec![
                         row.organization_id.into(),
                         row.user_id.into(),
                         row.desired_state.clone().into(),
                         row.membership_version.into(),
+                        unscoped.then_some("NO_ORGANIZATION_ENVIRONMENT").into(),
                     ],
                 ))
                 .await?;

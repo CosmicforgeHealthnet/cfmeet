@@ -66,8 +66,9 @@ pub const ACTING_USER_VERIFIED_EMAIL_HEADER: &str = "x-cf-acting-user-verified-e
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 /// Concurrent background shadow comparisons; beyond this a comparison is skipped.
 const SHADOW_CONCURRENCY: usize = 8;
-/// Member-list pages read for one organization (200 per page).
-const MAX_MEMBER_PAGES: usize = 10;
+/// Upper bound on member-list pages read for one organization (200 per page, i.e.
+/// 50,000 members). Larger organizations get an explicit error, never a truncated list.
+const MAX_MEMBER_PAGES: usize = 250;
 
 /// Which store answers organization questions (`ORGANIZATIONS_AUTHORITY_MODE`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +120,10 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     ),
     ("POST", "/internal/v1/organization-invitations/accept"),
     ("POST", "/internal/v1/organization-invitations/decline"),
+    // In-product invitations: the acting user's pending invitations, answered by id.
+    ("GET", "/internal/v1/organization-invitations/mine"),
+    ("POST", "/internal/v1/organization-invitations/{}/accept"),
+    ("POST", "/internal/v1/organization-invitations/{}/decline"),
     ("POST", "/internal/v1/organizations/{}/suspend"),
     ("POST", "/internal/v1/organizations/{}/reactivate"),
     ("POST", "/internal/v1/organizations/{}/archive"),
@@ -132,6 +137,8 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     // teams, team members and the organization policy (compare-and-swap), relayed with
     // the acting user; Organizations enforces organization.teams.manage /
     // organization.policies.manage and every team-role rule.
+    // Gap audit G11: the OWNER's export of the organization's data.
+    ("GET", "/internal/v1/organizations/{}/export"),
     ("GET", "/internal/v1/organizations/{}/teams"),
     ("POST", "/internal/v1/organizations/{}/teams"),
     ("GET", "/internal/v1/organizations/{}/teams/{}"),
@@ -154,6 +161,32 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     ("GET", "/internal/v1/admin/organizations"),
     ("POST", "/internal/v1/admin/organizations"),
     ("PATCH", "/internal/v1/admin/organizations/{}"),
+    // Operator recovery: appoint an owner (platform administrators only).
+    ("POST", "/internal/v1/admin/organizations/{}/owners"),
+    // Gap audit G10: operator provisioning, service bindings and event delivery, reached
+    // only through the platform-administrator endpoints of `handlers::v2::organizations`.
+    (
+        "POST",
+        "/internal/v1/admin/organizations/{}/provisioning/retry",
+    ),
+    (
+        "GET",
+        "/internal/v1/admin/organizations/{}/scopes/primary/service-bindings/calling",
+    ),
+    (
+        "GET",
+        "/internal/v1/admin/organizations/{}/scopes/primary/service-bindings/messaging",
+    ),
+    (
+        "POST",
+        "/internal/v1/admin/organizations/{}/scopes/primary/service-bindings/calling/rotate",
+    ),
+    (
+        "POST",
+        "/internal/v1/admin/organizations/{}/scopes/primary/service-bindings/messaging/rotate",
+    ),
+    ("GET", "/internal/v1/admin/event-delivery"),
+    ("POST", "/internal/v1/admin/event-delivery/replay"),
 ];
 
 /// `true` only for an exact [`RELAY_ROUTES`] match.
@@ -666,6 +699,11 @@ pub struct EffectiveOrganizationPolicy {
     pub meetings_enabled: bool,
     pub messaging_enabled: bool,
     pub calling_enabled: bool,
+    /// Gap audit G6: whether colleague search may surface the organization's members
+    /// (`memberDirectory.searchable`; true when absent).
+    pub directory_searchable: bool,
+    /// Gap audit G6: the organization's retention hint in days (`null`: none).
+    pub retention_hint_days: Option<i64>,
 }
 
 impl EffectiveOrganizationPolicy {
@@ -681,6 +719,12 @@ impl EffectiveOrganizationPolicy {
             meetings_enabled: features["meetings"].as_bool()?,
             messaging_enabled: features["messaging"].as_bool()?,
             calling_enabled: features["calling"].as_bool()?,
+            directory_searchable: v["constraints"]["memberDirectory"]["searchable"]
+                .as_bool()
+                .unwrap_or(true),
+            retention_hint_days: v["constraints"]["retentionHintDays"]
+                .as_i64()
+                .filter(|d| *d > 0),
         })
     }
 }
@@ -1025,7 +1069,63 @@ impl OrganizationsAuthority {
                 _ => return Ok(out),
             }
         }
-        Ok(out)
+        // Never answer with a silently truncated list (membership decisions read it).
+        tracing::error!(%organization, "organization member list exceeds the supported size");
+        Err(AuthorityError::Unavailable(Unavailable(
+            "organization member list exceeds the supported size",
+        )))
+    }
+
+    /// Gap audit G7: the user ids of a team's ACTIVE members, read for the acting user
+    /// (Organizations decides whether they may see the team). At most 500 members.
+    pub async fn team_member_users(
+        &self,
+        organization: Uuid,
+        team: Uuid,
+        actor: &ActingUser,
+    ) -> Result<Vec<Uuid>, AuthorityError> {
+        let mut out = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..3 {
+            let mut query = vec![("limit".to_string(), "200".to_string())];
+            if let Some(c) = &cursor {
+                query.push(("cursor".to_string(), c.clone()));
+            }
+            let body = self
+                .read(
+                    &Call::new(
+                        Method::GET,
+                        format!("/internal/v1/organizations/{organization}/teams/{team}/members"),
+                    )
+                    .query(query)
+                    .actor(actor),
+                )
+                .await?;
+            let items =
+                body["items"]
+                    .as_array()
+                    .ok_or(AuthorityError::Unavailable(Unavailable(
+                        "malformed team member list",
+                    )))?;
+            for item in items {
+                if item["status"].as_str().is_some_and(|s| s != "ACTIVE") {
+                    continue;
+                }
+                if let Some(u) = item["userId"]
+                    .as_str()
+                    .and_then(|u| Uuid::parse_str(u).ok())
+                {
+                    out.push(u);
+                }
+            }
+            match body["nextCursor"].as_str() {
+                Some(next) if !next.is_empty() => cursor = Some(next.to_string()),
+                _ => return Ok(out),
+            }
+        }
+        Err(AuthorityError::Unavailable(Unavailable(
+            "team is larger than a meeting invitation supports",
+        )))
     }
 
     /// `GET /internal/v1/users/{userId}/organizations` for the acting user.
@@ -1580,9 +1680,40 @@ pub async fn authoritative_colleagues(
     actor: &RegisteredActor,
     organizations: &[Uuid],
 ) -> Vec<Uuid> {
+    colleagues(authority, actor, organizations, false).await
+}
+
+/// Gap audit G6: the colleagues colleague SEARCH may surface: as
+/// [`authoritative_colleagues`], minus every organization whose policy turns its member
+/// directory's search off (`memberDirectory.searchable = false`). An unreadable policy
+/// counts as not searchable (fail closed for discovery only).
+pub async fn searchable_colleagues(
+    authority: &OrganizationsAuthority,
+    actor: &RegisteredActor,
+    organizations: &[Uuid],
+) -> Vec<Uuid> {
+    colleagues(authority, actor, organizations, true).await
+}
+
+async fn colleagues(
+    authority: &OrganizationsAuthority,
+    actor: &RegisteredActor,
+    organizations: &[Uuid],
+    search: bool,
+) -> Vec<Uuid> {
     let acting = ActingUser::of(actor);
     let mut people = BTreeSet::new();
     for org in organizations.iter().take(50) {
+        if search {
+            match authority.effective_policy(*org, &acting).await {
+                Ok(p) if p.directory_searchable => {}
+                Ok(_) => continue,
+                Err(_) => {
+                    tracing::warn!(organization_id = %org, "organization policy unavailable; omitted from colleague search");
+                    continue;
+                }
+            }
+        }
         match authority.members(*org, Some(&acting)).await {
             Ok(members) => people.extend(
                 members
@@ -1706,10 +1837,18 @@ mod tests {
                 Method::PUT,
                 format!("/internal/v1/organizations/{id}/policies"),
             ),
-            // Operator provisioning and service bindings stay outside the relay.
+            // Operator bindings are only read or rotated, never replaced or removed.
             (
-                Method::POST,
-                format!("/internal/v1/admin/organizations/{id}/provisioning/retry"),
+                Method::PUT,
+                format!(
+                    "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling"
+                ),
+            ),
+            (
+                Method::GET,
+                format!(
+                    "/internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/hub"
+                ),
             ),
             (
                 Method::GET,

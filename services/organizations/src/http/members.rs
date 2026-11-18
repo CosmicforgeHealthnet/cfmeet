@@ -124,6 +124,20 @@ async fn change_membership(
         // A removed member leaves every team (Section 6: only ACTIVE members are in teams).
         super::teams::end_team_memberships(txn, ctx, now, after.id).await?;
     }
+    if role_changed || status_changed {
+        // Invitations are only as good as their inviter: a removed, suspended or demoted
+        // member's pending invitations they could no longer issue are revoked.
+        super::invitations::revoke_unbacked(
+            txn,
+            ctx,
+            now,
+            after.organization_id,
+            after.user_id,
+            after.role(),
+            after.status() == MembershipStatus::Active,
+        )
+        .await?;
+    }
     let mut version = before.version;
     let status_event = |v: i64| -> Option<Event<'static>> {
         if !status_changed {
@@ -417,4 +431,92 @@ pub async fn transfer_ownership(
     let doc = store::organization_json(&txn, &org, Some(&me)).await?;
     txn.commit().await?;
     Ok(respond(StatusCode::OK, doc))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppointOwnerBody {
+    pub user_id: Uuid,
+    /// Why the operator intervenes (recorded in the audit event; 1–500 characters).
+    pub reason: String,
+}
+
+/// `POST /internal/v1/admin/organizations/{id}/owners` — operator recovery of an
+/// organization that lost its owner (for example the only owner's account was
+/// deactivated): makes `userId` an ACTIVE OWNER. An existing membership is promoted and
+/// re-activated; otherwise one is created (`joined_via = OPERATOR`). The operator's reason
+/// is audited. Requires `organization.administer`. Archived organizations are refused
+/// (archival is terminal). Idempotent: an ACTIVE OWNER is returned unchanged.
+pub async fn admin_appoint_owner(
+    State(state): State<AppState>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::OrganizationAdminister)?;
+    let (req, _): (AppointOwnerBody, Value) = parse(&body)?;
+    let reason = req.reason.trim();
+    if reason.is_empty() || reason.chars().count() > 500 || reason.chars().any(char::is_control) {
+        return Err(ApiError::validation(
+            "reason must be 1-500 characters without control characters",
+        ));
+    }
+    let txn = state.db.begin().await?;
+    let org = store::org(&txn, id, true)
+        .await?
+        .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
+    if org.status() == crate::domain::LifecycleStatus::Archived {
+        return Err(ApiError::new(ErrorCode::OrganizationArchived));
+    }
+    let now = db::now(&txn).await?;
+    let ctx = caller.as_operator();
+    let existing = store::current_membership(&txn, id, req.user_id, true).await?;
+    let (after, previous) = match existing {
+        Some(m) if m.role() == Role::Owner && m.status() == MembershipStatus::Active => {
+            txn.commit().await?;
+            return Ok(respond(StatusCode::OK, m.to_json()));
+        }
+        Some(m) => {
+            let previous = json!({ "role": m.role, "status": m.status });
+            let after = change_membership(
+                &txn,
+                &ctx,
+                now,
+                &m,
+                Role::Owner,
+                MembershipStatus::Active,
+                None,
+            )
+            .await?;
+            (after, previous)
+        }
+        None => {
+            let m: MembershipRow = db::one(
+                &txn,
+                &format!(
+                    "INSERT INTO organization_memberships (id, organization_id, user_id, role, status, joined_via, created_by, created_at, updated_at, version) \
+                     VALUES ($1, $2, $3, 'OWNER', 'ACTIVE', 'OPERATOR', $4, $5, $5, 1) RETURNING {MEMBERSHIP_COLUMNS}"
+                ),
+                vec![Uuid::new_v4().into(), id.into(), req.user_id.into(), ctx.user_id.into(), now.into()],
+            )
+            .await?
+            .ok_or(ApiError::new(ErrorCode::ServiceUnavailable))?;
+            store::history(&txn, &ctx, now, None, &m, "CREATED").await?;
+            store::emit_membership_activated(&txn, &ctx, now, &m).await?;
+            (m, Value::Null)
+        }
+    };
+    store::audit(
+        &txn,
+        &ctx,
+        now,
+        Some(id),
+        "membership.owner_appointed",
+        "membership",
+        Some(after.id),
+        json!({ "userId": after.user_id, "previous": previous, "reason": reason }),
+    )
+    .await?;
+    txn.commit().await?;
+    Ok(respond(StatusCode::OK, after.to_json()))
 }

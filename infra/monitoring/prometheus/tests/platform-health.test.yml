@@ -1,0 +1,139 @@
+# promtool unit tests for ../rules/platform-health.rules.yml (backend gap audit P3 / P4).
+# Run: promtool test rules infra/monitoring/prometheus/tests/*.test.yml
+
+rule_files:
+  - ../rules/platform-health.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a failing gateway readiness probe pages after 3 minutes; a passing one does not
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="health-probes", instance="http://cfmeet-api-gateway:8099/ready", service="api-gateway"}'
+        values: '1x5 0x10'
+      - series: 'probe_success{job="health-probes", instance="http://cfmeet-developer-platform:8098/ready", service="developer-platform"}'
+        values: '1x15'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ApiGatewayUnavailable
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: ApiGatewayUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: api-gateway
+            exp_annotations:
+              summary: "API Gateway readiness probe failing"
+              description: "GET /ready on cfmeet-api-gateway has failed for 3 minutes (process down, unreachable or not ready). Developer Platform API traffic through the gateway is failing."
+              runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+      - eval_time: 12m
+        alertname: DeveloperPlatformUnavailable
+        exp_alerts: []
+
+  - name: a failing Developer Platform readiness probe pages
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="health-probes", instance="http://cfmeet-developer-platform:8098/ready", service="developer-platform"}'
+        values: '1x5 0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DeveloperPlatformUnavailable
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: DeveloperPlatformUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: developer-platform
+            exp_annotations:
+              summary: "Developer Platform readiness probe failing"
+              description: "GET /ready on cfmeet-developer-platform has failed for 3 minutes (database unavailable, migrations pending or process down)."
+              runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+  - name: a failing Organizations readiness probe pages
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="health-probes", instance="http://cfmeet-organizations:8101/ready", service="organizations"}'
+        values: '1x5 0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: OrganizationsUnavailable
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: OrganizationsUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: organizations
+            exp_annotations:
+              summary: "Organizations readiness probe failing"
+              description: "GET /ready on cfmeet-organizations has failed for 3 minutes (database unavailable, migrations pending or process down)."
+              runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+  - name: a failing Communications readiness probe pages
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="health-probes", instance="http://cfmeet-communications:8080/ready", service="communications"}'
+        values: '1x5 0x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CommunicationsUnavailable
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: CommunicationsUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: communications
+            exp_annotations:
+              summary: "Communications readiness probe failing"
+              description: "GET /ready on cfmeet-communications has failed for 3 minutes (database unavailable, migrations pending or process down)."
+              runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+  - name: another service's failing probe warns under its own service label
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="health-probes", instance="http://cfmeet-calling:8090/health", service="calling"}'
+        values: '1x5 0x10'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ServiceHealthProbeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              approval: documented
+              service: calling
+            exp_annotations:
+              summary: "A CF Meet service readiness probe is failing"
+              description: "The health or readiness route of calling has failed for 5 minutes. Services with metrics also raise their own scrape alert."
+              runbook_url: "docs/operations/monitoring-alerts.md#health-probes"
+
+  - name: a stale worker heartbeat pages; a fresh one does not
+    interval: 1m
+    input_series:
+      - series: 'cfmeet_devplat_worker_heartbeat_age_seconds{job="developer-platform-heartbeat", instance="cfmeet-heartbeat-exporter:9399"}'
+        values: '5x5 400x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DeveloperPlatformWorkerHeartbeatStale
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: DeveloperPlatformWorkerHeartbeatStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              approval: documented
+              service: developer-platform
+            exp_annotations:
+              summary: "Developer Platform worker heartbeat is stale"
+              description: "No production worker has recorded a heartbeat for more than 5 minutes (the pass interval is 5 s). Invitation expiry, credential sweeps, reference reconciliation and webhook delivery have stopped."
+              runbook_url: "docs/operations/monitoring-alerts.md#developer-platform-worker-heartbeat"
+      - eval_time: 12m
+        alertname: DeveloperPlatformWorkerHeartbeatUnreadable
+        exp_alerts: []

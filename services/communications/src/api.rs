@@ -94,6 +94,14 @@ pub fn app(state: State) -> Router {
             post(crate::internal::suspend),
         )
         .route(
+            "/internal/v1/communications/admin/reports/list",
+            post(crate::internal::list_reports),
+        )
+        .route(
+            "/internal/v1/communications/admin/reports/review",
+            post(crate::internal::review_report),
+        )
+        .route(
             "/internal/v1/communications/verification/callback",
             post(crate::internal::phone_deferred),
         )
@@ -275,6 +283,7 @@ async fn resolve_principal(
                 credential_issued_at: None,
                 credential_principal_id: None,
                 conversation_id: None,
+                mentioned: None,
             },
         )
         .await?;
@@ -538,6 +547,9 @@ async fn dispatch_inner(
         ("GET", ["events"]) => s.changes(p, &r.query, true).await,
         ("GET", ["calls", "history"]) => s.call_history(scope, p, &r.query).await,
         ("GET", ["calls", call, "context"]) => s.call_context(scope, p, id(call)?).await,
+        ("POST", ["calls", call, "participants"]) => {
+            s.add_contacts_to_call(scope, p, id(call)?, body(&r)).await
+        }
         ("POST", ["contacts", contact, "calls"]) => {
             s.call_contact(scope, p, id(contact)?, body(&r)).await
         }

@@ -498,6 +498,13 @@ pub static ROUTES: &[RelayRoute] = &[
         &[],
         false,
     ),
+    // Gap audit S3: the owner hands the conversation over.
+    r(
+        Method::POST,
+        &[Lit("conversations"), Id, Lit("owner")],
+        &[],
+        false,
+    ),
     r(
         Method::GET,
         &[Lit("conversations"), Id, Lit("bans")],
@@ -965,6 +972,7 @@ mod tests {
             (Method::POST, format!("v1/conversations/{C}/mls/commits")),
             (Method::PATCH, format!("v1/conversations/{C}/members/{C}")),
             (Method::POST, format!("v1/conversations/{C}/bans")),
+            (Method::POST, format!("v1/conversations/{C}/owner")),
             (
                 Method::PUT,
                 format!("v1/conversations/{C}/messages/{C}/reactions/:thumbsup:"),

@@ -713,3 +713,260 @@ async fn validation_errors_name_the_public_field_with_structured_details() {
         "title: Title must be between 1 and 200 characters"
     );
 }
+
+/// Gap audit A24: a wrong sign-in code for an existing account is audited (off the request
+/// path); an unknown address leaves no event.
+#[tokio::test]
+async fn wrong_sign_in_codes_are_audited_for_existing_accounts() {
+    let app = app_with_redis!();
+    let email = format!(
+        "wrongcode-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..10]
+    );
+    let id = email_user(&app, &email, "active").await;
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": email }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let code = mailed_code(&app, &email).await;
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/otp/verify",
+            Auth::None,
+            json!({ "email": email, "code": wrong }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let sql = format!(
+        "SELECT count(*) FROM account_security_events WHERE user_id = '{id}' \
+          AND event_type = 'SIGN_IN_CODE' AND outcome = 'FAILURE'"
+    );
+    let mut seen = 0;
+    for _ in 0..50 {
+        seen = app.scalar(&sql).await;
+        if seen > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(seen, 1);
+}
+
+/// Gap audit A17: usernames differ by more than case; the database enforces
+/// case-insensitive uniqueness of emails and usernames, and administrators see the report.
+#[tokio::test]
+async fn identities_are_unique_regardless_of_case() {
+    let app = app_with_redis!();
+    let a = format!(
+        "caseA-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let id = email_user(&app, &a, "active").await;
+    // The same address in another case cannot become a second account.
+    let dup = app
+        .db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO users (id, username, email, auth_type, role, status, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'local', 'user', 'active'::user_status, now(), now())",
+            [
+                Uuid::new_v4().into(),
+                format!("u_{}", &Uuid::new_v4().simple().to_string()[..10]).into(),
+                a.to_uppercase().into(),
+            ],
+        ))
+        .await;
+    assert!(dup.is_err(), "case-only duplicate email accepted");
+    let name: String = app
+        .db
+        .conn
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT username FROM users WHERE id = $1",
+            [id.into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "username")
+        .unwrap();
+    assert!(backend::services::account_security::username_taken(
+        &app.db.conn,
+        &name.to_uppercase(),
+        None
+    )
+    .await
+    .unwrap());
+    assert!(!backend::services::account_security::username_taken(
+        &app.db.conn,
+        &name.to_uppercase(),
+        Some(id)
+    )
+    .await
+    .unwrap());
+    let admin = app.admin("identity-admin").await;
+    let (s, v) = app
+        .get(
+            "/api/v2/admin/identity-duplicates",
+            Auth::Bearer(&admin.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["email"]["enforced"], true, "{v}");
+    assert_eq!(v["username"]["enforced"], true, "{v}");
+    let (s, v) = app
+        .post(
+            "/api/v2/admin/identity-duplicates/enforce",
+            Auth::Bearer(&admin.token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = app
+        .get("/api/v2/admin/identity-duplicates", Auth::None)
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+async fn verify_with_code(app: &TestApp, email: &str) -> (StatusCode, Value) {
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": email }),
+        )
+        .await;
+    assert!(s.is_success(), "{v}");
+    let code = mailed_code(app, email).await;
+    app.post(
+        "/api/v1/auth/otp/verify",
+        Auth::None,
+        json!({ "email": email, "code": code }),
+    )
+    .await
+}
+
+/// Gap audit A1: an authenticator app is enrolled with a current code; sign-in then needs
+/// it (or a single-use recovery code); a code's time step is accepted once; turning it off
+/// needs a DISABLE_MFA step-up.
+#[tokio::test]
+async fn an_authenticator_app_guards_sign_in() {
+    use backend::services::mfa;
+    let app = app_with_redis!();
+    let email = format!(
+        "mfa-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..10]
+    );
+    let id = email_user(&app, &email, "active").await;
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let access = v["access_token"].as_str().unwrap().to_string();
+
+    let (s, setup) = app
+        .post(
+            "/api/v2/me/mfa/totp/setup",
+            Auth::Bearer(&access),
+            json!({}),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{setup}");
+    assert!(setup["otpauthUri"]
+        .as_str()
+        .unwrap()
+        .starts_with("otpauth://totp/"));
+    let secret = mfa::base32_decode(setup["secret"].as_str().unwrap()).unwrap();
+    // Not on until confirmed: sign-in still answers tokens.
+    let (s, _) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/totp/confirm",
+            Auth::Bearer(&access),
+            json!({ "code": "000000" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let step = mfa::step_now();
+    let (s, v) = app
+        .post(
+            "/api/v2/me/mfa/totp/confirm",
+            Auth::Bearer(&access),
+            json!({ "code": mfa::code_at(&secret, step) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let recovery: Vec<String> = serde_json::from_value(v["recoveryCodes"].clone()).unwrap();
+    assert_eq!(recovery.len(), 10);
+    let (_, status) = app.get("/api/v2/me/mfa", Auth::Bearer(&access)).await;
+    assert_eq!(status["totpEnabled"], true);
+
+    // Sign-in now stops at the second factor.
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
+    assert_eq!(code(&v), "MFA_REQUIRED");
+    let ticket = v["error"]["mfaTicket"].as_str().unwrap().to_string();
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": "123456" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // The code used to confirm (same step) is not accepted again; a recovery code works once.
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": mfa::code_at(&secret, step) }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, v) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": recovery[0] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["access_token"].is_string());
+    let (s, v) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let ticket = v["error"]["mfaTicket"].as_str().unwrap().to_string();
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/mfa/verify",
+            Auth::None,
+            json!({ "mfaTicket": ticket, "code": recovery[0] }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "a recovery code is single use");
+
+    // Turning it off needs the step-up.
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/disable",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": "x" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let token = app.step_up_token(&access, id, "DISABLE_MFA").await;
+    let (s, _) = app
+        .post(
+            "/api/v2/me/mfa/disable",
+            Auth::Bearer(&access),
+            json!({ "stepUpToken": token }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = verify_with_code(&app, &email).await;
+    assert_eq!(s, StatusCode::OK);
+}

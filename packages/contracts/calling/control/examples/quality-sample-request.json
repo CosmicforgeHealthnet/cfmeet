@@ -1,0 +1,5 @@
+{
+  "jitterMs": 4.25,
+  "packetLossPercent": 0.5,
+  "rttMs": 60
+}

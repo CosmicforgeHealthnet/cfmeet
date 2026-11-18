@@ -49,12 +49,38 @@ const BATCH_SIZE: u64 = 20;
 /// Background worker for auto-ending meetings
 pub struct MeetingAutoEndWorker {
     db: DatabaseConnection,
+    /// Gap audit M7: the provider whose legacy room is terminated when a meeting ends.
+    rtc: Option<std::sync::Arc<dyn crate::services::rtc_provider::RtcProvider>>,
+    /// Gap audit M9: keeps the v2 view of each changed meeting current.
+    mirror: Option<std::sync::Arc<crate::services::compat::CompatService>>,
 }
 
 impl MeetingAutoEndWorker {
     /// Create a new MeetingAutoEndWorker
     pub fn new(db: DatabaseConnection) -> Self {
-        Self { db }
+        Self {
+            db,
+            rtc: None,
+            mirror: None,
+        }
+    }
+
+    /// Gap audit M9: mirror each meeting this worker changes into its v2 view.
+    pub fn with_mirror(
+        mut self,
+        compat: std::sync::Arc<crate::services::compat::CompatService>,
+    ) -> Self {
+        self.mirror = Some(compat);
+        self
+    }
+
+    /// Also terminate each ended meeting's media room through `rtc`.
+    pub fn with_rtc(
+        mut self,
+        rtc: std::sync::Arc<dyn crate::services::rtc_provider::RtcProvider>,
+    ) -> Self {
+        self.rtc = Some(rtc);
+        self
     }
 
     /// Start the worker loop
@@ -203,6 +229,18 @@ impl MeetingAutoEndWorker {
         txn.commit()
             .await
             .map_err(|e| format!("Failed to commit auto-end: {}", e))?;
+        if let Some(compat) = &self.mirror {
+            compat.mirror_legacy_write(meeting_id).await;
+        }
+        if let Some(rtc) = &self.rtc {
+            crate::services::legacy_media::terminate(
+                rtc.as_ref(),
+                meeting_id,
+                &meeting_identifier,
+                "LEGACY_MEETING_AUTO_ENDED",
+            )
+            .await;
+        }
 
         tracing::info!(
             "Auto-ended meeting {} ({}) at scheduled end time",
@@ -233,8 +271,18 @@ impl MeetingAutoEndWorkerHandle {
 /// Spawn the meeting auto-end worker as a background task
 ///
 /// Returns a handle for shutdown.
-pub fn spawn_meeting_auto_end_worker(db: DatabaseConnection) -> MeetingAutoEndWorkerHandle {
-    let worker = MeetingAutoEndWorker::new(db);
+pub fn spawn_meeting_auto_end_worker(
+    db: DatabaseConnection,
+    rtc: Option<std::sync::Arc<dyn crate::services::rtc_provider::RtcProvider>>,
+    mirror: Option<std::sync::Arc<crate::services::compat::CompatService>>,
+) -> MeetingAutoEndWorkerHandle {
+    let mut worker = match rtc {
+        Some(rtc) => MeetingAutoEndWorker::new(db).with_rtc(rtc),
+        None => MeetingAutoEndWorker::new(db),
+    };
+    if let Some(m) = mirror {
+        worker = worker.with_mirror(m);
+    }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 

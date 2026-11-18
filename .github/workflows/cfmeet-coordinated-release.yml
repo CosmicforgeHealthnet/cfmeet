@@ -19,13 +19,13 @@ on:
         type: choice
         required: true
         default: inspect
-        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, activate-organization-bindings, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, org-cutover-first-activation, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-personal-encryption, activate-web-push, activate-web-origins, activate-gateway-docs, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, activate-production-access-review, activate-meeting-notice-preferences, activate-public-internal-denial, activate-notifications-owners, activate-notifications-routing, activate-notifications-relay, activate-messaging-publications, activate-organizations-publications, activate-communications-publications, activate-developer-publications, activate-meeting-publications, activate-calling-publications, activate-notifications-push, activate-messaging-push-mirror, activate-calling-push, activate-critical-lane, activate-preference-copy, activate-preference-authority, activate-notifications-email, activate-notification-fence, developer-acceptance, organization-acceptance, diagnose, email-acceptance, developer-access-review, notifications-acceptance]
+        options: [inspect, backup, provision, release, verify, rollback, certify, activate-provisioning, activate-org-events, activate-organization-bindings, org-cutover-export, org-cutover-import, org-cutover-shadow, org-cutover-authoritative, org-cutover-first-activation, activate-enterprise-calling, activate-developer-platform, activate-gateway-routing, activate-first-party-features, activate-personal-encryption, activate-web-push, activate-web-origins, activate-gateway-docs, activate-edge-rate-limits, activate-token-ceiling, activate-service-key-publish, activate-service-key-switch, activate-service-key-retire, activate-developer-console, activate-developer-webhooks, activate-gateway-families, activate-usage-export, activate-resend-email, activate-production-access-review, activate-meeting-notice-preferences, activate-public-internal-denial, activate-notifications-owners, activate-notifications-routing, activate-notifications-relay, activate-messaging-publications, activate-organizations-publications, activate-communications-publications, activate-developer-publications, activate-meeting-publications, activate-calling-publications, activate-notifications-push, activate-messaging-push-mirror, activate-calling-push, activate-critical-lane, activate-preference-copy, activate-preference-authority, activate-notifications-email, activate-notification-fence, developer-acceptance, organization-acceptance, diagnose, email-acceptance, developer-access-review, notifications-acceptance, deploy-monitoring]
       release_sha:
         description: 'Full 40-character commit SHA; must equal the main head this run is dispatched on'
         type: string
         required: true
       confirm:
-        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated); developer-access-review: list | get | review | approve | reject; email-acceptance: otp'
+        description: 'Owner gate confirmations for cutover steps only (lowercase words, comma separated); developer-access-review: list | get | review | approve | reject; email-acceptance: otp; activate-service-key-*: service=<name>'
         type: string
         required: false
         default: ''
@@ -367,6 +367,40 @@ jobs:
               | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > /opt/cfmeet-core/coordinated/developer-access-review.json"
           fi
 
+      - name: Alertmanager receiver URLs on the VPS (from environment secrets, never printed)
+        # Backend gap audit P1: the receivers of the production Alertmanager are driven only
+        # by the production environment secrets CFMEET_ALERT_WEBHOOK_URL (generic Alertmanager
+        # webhook JSON) and CFMEET_ALERT_SLACK_WEBHOOK_URL (Slack-compatible incoming webhook),
+        # both optional. A set secret is written to a root-only file of the VPS secret store;
+        # an unset one removes its file, and monitoring_stack.py then deploys Alertmanager
+        # without that integration. This step never fails the operation.
+        if: inputs.operation == 'release' || inputs.operation == 'deploy-monitoring'
+        continue-on-error: true
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          CFMEET_ALERT_WEBHOOK_URL: ${{ secrets.CFMEET_ALERT_WEBHOOK_URL }}
+          CFMEET_ALERT_SLACK_WEBHOOK_URL: ${{ secrets.CFMEET_ALERT_SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes)
+          valid_url() {
+            python3 -c 'import os, re, sys; v = os.environ[sys.argv[1]]; sys.exit(0 if re.fullmatch(r"https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[\x21-\x7e]{0,2000}", v) else 1)' "$1"
+          }
+          for pair in CFMEET_ALERT_WEBHOOK_URL:alertmanager-webhook-url CFMEET_ALERT_SLACK_WEBHOOK_URL:alertmanager-slack-webhook-url; do
+            name="${pair%%:*}"; file="/opt/cfmeet-core/secrets/${pair#*:}"
+            if [[ -z "${!name}" ]]; then
+              ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f '$file'"
+              echo "::warning::$name is not set: Alertmanager runs without this integration (alerts are not delivered through it)"
+            elif valid_url "$name"; then
+              printf '%s\n' "${!name}" | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; cat > '$file.tmp' && mv '$file.tmp' '$file'"
+              echo "$name: installed"
+            else
+              ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "rm -f '$file'"
+              echo "::warning::$name is not an https URL: not installed, Alertmanager runs without this integration"
+            fi
+          done
+
       - name: Run the operation on the VPS
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -379,10 +413,14 @@ jobs:
           ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=40)
           [[ "$OPERATION" =~ ^[a-z][a-z-]{1,40}$ ]]
           [[ "$RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
-          [[ "$CONFIRM" =~ ^[a-z,-]{0,120}$ ]] || { echo "::error::confirm may contain only a-z, comma and hyphen"; exit 1; }
+          # a-z, comma and hyphen; `service=<name>` (digits allowed) for activate-service-key-*.
+          [[ "$CONFIRM" =~ ^[a-z0-9,=-]{0,120}$ ]] || { echo "::error::confirm may contain only a-z, 0-9, comma, equals and hyphen"; exit 1; }
           run_id="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           remote="/opt/cfmeet-core/coordinated-releases/$GITHUB_SHA"
           cp services/calling/tests/rtc/rtc_client.py infra/calling/production/rtc_client.py
+          # The monitoring stack's rules, routing and exporter configuration (monitoring_stack.py).
+          rm -rf infra/calling/production/monitoring-config
+          cp -R infra/monitoring infra/calling/production/monitoring-config
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "umask 077; mkdir -p '$remote'"
           tar -C infra/calling/production -cf - . | ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "tar -C '$remote' -xf -"
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" \

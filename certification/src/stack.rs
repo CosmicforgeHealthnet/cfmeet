@@ -50,6 +50,7 @@ pub const BINARIES: &[&str] = &[
     "organization-integration-migration",
     "lifecycle-delivery-migration",
     "notification-fence-migration",
+    "gap-closure-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -360,6 +361,8 @@ impl Stack {
             // Notification Service N7: routing fence v1 (every category LEGACY_ONLY, so the
             // legacy-table guard triggers are inert); journeys run with them installed.
             db::migrate(&self.bin("notification-fence-migration"), &url)?;
+            // Backend gap audit: its own additive history.
+            db::migrate(&self.bin("gap-closure-migration"), &url)?;
         }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under

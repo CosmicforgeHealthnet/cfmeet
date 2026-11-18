@@ -136,6 +136,9 @@ async fn template(admin: &str) -> String {
             messaging_migration::NotificationFenceMigrator::up(&tmpl, None)
                 .await
                 .expect("routing fence migrations apply");
+            messaging_migration::GapClosureMigrator::up(&tmpl, None)
+                .await
+                .expect("gap-closure migrations apply");
             tmpl.close().await.ok();
             name
         })
@@ -364,8 +367,11 @@ fn communications_key() -> &'static ServiceSigningKey {
     KEY.get_or_init(|| key("communications-test-1"))
 }
 
-pub const MEETING_PERMISSIONS: &[&str] =
-    &["messaging-application.delegate", "messaging-meeting.sync"];
+pub const MEETING_PERMISSIONS: &[&str] = &[
+    "messaging-application.delegate",
+    "messaging-meeting.sync",
+    "messaging-organization.govern",
+];
 
 fn peer_keys() -> &'static (ServiceSigningKey, ServiceSigningKey, ServiceSigningKey) {
     static KEYS: std::sync::OnceLock<(ServiceSigningKey, ServiceSigningKey, ServiceSigningKey)> =

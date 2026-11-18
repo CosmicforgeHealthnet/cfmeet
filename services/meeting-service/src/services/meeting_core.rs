@@ -412,11 +412,33 @@ pub async fn actor_space_role<C: ConnectionTrait>(
     actor: &ActorContext,
 ) -> ApiResult<Option<(Role, RoleSource)>> {
     match &actor.kind {
-        ActorKind::RegisteredUser(r) => space_role(conn, space, r).await,
+        ActorKind::RegisteredUser(r) => {
+            let role = space_role(conn, space, r).await?;
+            Ok(organization_bound(
+                space,
+                &actor.verified_organizations,
+                role,
+            ))
+        }
         ActorKind::Platform(p) if platform_owns(space, p) => {
             Ok(Some((Role::Owner, RoleSource::Owner)))
         }
         _ => Ok(None),
+    }
+}
+
+/// An organization space's ownership lasts only while its owner is a verified member of
+/// that organization: someone who left or was removed keeps no owner control of the spaces
+/// they created there (the organization's managers can reassign them). A space membership
+/// role (an invited co-host, for example) is unaffected: it was granted explicitly.
+pub fn organization_bound(
+    space: &meeting_spaces::Model,
+    verified_organizations: &[Uuid],
+    role: Option<(Role, RoleSource)>,
+) -> Option<(Role, RoleSource)> {
+    match (role, space.organization_id) {
+        (Some((_, RoleSource::Owner)), Some(org)) if !verified_organizations.contains(&org) => None,
+        (role, _) => role,
     }
 }
 

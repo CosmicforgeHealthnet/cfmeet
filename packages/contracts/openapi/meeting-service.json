@@ -741,6 +741,44 @@
         ]
       }
     },
+    "/api/v1/auth/mfa/verify": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Finish a sign-in with the second factor",
+        "description": "Gap audit A1: when an account has an authenticator app, `POST /api/v1/auth/otp/verify` (and\n`/otp/verify-link`) answer `401 MFA_REQUIRED` with a one-time `mfaTicket` (valid 5 minutes)\ninstead of tokens. Send it here with the 6-digit code from the authenticator app, or one of\nthe account's recovery codes; the answer is then exactly that of a completed sign-in. A wrong\ncode gets 400; after 5 attempts the ticket is destroyed (429: sign in again).",
+        "operationId": "verify_mfa",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtpVerifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired code or ticket"
+          },
+          "429": {
+            "description": "Too many attempts"
+          }
+        }
+      }
+    },
     "/api/v1/auth/oauth/google": {
       "get": {
         "tags": [
@@ -825,6 +863,50 @@
           },
           "400": {
             "description": "Invalid or expired exchange code"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/oauth/google/native": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Sign in with Google on a native app",
+        "description": "Gap audit A4: for the mobile apps. Send the Google ID token the platform SDK returned (and the\nnonce it was requested with, when one was used). The token's signature is verified against\nGoogle's published keys and every claim is checked (issuer, audience = the web client or a\nconfigured native client, expiry, verified email). The answer is that of any sign-in; an\naccount with two-step sign-in gets `401 MFA_REQUIRED` with an `mfaTicket` instead.",
+        "operationId": "oauth_google_native",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleNativeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OtpVerifyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ID token rejected, or MFA_REQUIRED"
+          },
+          "403": {
+            "description": "Account has been deactivated"
+          },
+          "409": {
+            "description": "The address belongs to an account linked to another Google identity"
+          },
+          "503": {
+            "description": "Google's keys are unreachable"
           }
         }
       }
@@ -2718,6 +2800,234 @@
         ]
       }
     },
+    "/api/v2/admin/identity-duplicates": {
+      "get": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Report case-only duplicate accounts (platform administrators)",
+        "description": "Gap audit A17: emails and usernames are unique regardless of case. The database enforces\nit once no case-only duplicates remain; this lists the account ids of each duplicate\ngroup (no addresses) and whether each rule is enforced yet.",
+        "operationId": "v2_admin_identity_duplicates",
+        "responses": {
+          "200": {
+            "description": "Report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityDuplicatesReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/identity-duplicates/enforce": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Enforce case-insensitive uniqueness where possible (platform administrators)",
+        "description": "Gap audit A17: creates each unique index whose field has no case-only duplicates left\n(idempotent) and returns the resulting report.",
+        "operationId": "v2_admin_identity_duplicates_enforce",
+        "responses": {
+          "200": {
+            "description": "Report after enforcement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityDuplicatesReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organization-event-delivery": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization event delivery status (platform administrators).",
+        "description": "Gap audit G10: pending, failing and dead-lettered organization events per consumer.",
+        "operationId": "v2_admin_organization_event_delivery",
+        "responses": {
+          "200": {
+            "description": "Delivery status (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organization-event-delivery/replay": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Replay dead-lettered organization events (platform administrators).",
+        "description": "Gap audit G10: returns dead-lettered rows (all, one consumer's, or listed events) to\nPENDING with a fresh attempt budget. Audited by Organizations.",
+        "operationId": "v2_admin_replay_organization_events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayOrganizationEventsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Replayed (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/admin/organizations": {
       "get": {
         "tags": [
@@ -2963,6 +3273,517 @@
         ]
       }
     },
+    "/api/v2/admin/organizations/{id}/owners": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Appoint an organization owner (platform administrators).",
+        "description": "Recovers an organization that lost its owner, for example because the only owner's account\nwas deactivated: makes `userId` an ACTIVE OWNER (an existing membership is promoted, otherwise\none is created). The reason is recorded in the organization's audit history. Archived\norganizations are refused. Requires a platform administrator bearer token and an authoritative\nOrganizations Service.",
+        "operationId": "v2_appoint_organization_owner",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppointOrganizationOwnerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The appointed OWNER membership",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{id}/provisioning/retry": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Retry an organization's provisioning (platform administrators).",
+        "description": "Gap audit G10: re-runs the provisioning of an organization whose technical scope is not\nREADY (for example after a Platform Access outage). Archived organizations are refused.\nRequires a platform administrator and an authoritative Organizations Service.",
+        "operationId": "v2_admin_retry_organization_provisioning",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provisioning state (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Retry accepted (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{id}/service-bindings/{service}": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Read an organization's service binding (platform administrators).",
+        "description": "Gap audit G10: the Calling or Messaging binding of the organization's primary scope\n(ids, source, verification and credential expiry; never a secret).",
+        "operationId": "v2_admin_get_organization_service_binding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "description": "calling or messaging",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / not bound / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/organizations/{id}/service-bindings/{service}/rotate": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Rotate an organization's service-binding credential (platform administrators).",
+        "description": "Gap audit G10: Platform Access issues a successor credential for the AUTOMATIC binding\n(the predecessor is revoked) and Organizations records it (audited).",
+        "operationId": "v2_admin_rotate_organization_service_binding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "service",
+            "in": "path",
+            "description": "calling or messaging",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rotated binding (Organizations contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / not bound / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_ARCHIVED / operator binding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE (Organizations or Platform Access unreachable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/admin/users/{userId}/sessions/revoke": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "End every session of a user (platform administrators)",
+        "description": "Gap audit A20: ends every open sign-in of the account and every credential issued\nbefore now (the account revocation epoch), without suspending or deactivating it; the\nuser can sign in again. Hub, Messaging and Calling credentials end with them. Requires a\nplatform administrator and an audited reason.",
+        "operationId": "v2_admin_revoke_user_sessions",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The account",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminRevokeSessionsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionRevokeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (reason 1-500 characters)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "USER_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/avatars/{avatarId}": {
+      "get": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Get an avatar image",
+        "description": "Public and read-only: the image bytes of an uploaded avatar, with its content type. An\naddress never changes content (a new upload gets a new address), so it may be cached\nfor a long time. A replaced or removed image, or one of a deactivated or suspended\naccount, answers `404 AVATAR_NOT_FOUND`.",
+        "operationId": "v2_get_avatar",
+        "parameters": [
+          {
+            "name": "avatarId",
+            "in": "path",
+            "description": "Avatar id from the profile's avatarUrl",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image (image/png, image/jpeg or image/webp)",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "AVATAR_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/api/v2/conferences/{id}": {
       "get": {
         "tags": [
@@ -3094,7 +3915,7 @@
           "Artifacts (v2)"
         ],
         "summary": "Generate an attendance report, poll report or chat export (policy-gated).",
-        "description": "Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and\nstores it as a READY JSON artifact. Requires the export permission, and the meeting policy must\nallow the requested export type. Anonymous polls stay anonymous and private chat messages are\nnever exported.",
+        "description": "Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and\nstores it as a READY JSON artifact. Requires the export permission, and the meeting policy must\nallow the requested export type. Anonymous polls stay anonymous and private chat messages are\nnever exported. Without artifact storage in the deployment this answers `501\nARTIFACT_STORAGE_NOT_CONFIGURED`; `GET /api/v2/conferences/{id}/exports/{artifactType}`\nreturns the same report directly.",
         "operationId": "v2_generate_report",
         "parameters": [
           {
@@ -3131,6 +3952,16 @@
           },
           "403": {
             "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "ARTIFACT_STORAGE_NOT_CONFIGURED (use the inline export)",
             "content": {
               "application/json": {
                 "schema": {
@@ -5208,6 +6039,77 @@
         ]
       }
     },
+    "/api/v2/conferences/{id}/exports/{artifactType}": {
+      "get": {
+        "tags": [
+          "Artifacts (v2)"
+        ],
+        "summary": "Download an attendance report, poll report or chat export directly.",
+        "description": "Returns the `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` JSON itself instead of storing\nit as an artifact, so it works without artifact storage. Same rules as generating a stored\nreport: the export permission, the meeting policy for that export type, anonymous polls stay\nanonymous and private chat is never exported. Each download is audited.",
+        "operationId": "v2_export_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "artifactType",
+            "in": "path",
+            "description": "ATTENDANCE_REPORT, POLL_REPORT or CHAT_EXPORT",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
     "/api/v2/conferences/{id}/hand-raise": {
       "get": {
         "tags": [
@@ -6057,6 +6959,96 @@
             "participant_token": []
           }
         ]
+      },
+      "patch": {
+        "tags": [
+          "Chat (v2)"
+        ],
+        "summary": "Edit my message.",
+        "description": "The sender replaces the text of their own message (1–4000 characters) within 15 minutes of\nsending, while the conference is live; the message then shows `editedAt`. Deleted messages\ncannot be edited, and another person's private message answers MESSAGE_NOT_FOUND. Everyone\nwho can see the message gets a `chat.message_edited` event.",
+        "operationId": "v2_edit_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "description": "Message id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Edited message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MESSAGE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
       }
     },
     "/api/v2/conferences/{id}/participants": {
@@ -6065,7 +7057,7 @@
           "Participants (v2)"
         ],
         "summary": "Admitted participants (roster).",
-        "description": "Returns the participants currently ADMITTED to the conference, ordered by admission time.\nAvailable to admitted participants and to the space owner and members; other callers (including\nwaiting, denied, removed or banned participants) get PERMISSION_DENIED.",
+        "description": "Returns the participants currently ADMITTED to the conference, ordered by admission time.\nAvailable to admitted participants and to the space owner and members; other callers (including\nwaiting, denied, removed or banned participants) get PERMISSION_DENIED. A VIEWER (a webinar or\ntown-hall attendee) sees only the people running the session (presenters and above) and\nthemselves, never the other attendees.",
         "operationId": "v2_list_participants",
         "parameters": [
           {
@@ -10442,6 +11434,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -10500,6 +11502,170 @@
         },
         "security": [
           {}
+        ]
+      }
+    },
+    "/api/v2/me/account/delete": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Delete my account",
+        "description": "Gap audit A2: permanently deletes (anonymizes) the signed-in account after a\n`DELETE_ACCOUNT` step-up: the address, username, name, avatar, time zone, locale and any\npassword are removed and the account can never sign in again; the Google link is removed,\nmeeting memberships end, owned meeting spaces are archived and webinar registrations are\ncancelled; every sign-in and device ends, and Messaging, the Communications Hub and Calling\ncredentials end with them. The previous address receives one confirmation email.",
+        "operationId": "v2_delete_my_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - missing, wrong, used or expired step-up token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/avatar": {
+      "put": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Upload my avatar",
+        "description": "Sends the image itself as the request body (`Content-Type: image/png`, `image/jpeg` or\n`image/webp`; at most 512 KiB). Uploads need the service's https public address\n(`AVATAR_PUBLIC_BASE_URL`); without one they answer `404 FEATURE_DISABLED`. The image\nis recognised by its content; a body that is\nnot one of these images, or whose declared type does not match, answers `400\nVALIDATION_ERROR`. The profile's `avatarUrl` becomes the image's public, immutable\naddress (`/api/v2/avatars/{avatarId}`), replacing any earlier upload. Returns the\nupdated profile.",
+        "operationId": "v2_upload_my_avatar",
+        "requestBody": {
+          "description": "PNG, JPEG or WebP image, at most 512 KiB",
+          "content": {
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "REQUEST_TOO_LARGE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Remove my avatar",
+        "description": "Removes the uploaded avatar image (if any) and clears the profile's `avatarUrl`.\nReturns the updated profile. Removing when there is no avatar is not an error.",
+        "operationId": "v2_remove_my_avatar",
+        "responses": {
+          "200": {
+            "description": "Updated profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
         ]
       }
     },
@@ -10619,6 +11785,53 @@
           },
           "403": {
             "description": "PERMISSION_DENIED (organizationId)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/data-export": {
+      "get": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Export my personal data",
+        "description": "Gap audit A2: one JSON document of everything the Meeting Service holds about the\nsigned-in account (profile, sign-ins, linked devices, owned meeting spaces, memberships,\nwebinar registrations, conference participation and its own security events). Chats,\ncontacts and calls are held by Messaging, the Communications Hub and Calling, which the\ndocument names. Requires a session-bound sign-in.",
+        "operationId": "v2_export_my_data",
+        "responses": {
+          "200": {
+            "description": "The personal-data export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - the token has no session; sign in again",
             "content": {
               "application/json": {
                 "schema": {
@@ -11526,6 +12739,264 @@
         ]
       }
     },
+    "/api/v2/me/mfa": {
+      "get": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "My two-step sign-in state",
+        "description": "Gap audit A1: whether an authenticator app is enabled and how many unused recovery codes\nremain.",
+        "operationId": "v2_get_my_mfa",
+        "responses": {
+          "200": {
+            "description": "{totpEnabled, recoveryCodesRemaining}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/mfa/disable": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Turn two-step sign-in off",
+        "description": "Gap audit A1: removes the authenticator and its recovery codes after a `DISABLE_MFA` step-up\n(an emailed code). The account's address receives a security email.",
+        "operationId": "v2_disable_my_mfa",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaDisableRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Turned off"
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - missing, wrong, used or expired step-up token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/mfa/totp/confirm": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Enable the authenticator app",
+        "description": "Gap audit A1: confirms the enrolment with a current 6-digit code and returns 10 single-use\nrecovery codes (shown once). From now on every sign-in also needs a code. The account's\naddress receives a security email.",
+        "operationId": "v2_confirm_my_totp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaRecoveryCodes"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - the token has no session; sign in again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/mfa/totp/setup": {
+      "post": {
+        "tags": [
+          "Account security (v2)"
+        ],
+        "summary": "Start enrolling an authenticator app",
+        "description": "Gap audit A1: returns a new secret (and its `otpauth://` URI for a QR code). Nothing changes\nat sign-in until `POST /api/v2/me/mfa/totp/confirm` with a current code. 409 when an\nauthenticator is already enabled.",
+        "operationId": "v2_setup_my_totp",
+        "responses": {
+          "200": {
+            "description": "Secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaSetupResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "REAUTHENTICATION_REQUIRED - the token has no session; sign in again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/organization-invitations": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "My pending organization invitations.",
+        "description": "Lists the PENDING, unexpired invitations addressed to the signed-in account: those sent to\nits CF Meet ID and those sent to its verified email address. Each item names the\norganization, the offered role and the expiry; answer one with\n`POST /api/v2/organization-invitations/{invitationId}/accept` or `.../decline`, without\nthe emailed link. Newest first, at most 100. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_my_organization_invitations",
+        "responses": {
+          "200": {
+            "description": "Pending invitations for the signed-in account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyOrganizationInvitationList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/me/organizations": {
       "get": {
         "tags": [
@@ -11816,6 +13287,63 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (the account has a trusted device and this sign-in is not on one)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/sessions/revoke-others": {
+      "post": {
+        "tags": [
+          "Account sessions (v2)"
+        ],
+        "summary": "Sign out every other session",
+        "description": "Gap audit A20: ends every open sign-in of the account except the one making the\nrequest (each with its Hub, Messaging and Calling credentials and meeting media). The\naccount stays signed in here and keeps its linked devices. Once the account has a\ntrusted device, only a trusted device may do this.",
+        "operationId": "v2_revoke_other_account_sessions",
+        "responses": {
+          "200": {
+            "description": "Every other session ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionRevokeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (the account has a trusted device and this sign-in is not on one); REAUTHENTICATION_REQUIRED (a sign-in without a session id: sign in again)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -11858,6 +13386,16 @@
           },
           "401": {
             "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "DEVICE_NOT_TRUSTED (ending a trusted device's sign-in from a sign-in that is not on a trusted device)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12322,6 +13860,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -12753,6 +14301,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -13123,6 +14681,95 @@
           },
           "403": {
             "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/meeting-spaces/{id}/members/team": {
+      "post": {
+        "tags": [
+          "Members (v2)"
+        ],
+        "summary": "Add a team of the organization.",
+        "description": "Gap audit G7: for a meeting space of an organization, adds every active member of one of\nthe organization's teams with the given role, under the same rules as adding one member\n(managers only; a role you may grant). The Organizations Service decides whether you may see\nthe team. Team members who already belong, the owner, you and inactive accounts are skipped.\nAt most 500 team members.",
+        "operationId": "v2_add_team_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTeamMembersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddTeamMembersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
             "content": {
               "application/json": {
                 "schema": {
@@ -13761,7 +15408,7 @@
           "Registrations (v2)"
         ],
         "summary": "Registrations of a meeting space (organizer view).",
-        "description": "Returns up to 500 registrations of the space, newest first, including cancelled ones, with the\nattendee details collected at registration. Admission tokens are never returned. Requires a\nsigned-in owner, host or co-host of the space and webinar mode enabled.",
+        "description": "Returns the registrations of the space, newest first, including cancelled ones, with the\nattendee details collected at registration, `limit` (1-500, default 100) at a time; pass\n`nextCursor` as `after` for the next page. Admission tokens are never returned. Requires a\nsigned-in owner, host or co-host of the space and webinar mode enabled.",
         "operationId": "v2_list_registrations",
         "parameters": [
           {
@@ -13772,6 +15419,29 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Last registration id of the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-500 (default 100).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true,
+              "minimum": 0
             }
           }
         ],
@@ -13808,7 +15478,7 @@
           "Registrations (v2)"
         ],
         "summary": "Register for a webinar / town hall (public when the profile enables registration).",
-        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled; rate-limited per\nmeeting space.",
+        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
         "operationId": "v2_register",
         "parameters": [
           {
@@ -13874,7 +15544,7 @@
             }
           },
           "409": {
-            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE",
+            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL",
             "content": {
               "application/json": {
                 "schema": {
@@ -16051,6 +17721,176 @@
         ]
       }
     },
+    "/api/v2/organization-invitations/{invitationId}/accept": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Accept one of my organization invitations.",
+        "description": "Joins the organization with the invitation's role. The invitation must be addressed to the\nsigned-in account (its CF Meet ID or its verified email); anyone else gets\nINVITATION_INVALID, exactly as for an unknown id. An invitation whose sender has since lost\nthe right to invite is revoked (INVITATION_INVALID). An expired invitation answers\nINVITE_EXPIRED. Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "operationId": "v2_accept_my_organization_invitation",
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "description": "Invitation id (from `GET /api/v2/me/organization-invitations`)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional empty JSON object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Membership created by the invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BusinessOrganizationMembership"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "INVITATION_INVALID / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITE_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organization-invitations/{invitationId}/decline": {
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Decline one of my organization invitations.",
+        "description": "Declines a PENDING invitation addressed to the signed-in account (its CF Meet ID or its\nverified email); anyone else gets INVITATION_INVALID. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_decline_my_organization_invitation",
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "description": "Invitation id (from `GET /api/v2/me/organization-invitations`)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional empty JSON object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Declined invitation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationInvitation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "INVITATION_INVALID / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "INVITE_EXPIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations": {
       "post": {
         "tags": [
@@ -16451,6 +18291,47 @@
             "schema": {
               "type": "integer",
               "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "description": "Only this action, e.g. `membership.updated`",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "actorUserId",
+            "in": "query",
+            "description": "Only changes made by this user",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive lower bound (RFC 3339)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Exclusive upper bound (RFC 3339)",
+            "required": false,
+            "schema": {
+              "type": "string",
               "nullable": true
             }
           }
@@ -17011,6 +18892,85 @@
         ]
       }
     },
+    "/api/v2/organizations/{id}/export": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Export the organization's data.",
+        "description": "Gap audit G11: everything the Organizations Service holds about the organization as one JSON\ndocument: the organization and its profile, policies, memberships and their history, teams and\nteam memberships, invitations (never their token) and the newest 10000 audit events. People\nappear by user id only. Requires the OWNER (`organization.lifecycle.manage`); each export is\nrecorded in the organization's audit history. Returns FEATURE_DISABLED until the\nOrganizations Service is authoritative.",
+        "operationId": "v2_export_organization",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations/{id}/invitations": {
       "get": {
         "tags": [
@@ -17033,17 +18993,38 @@
           {
             "name": "status",
             "in": "query",
-            "description": "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED",
+            "description": "PENDING, ACCEPTED, DECLINED, REVOKED or EXPIRED (a PENDING invitation past its expiry counts as EXPIRED)",
             "required": false,
             "schema": {
               "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The previous page's `nextCursor` (opaque)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size 1–200 (default 50 when paging; 200 when neither `limit` nor `cursor` is given)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
               "nullable": true
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "Invitations",
+            "description": "Invitations (newest first) and `nextCursor` while more remain",
             "content": {
               "application/json": {
                 "schema": {
@@ -17261,6 +19242,274 @@
           },
           "404": {
             "description": "ORGANIZATION_NOT_FOUND / INVITATION_INVALID / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/meeting-profile-policy": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization meeting profile policy.",
+        "description": "Gap audit G17: the organization layer of the meeting profile policy, which the Meeting Service\napplies as ceilings to every meeting space of the organization (a space can be stricter, never\nmore permissive). Sparse; `{}` when nothing is set. Requires `organization.policies.manage`\n(Organizations authoritative mode) or, with the legacy directory, the organization's OWNER /\nADMIN.",
+        "operationId": "v2_get_organization_meeting_profile_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization layer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMeetingProfilePolicy"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Replace the organization meeting profile policy.",
+        "description": "Gap audit G17: sets the organization layer (validated like a space override: unknown fields,\nout-of-range values and privileged role mappings are VALIDATION_ERROR; at most 16 KiB). Every\nvalue set becomes a ceiling for the organization's meeting spaces from their next resolution.\n`{}` removes every organization value. Same permission as reading it; the change is audited.",
+        "operationId": "v2_put_organization_meeting_profile_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutOrganizationMeetingProfilePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMeetingProfilePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/meeting-spaces": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Meeting spaces of an organization (managers).",
+        "description": "Gap audit G13: lists every meeting space of the organization, whatever its access policy or\nsecurity profile (INVITE_ONLY, healthcare and high-security spaces included), newest first,\n`limit` (1-200, default 50) at a time; pass `nextCursor` as `after` for the next page. Archived\nspaces are left out unless `includeArchived=true`. Only governance fields are returned: no\npasscodes, invitations, participants or content. Requires `meetings.organization.manage` in\nthe organization (Organizations authoritative mode); anyone else gets ORGANIZATION_NOT_FOUND\nor PERMISSION_DENIED as for other organization operations.",
+        "operationId": "v2_list_organization_meeting_spaces",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Last space id of the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "includeArchived",
+            "in": "query",
+            "description": "Include archived spaces (default false).",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting spaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMeetingSpacePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
             "content": {
               "application/json": {
                 "schema": {
@@ -17571,7 +19820,7 @@
           "Organizations (v2)"
         ],
         "summary": "Change a member's role or status.",
-        "description": "Changes the role (OWNER, ADMIN, MANAGER, MEMBER, GUEST) or status (ACTIVE, SUSPENDED, REMOVED)\nof one membership. The path's member segment is the membership `id` from the member list.\n`expectedVersion` must be the membership's current `version`. The Organizations Service\nenforces the role rules: OWNERs manage anyone, ADMINs manage MANAGER, MEMBER and GUEST\nmemberships, nobody raises their own role, and the last OWNER cannot be removed or demoted\n(LAST_OWNER). Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
+        "description": "Changes the role (OWNER, ADMIN, MANAGER, MEMBER, GUEST) or status (ACTIVE, SUSPENDED, REMOVED)\nof one membership. The path's member segment is the member's user id (as on PUT) or the\nmembership `id` from the member list.\n`expectedVersion` must be the membership's current `version`. The Organizations Service\nenforces the role rules: OWNERs manage anyone, ADMINs manage MANAGER, MEMBER and GUEST\nmemberships, nobody raises their own role, and the last OWNER cannot be removed or demoted\n(LAST_OWNER). Returns FEATURE_DISABLED until the Organizations Service is authoritative.",
         "operationId": "v2_update_organization_membership",
         "parameters": [
           {
@@ -17587,7 +19836,7 @@
           {
             "name": "userId",
             "in": "path",
-            "description": "Membership id (the `id` of a member list item)",
+            "description": "The member: their user id (as on PUT) or the membership id (the `id` of a member list item)",
             "required": true,
             "schema": {
               "type": "string",
@@ -17746,6 +19995,228 @@
           },
           "404": {
             "description": "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/messaging/moderation/{path}": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Read the organization's Messaging moderation queue, a report or the actions.",
+        "description": "Gap audit G6: `{path}` is `reports`, `reports/{reportId}` or `moderation/actions`.\n\nLists the reported content of the organization's conversations (the moderation queue,\n`status` / `limit`), reads one report with its evidence (audited with the caller as\nthe viewer) or lists the organization's moderation actions (`limit`). The caller must be\nan active member of an active organization whose policy allows Messaging and whose\norganization grants `messaging.organization.moderate` (OWNER / ADMIN by default); the\nOrganizations Service decides this on every request. Only the organization's own\nMessaging scope is visible. Messaging's status and JSON body are returned.",
+        "operationId": "v2_organization_messaging_moderation_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "reports, reports/{reportId} or moderation/actions",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messaging contract answer (ReportList, ReportDetail or ModerationActionList)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND / FEATURE_DISABLED / NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization moderation action (gap audit G6): `moderation/actions`.",
+        "description": "Removes a message, mutes / unmutes or removes a member, restricts / un-restricts a\nprincipal or dismisses a report in the organization's conversations. Each action is\nrecorded append-only with the caller's organization principal as the moderator and\naudited. Requires active membership, an active organization, `features.messaging` and\n`messaging.organization.moderate`. Messaging's status and JSON body are returned.",
+        "operationId": "v2_organization_messaging_moderation_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "moderation/actions",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "ModerationAction (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND / FEATURE_DISABLED / NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
             "content": {
               "application/json": {
                 "schema": {
@@ -19956,6 +22427,189 @@
         ]
       }
     },
+    "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel": {
+      "put": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Create or resync a team's Messaging channel (gap audit G7).",
+        "description": "Creates the organization team's MANAGED group conversation in the organization's own\nMessaging scope (201; the caller owns it) or resynchronizes its membership (200) from\nthe team's current ACTIVE members, read from the Organizations Service. Members that\njoined by the team and left it are removed; the owner and members added another way\nare kept. The team is not followed automatically: Organizations does not deliver team\nmembership events, so call this again after team changes. Requires active membership,\nan active organization, `features.messaging` and `organization.teams.manage`. Optional\nbody `{title}` names a newly created channel.",
+        "operationId": "v2_organization_team_messaging_channel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Resynchronized (TeamChannelSyncResult, Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created (TeamChannelSyncResult)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/registrations/cancel": {
+      "post": {
+        "tags": [
+          "Registrations (v2)"
+        ],
+        "summary": "Cancel my own registration (with its admission token).",
+        "description": "The registrant cancels their webinar / town-hall registration with the admission token they\nreceived when registering; no sign-in is needed. The token is revoked so it can no longer be used\nto join. An unknown, used-up or revoked token answers REGISTRATION_NOT_FOUND; cancelling an\nalready-cancelled registration returns it unchanged. (A signed-in account whose verified email\nis the registered address can also simply register again: it reclaims the registration and gets\na fresh token.)",
+        "operationId": "v2_cancel_own_registration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelOwnRegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "REGISTRATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/api/v2/resolve/{identifier}": {
       "get": {
         "tags": [
@@ -20270,6 +22924,46 @@
           }
         }
       },
+      "AddTeamMembersRequest": {
+        "type": "object",
+        "description": "Gap audit G7: add every active member of one of the space's organization teams.",
+        "required": [
+          "teamId",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "teamId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AddTeamMembersResponse": {
+        "type": "object",
+        "description": "Result of adding a team (gap audit G7).",
+        "required": [
+          "added",
+          "skipped"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberResponse"
+            },
+            "description": "Members added now."
+          },
+          "skipped": {
+            "type": "integer",
+            "description": "Team members skipped: already members, the owner, you, or not an active account.",
+            "minimum": 0
+          }
+        }
+      },
       "AdminChangeEmailRequest": {
         "type": "object",
         "description": "Support-assisted email change (admin only): the owner lost access to the old address\nand was verified by support outside the product.",
@@ -20462,6 +23156,19 @@
             "minimum": 0
           }
         }
+      },
+      "AdminRevokeSessionsRequest": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why the sessions are ended (1-500 characters; recorded in the security audit)."
+          }
+        },
+        "additionalProperties": false
       },
       "AdminUpdateUserRequest": {
         "type": "object",
@@ -20938,6 +23645,26 @@
             "format": "int32"
           }
         }
+      },
+      "AppointOrganizationOwnerRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/admin/organizations/{id}/owners` (platform administrators).",
+        "required": [
+          "userId",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why the administrator intervenes (1–500 characters; recorded in the organization's\naudit history)."
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The account that becomes an ACTIVE OWNER."
+          }
+        },
+        "additionalProperties": false
       },
       "ApproveLinkRequest": {
         "type": "object",
@@ -21596,6 +24323,18 @@
             "type": "string",
             "format": "uuid"
           },
+          "durationSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gap audit M17: timed rooms only — the length set at creation, and once open, when\nthe room closes by itself.",
+            "nullable": true,
+            "minimum": 0
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -21841,6 +24580,20 @@
             "nullable": true
           }
         }
+      },
+      "CancelOwnRegistrationRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/registrations/cancel` request: the registration's admission token.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The admission token returned when registering (`reg_…`)."
+          }
+        },
+        "additionalProperties": false
       },
       "ChangedResponse": {
         "type": "object",
@@ -22801,6 +25554,13 @@
             "nullable": true,
             "minimum": 0
           },
+          "durationSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gap audit M17: timed rooms. Once opened, a room closes by itself after this many\nseconds (60-14400), with a `warningSeconds` countdown first.",
+            "nullable": true,
+            "minimum": 0
+          },
           "names": {
             "type": "array",
             "items": {
@@ -22816,6 +25576,13 @@
               }
             ],
             "nullable": true
+          },
+          "warningSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Countdown before a timed room closes (0-600, default 60).",
+            "nullable": true,
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -23388,6 +26155,20 @@
         },
         "additionalProperties": false
       },
+      "DeleteAccountRequest": {
+        "type": "object",
+        "description": "Gap audit A2: the confirmation of an account deletion.",
+        "required": [
+          "stepUpToken"
+        ],
+        "properties": {
+          "stepUpToken": {
+            "type": "string",
+            "description": "A step-up token for purpose `DELETE_ACCOUNT` (`POST /api/v2/me/step-up/verify`)."
+          }
+        },
+        "additionalProperties": false
+      },
       "DenyRequest": {
         "type": "object",
         "properties": {
@@ -23782,6 +26563,19 @@
         },
         "additionalProperties": false
       },
+      "EditMessageRequest": {
+        "type": "object",
+        "description": "Gap audit M17: the new text of an edited message.",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "EmailChangeConfirmRequest": {
         "type": "object",
         "required": [
@@ -23982,6 +26776,7 @@
           "ARTIFACT_DELETED",
           "ARTIFACT_ACCESS_DENIED",
           "ARTIFACT_STORAGE_UNAVAILABLE",
+          "ARTIFACT_STORAGE_NOT_CONFIGURED",
           "ARTIFACT_INTEGRITY_FAILED",
           "TRANSCRIPTION_DISABLED",
           "TRANSCRIPTION_NOT_ALLOWED",
@@ -23992,6 +26787,7 @@
           "INTELLIGENCE_PROVIDER_UNAVAILABLE",
           "REGISTRATION_DISABLED",
           "REGISTRATION_CLOSED",
+          "REGISTRATION_FULL",
           "REGISTRATION_NOT_FOUND",
           "ADMISSION_TOKEN_INVALID",
           "BACKSTAGE_ACCESS_DENIED",
@@ -24035,6 +26831,9 @@
           "DEVICE_DECLARATION_REFUSED",
           "DEVICE_DECLARATION_REQUIRED",
           "DEVICE_NOT_FOUND",
+          "MFA_REQUIRED",
+          "USER_NOT_FOUND",
+          "AVATAR_NOT_FOUND",
           "DEVICE_KEY_IN_USE",
           "DEVICE_LINK_INVALID",
           "DATABASE_ERROR",
@@ -24163,6 +26962,25 @@
           }
         }
       },
+      "GoogleNativeRequest": {
+        "type": "object",
+        "description": "Gap audit A4: a native Google ID token.",
+        "required": [
+          "idToken"
+        ],
+        "properties": {
+          "idToken": {
+            "type": "string",
+            "description": "The ID token returned by the Google Sign-In SDK."
+          },
+          "nonce": {
+            "type": "string",
+            "description": "The nonce the token was requested with, if any.",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "HandRaiseResponse": {
         "type": "object",
         "required": [
@@ -24188,6 +27006,22 @@
           }
         }
       },
+      "IdentityDuplicatesReport": {
+        "type": "object",
+        "description": "Gap audit A17: the case-insensitive uniqueness report.",
+        "required": [
+          "email",
+          "username"
+        ],
+        "properties": {
+          "email": {
+            "$ref": "#/components/schemas/IdentityUniqueness"
+          },
+          "username": {
+            "$ref": "#/components/schemas/IdentityUniqueness"
+          }
+        }
+      },
       "IdentityType": {
         "type": "string",
         "enum": [
@@ -24198,6 +27032,31 @@
           "SERVICE",
           "BOT"
         ]
+      },
+      "IdentityUniqueness": {
+        "type": "object",
+        "description": "Gap audit A17: case-insensitive uniqueness of one identity field.",
+        "required": [
+          "enforced",
+          "duplicateGroups"
+        ],
+        "properties": {
+          "duplicateGroups": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "description": "Accounts that differ only by case, grouped (at most 100 groups); empty when none."
+          },
+          "enforced": {
+            "type": "boolean",
+            "description": "True when the database enforces it (the unique index exists)."
+          }
+        }
       },
       "InstantMeetingApiResponse": {
         "type": "object",
@@ -24371,6 +27230,27 @@
           "ACTIVE",
           "REVOKED"
         ]
+      },
+      "InvitingOrganization": {
+        "type": "object",
+        "description": "The organization an invitation for the signed-in account comes from.",
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        }
       },
       "JoinConferenceRequest": {
         "type": "object",
@@ -25496,6 +28376,12 @@
           "deleted": {
             "type": "boolean"
           },
+          "editedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Gap audit M17: when the sender last edited the message (`null`: never edited).",
+            "nullable": true
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -25516,6 +28402,85 @@
             "format": "uuid"
           }
         }
+      },
+      "MfaConfirmRequest": {
+        "type": "object",
+        "description": "Gap audit A1: a code from the authenticator app.",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MfaDisableRequest": {
+        "type": "object",
+        "description": "Gap audit A1: the confirmation of turning two-step sign-in off.",
+        "required": [
+          "stepUpToken"
+        ],
+        "properties": {
+          "stepUpToken": {
+            "type": "string",
+            "description": "A step-up token for purpose `DISABLE_MFA`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "MfaRecoveryCodes": {
+        "type": "object",
+        "description": "Gap audit A1: the recovery codes (shown once).",
+        "required": [
+          "recoveryCodes"
+        ],
+        "properties": {
+          "recoveryCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MfaSetupResponse": {
+        "type": "object",
+        "description": "Gap audit A1: the authenticator enrolment secret (shown once).",
+        "required": [
+          "secret",
+          "otpauthUri"
+        ],
+        "properties": {
+          "otpauthUri": {
+            "type": "string",
+            "description": "The `otpauth://` URI to show as a QR code."
+          },
+          "secret": {
+            "type": "string",
+            "description": "The base32 secret for manual entry."
+          }
+        }
+      },
+      "MfaVerifyRequest": {
+        "type": "object",
+        "description": "Gap audit A1: the second factor of a parked sign-in.",
+        "required": [
+          "mfaTicket",
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "A 6-digit authenticator code, or a recovery code (`xxxxx-xxxxx`)."
+          },
+          "mfaTicket": {
+            "type": "string",
+            "description": "The `mfaTicket` of the `401 MFA_REQUIRED` answer."
+          }
+        },
+        "additionalProperties": false
       },
       "MigrationStatusView": {
         "type": "object",
@@ -25705,6 +28670,76 @@
           },
           "videoLocked": {
             "type": "boolean"
+          }
+        }
+      },
+      "MyOrganizationInvitation": {
+        "type": "object",
+        "description": "A pending invitation addressed to the signed-in account.",
+        "required": [
+          "id",
+          "organizationId",
+          "role",
+          "status",
+          "inviteeEmailHint",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invitedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "inviteeEmailHint": {
+            "type": "string"
+          },
+          "organization": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InvitingOrganization"
+              }
+            ],
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "description": "The role the invitation offers: ADMIN, MANAGER, MEMBER or GUEST."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always PENDING in this list."
+          }
+        }
+      },
+      "MyOrganizationInvitationList": {
+        "type": "object",
+        "description": "Pending invitations addressed to the signed-in account (newest first, at most 100).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MyOrganizationInvitation"
+            }
           }
         }
       },
@@ -25949,6 +28984,11 @@
               "$ref": "#/components/schemas/OrganizationInvitation"
             },
             "description": "Invitations (masked invitee email; never a token)."
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "The cursor of the next page; absent or null on the last page.",
+            "nullable": true
           }
         }
       },
@@ -25999,6 +29039,97 @@
             "type": "integer",
             "format": "int64",
             "description": "Optional organization `version` the change is based on.",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationMeetingProfilePolicy": {
+        "type": "object",
+        "description": "Gap audit G17: the organization layer of the meeting profile policy. Sparse, in the\nsame shape as a space override; every value set binds the organization's spaces.",
+        "required": [
+          "organizationId",
+          "policy"
+        ],
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policy": {
+            "type": "object"
+          }
+        }
+      },
+      "OrganizationMeetingSpace": {
+        "type": "object",
+        "description": "Gap audit G13: one meeting space of an organization, as its managers oversee it\n(whatever its access policy or security profile). Governance fields only: no\npasscode, invitation, participant or content data.",
+        "required": [
+          "id",
+          "title",
+          "meetingType",
+          "accessPolicy",
+          "securityProfile",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "accessPolicy": {
+            "$ref": "#/components/schemas/AccessPolicy"
+          },
+          "archivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meetingType": {
+            "$ref": "#/components/schemas/MeetingType"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "securityProfile": {
+            "$ref": "#/components/schemas/SecurityProfile"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SpaceStatus"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationMeetingSpacePage": {
+        "type": "object",
+        "description": "`GET /api/v2/organizations/{id}/meeting-spaces` page (gap audit G13).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrganizationMeetingSpace"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as `after` for the next page; `null` on the last page.",
             "nullable": true
           }
         }
@@ -27953,6 +31084,20 @@
           }
         }
       },
+      "PutOrganizationMeetingProfilePolicyRequest": {
+        "type": "object",
+        "description": "Replace the organization layer (gap audit G17).",
+        "required": [
+          "policy"
+        ],
+        "properties": {
+          "policy": {
+            "type": "object",
+            "description": "Sparse profile policy, e.g. `{\"recording\": {\"allowed\": false}}`; `{}` clears it."
+          }
+        },
+        "additionalProperties": false
+      },
       "QualityIngestResponse": {
         "type": "object",
         "required": [
@@ -28753,6 +31898,12 @@
           "registrations"
         ],
         "properties": {
+          "nextCursor": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass as `after` to get the next page; `null` on the last page.",
+            "nullable": true
+          },
           "registrations": {
             "type": "array",
             "items": {
@@ -28772,11 +31923,29 @@
           "tokenMaxUses"
         ],
         "properties": {
+          "capacity": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gap audit M10: most active registrations accepted (per occurrence, or for the\nwhole series); 0 = no limit. At most 100000.",
+            "minimum": 0
+          },
+          "closesMinutesBeforeStart": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Gap audit M10: registration closes this many minutes before the occurrence's\nscheduled start (0 = open until the occurrence ends).",
+            "minimum": 0
+          },
           "customFields": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CustomRegistrationField"
             }
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Gap audit M10: registration closes at this time, whatever the occurrence.",
+            "nullable": true
           },
           "email": {
             "$ref": "#/components/schemas/FieldRequirement"
@@ -28894,6 +32063,26 @@
           "reason": {
             "type": "string",
             "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReplayOrganizationEventsRequest": {
+        "type": "object",
+        "description": "Gap audit G10: which dead-lettered organization events to replay.",
+        "properties": {
+          "destination": {
+            "type": "string",
+            "description": "One consumer's dead letters only (for example `cfmeet.meeting-service`).",
+            "nullable": true
+          },
+          "eventIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Only these events (at most 500); empty: every dead letter (of the destination)."
           }
         },
         "additionalProperties": false
@@ -29727,7 +32916,9 @@
         "description": "What the confirmation is for; a token for one purpose never authorizes another.",
         "enum": [
           "DEACTIVATE_ACCOUNT",
-          "CHANGE_EMAIL"
+          "CHANGE_EMAIL",
+          "DELETE_ACCOUNT",
+          "DISABLE_MFA"
         ]
       },
       "StepUpRequest": {

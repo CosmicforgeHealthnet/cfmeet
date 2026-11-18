@@ -199,6 +199,14 @@ pub async fn deactivate_account(
             .detail(serde_json::json!({ "reauthentication": method })),
     )
     .await;
+    // Gap audit A13: the owner is told (the account's address stays on record).
+    security::notify_security(
+        &state,
+        user_id,
+        crate::services::email::SecurityNotice::Deactivated,
+        &uuid::Uuid::new_v4().to_string(),
+    )
+    .await;
     // Section 14 (ACC-010): Messaging, Calling, the Hub and Platform Access follow.
     crate::services::communications::credentials_ended(
         &state,

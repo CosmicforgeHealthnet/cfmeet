@@ -1135,3 +1135,80 @@ async fn account_session_events_are_shape_checked() {
     assert!(p.credentials_not_before.is_none());
     h.close().await;
 }
+
+/// Gap audit A16: a deactivated profile returns only when Account reactivates the
+/// account; credentials issued before the deactivation stay invalid.
+#[tokio::test]
+async fn reactivated_accounts_leave_deactivation() {
+    let h = Harness::new().await;
+    let a = h.account();
+    let p = h.profile(&a).await;
+    let path = "/internal/v1/communications/account-events";
+    let send = |version: i64, kind: &str, state: &str| json!({"eventId":Uuid::new_v4(),"accountReference":a.account_reference,"sourceVersion":version,"kind":kind,"state":state,"occurredAt":chrono::Utc::now()});
+    let (status, _) = h
+        .http(
+            &h.account_signer,
+            path,
+            send(2, "STATUS_CHANGED", "DEACTIVATED"),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status, 200);
+    let read = || async {
+        h.state
+            .store
+            .principal(&h.state.store.db, p.scope(), p.principal_id)
+            .await
+            .unwrap()
+    };
+    let deactivated = read().await;
+    assert_eq!(
+        deactivated.activation_state,
+        communications::model::Activation::Deactivated
+    );
+    let epoch = deactivated.credentials_not_before.unwrap();
+    // A session event does not bring it back.
+    h.http(
+        &h.account_signer,
+        path,
+        send(3, "SESSION_REVOKED", "ACCOUNT_CREATED"),
+        h.scope.clone(),
+    )
+    .await;
+    assert_eq!(
+        read().await.activation_state,
+        communications::model::Activation::Deactivated
+    );
+    // Reactivation does.
+    let (status, r) = h
+        .http(
+            &h.account_signer,
+            path,
+            send(4, "STATUS_CHANGED", "ACCOUNT_CREATED"),
+            h.scope.clone(),
+        )
+        .await;
+    assert_eq!(status, 200, "{r}");
+    let back = read().await;
+    assert_eq!(
+        back.activation_state,
+        communications::model::Activation::AccountCreated
+    );
+    assert!(back.credentials_not_before.unwrap() >= epoch);
+    // The database still refuses any other way out of deactivation.
+    execute(
+        &h.state.store.db,
+        "UPDATE communication_profiles SET activation_state='DEACTIVATED',version=version+1 WHERE id=$1",
+        vec![p.id.into()],
+    )
+    .await
+    .unwrap();
+    assert!(execute(
+        &h.state.store.db,
+        "UPDATE communication_profiles SET activation_state='ACTIVE',version=version+1 WHERE id=$1",
+        vec![p.id.into()]
+    )
+    .await
+    .is_err());
+    h.close().await;
+}

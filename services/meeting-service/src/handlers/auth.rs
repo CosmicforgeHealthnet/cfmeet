@@ -1,6 +1,6 @@
 use crate::validation::ValidateRequest;
 use axum::{extract::State, http::HeaderMap, Json};
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
 use crate::{
@@ -58,11 +58,53 @@ const CODE_SENT: &str =
 /// Uniform answer to a wrong, expired, used or replaced code or link.
 const INVALID_CODE: &str = "Invalid or expired code";
 
-fn disabled(user: &users::Model) -> bool {
-    matches!(
-        user.status,
-        users::UserStatus::Inactive | users::UserStatus::Suspended
+/// Whether sign-in is refused: suspended accounts and deactivated ones, except an account
+/// its owner deactivated within the reactivation window (gap audit A16).
+async fn blocked(state: &AppState, user: &users::Model) -> ApiResult<bool> {
+    Ok(match user.status {
+        users::UserStatus::Suspended => true,
+        users::UserStatus::Inactive => {
+            !security::self_reactivation_allowed(&state.db, user.id).await?
+        }
+        _ => false,
+    })
+}
+
+/// Gap audit A16: once every factor is proven, an account its owner deactivated is active
+/// again. The status trigger advances the Hub, Messaging and Calling authority; every
+/// credential from before the deactivation stays void.
+async fn reactivate_if_deactivated(
+    state: &AppState,
+    user: users::Model,
+    via: &str,
+) -> ApiResult<users::Model> {
+    if user.status != users::UserStatus::Inactive {
+        return Ok(user);
+    }
+    if !security::self_reactivation_allowed(&state.db, user.id).await? {
+        return Err(ApiError::Forbidden(
+            "Account has been deactivated".to_string(),
+        ));
+    }
+    let mut active: users::ActiveModel = user.into();
+    active.status = Set(users::UserStatus::Active);
+    active.updated_at = Set(now_utc());
+    let user = active.update(&state.db).await?;
+    security::record_event_best_effort(
+        &state.db,
+        SecurityEvent::new("ACCOUNT_REACTIVATED", Outcome::Success)
+            .by_user(user.id)
+            .detail(serde_json::json!({ "method": via })),
     )
+    .await;
+    security::notify_security(
+        state,
+        user.id,
+        crate::services::email::SecurityNotice::Reactivated,
+        &Uuid::new_v4().to_string(),
+    )
+    .await;
+    Ok(user)
 }
 
 /// Request a sign-in code
@@ -105,7 +147,7 @@ pub async fn request_otp(
         return Ok(accepted());
     }
     if let Some(user) = security::find_user_by_email(&state.db, &email).await? {
-        if disabled(&user) {
+        if blocked(&state, &user).await? {
             return Ok(accepted());
         }
     }
@@ -184,7 +226,7 @@ pub async fn verify_otp(
                 .otp_service
                 .check(&email, &payload.code, OtpType::SignIn)
                 .await;
-            settle_check(outcome)?;
+            settle_check(&state, &email, "CODE", outcome)?;
             false
         }
     };
@@ -224,15 +266,99 @@ pub async fn verify_otp_link(
         .otp_service
         .check_link(&email, &payload.token, OtpType::SignIn)
         .await;
-    settle_check(outcome)?;
+    settle_check(&state, &email, "LINK", outcome)?;
     inc(&OM.auth_magic_link_verified);
     complete_sign_in(&state, &headers, &email, "LINK", false)
         .await
         .map(Json)
 }
 
-/// Map a code/link check to the uniform answers (and count it).
-fn settle_check(outcome: ApiResult<OtpCheck>) -> ApiResult<()> {
+/// Finish a sign-in with the second factor
+///
+/// Gap audit A1: when an account has an authenticator app, `POST /api/v1/auth/otp/verify` (and
+/// `/otp/verify-link`) answer `401 MFA_REQUIRED` with a one-time `mfaTicket` (valid 5 minutes)
+/// instead of tokens. Send it here with the 6-digit code from the authenticator app, or one of
+/// the account's recovery codes; the answer is then exactly that of a completed sign-in. A wrong
+/// code gets 400; after 5 attempts the ticket is destroyed (429: sign in again).
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/mfa/verify",
+    tag = "Authentication",
+    request_body = MfaVerifyRequest,
+    responses(
+        (status = 200, description = "Signed in", body = OtpVerifyResponse),
+        (status = 400, description = "Invalid or expired code or ticket"),
+        (status = 429, description = "Too many attempts"),
+    )
+)]
+pub async fn verify_mfa(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<MfaVerifyRequest>,
+) -> ApiResult<Json<OtpVerifyResponse>> {
+    limit_by_client(&state, &headers, "mfa-verify", 30, 15 * 60).await?;
+    let pending = crate::services::mfa::redeem(&state, &payload.mfa_ticket, &payload.code).await?;
+    let user = Users::find_by_id(pending.user_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Invalid or expired code".into()))?;
+    if blocked(&state, &user).await? {
+        return Err(ApiError::Forbidden(
+            "Account has been deactivated".to_string(),
+        ));
+    }
+    let via: &'static str = match pending.via.as_str() {
+        "LINK" => "LINK",
+        "GOOGLE" => "GOOGLE",
+        _ => "CODE",
+    };
+    finish_sign_in(
+        &state,
+        &headers,
+        user,
+        pending.created,
+        via,
+        pending.test_account,
+    )
+    .await
+    .map(Json)
+}
+
+/// Gap audit A1: the second factor of a parked sign-in.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MfaVerifyRequest {
+    /// The `mfaTicket` of the `401 MFA_REQUIRED` answer.
+    pub mfa_ticket: String,
+    /// A 6-digit authenticator code, or a recovery code (`xxxxx-xxxxx`).
+    pub code: String,
+}
+
+/// Map a code/link check to the uniform answers (and count it). Gap audit A24: a wrong
+/// code and a lock-out are audited for an existing account, off the request path so the
+/// answer's timing never depends on whether the account exists.
+fn settle_check(
+    state: &AppState,
+    email: &str,
+    via: &'static str,
+    outcome: ApiResult<OtpCheck>,
+) -> ApiResult<()> {
+    let audit = |outcome: Outcome, reason: &'static str| {
+        let db = state.db.clone();
+        let email = email.to_owned();
+        tokio::spawn(async move {
+            if let Ok(Some(user)) = security::find_user_by_email(&db, &email).await {
+                security::record_event_best_effort(
+                    &db,
+                    SecurityEvent::new("SIGN_IN_CODE", outcome)
+                        .user(user.id)
+                        .actor(ActorKind::Anonymous, None)
+                        .detail(serde_json::json!({ "via": via, "reason": reason })),
+                )
+                .await;
+            }
+        });
+    };
     match outcome {
         Ok(OtpCheck::Valid) => Ok(()),
         Ok(OtpCheck::Missing) => {
@@ -241,10 +367,12 @@ fn settle_check(outcome: ApiResult<OtpCheck>) -> ApiResult<()> {
         }
         Ok(OtpCheck::Wrong) => {
             inc(&OM.auth_otp_wrong);
+            audit(Outcome::Failure, "WRONG_CODE");
             Err(ApiError::BadRequest(INVALID_CODE.to_string()))
         }
         Err(e @ ApiError::TooManyRequests(_)) => {
             inc(&OM.auth_otp_locked);
+            audit(Outcome::Denied, "TOO_MANY_ATTEMPTS");
             Err(e)
         }
         Err(e) => Err(e),
@@ -262,7 +390,7 @@ async fn complete_sign_in(
 ) -> ApiResult<OtpVerifyResponse> {
     let (mut user, created) = find_or_create_account(state, email).await?;
 
-    if disabled(&user) {
+    if blocked(state, &user).await? {
         security::record_event_best_effort(
             &state.db,
             SecurityEvent::new("LOGIN", Outcome::Denied)
@@ -292,6 +420,30 @@ async fn complete_sign_in(
         crate::services::account_profile::mark_email_verified(&state.db, user.id).await?;
     }
 
+    // Gap audit A1: an account with an authenticator finishes with the second factor.
+    if !test_account && crate::services::mfa::enabled(&state.db, user.id).await? {
+        let pending = crate::services::mfa::Pending {
+            user_id: user.id,
+            via: via.to_string(),
+            created,
+            test_account,
+        };
+        return Err(crate::services::mfa::challenge(state, &pending).await?);
+    }
+    finish_sign_in(state, headers, user, created, via, test_account).await
+}
+
+/// The sign-in after every proof (address, and second factor when enabled): session,
+/// audit and the security emails that apply.
+async fn finish_sign_in(
+    state: &AppState,
+    headers: &HeaderMap,
+    user: users::Model,
+    created: bool,
+    via: &str,
+    test_account: bool,
+) -> ApiResult<OtpVerifyResponse> {
+    let user = reactivate_if_deactivated(state, user, via).await?;
     let label = security::client_label(headers);
     let issued =
         security::start_session(state, &user, AuthMethod::EmailOtp, None, label.clone()).await?;
@@ -402,11 +554,7 @@ async fn find_or_create_account(state: &AppState, email: &str) -> ApiResult<(use
     }
     let mut username = random_username();
     for _ in 0..4 {
-        let taken = Users::find()
-            .filter(users::Column::Username.eq(&username))
-            .one(&txn)
-            .await?
-            .is_some();
+        let taken = security::username_taken(&txn, &username, None).await?;
         if !taken {
             break;
         }
@@ -746,12 +894,17 @@ pub async fn logout(
     }
 
     // Part V H §104: logging out of CF Meet also ends the account's Messaging client
-    // sessions (durable job; a Messaging outage never blocks the logout).
-    if let (Some(um), Ok(user_id)) = (
-        state.meeting.core.unified.as_ref(),
-        Uuid::parse_str(&claims.sub),
-    ) {
-        um.revoke_sessions_for_user(user_id, "LOGOUT").await;
+    // sessions (durable job; a Messaging outage never blocks the logout). Gap audit A11:
+    // a sign-in with a session id ends only its own Messaging sessions (done above through
+    // `session_ended`); only a legacy token, whose logout already ends every credential,
+    // ends every Messaging client session of the account.
+    if claims.session_id().is_none() {
+        if let (Some(um), Ok(user_id)) = (
+            state.meeting.core.unified.as_ref(),
+            Uuid::parse_str(&claims.sub),
+        ) {
+            um.revoke_sessions_for_user(user_id, "LOGOUT").await;
+        }
     }
 
     Ok(Json(MessageResponse {
@@ -920,6 +1073,18 @@ pub async fn oauth_google_callback(
     let (user, issued) =
         match oauth_google_callback_inner(&state, &headers, code, state_value, binding).await {
             Ok(done) => done,
+            Err(ApiError::MfaRequired { ticket }) => {
+                // Gap audit A1: the web app finishes with POST /api/v1/auth/mfa/verify.
+                return with_cookie(
+                    Redirect::to(&format!(
+                        "{}/google/callback?mfa_ticket={}",
+                        frontend_url,
+                        urlencoding::encode(&ticket)
+                    ))
+                    .into_response(),
+                    &clear,
+                );
+            }
             Err(e) => {
                 let reason = match &e {
                     ApiError::Forbidden(_) => "account_disabled",
@@ -1133,11 +1298,7 @@ async fn unique_username(state: &AppState, name: &str, email: &str) -> ApiResult
         } else {
             format!("{base}_{}", rand::thread_rng().gen_range(1000..1_000_000))
         };
-        let taken = Users::find()
-            .filter(users::Column::Username.eq(&candidate))
-            .one(&state.db)
-            .await?
-            .is_some();
+        let taken = security::username_taken(&state.db, &candidate, None).await?;
         if !taken {
             return Ok(candidate);
         }
@@ -1178,7 +1339,11 @@ async fn oauth_google_callback_inner(
 
     // Exchange code for tokens
     let token_response = reqwest::Client::new()
-        .post("https://oauth2.googleapis.com/token")
+        .post(
+            // Overridable for tests and private deployments (gap audit A14).
+            std::env::var("GOOGLE_TOKEN_URL")
+                .unwrap_or_else(|_| "https://oauth2.googleapis.com/token".into()),
+        )
         .form(&[
             ("code", code),
             ("client_id", state.google_client_id.as_str()),
@@ -1220,8 +1385,85 @@ async fn oauth_google_callback_inner(
         chrono::Utc::now().timestamp(),
     )
     .map_err(|reason| ApiError::Unauthorized(format!("ID token rejected: {reason}")))?;
+    google_session(state, headers, &identity).await
+}
 
-    let (user, event) = resolve_google_account(state, &identity).await?;
+/// Sign in with Google on a native app
+///
+/// Gap audit A4: for the mobile apps. Send the Google ID token the platform SDK returned (and the
+/// nonce it was requested with, when one was used). The token's signature is verified against
+/// Google's published keys and every claim is checked (issuer, audience = the web client or a
+/// configured native client, expiry, verified email). The answer is that of any sign-in; an
+/// account with two-step sign-in gets `401 MFA_REQUIRED` with an `mfaTicket` instead.
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/oauth/google/native",
+    tag = "Authentication",
+    request_body = GoogleNativeRequest,
+    responses(
+        (status = 200, description = "Signed in", body = OtpVerifyResponse),
+        (status = 401, description = "ID token rejected, or MFA_REQUIRED"),
+        (status = 403, description = "Account has been deactivated"),
+        (status = 409, description = "The address belongs to an account linked to another Google identity"),
+        (status = 503, description = "Google's keys are unreachable"),
+    )
+)]
+pub async fn oauth_google_native(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<GoogleNativeRequest>,
+) -> ApiResult<Json<OtpVerifyResponse>> {
+    limit_by_client(&state, &headers, "oauth-native", 60, 15 * 60).await?;
+    let identity = crate::services::google_native::verify(
+        &payload.id_token,
+        &state.google_client_id,
+        payload.nonce.as_deref(),
+    )
+    .await?;
+    let (user, issued) = google_session(&state, &headers, &identity).await?;
+    Ok(Json(OtpVerifyResponse {
+        access_token: issued.access_token,
+        refresh_token: issued.refresh_token,
+        user: UserInfo {
+            id: user.id,
+            username: user.username.clone(),
+            role: security::role_claim(&user),
+            status: status_string(&state, &user),
+        },
+        is_new_account: false,
+    }))
+}
+
+/// Gap audit A4: a native Google ID token.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GoogleNativeRequest {
+    /// The ID token returned by the Google Sign-In SDK.
+    pub id_token: String,
+    /// The nonce the token was requested with, if any.
+    #[serde(default)]
+    pub nonce: Option<String>,
+}
+
+/// The sign-in of a verified Google identity (web callback and native ID token): account
+/// resolution, the second factor when enabled, the session and its audit.
+async fn google_session(
+    state: &AppState,
+    headers: &HeaderMap,
+    identity: &GoogleIdentity,
+) -> ApiResult<(users::Model, security::IssuedSession)> {
+    let (user, event) = resolve_google_account(state, identity).await?;
+    // Gap audit A1: Google proves the address, not the second factor.
+    if crate::services::mfa::enabled(&state.db, user.id).await? {
+        let pending = crate::services::mfa::Pending {
+            user_id: user.id,
+            via: "GOOGLE".into(),
+            created: false,
+            test_account: false,
+        };
+        return Err(crate::services::mfa::challenge(state, &pending).await?);
+    }
+    let user = reactivate_if_deactivated(state, user, "GOOGLE").await?;
     let issued = security::start_session(
         state,
         &user,
@@ -1240,6 +1482,16 @@ async fn oauth_google_callback_inner(
             .session(issued.session_id),
     )
     .await;
+    // Gap audit A13: linking Google to an existing account is a new way in.
+    if matches!(event, "GOOGLE_LINKED" | "GOOGLE_CLAIMED_UNVERIFIED_ACCOUNT") {
+        security::notify_security(
+            state,
+            user.id,
+            crate::services::email::SecurityNotice::GoogleLinked,
+            &issued.session_id.to_string(),
+        )
+        .await;
+    }
     security::record_event_best_effort(
         &state.db,
         SecurityEvent::new("LOGIN", Outcome::Success)
@@ -1264,18 +1516,12 @@ pub async fn resolve_google_account(
     state: &AppState,
     identity: &GoogleIdentity,
 ) -> ApiResult<(users::Model, &'static str)> {
-    let disabled = |u: &users::Model| {
-        matches!(
-            u.status,
-            users::UserStatus::Inactive | users::UserStatus::Suspended
-        )
-    };
     if let Some(user_id) = security::user_for_google_subject(&state.db, &identity.subject).await? {
         let user = Users::find_by_id(user_id)
             .one(&state.db)
             .await?
             .ok_or_else(|| ApiError::Unauthorized("Account is unavailable".into()))?;
-        if disabled(&user) {
+        if blocked(state, &user).await? {
             return Err(ApiError::Forbidden("Account has been deactivated".into()));
         }
         return Ok((user, "GOOGLE_SIGN_IN"));
@@ -1283,7 +1529,7 @@ pub async fn resolve_google_account(
 
     match security::find_user_by_email(&state.db, &identity.email).await? {
         Some(user) => {
-            if disabled(&user) {
+            if blocked(state, &user).await? {
                 return Err(ApiError::Forbidden("Account has been deactivated".into()));
             }
             if security::google_subject_for_user(&state.db, user.id)

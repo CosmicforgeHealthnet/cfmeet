@@ -204,9 +204,12 @@ pub async fn canonical_conference<C: ConnectionTrait>(
         .remove(&space_id))
 }
 
-/// Expire stale occurrences: unstarted v2 occurrences whose start window closed become
-/// CANCELLED (`cancelled_by = system:expired`), one `conference.cancelled` event each.
-/// Multi-worker safe (`FOR UPDATE SKIP LOCKED`), bounded per call.
+/// Expire stale occurrences: unstarted v2 occurrences (CREATED, and PREPARING / WAITING
+/// ones that were prepared but never started) whose start window closed become CANCELLED
+/// (`cancelled_by = system:expired`), one `conference.cancelled` event each; an occurrence
+/// that already holds a provider room also gets the room's termination command, so a
+/// prepared-but-abandoned occurrence never keeps a room. Multi-worker safe
+/// (`FOR UPDATE SKIP LOCKED`), bounded per call.
 pub async fn expire_stale<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     now: DateTime<Utc>,
@@ -215,7 +218,7 @@ pub async fn expire_stale<C: ConnectionTrait + TransactionTrait>(
     let sql = format!(
         r#"WITH due AS (
              SELECT c.id FROM conference_sessions c JOIN meeting_spaces s ON s.id = c.meeting_space_id
-              WHERE c.status = 'CREATED' AND c.origin = 'V2'
+              WHERE c.status IN ('CREATED', 'PREPARING', 'WAITING') AND c.origin = 'V2'
                 AND c.scheduled_start_at IS NOT NULL AND c.scheduled_start_at < $1
                 AND NOT {open}
               ORDER BY c.scheduled_start_at
@@ -246,6 +249,13 @@ pub async fn expire_stale<C: ConnectionTrait + TransactionTrait>(
             ),
         )
         .await?;
+        if c.rtc_room_ready_at.is_some() {
+            emit(
+                &txn,
+                crate::services::conference::ConferenceService::terminate_command(c),
+            )
+            .await?;
+        }
     }
     txn.commit().await?;
     Ok(expired.len() as u64)

@@ -293,7 +293,7 @@ async fn s11_meeting_invitation_email_only_on_request_with_the_token_in_the_frag
     let h = some!(Harness::new(true).await);
     let app = &h.app;
     let owner = app.user("owner").await;
-    let (sid, _) = scheduled(
+    let (sid, conference) = scheduled(
         app,
         &owner,
         "Quarterly review",
@@ -330,6 +330,34 @@ async fn s11_meeting_invitation_email_only_on_request_with_the_token_in_the_frag
         sent[0].text
     );
     assert!(sent[0].html.contains(&format!("/invite#{token}")));
+    // A space-wide invitation has no single time: no calendar file.
+    assert!(sent[0].calendar.is_none());
+
+    // Gap audit M14: an invitation to a scheduled occurrence carries its calendar invite,
+    // without the invitation token.
+    let (s, v) = invite(
+        app,
+        &owner,
+        sid,
+        json!({ "inviteeEmail": guest, "sendEmail": true, "conferenceId": conference["id"] }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let sent = h.mail.sent();
+    let ics = sent
+        .last()
+        .unwrap()
+        .calendar
+        .clone()
+        .expect("calendar invite");
+    assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"), "{ics}");
+    assert!(ics.contains("BEGIN:VEVENT"));
+    assert!(ics.contains(&format!(
+        "UID:conference-{}@cfmeet.com",
+        uuid(&conference["id"]).simple()
+    )));
+    assert!(ics.contains("SUMMARY:Quarterly review"), "{ics}");
+    assert!(!ics.contains(v["token"].as_str().unwrap()));
 
     // sendEmail needs an address.
     let (s, v) = invite(app, &owner, sid, json!({ "sendEmail": true })).await;
@@ -348,7 +376,7 @@ async fn s11_meeting_invitation_email_only_on_request_with_the_token_in_the_frag
     .await;
     assert_eq!(s, StatusCode::CREATED);
     assert_eq!(v["emailDelivery"], "ACCEPTED");
-    assert_eq!(h.mail.sent().len(), 1);
+    assert_eq!(h.mail.sent().len(), 2);
 
     // Unknown preferences or a queue outage: the invitation exists, the email is FAILED.
     let known = app.user_with_email("known", &unique_email("known")).await;
@@ -374,7 +402,7 @@ async fn s11_meeting_invitation_email_only_on_request_with_the_token_in_the_frag
     assert_eq!(s, StatusCode::CREATED);
     assert_eq!(v["emailDelivery"], "FAILED");
     h.mail.set_failing(false);
-    assert_eq!(h.mail.sent().len(), 1);
+    assert_eq!(h.mail.sent().len(), 2);
 }
 
 #[tokio::test]
@@ -816,4 +844,79 @@ async fn s11_a_poison_or_suppressed_recipient_never_blocks_the_others() {
     // Nothing more on later passes.
     assert_eq!(h.tick().await.sent, 0);
     assert_eq!(h.mail.sent().len(), 1);
+}
+
+/// Gap audit M3: series-level changes are announced per occurrence with the existing
+/// durable notices: a timezone move reschedules the next occurrences, and ending the
+/// series cancels them (they stay, cancelled, instead of vanishing silently).
+#[tokio::test]
+async fn m3_series_changes_are_announced() {
+    let h = some!(Harness::new(true).await);
+    let app = &h.app;
+    let owner = app.user("owner").await;
+    let space = app
+        .create_space(
+            &owner,
+            json!({ "title": "Daily standup", "timezone": "Europe/London" }),
+        )
+        .await;
+    let sid = uuid(&space["id"]);
+    let start = (Utc::now() + Duration::days(1))
+        .naive_utc()
+        .date()
+        .and_hms_opt(9, 0, 0)
+        .unwrap();
+    let (s, v) = app
+        .call(
+            axum::http::Method::PUT,
+            &format!("/api/v2/meeting-spaces/{sid}/recurrence"),
+            Auth::Bearer(&owner.token),
+            Some(json!({ "rrule": "FREQ=DAILY;COUNT=5", "startLocal": start, "durationMinutes": 15 })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let count = |kind: &'static str| {
+        let app = app;
+        async move {
+            app.scalar(&format!(
+                "SELECT count(*) FROM meeting_notifications WHERE meeting_space_id = '{sid}' AND kind = '{kind}'"
+            ))
+            .await
+        }
+    };
+    assert_eq!(count("CONFERENCE_RESCHEDULED").await, 0);
+
+    // Timezone move: same wall-clock time elsewhere, every upcoming occurrence moves.
+    let (_, current) = app
+        .get(
+            format!("/api/v2/meeting-spaces/{sid}"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    let (s, v) = app
+        .patch(
+            format!("/api/v2/meeting-spaces/{sid}"),
+            Auth::Bearer(&owner.token),
+            json!({ "version": current["version"], "timezone": "America/New_York" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(count("CONFERENCE_RESCHEDULED").await, 5);
+
+    // Ending the series cancels the remaining occurrences, each announced once.
+    let (s, v) = app
+        .delete(
+            format!("/api/v2/meeting-spaces/{sid}/recurrence"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert!(s.is_success(), "{s} {v}");
+    assert_eq!(count("CONFERENCE_CANCELLED").await, 5);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_sessions WHERE meeting_space_id = '{sid}' AND status = 'CANCELLED'"
+        ))
+        .await,
+        5
+    );
 }

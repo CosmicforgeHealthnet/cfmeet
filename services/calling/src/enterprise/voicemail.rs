@@ -263,6 +263,13 @@ pub struct MailboxChange {
     pub retention_days: Option<i32>,
 }
 
+/// Mailbox list filter by owner (C16).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MailboxOwnerFilter {
+    pub owner_type: Option<MailboxOwnerType>,
+    pub owner_id: Option<Uuid>,
+}
+
 /// Message filters.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MessageFilter {
@@ -458,10 +465,13 @@ impl EnterpriseService {
         ))
     }
 
+    /// Lists the scope's mailboxes, optionally only one owner's (C16: `ownerType` and / or
+    /// `ownerId`; an owner of another scope simply matches nothing).
     pub async fn list_mailboxes(
         &self,
         scope: CallScope,
         status: Option<ResourceStatus>,
+        owner: MailboxOwnerFilter,
         page: &PageRequest,
     ) -> EnterpriseResult<MailboxPage> {
         let limit = page.limit()?;
@@ -473,6 +483,14 @@ impl EnterpriseService {
         if let Some(status) = status {
             values.push(status.as_str().into());
             sql.push_str(&format!(" AND status = ${}", values.len()));
+        }
+        if let Some(owner_type) = owner.owner_type {
+            values.push(owner_type.as_str().into());
+            sql.push_str(&format!(" AND owner_type = ${}", values.len()));
+        }
+        if let Some(owner_id) = owner.owner_id {
+            values.push(owner_id.into());
+            sql.push_str(&format!(" AND owner_id = ${}", values.len()));
         }
         if let Some((at, id)) = page.after()? {
             values.push(at.into());

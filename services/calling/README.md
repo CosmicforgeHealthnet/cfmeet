@@ -38,8 +38,15 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **Part IV Workstream L** Calls to and from Digital Communications Numbers (DCNs) owned by `services/numbering` (inbound DCN offers verified against Numbering, outbound DCN presentation with enterprise membership policy and single-use caller-identity grants) | **Implemented** (ADR 0041; summary below) |
 | **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → service account → credential limits and the principal axis, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
 
-**Deferred (later sections / services):** push delivery through a push vendor (a
-transport-neutral push-ready payload is produced), a message-broker transport for
+**Push (current state):** Calling builds the transport-neutral
+`cfmeet.calling.push-invitation` payload for endpoints that registered a `pushTargetRef`,
+but the service runs with `NoPushTransport` (`src/main.rs`), so nothing is pushed. The
+Notification Service's internal call-push route (`POST /internal/v1/push/call-invitations`)
+exists, but Calling is not wired to it yet. Incoming calls therefore reach a device only
+through its open signaling WebSocket or the recovery API (see [Flow](#flow)).
+
+**Deferred (later sections / services):** wiring Calling's push dispatcher to the
+Notification Service, a message-broker transport for
 platform events, quality metrics from providers that do not offer them, Numbering's own
 lifecycle and number administration (it is a separate service), billing / invoicing / pricing, and the Part F items listed below.
 
@@ -227,9 +234,27 @@ references or telephone numbers.
 5. Hold / resume / transfer / session removal / end are commands with `expectedVersion`;
    the provider enforces them. END reaches ENDED only on cleanup evidence; usage is
    finalized.
+6. Group calls have a host (C4, gap-closure migration 000052): the creator, unless the role was
+   handed over (`POST /v1/calls/{id}/host`); while the host is not present (its sessions
+   removed) the longest-standing present participant holds the role. In a group call
+   (more than two participants, ever) END / HOLD / RESUME naming an
+   `actingParticipantId` are the host's (403 for anyone else, who leaves by removing its
+   session); the backend acting without one is unchanged. The host removes a participant
+   for good (`…/participants/{participant_id}/remove`, HOST_REMOVED) or mutes it
+   (`…/participants/{participant_id}/mute`, enforced at the provider until unmuted). The
+   Call view shows `hostParticipantId` and `mutedParticipantIds`.
+7. Leaving is removing one's sessions; a participant who left a live call (ANSWERED,
+   CONNECTED, HELD) rejoins with `POST /v1/calls/{id}/participants/{participant_id}/rejoin`
+   (`endpointId`: one of its own active endpoints). The new session continues the
+   participant's winning session lineage and gets media credentials as after an answer;
+   a participant the host removed (403), one that never joined (409) or one still live on
+   another device (409) is refused.
 
-Signals are sent only after the authoritative transaction commits; a reconnecting
-endpoint recovers with `GET /v1/calling/invitations`. Expiry and media reconciliation
+Signals are sent only after the authoritative transaction commits and fan out across
+instances through PostgreSQL `LISTEN` / `NOTIFY` (`PgNotifySignalBus`); only endpoints
+with an open `GET /v1/calling/signaling` connection receive them (there is no push
+fallback yet, see above). A reconnecting endpoint recovers with
+`GET /v1/calling/invitations`. Expiry and media reconciliation
 workers run on every instance (row leases / `SKIP LOCKED`).
 
 ### Tables (migrations 000010–000014)
@@ -275,10 +300,10 @@ Meeting Service dependency; Telephony only executes edge primitives.
 | §55 | Ring groups: SIMULTANEOUS / ORDERED, group single winner, bounded fan-out, fallback | ADR 0019 |
 | §56 | Queues: FIFO, authoritative positions, one offer per entry / agent, timeouts, overflow, abandonment | ADR 0019 |
 | §57 | Declarative versioned IVR (keys never stored or logged), built-in prompts, RTC keypad and SIP DTMF | ADR 0020 |
-| §58 | Business hours (IANA zones, DST, exceptions), typed forwarding, loop / hop protection; public forwarding only through every Part E gate | ADR 0021 |
+| §58 | Business hours (IANA zones, DST, exceptions), typed forwarding (`/v1/enterprise/forwarding-rules`), loop / hop protection; public forwarding only through every Part E gate. Forwarding and voicemail also apply to an ordinary one-to-one application call (C3, `calls/app/enterprise/direct.rs`, gap-closure migration 000054): when the callee has an ACTIVE rule or mailbox, the call gets a context without entry extension (`direct`) and the router applies ALWAYS / UNAVAILABLE / BUSY / NO_ANSWER, else the callee's mailbox; off with `ENTERPRISE_CALLING_ENABLED`; voicemail only in Communications-governed personal scopes | ADR 0021 |
 | §59 | Hold / resume / transfer to enterprise targets on the same Call | ADR 0022 |
 | §60 | Voicemail: mailboxes, edge (SIP) / LiveKit Egress (RTC) capture, protected object storage (`packages/object-storage`), READY, authorized signed retrieval, read state, deletion, retention | ADR 0023, 0027 |
-| §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge (SIP) / audio-only room-composite (RTC) capture, protected artifacts, audited access | ADR 0024, 0027 |
+| §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge (SIP) / audio-only room-composite (RTC) capture, protected artifacts, audited access. A participant who joins while a recording runs (answered transfer, later answer, rejoin) gets the notice at once (`call.recording_started`, `lateJoin`) and, when the policy requires its consent, 60 s to grant it; a decline or no grant stops the recording (CONSENT_WITHDRAWN) | ADR 0024, 0027 |
 | §62 | Missed calls and history derived per logical participant from Call evidence; `GET /v1/calls?principalId=`, `GET /v1/calling/history` | ADR 0025 |
 | cross-cutting | Durable `ENTERPRISE_ROUTING_STEP` outbox events, `calling_incidents`, bounded metrics, races, failure injection, load | ADR 0026 |
 
@@ -336,6 +361,16 @@ S3-compatible store; it certifies internal enterprise SIP only. Results:
   recording artifacts); filters `from`, `to`, `usageType`, `resourceClass`; keyset paging.
   Not a bill ([`platform/usage`](../../packages/contracts/platform/usage/v1.schema.json)).
 * **Limits** — see *Limits*; `GET /v1/limits` (`usage.read`).
+* **Source of truth** — the Developer Platform's unified usage ledger is the single source
+  of truth for platform usage and API limits; `/v1/usage` and `/v1/limits` here are the
+  legacy compatibility views until the gateway switch, Calling's own detail stays at
+  `/v1/calling/usage` / `/v1/calling/limits`
+  ([usage-and-limits-source-of-truth](../../docs/operations/usage-and-limits-source-of-truth.md)).
+* **Direct-route API request accounting (P6)** — requests authenticated DIRECTLY at Calling
+  (not gateway-forwarded) are counted into the Developer Platform's API request accounting
+  (`src/usage/direct.rs`; daily totals and API_OPERATION counts, flushed every 30 s in
+  idempotent batches; `developer-usage.record`). On when `CF_DEVELOPER_PLATFORM_BASE_URL` is
+  set; `CALLING_DIRECT_USAGE_ACCOUNTING=off` disables it.
 * **Configuration** — `CALLING_WEBHOOK_SECRET_KEY` (32 bytes, base64, from the secret
   manager; without it webhook creation is refused) and
   `CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` (honoured only when `CF_RUNTIME_ENVIRONMENT=local`).
@@ -350,6 +385,7 @@ data class has one policy; bounds are configuration (`CALLING_RETENTION_*`, see
 | Class | Action | Bound (default) |
 |---|---|---|
 | `CALL_RECORD` | MINIMIZE display metadata of terminal Calls (participant display names, enterprise entry label → extension code) | `CALLING_RETENTION_CALL_DISPLAY_DAYS` (365) |
+| `CALL_HISTORY` | MINIMIZE: terminal Calls leave every participant's history (`call_participants.history_hidden_at`, reason RETENTION); the Call, events and usage stay. A principal can also hide a finished Call from its own history at any time: `DELETE /v1/calls/{id}/history?principalId=` (reason USER) | `CALLING_RETENTION_CALL_HISTORY_DAYS` (400) |
 | `CALL_EVENT`, `CALL_USAGE`, `SPEND_EVIDENCE`, `ADMIN_AUDIT`, `RECORDING_ACCESS_AUDIT` | RETAIN (evidence other records need; `CALLING_RETENTION_CALL_EVENTS_DAYS` refuses startup) | — |
 | `WEBHOOK_DELIVERY_HISTORY` / `WEBHOOK_EVENT_HISTORY` | DELETE terminal deliveries + attempts, then events without deliveries | `CALLING_RETENTION_WEBHOOK_HISTORY_DAYS` (90) |
 | `CALLING_INCIDENT` | DELETE RESOLVED incidents | `CALLING_RETENTION_INCIDENTS_DAYS` (365) |
@@ -463,6 +499,12 @@ peer service ◄─ X-CF-Service-Authorization: Bearer <EdDSA JWS> ◄───�
   outbound_for_customer, outbound_next_hop}` and `ServiceAuthRuntime::client()` (HTTPS in
   staging / production, no redirects, no proxies, `/internal/v1/` paths only).
 
+* Operator review of abuse reports (C21): `GET /internal/v1/abuse-reports` (queue across
+  scopes, oldest first, keyset cursor) and `POST /internal/v1/abuse-reports/{id}/resolve`
+  require `calling-abuse-reports.review`, grantable to `cfmeet.operator-console` only
+  (`src/calls/app/abuse_review.rs`). Add the operator console to Calling's trust bundle
+  with that permission to enable it.
+
 ADR: [0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md).
 
 ### First-party organization requests (Blueprint Section 12 follow-up, CAL-007)
@@ -554,7 +596,12 @@ set-credential | set-principal`). Two axes (ADR 0028 §70):
   default; every configured parent is also an aggregate ceiling (a service-account
   ceiling across all of its credentials, …).
 * **PRINCIPAL** — an independent ceiling of a server-resolved principal, shared by every
-  credential, service account and device acting for it.
+  credential, service account and device acting for it. Call creation is limited per
+  initiating principal even when nothing is configured (C9):
+  `CALLING_CALL_CREATIONS_PER_PRINCIPAL_PER_MINUTE` (default 60, `0` = off) applies when
+  the principal has no configured request rate (`platform_admin limits set-principal
+  --requests-per-minute` overrides it, higher or lower); a refusal is 429 with
+  `Retry-After` and a deduplicated `limit.exceeded` notice.
 
 An operation must satisfy every applicable ceiling (plus the environment's spend
 policy); the broadest exhausted level is reported. Telecom spend defaults to zero and is
@@ -683,7 +730,12 @@ app refusals.
   (answered / declined / busy / no_answer / cancelled / failed / timeout),
   `calling_media_admissions_total{source,result,reason}`, `calling_media_reconnects_total`.
   No jitter / RTT / packet loss is invented; the end-of-call quality summary records the
-  admitted sessions, reconnects and connected participants Calling observed.
+  admitted sessions, reconnects and connected participants Calling observed. Clients
+  report what they measured (C8): `POST /v1/calls/{id}/sessions/{session_id}/quality-samples`
+  (jitter ms, packet loss %, RTT ms; finite and bounded; at most 720 samples per live
+  session) stores an immutable quality record of that session with a server-computed
+  estimated MOS (simplified E-model, 1.0–4.5); `GET /v1/calls/{id}/quality` aggregates
+  them per participant; `calling_quality_samples_total{call_kind}`.
 * **Correlation** — `calls.correlation_id` keeps the creating request's correlation id;
   Calling's own later commands for the Call (worker / event-driven transitions,
   TERMINATE / BRIDGE / ANSWER / PROMPT to Telephony, usage) carry it, and worker / event
@@ -710,6 +762,14 @@ curl http://127.0.0.1:8090/health
 
 From the repository root: `make calling-migrate`, `make calling`.
 
+`calling-migration up` applies two histories: the main one (`calling_seaql_migrations`,
+fail-closed on versions it does not know) and then the additive gap-closure history
+(`calling_gap_closure_seaql_migrations`, `migration/src/gap/`). New additive changes go
+to the gap-closure history so the previous image still starts against a database that
+has them; this image refuses to start until both are applied
+(`calling_migration::pending_migrations`). `reset` rolls the gap-closure history back
+first; other subcommands concern the main history.
+
 ## Administration
 
 `platform_admin` administers what Calling owns. Identity (tenants … credentials, scopes,
@@ -734,6 +794,9 @@ $A compliance set --tenant acme --application dispatch --environment production 
 $A compliance show --tenant acme --application dispatch --environment production
 $A compliance revoke --tenant acme --application dispatch --environment production
 $A abuse-report set-status --report <id> --status reviewed
+# The same review over HTTP (C21): the operator console, with the receiver-granted
+# permission calling-abuse-reports.review, uses GET /internal/v1/abuse-reports and
+# POST /internal/v1/abuse-reports/{id}/resolve (same audit row, actor = the service id).
 $A block release --block <id>
 # Retention (Part H §80): holds are audited; list / policies are read-only.
 $A retention policies

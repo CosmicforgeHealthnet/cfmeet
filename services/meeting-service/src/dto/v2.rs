@@ -279,6 +279,65 @@ pub struct MeetingSpaceListResponse {
     pub next_cursor: Option<String>,
 }
 
+/// Gap audit G13: one meeting space of an organization, as its managers oversee it
+/// (whatever its access policy or security profile). Governance fields only: no
+/// passcode, invitation, participant or content data.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationMeetingSpace {
+    pub id: Uuid,
+    pub title: String,
+    pub owner_user_id: Option<Uuid>,
+    pub meeting_type: MeetingType,
+    pub access_policy: AccessPolicy,
+    pub security_profile: SecurityProfile,
+    pub status: SpaceStatus,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Gap audit G17: the organization layer of the meeting profile policy. Sparse, in the
+/// same shape as a space override; every value set binds the organization's spaces.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationMeetingProfilePolicy {
+    pub organization_id: Uuid,
+    #[schema(value_type = Object)]
+    pub policy: serde_json::Value,
+}
+
+/// Replace the organization layer (gap audit G17).
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutOrganizationMeetingProfilePolicyRequest {
+    /// Sparse profile policy, e.g. `{"recording": {"allowed": false}}`; `{}` clears it.
+    #[schema(value_type = Object)]
+    pub policy: serde_json::Value,
+}
+
+/// `GET /api/v2/organizations/{id}/meeting-spaces` page (gap audit G13).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationMeetingSpacePage {
+    pub items: Vec<OrganizationMeetingSpace>,
+    /// Pass as `after` for the next page; `null` on the last page.
+    pub next_cursor: Option<Uuid>,
+}
+
+/// Paging and filter of an organization's meeting spaces (gap audit G13).
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+pub struct OrganizationMeetingSpacesQuery {
+    /// Last space id of the previous page.
+    pub after: Option<Uuid>,
+    /// Page size, 1-200 (default 50).
+    pub limit: Option<u64>,
+    /// Include archived spaces (default false).
+    pub include_archived: Option<bool>,
+}
+
 /// `GET /api/v2/meeting-spaces` paging (both optional; omitting both keeps the legacy
 /// complete list).
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -309,6 +368,25 @@ pub struct AddMemberRequest {
     /// Matched only against verified account emails.
     pub email: Option<String>,
     pub role: Role,
+}
+
+/// Gap audit G7: add every active member of one of the space's organization teams.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AddTeamMembersRequest {
+    pub team_id: Uuid,
+    /// Meeting role given to each team member (same grant rules as one member).
+    pub role: Role,
+}
+
+/// Result of adding a team (gap audit G7).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTeamMembersResponse {
+    /// Members added now.
+    pub added: Vec<MemberResponse>,
+    /// Team members skipped: already members, the owner, you, or not an active account.
+    pub skipped: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -1272,6 +1350,55 @@ pub struct OrganizationLifecycleRequest {
 pub struct OrganizationInvitationList {
     /// Invitations (masked invitee email; never a token).
     pub items: Vec<OrganizationInvitation>,
+    /// The cursor of the next page; absent or null on the last page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// `POST /api/v2/admin/organizations/{id}/owners` (platform administrators).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppointOrganizationOwnerRequest {
+    /// The account that becomes an ACTIVE OWNER.
+    pub user_id: Uuid,
+    /// Why the administrator intervenes (1–500 characters; recorded in the organization's
+    /// audit history).
+    pub reason: String,
+}
+
+/// The organization an invitation for the signed-in account comes from.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InvitingOrganization {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+}
+
+/// A pending invitation addressed to the signed-in account.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MyOrganizationInvitation {
+    pub id: Uuid,
+    pub organization_id: Uuid,
+    /// The inviting organization (absent only if it could not be read).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<InvitingOrganization>,
+    /// The role the invitation offers: ADMIN, MANAGER, MEMBER or GUEST.
+    pub role: String,
+    /// Always PENDING in this list.
+    pub status: String,
+    pub invitee_email_hint: String,
+    pub invited_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// Pending invitations addressed to the signed-in account (newest first, at most 100).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MyOrganizationInvitationList {
+    pub items: Vec<MyOrganizationInvitation>,
 }
 
 /// Who performed an audited organization change.

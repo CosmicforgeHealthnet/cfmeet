@@ -79,6 +79,7 @@ zeroize = { version = "1.8", features = ["derive"] }
 cf-usage-facts = { path = "../../packages/usage-facts", features = ["exporter"] }
 # Blueprint Section 16 (SEC-019): the one shared S3 SigV4 signer (artefact storage).
 cf-object-storage = { path = "../../packages/object-storage" }
+sha1 = "0.10"
 
 [[bin]]
 name = "test_email"

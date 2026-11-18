@@ -932,3 +932,149 @@ async fn j08_invited_guest_prejoin_consent_wait_admit_journey() {
         .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
 }
+
+/// Gap audit M17: a timed breakout room ends by itself — its end is fixed when it opens,
+/// the countdown starts `warningSeconds` before, and the closer worker finishes it.
+#[tokio::test]
+async fn m17_timed_breakout_rooms_close_themselves() {
+    let app = app!();
+    let (owner, cid, _) = meeting(&app, public(), 1).await;
+    let (s, v) = app
+        .post(
+            &format!("{}/breakouts", base(cid)),
+            Auth::Bearer(&owner.token),
+            json!({ "count": 1, "durationSeconds": 30 }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "durations start at 60 s: {v}");
+    let rooms = create_rooms(
+        &app,
+        cid,
+        &owner,
+        json!({ "count": 1, "durationSeconds": 600, "warningSeconds": 30 }),
+    )
+    .await;
+    let opened = open_room(&app, cid, &owner, rooms[0]).await;
+    assert_eq!(opened["breakout"]["durationSeconds"], 600);
+    assert!(opened["breakout"]["endsAt"].is_string(), "{opened}");
+    let closer = backend::workers::BreakoutCloser::new(app.state.meeting.core.clone());
+    closer.tick().await.unwrap();
+    let room = rooms[0];
+    let status = |v: &Value| {
+        v["breakouts"]
+            .as_array()
+            .and_then(|l| l.iter().find(|b| b["id"] == json!(room)))
+            .and_then(|b| b["status"].as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let (_, v) = app
+        .get(
+            &format!("{}/breakouts", base(cid)),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(status(&v), "OPEN", "not yet: {v}");
+    // Time passes: the end is within the warning window.
+    exec(
+        &app,
+        &format!(
+            "UPDATE breakout_rooms SET config = jsonb_set(config, '{{endsAt}}', to_jsonb(to_char((now() + interval '20 seconds') AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'))) WHERE id = '{}'",
+            rooms[0]
+        ),
+    )
+    .await;
+    closer.tick().await.unwrap();
+    let (_, v) = app
+        .get(
+            &format!("{}/breakouts", base(cid)),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(status(&v), "CLOSING", "{v}");
+    assert!(event_payloads(&app, cid, "breakout.closing").await.len() >= 1);
+    exec(
+        &app,
+        &format!(
+            "UPDATE breakout_rooms SET closing_at = now() WHERE id = '{}'",
+            rooms[0]
+        ),
+    )
+    .await;
+    closer.tick().await.unwrap();
+    let (_, v) = app
+        .get(
+            &format!("{}/breakouts", base(cid)),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(status(&v), "CLOSED", "{v}");
+}
+
+/// Gap audit M17: the sender edits their message (within 15 minutes); others cannot,
+/// and a deleted message cannot be edited.
+#[tokio::test]
+async fn m17_senders_edit_their_chat_messages() {
+    let app = app!();
+    let (owner, cid, guests) = meeting(&app, public(), 2).await;
+    let a = guests[0].participant_token.clone().unwrap();
+    let b = guests[1].participant_token.clone().unwrap();
+    let (s, v) = send(&app, cid, Auth::Participant(&a), json!({ "body": "helo" })).await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let mid = uuid(&v["id"]);
+    assert!(v["editedAt"].is_null());
+    let edit = |token: String, body: &'static str| {
+        let app = &app;
+        async move {
+            app.patch(
+                &format!("{}/messages/{mid}", base(cid)),
+                Auth::Participant(&token),
+                json!({ "body": body }),
+            )
+            .await
+        }
+    };
+    let (s, v) = edit(a.clone(), "hello").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["body"], "hello");
+    assert!(v["editedAt"].is_string());
+    let (_, page) = messages(&app, cid, Auth::Participant(&b), "").await;
+    let listed = page["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == json!(mid))
+        .cloned()
+        .unwrap();
+    assert_eq!(listed["body"], "hello");
+    assert!(!event_payloads(&app, cid, "chat.message_edited")
+        .await
+        .is_empty());
+    // Someone else cannot edit it; an empty body is refused.
+    assert_eq!(edit(b.clone(), "hijack").await.0, StatusCode::FORBIDDEN);
+    assert_eq!(edit(a.clone(), "   ").await.0, StatusCode::BAD_REQUEST);
+    // After the window, or once deleted, it cannot be edited.
+    exec(
+        &app,
+        &format!("UPDATE conference_messages SET created_at = now() - interval '16 minutes' WHERE id = '{mid}'"),
+    )
+    .await;
+    assert_eq!(edit(a.clone(), "late").await.0, StatusCode::BAD_REQUEST);
+    let (s, v) = send(&app, cid, Auth::Participant(&a), json!({ "body": "oops" })).await;
+    assert_eq!(s, StatusCode::CREATED);
+    let gone = uuid(&v["id"]);
+    app.delete(
+        &format!("{}/messages/{gone}", base(cid)),
+        Auth::Participant(&a),
+    )
+    .await;
+    let (s, _) = app
+        .patch(
+            &format!("{}/messages/{gone}", base(cid)),
+            Auth::Participant(&a),
+            json!({ "body": "x" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let _ = owner;
+}

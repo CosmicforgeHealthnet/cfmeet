@@ -124,6 +124,9 @@ const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
     ("GET", "/v1/conversations/*/messages/*"),
     ("PATCH", "/v1/conversations/*/messages/*"),
     ("DELETE", "/v1/conversations/*/messages/*"),
+    // Gap audit S11 / S12: a member forwards a message and joins with an invite link.
+    ("POST", "/v1/conversations/*/messages/*/forward"),
+    ("POST", "/v1/messaging/invite-links/join"),
     ("GET", "/v1/conversations/*/messages/*/revisions"),
     ("GET", "/v1/conversations/*/messages/*/reactions"),
     ("GET", "/v1/conversations/*/messages/*/thread"),
@@ -749,6 +752,79 @@ pub async fn require_delegated_application(
     let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
     request.extensions_mut().insert(CustomerCaller(ctx));
     request.extensions_mut().insert(DelegatedApplication);
+    let response = next.run(request).await;
+    if mutation && response.status().is_success() {
+        state.wake_outbox();
+    }
+    response
+}
+
+/// Request extension set ONLY by [`require_organization_moderation`]: the organization
+/// moderator (their principal in the organization's own Messaging scope) a moderation
+/// request was relayed for. Recorded on moderation actions and audit entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrganizationModerator(pub Uuid);
+
+/// The single scope an organization moderation request holds.
+pub const ORGANIZATION_MODERATION_SCOPES: &[&str] = &["moderation.manage"];
+
+/// `/internal/v1/organization-moderation/**` (gap audit G6): the Meeting Service, granted
+/// `messaging-organization.govern`, relays a request of an organization moderator — a
+/// member whose organization grants `messaging.organization.moderate`, decided by the
+/// Organizations Service on every request before anything reaches Messaging — into the
+/// organization's OWN first-party scope. The handlers are the ordinary moderation
+/// handlers (one moderation path) and see a [`CustomerCaller`] holding only
+/// `moderation.manage`. The moderator must travel SIGNED as the initiating principal and
+/// be ACTIVE in that scope; it is never an acting member (no CF-Acting-Principal), and is
+/// recorded as [`OrganizationModerator`]. The organization's scope bounds what is visible:
+/// the reports and conversations of that organization only.
+pub async fn require_organization_moderation(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let Some(caller) = request.extensions().get::<InternalCaller>().cloned() else {
+        return ApiError::code(ErrorCode::InternalAuthenticationFailed).into_response();
+    };
+    if let Err(e) = caller.require_permission(InternalPermission::MessagingOrganizationGovern) {
+        return e.into_response();
+    }
+    let mut ctx = match delegated_context(&state, &caller).await {
+        Ok(ctx) => ctx,
+        Err(e) => return e.into_response(),
+    };
+    if !ctx.first_party {
+        return ApiError::code(ErrorCode::DelegatedContextInvalid).into_response();
+    }
+    let Some(signed) = caller
+        .context()
+        .delegated_platform_context()
+        .and_then(|d| d.initiating_principal())
+    else {
+        return ApiError::reason(ErrorCode::PrincipalNotAuthorized, "MODERATOR_REQUIRED")
+            .into_response();
+    };
+    match acting_header(request.headers()) {
+        Ok(None) => {}
+        Ok(Some(_)) => {
+            return ApiError::reason(ErrorCode::PrincipalNotAuthorized, "ADMINISTRATION_ONLY")
+                .into_response()
+        }
+        Err(e) => return e.into_response(),
+    }
+    let moderator = match verify_principal(&state, &ctx, signed.principal_id).await {
+        Ok(a) => a.principal_id,
+        Err(e) => return e.into_response(),
+    };
+    ctx.scopes = ORGANIZATION_MODERATION_SCOPES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
+    request.extensions_mut().insert(CustomerCaller(ctx));
+    request
+        .extensions_mut()
+        .insert(OrganizationModerator(moderator));
     let response = next.run(request).await;
     if mutation && response.status().is_success() {
         state.wake_outbox();

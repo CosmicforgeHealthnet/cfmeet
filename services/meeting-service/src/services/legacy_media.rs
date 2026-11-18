@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::{
     error::ApiResult,
-    services::rtc_provider::{RtcParticipantRef, RtcProvider},
+    services::rtc_provider::{RtcParticipantRef, RtcProvider, RtcRoomRef},
 };
 
 /// Provider reference of one legacy participant in its legacy room.
@@ -26,6 +26,29 @@ pub fn participant_ref(
         room_name: room_name.to_owned(),
         participant_session_id: participant_id,
         media_identity: participant_id.to_string(),
+    }
+}
+
+/// Gap audit M7: end a legacy meeting's media room when the meeting ends (host end or the
+/// v1 auto-end worker), so connected participants are disconnected instead of staying in
+/// the room while their credentials refresh. Already absent = success (provider contract).
+/// `false` (logged) when the provider could not be reached; the database state stands.
+pub async fn terminate(
+    rtc: &dyn RtcProvider,
+    meeting_id: Uuid,
+    room_name: &str,
+    reason: &str,
+) -> bool {
+    let room = RtcRoomRef {
+        conference_id: meeting_id,
+        room_name: room_name.to_owned(),
+    };
+    match rtc.terminate_room(&room, reason).await {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!(meeting_id = %meeting_id, reason, "legacy media room termination failed: {e}");
+            false
+        }
     }
 }
 
