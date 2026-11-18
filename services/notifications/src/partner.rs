@@ -531,12 +531,15 @@ impl PartnerTransport for RecordingPartnerTransport {
     }
 }
 
+/// A sender built for one stored version (fingerprint, `updated_at`) of a credential.
+type CachedSender = (String, DateTime<Utc>, Arc<dyn PushProvider>);
+
 /// The partner push runtime (present only while `NOTIFICATIONS_PARTNER_PUSH_ENABLED`).
 pub struct PartnerPush {
     pub transport: Arc<dyn PartnerTransport>,
     /// Senders per (scope, slot), valid for one stored version of the credential (a
     /// replaced or deleted credential is never used again: every send reads the row).
-    senders: Mutex<HashMap<(Scope, &'static str), (String, DateTime<Utc>, Arc<dyn PushProvider>)>>,
+    senders: Mutex<HashMap<(Scope, &'static str), CachedSender>>,
 }
 
 impl PartnerPush {
