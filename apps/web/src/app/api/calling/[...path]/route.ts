@@ -1,5 +1,6 @@
 import { callerDisplayName, callingDevMode, callingFailure, callingFetch, callingIdentity, CallingHttpError, ownCall, ownEndpoints, type CallingIdentity } from "@/lib/calling/server";
 import { mayControl, ownParticipant, activeParticipant, type ControlOperation } from "@/lib/calling/call-permissions";
+import { contactVaultFetch, contactVaultScope, isContactVaultRoute } from "@/lib/calling/contact-vault";
 import type { Call } from "@/types/calling";
 
 /**
@@ -19,6 +20,10 @@ import type { Call } from "@/types/calling";
  *  - The remaining enterprise administration of the SHARED scope stays behind the
  *    CALLING_ADMIN_PRINCIPAL_IDS allowlist until it is retired (CAL-007); organization
  *    administration goes through Meeting's `/api/v2/organizations/{id}/calling/{path}`.
+ *  - Protected contacts (`v1/privacy-relay/contacts…`) are NOT Calling operations: they are
+ *    Privacy Relay's Contact Vault. Behind the same privacy-administrator allowlist, the adapter
+ *    mints a one-scope grant at Calling (`contact-access-grants`) and calls the Contact Vault
+ *    with `X-CF-Contact-Authorization` (`contact-vault.ts`); nothing of it goes to Calling.
  */
 
 export const runtime = "nodejs";
@@ -67,9 +72,7 @@ const privacyRelayRules: Array<[RegExp, string[]]> = [
   [new RegExp(`^v1/privacy-relay/sessions/${resourceId}/evidence$`), ["GET"]],
   [new RegExp(`^v1/privacy-relay/sessions/${resourceId}/(suspend|resume|revoke)$`), ["POST"]],
   [/^v1\/privacy-relay\/contact-access-grants$/, ["POST"]],
-  [/^v1\/privacy-relay\/contacts$/, ["POST"]],
-  [new RegExp(`^v1/privacy-relay/contacts/${resourceId}$`), ["GET", "PATCH"]],
-  [new RegExp(`^v1/privacy-relay/contacts/${resourceId}/disable$`), ["POST"]],
+  // Contact Vault paths (v1/privacy-relay/contacts…) are served by Privacy Relay: see contact-vault.ts.
 ];
 
 /** Abuse categories of `services/calling/src/calls/app/abuse_reports.rs` (AbuseCategory). */
@@ -231,6 +234,7 @@ async function handle(request: Request, context: Context) {
       if (text) body = parseBody(text);
     }
     const route = path.join("/");
+    if (isContactVaultRoute(route)) return await forwardToContactVault(identity, route, method, url, body);
     const decision = await authorize({ identity, route, path, method, url, body });
     if (decision instanceof Response) return decision;
     if (!decision) throw new CallingHttpError(404, "NOT_FOUND", "Calling operation not found.");
@@ -251,6 +255,23 @@ async function handle(request: Request, context: Context) {
     }
     return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch (error) { return callingFailure(error); }
+}
+
+/** Contact Vault operations: privacy administrators only, through a Calling-minted grant. */
+async function forwardToContactVault(identity: CallingIdentity, route: string, method: string, url: URL, body: Body | undefined) {
+  const scope = contactVaultScope(route, method);
+  if (!scope || url.search) throw new CallingHttpError(404, "NOT_FOUND", "Calling operation not found.");
+  requireResourceAdministrator(identity.principalId, route);
+  const upstream = await contactVaultFetch(route, scope, { method, body: body ? JSON.stringify(body) : undefined });
+  if (upstream.status === 401) {
+    throw new CallingHttpError(503, "CONTACT_VAULT_UNAVAILABLE", "Protected contacts are temporarily unavailable.");
+  }
+  const responseHeaders = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
+  for (const name of ["Retry-After", "X-Request-Id"]) {
+    const value = upstream.headers.get(name);
+    if (value) responseHeaders.set(name, value);
+  }
+  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
 }
 
 type Authorization = { identity: CallingIdentity; route: string; path: string[]; method: string; url: URL; body: Body | undefined };

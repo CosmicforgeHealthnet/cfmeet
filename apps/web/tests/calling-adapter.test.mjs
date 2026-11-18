@@ -47,7 +47,8 @@ function fixture({ own = true, ownsBlock = true, configured = true, scope = iden
   const guard = load("../src/lib/calling/runtime-guard.ts");
   const permissions = load("../src/lib/calling/call-permissions.ts");
   const server = load("../src/lib/calling/server.ts", { "@/lib/calling/runtime-guard": guard });
-  const route = load("../src/app/api/calling/[...path]/route.ts", { "@/lib/calling/server": server, "@/lib/calling/call-permissions": permissions });
+  const vault = load("../src/lib/calling/contact-vault.ts", { "@/lib/calling/server": server });
+  const route = load("../src/app/api/calling/[...path]/route.ts", { "@/lib/calling/server": server, "@/lib/calling/call-permissions": permissions, "@/lib/calling/contact-vault": vault });
   const signaling = load("../src/app/api/calling-signaling/[...path]/route.ts", { "@/lib/calling/server": server });
   const request = async (path, method = "GET", body, headers = {}, endpoint = false) => (endpoint ? signaling : route)[method](new Request(`https://web.example/api/calling/${path}`, {
     method, headers: { Authorization: "Bearer login-token", ...headers }, body: body ? JSON.stringify(body) : undefined,
@@ -357,4 +358,71 @@ test("signaling forwards endpoint credentials alone and refuses login/admin requ
   assert.equal((await invalid.request("v1/calling/invitations", "GET", undefined, {}, true)).status, 401);
   assert.equal((await invalid.request("v1/calls", "GET", undefined, { Authorization: "Bearer cfsig_test.token" }, true)).status, 404);
   assert.equal(invalid.sent.length, 0);
+});
+
+// C17: protected contacts are Privacy Relay's Contact Vault, never Calling operations.
+const contactRef = "77777777-7777-4777-8777-777777777777";
+const grantToken = "aaa.bbb.ccc";
+function vaultUpstream(url, init) {
+  if (url.endsWith("/v1/privacy-relay/contact-access-grants")) {
+    return Response.json({ grant: { grantId: "0".repeat(32), accessToken: grantToken, tokenType: "Bearer",
+      authorizationHeader: "X-CF-Contact-Authorization", audience: "cfmeet.privacy-relay",
+      scopes: JSON.parse(init.body).scopes, expiresAt: "2026-11-18T12:02:00Z" } }, { status: 201 });
+  }
+  if (url.startsWith("https://relay.example/")) return Response.json({ contactReference: contactRef }, { status: 200 });
+  return null;
+}
+
+test("contact vault operations mint a one-scope grant at Calling and go to Privacy Relay", async () => {
+  for (const [path, method, body, scope] of [
+    ["v1/privacy-relay/contacts", "POST", { phoneNumber: "+2348000000000" }, "privacy.contacts.write"],
+    [`v1/privacy-relay/contacts/${contactRef}`, "GET", undefined, "privacy.contacts.read"],
+    [`v1/privacy-relay/contacts/${contactRef}`, "PATCH", { expectedVersion: 1 }, "privacy.contacts.write"],
+    [`v1/privacy-relay/contacts/${contactRef}/disable`, "POST", { expectedVersion: 1 }, "privacy.contacts.write"],
+    [`v1/privacy-relay/contacts/${contactRef}/verification`, "POST", { expectedVersion: 1 }, "privacy.contacts.verify"],
+  ]) {
+    const f = fixture({ admin: true, extraEnv: { PRIVACY_RELAY_API_URL: "https://relay.example" }, upstream: vaultUpstream });
+    const response = await f.request(path, method, body);
+    assert.equal(response.status, 200, `${method} ${path}`);
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+    const text = await response.text();
+    assert.ok(!text.includes(grantToken) && !text.includes("server-secret"));
+    // identity, grant (Calling, platform credential), vault (Privacy Relay, grant only)
+    assert.equal(f.sent.length, 3, `${method} ${path}`);
+    const [, grant, vault] = f.sent;
+    assert.equal(grant.url, "https://calling.example/v1/privacy-relay/contact-access-grants");
+    assert.equal(grant.init.method, "POST");
+    assert.equal(grant.init.headers.get("Authorization"), "Bearer server-secret");
+    assert.deepEqual(JSON.parse(grant.init.body), { scopes: [scope] });
+    assert.equal(vault.url, `https://relay.example/${path}`);
+    assert.equal(vault.init.method, method);
+    assert.equal(vault.init.headers.get("X-CF-Contact-Authorization"), `Bearer ${grantToken}`);
+    assert.equal(vault.init.headers.get("Authorization"), null);
+    assert.ok(!f.sent.some((s) => s.url.startsWith("https://calling.example/v1/privacy-relay/contacts")));
+    if (body) assert.deepEqual(JSON.parse(vault.init.body), body);
+  }
+});
+
+test("contact vault routes are privacy-admin only, allowlisted, and fail closed without Privacy Relay", async () => {
+  const relay = { PRIVACY_RELAY_API_URL: "https://relay.example" };
+  const denied = fixture({ extraEnv: relay, upstream: vaultUpstream });
+  assert.equal((await denied.request(`v1/privacy-relay/contacts/${contactRef}`)).status, 403);
+  assert.equal(denied.sent.length, 1, "no grant is minted for a non-administrator");
+  for (const [path, method] of [
+    ["v1/privacy-relay/contacts", "GET"],
+    [`v1/privacy-relay/contacts/${contactRef}`, "DELETE"],
+    ["v1/privacy-relay/contacts/not-a-uuid", "GET"],
+    [`v1/privacy-relay/contacts/${contactRef}/export`, "POST"],
+    [`v1/privacy-relay/contacts/${contactRef}?raw=1`, "GET"],
+  ]) {
+    const f = fixture({ admin: true, extraEnv: relay, upstream: vaultUpstream });
+    assert.equal((await f.request(path, method, method === "GET" || method === "DELETE" ? undefined : {})).status, 404, `${method} ${path}`);
+    assert.equal(f.sent.length, 1, `${method} ${path} must reach neither Calling nor Privacy Relay`);
+  }
+  const unconfigured = fixture({ admin: true, upstream: vaultUpstream });
+  assert.equal((await unconfigured.request(`v1/privacy-relay/contacts/${contactRef}`)).status, 503);
+  assert.equal(unconfigured.sent.length, 1);
+  const insecure = fixture({ admin: true, extraEnv: { PRIVACY_RELAY_API_URL: "http://relay.example", NODE_ENV: "production" }, upstream: vaultUpstream });
+  assert.equal((await insecure.request(`v1/privacy-relay/contacts/${contactRef}`)).status, 503);
+  assert.equal(insecure.sent.length, 1);
 });
