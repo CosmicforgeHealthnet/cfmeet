@@ -2690,7 +2690,18 @@ async fn peer_handler(
     // Gap audit G6 / G7: organization moderation and team channels.
     let to_governance = path.starts_with("/internal/v1/organization-moderation/")
         || path == "/internal/v1/team-channels";
-    let (verifier, permission) = if to_platform_access {
+    // Gap audit G3: organization members' own calling presence and extension offboarding.
+    let to_members = path.starts_with("/internal/v1/organization-members/");
+    let (verifier, permission) = if to_members {
+        (
+            &state.calling,
+            if path.ends_with("/extension-status") {
+                InternalPermission::CallingOrganizationMemberOffboard
+            } else {
+                InternalPermission::CallingOrganizationMemberAct
+            },
+        )
+    } else if to_platform_access {
         (
             &state.platform_access,
             InternalPermission::PlatformPrincipalEnsure,
@@ -2802,7 +2813,11 @@ impl Peers {
             calling: peer_verifier(
                 &jwk,
                 "cfmeet.calling",
-                &["calling-request.act-for-organization"],
+                &[
+                    "calling-request.act-for-organization",
+                    "calling-organization-member.act",
+                    "calling-organization-member.offboard",
+                ],
             ),
             platform_access: peer_verifier(
                 &jwk,
@@ -2845,6 +2860,14 @@ impl Peers {
         self.records()
             .into_iter()
             .filter(|r| !r.path.starts_with("/internal/"))
+            .collect()
+    }
+
+    /// Gap audit G3: what reached Calling's organization member routes.
+    fn member_records(&self) -> Vec<PeerRecord> {
+        self.records()
+            .into_iter()
+            .filter(|r| r.path.starts_with("/internal/v1/organization-members/"))
             .collect()
     }
 }
@@ -3303,6 +3326,267 @@ async fn s12_organization_calling_is_disabled_by_default() {
         (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
         "{v}"
     );
+}
+
+impl CallingWorld {
+    async fn member_calling(
+        &self,
+        method: Method,
+        user: &User,
+        rest: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        self.app
+            .call(
+                method,
+                &format!("/api/v2/organizations/{}/member-calling/{rest}", self.org),
+                Auth::Bearer(&user.token),
+                body,
+            )
+            .await
+    }
+}
+
+/// Gap audit G3: a MEMBER (no administrative capability) registers, lists and revokes
+/// their own endpoints and obtains signaling credentials in the organization's OWN Calling
+/// scope, as their organization principal, with the organization's credential named for
+/// Calling to re-verify — never a principal from the request.
+#[tokio::test]
+async fn g3_members_get_their_own_calling_endpoint_and_signaling_in_the_organization_scope() {
+    let w = some!(calling_world(true).await);
+    let endpoint = Uuid::new_v4();
+    let device = json!({ "endpointKey": "member-web-1", "endpointKind": "WEB",
+                         "capabilities": { "audio": true, "video": true } });
+    let (s, v) = w
+        .member_calling(Method::POST, &w.member, "endpoints", Some(device.clone()))
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let (s, v) = w
+        .member_calling(
+            Method::GET,
+            &w.member,
+            "endpoints?includeRevoked=true",
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, v) = w
+        .member_calling(
+            Method::POST,
+            &w.member,
+            "signaling-credentials",
+            Some(json!({ "endpointId": endpoint })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let (s, v) = w
+        .member_calling(
+            Method::DELETE,
+            &w.member,
+            &format!("endpoints/{endpoint}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        s,
+        StatusCode::CREATED,
+        "the fake answers every POST with 201: {v}"
+    );
+
+    let records = w.peers.member_records();
+    let calls: Vec<(String, String, Option<String>, Value)> = records
+        .iter()
+        .map(|r| {
+            (
+                r.method.clone(),
+                r.path.clone(),
+                r.query.clone(),
+                r.body.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        calls,
+        vec![
+            (
+                "POST".into(),
+                "/internal/v1/organization-members/endpoints".into(),
+                None,
+                device
+            ),
+            (
+                "GET".into(),
+                "/internal/v1/organization-members/endpoints".into(),
+                Some("includeRevoked=true".into()),
+                Value::Null
+            ),
+            (
+                "POST".into(),
+                "/internal/v1/organization-members/signaling-credentials".into(),
+                None,
+                json!({ "endpointId": endpoint })
+            ),
+            (
+                "POST".into(),
+                "/internal/v1/organization-members/endpoints/revoke".into(),
+                None,
+                json!({ "endpointId": endpoint })
+            ),
+        ]
+    );
+    for r in &records {
+        // The organization's own scope, its Calling credential (id only) and the member's
+        // organization principal — never a customer credential header.
+        assert_eq!((r.tenant, r.application, r.environment), w.triple);
+        assert_eq!(
+            (r.service_account, r.credential),
+            (w.binding.0, Some(w.binding.1))
+        );
+        assert_eq!(
+            r.principal,
+            Some((w.peers.state.principal, "NATIVE_CF_USER".to_string()))
+        );
+        assert!(!r.authorization);
+    }
+    // The administration relay was not used, and no administrative capability is needed.
+    assert!(w.peers.calling_records().is_empty());
+}
+
+#[tokio::test]
+async fn g3_member_calling_is_gated_by_organizations_and_fails_closed() {
+    let w = some!(calling_world(true).await);
+    let forwarded = |w: &CallingWorld| w.peers.member_records().len();
+    let body = json!({ "endpointId": Uuid::new_v4() });
+    // Bad bodies and ids never reach Calling.
+    for (method, rest, b) in [
+        (
+            Method::POST,
+            "signaling-credentials",
+            Some(json!({ "endpointId": "x" })),
+        ),
+        (
+            Method::POST,
+            "signaling-credentials",
+            Some(json!({ "endpointId": Uuid::new_v4(), "principalId": Uuid::new_v4() })),
+        ),
+        (Method::POST, "endpoints", Some(json!([1, 2]))),
+        (Method::GET, "endpoints?principalId=x", None),
+    ] {
+        let (s, v) = w.member_calling(method, &w.member, rest, b).await;
+        assert_eq!(
+            (s, code(&v)),
+            (StatusCode::BAD_REQUEST, "VALIDATION_ERROR"),
+            "{rest}: {v}"
+        );
+    }
+    let (s, v) = w
+        .member_calling(Method::DELETE, &w.member, "endpoints/not-a-uuid", None)
+        .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "{v}");
+    // A suspended member, a suspended organization, an outsider, Calling turned off by
+    // policy: refused by Organizations, nothing forwarded.
+    w.fake
+        .set_membership_status(w.member.id, w.org, "SUSPENDED");
+    let (s, v) = w
+        .member_calling(
+            Method::POST,
+            &w.member,
+            "signaling-credentials",
+            Some(body.clone()),
+        )
+        .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s} {v}"
+    );
+    w.fake.set_membership_status(w.member.id, w.org, "ACTIVE");
+    w.fake.set_org_status(w.org, "SUSPENDED");
+    let (s, v) = w
+        .member_calling(
+            Method::POST,
+            &w.member,
+            "signaling-credentials",
+            Some(body.clone()),
+        )
+        .await;
+    assert!(s.is_client_error(), "{s} {v}");
+    w.fake.set_org_status(w.org, "ACTIVE");
+    let outsider = w.app.user("g3-outsider").await;
+    let (s, v) = w
+        .member_calling(Method::GET, &outsider, "endpoints", None)
+        .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s} {v}"
+    );
+    w.fake.set_policy(
+        w.org,
+        json!({ "revision": 2, "features": { "meetings": true, "messaging": true, "calling": false },
+                "restrict": {} }),
+    );
+    let (s, v) = w
+        .member_calling(Method::GET, &w.member, "endpoints", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::FORBIDDEN, "ORGANIZATION_POLICY_RESTRICTED"),
+        "{v}"
+    );
+    w.fake.set_policy(w.org, default_policy());
+    // No Calling binding yet.
+    w.bind(false);
+    let (s, v) = w
+        .member_calling(Method::GET, &w.member, "endpoints", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
+        "{v}"
+    );
+    w.bind(true);
+    assert_eq!(forwarded(&w), 0, "nothing refused ever reached Calling");
+    // Calling refusing the Meeting Service (trust bundle grant, credential) or failing.
+    for status in [401, 403, 500, 503] {
+        *w.peers.state.calling_answer.lock().unwrap() =
+            Some((status, envelope("INTERNAL_PERMISSION_DENIED")));
+        let (s, v) = w
+            .member_calling(Method::GET, &w.member, "endpoints", None)
+            .await;
+        assert_eq!(
+            (s, code(&v)),
+            (StatusCode::SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE"),
+            "calling {status}: {v}"
+        );
+    }
+    // Calling's own answers (e.g. another member's endpoint) are relayed.
+    *w.peers.state.calling_answer.lock().unwrap() = Some((404, envelope("NOT_FOUND")));
+    let (s, v) = w
+        .member_calling(Method::POST, &w.member, "signaling-credentials", Some(body))
+        .await;
+    assert_eq!((s, code(&v)), (StatusCode::NOT_FOUND, "NOT_FOUND"), "{v}");
+    *w.peers.state.calling_answer.lock().unwrap() = None;
+    // Unauthenticated, and disabled by default.
+    let (s, v) = w
+        .app
+        .get(
+            format!("/api/v2/organizations/{}/member-calling/endpoints", w.org),
+            Auth::None,
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::UNAUTHORIZED, "AUTHENTICATION_REQUIRED")
+    );
+    let off = some!(calling_world(false).await);
+    let (s, v) = off
+        .member_calling(Method::GET, &off.member, "endpoints", None)
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (StatusCode::CONFLICT, "ORGANIZATION_CALLING_DISABLED"),
+        "{v}"
+    );
+    assert!(off.peers.records().is_empty());
 }
 
 /// Blueprint Section 11: an organization invitation email is delivered by the account
