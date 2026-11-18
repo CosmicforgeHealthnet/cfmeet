@@ -16199,6 +16199,102 @@
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN"
         ]
+      },
+      "patch": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Edit my message.",
+        "description": "The sender replaces the text of their own message (1–4000 characters) within 15 minutes of\nsending, while the conference is live; the message then shows `editedAt`. Deleted messages\ncannot be edited, and another person's private message answers MESSAGE_NOT_FOUND. Everyone\nwho can see the message gets a `chat.message_edited` event.",
+        "operationId": "v2_edit_message",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "description": "Message id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/meetings.EditMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Edited message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.MessageView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MESSAGE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "meetings.bearer_auth": []
+          },
+          {
+            "meetings.participant_token": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_edit_message",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION",
+          "PARTICIPANT_TOKEN"
+        ]
       }
     },
     "/api/v2/conferences/{id}/participants": {
@@ -70827,6 +70923,22 @@
             "type": "string",
             "format": "uuid"
           },
+          "durationSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Gap audit M17: timed rooms only — the length set at creation, and once open, when\nthe room closes by itself.",
+            "minimum": 0
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -71871,6 +71983,15 @@
             "description": "Number of automatically numbered rooms (\"Room N\").",
             "minimum": 0
           },
+          "durationSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Gap audit M17: timed rooms. Once opened, a room closes by itself after this many\nseconds (60-14400), with a `warningSeconds` countdown first.",
+            "minimum": 0
+          },
           "names": {
             "type": [
               "array",
@@ -71894,6 +72015,15 @@
                 "type": "null"
               }
             ]
+          },
+          "warningSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Countdown before a timed room closes (0-600, default 60).",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -72344,6 +72474,19 @@
               "string",
               "null"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "meetings.EditMessageRequest": {
+        "type": "object",
+        "description": "Gap audit M17: the new text of an edited message.",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -73748,6 +73891,14 @@
           },
           "deleted": {
             "type": "boolean"
+          },
+          "editedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Gap audit M17: when the sender last edited the message (`null`: never edited)."
           },
           "id": {
             "type": "string",

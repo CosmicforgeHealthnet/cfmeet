@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 35,
     "OPERATOR_ADMIN": 48,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 595,
+    "PUBLIC_CUSTOMER": 596,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -1640,6 +1640,22 @@
       "id": "meetings.v2_delete_message",
       "domain": "meetings",
       "method": "DELETE",
+      "pattern": "/api/v2/conferences/{id}/messages/{messageId}",
+      "protocol": "REST",
+      "upstream": "cfmeet.meeting-service",
+      "upstreamPath": "/api/v2/conferences/{id}/messages/{messageId}",
+      "auth": [
+        "MEETING_SESSION",
+        "PARTICIPANT_TOKEN"
+      ],
+      "forwardHeaders": [
+        "x-client-kind"
+      ]
+    },
+    {
+      "id": "meetings.v2_edit_message",
+      "domain": "meetings",
+      "method": "PATCH",
       "pattern": "/api/v2/conferences/{id}/messages/{messageId}",
       "protocol": "REST",
       "upstream": "cfmeet.meeting-service",
@@ -12293,6 +12309,14 @@
       "contract": "cfmeet.meeting-service.http-api",
       "operationId": "v2_delete_message",
       "method": "DELETE",
+      "path": "/api/v2/conferences/{id}/messages/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "contract": "cfmeet.meeting-service.http-api",
+      "operationId": "v2_edit_message",
+      "method": "PATCH",
       "path": "/api/v2/conferences/{id}/messages/{messageId}",
       "class": "PUBLIC_CUSTOMER"
     },

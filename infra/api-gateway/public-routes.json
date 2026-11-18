@@ -1901,6 +1901,12 @@
     },
     {
       "domain": "meetings",
+      "method": "PATCH",
+      "path": "/api/v2/conferences/{id}/messages/{messageId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
       "method": "GET",
       "path": "/api/v2/conferences/{id}/participants",
       "class": "PUBLIC_CUSTOMER"

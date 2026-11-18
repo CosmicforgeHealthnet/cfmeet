@@ -81,6 +81,8 @@ pub mod event {
     // Part F — chat
     pub const CHAT_MESSAGE_CREATED: &str = "chat.message_created";
     pub const CHAT_MESSAGE_DELETED: &str = "chat.message_deleted";
+    /// Gap audit M17.
+    pub const CHAT_MESSAGE_EDITED: &str = "chat.message_edited";
     pub const CHAT_PARTICIPANT_RESTRICTED: &str = "chat.participant_restricted";
     pub const CHAT_PARTICIPANT_UNRESTRICTED: &str = "chat.participant_unrestricted";
     pub const CHAT_POLICY_CHANGED: &str = "chat.policy_changed";

@@ -213,6 +213,7 @@ fn every_v2_route_is_documented() {
         ("get", "/api/v2/conferences/{id}/messages"),
         ("post", "/api/v2/conferences/{id}/messages"),
         ("delete", "/api/v2/conferences/{id}/messages/{messageId}"),
+        ("patch", "/api/v2/conferences/{id}/messages/{messageId}"),
         (
             "post",
             "/api/v2/conferences/{id}/participants/{participantId}/chat-restriction",

@@ -757,12 +757,14 @@ class BreakoutView {
   const BreakoutView.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory BreakoutView.create({int? capacity, String? closedAt, String? closingAt, required String conferenceId, required String id, required String name, String? openedAt, required int participantCount, List<String>? participantIds, required int position, required String recordingPolicy, required BreakoutStatus status, required int version}) =>
+  factory BreakoutView.create({int? capacity, String? closedAt, String? closingAt, required String conferenceId, int? durationSeconds, String? endsAt, required String id, required String name, String? openedAt, required int participantCount, List<String>? participantIds, required int position, required String recordingPolicy, required BreakoutStatus status, required int version}) =>
       BreakoutView.fromJson(<String, Object?>{
         if (capacity != null) 'capacity': capacity,
         if (closedAt != null) 'closedAt': closedAt,
         if (closingAt != null) 'closingAt': closingAt,
         'conferenceId': conferenceId,
+        if (durationSeconds != null) 'durationSeconds': durationSeconds,
+        if (endsAt != null) 'endsAt': endsAt,
         'id': id,
         'name': name,
         if (openedAt != null) 'openedAt': openedAt,
@@ -784,6 +786,11 @@ class BreakoutView {
   String? get closingAt => json['closingAt'] as String?;
 
   String get conferenceId => json['conferenceId']! as String;
+
+  /// Gap audit M17: timed rooms only — the length set at creation, and once open, when the room closes by itself.
+  int? get durationSeconds => (json['durationSeconds'] as num?)?.toInt();
+
+  String? get endsAt => json['endsAt'] as String?;
 
   String get id => json['id']! as String;
 
@@ -1522,12 +1529,14 @@ class CreateBreakoutsRequest {
   const CreateBreakoutsRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CreateBreakoutsRequest.create({int? capacity, int? count, List<String>? names, BreakoutRecordingPolicy? recordingPolicy}) =>
+  factory CreateBreakoutsRequest.create({int? capacity, int? count, int? durationSeconds, List<String>? names, BreakoutRecordingPolicy? recordingPolicy, int? warningSeconds}) =>
       CreateBreakoutsRequest.fromJson(<String, Object?>{
         if (capacity != null) 'capacity': capacity,
         if (count != null) 'count': count,
+        if (durationSeconds != null) 'durationSeconds': durationSeconds,
         if (names != null) 'names': names,
         if (recordingPolicy != null) 'recordingPolicy': recordingPolicy,
+        if (warningSeconds != null) 'warningSeconds': warningSeconds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
@@ -1538,10 +1547,16 @@ class CreateBreakoutsRequest {
   /// Number of automatically numbered rooms ("Room N").
   int? get count => (json['count'] as num?)?.toInt();
 
+  /// Gap audit M17: timed rooms. Once opened, a room closes by itself after this many seconds (60-14400), with a `warningSeconds` countdown first.
+  int? get durationSeconds => (json['durationSeconds'] as num?)?.toInt();
+
   /// Named rooms. Mutually exclusive with `count`.
   List<String>? get names => json['names'] == null ? null : (json['names']! as List<Object?>).map((e) => e! as String).toList();
 
   BreakoutRecordingPolicy? get recordingPolicy => json['recordingPolicy'] as String?;
+
+  /// Countdown before a timed room closes (0-600, default 60).
+  int? get warningSeconds => (json['warningSeconds'] as num?)?.toInt();
 
   Map<String, Object?> toJson() => json;
 }
@@ -1828,6 +1843,25 @@ class DuplicateMeetingSpaceRequest {
   final Map<String, Object?> json;
 
   String? get title => json['title'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Gap audit M17: the new text of an edited message.
+class EditMessageRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const EditMessageRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory EditMessageRequest.create({required String body}) =>
+      EditMessageRequest.fromJson(<String, Object?>{
+        'body': body,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get body => json['body']! as String;
 
   Map<String, Object?> toJson() => json;
 }
@@ -2811,13 +2845,14 @@ class MessageView {
   const MessageView.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory MessageView.create({String? body, String? breakoutId, required String conferenceId, required String createdAt, required bool deleted, required String id, required MessageKind kind, String? recipientParticipantId, required String senderDisplayName, required String senderParticipantId}) =>
+  factory MessageView.create({String? body, String? breakoutId, required String conferenceId, required String createdAt, required bool deleted, String? editedAt, required String id, required MessageKind kind, String? recipientParticipantId, required String senderDisplayName, required String senderParticipantId}) =>
       MessageView.fromJson(<String, Object?>{
         if (body != null) 'body': body,
         if (breakoutId != null) 'breakoutId': breakoutId,
         'conferenceId': conferenceId,
         'createdAt': createdAt,
         'deleted': deleted,
+        if (editedAt != null) 'editedAt': editedAt,
         'id': id,
         'kind': kind,
         if (recipientParticipantId != null) 'recipientParticipantId': recipientParticipantId,
@@ -2838,6 +2873,9 @@ class MessageView {
   String get createdAt => json['createdAt']! as String;
 
   bool get deleted => json['deleted']! as bool;
+
+  /// Gap audit M17: when the sender last edited the message (`null`: never edited).
+  String? get editedAt => json['editedAt'] as String?;
 
   String get id => json['id']! as String;
 

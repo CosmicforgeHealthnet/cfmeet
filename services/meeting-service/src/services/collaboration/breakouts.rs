@@ -344,6 +344,12 @@ pub struct BreakoutView {
     pub opened_at: Option<chrono::DateTime<Utc>>,
     pub closing_at: Option<chrono::DateTime<Utc>>,
     pub closed_at: Option<chrono::DateTime<Utc>>,
+    /// Gap audit M17: timed rooms only — the length set at creation, and once open, when
+    /// the room closes by itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ends_at: Option<chrono::DateTime<Utc>>,
     pub participant_count: usize,
     /// Assigned participant ids — only for roles that manage breakouts.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -417,10 +423,20 @@ fn view(
         opened_at: r.opened_at,
         closing_at: r.closing_at,
         closed_at: r.closed_at,
+        duration_seconds: r.config["durationSeconds"].as_u64().map(|d| d as u32),
+        ends_at: ends_at(r),
         participant_count: ids.len(),
         participant_ids: manager.then_some(ids),
         version: r.version,
     }
+}
+
+/// When a timed room closes by itself (set when it opened).
+fn ends_at(r: &breakout_rooms::Model) -> Option<chrono::DateTime<Utc>> {
+    r.config["endsAt"]
+        .as_str()
+        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+        .map(|t| t.with_timezone(&Utc))
 }
 
 fn room_payload(r: &breakout_rooms::Model) -> serde_json::Value {
@@ -896,6 +912,11 @@ pub struct CreateBreakoutsRequest {
     pub count: Option<u16>,
     pub capacity: Option<i32>,
     pub recording_policy: Option<BreakoutRecordingPolicy>,
+    /// Gap audit M17: timed rooms. Once opened, a room closes by itself after this many
+    /// seconds (60-14400), with a `warningSeconds` countdown first.
+    pub duration_seconds: Option<u32>,
+    /// Countdown before a timed room closes (0-600, default 60).
+    pub warning_seconds: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -1047,6 +1068,34 @@ impl BreakoutService {
                 ));
             }
         }
+        if req
+            .duration_seconds
+            .is_some_and(|d| !(60..=4 * 3600).contains(&d))
+        {
+            return Err(ApiError::domain(
+                ErrorCode::ValidationError,
+                "durationSeconds must be 60–14400",
+            ));
+        }
+        if req.warning_seconds.is_some_and(|w| w > MAX_COUNTDOWN_SECS) {
+            return Err(ApiError::domain(
+                ErrorCode::ValidationError,
+                format!("warningSeconds must be at most {MAX_COUNTDOWN_SECS}"),
+            ));
+        }
+        if req.warning_seconds.is_some() && req.duration_seconds.is_none() {
+            return Err(ApiError::domain(
+                ErrorCode::ValidationError,
+                "warningSeconds needs durationSeconds",
+            ));
+        }
+        let room_config = match req.duration_seconds {
+            Some(d) => json!({
+                "durationSeconds": d,
+                "warningSeconds": req.warning_seconds.unwrap_or(60).min(d),
+            }),
+            None => json!({}),
+        };
         let mut seen = HashSet::new();
         for n in names.iter().flatten() {
             if n.is_empty() || n.chars().count() > 100 {
@@ -1126,7 +1175,7 @@ impl BreakoutService {
                 closing_at: Set(None),
                 close_requested_at: Set(None),
                 recording_policy: Set(policy.as_str().into()),
-                config: Set(json!({})),
+                config: Set(room_config.clone()),
                 rtc_room_ready_at: Set(None),
                 version: Set(1),
             }
@@ -1212,6 +1261,12 @@ impl BreakoutService {
         let mut am: breakout_rooms::ActiveModel = room.clone().into();
         am.status = Set("OPEN".into());
         am.opened_at = Set(Some(now));
+        // Gap audit M17: a timed room's end is fixed when it opens.
+        if let Some(d) = room.config["durationSeconds"].as_i64() {
+            let mut config = room.config.clone();
+            config["endsAt"] = json!(now + Duration::seconds(d));
+            am.config = Set(config);
+        }
         am.version = Set(room.version + 1);
         am.updated_at = Set(now);
         let updated = am.update(&txn).await?;
@@ -1936,8 +1991,68 @@ impl BreakoutService {
 
 /// Restart-safe countdown completion: due CLOSING rooms are finalized under the
 /// conference row lock (idempotent; safe with several instances).
+/// Gap audit M17: timed rooms whose warning time has come start their countdown
+/// (OPEN → CLOSING, `closing_at` = the room's end). Returns how many started.
+pub async fn start_timed_countdowns(core: &Core, limit: u64) -> ApiResult<u32> {
+    use sea_orm::QuerySelect;
+    let now = Utc::now();
+    let due = breakout_rooms::Entity::find()
+        .filter(breakout_rooms::Column::Status.eq("OPEN"))
+        .filter(sea_orm::sea_query::Expr::cust_with_values(
+            "(config->>'endsAt') IS NOT NULL AND (config->>'endsAt')::timestamptz \
+             - make_interval(secs => COALESCE((config->>'warningSeconds')::int, 60)) <= $1",
+            [sea_orm::Value::from(now)],
+        ))
+        .limit(limit)
+        .all(&core.db)
+        .await?;
+    let mut started = 0;
+    for r in due {
+        let txn = core.db.begin().await?;
+        let conference = lock_conference(&txn, r.conference_id).await?;
+        let room = scoped_room(&txn, r.conference_id, r.id).await?;
+        let Some(end) = ends_at(&room).filter(|_| room.status == "OPEN") else {
+            txn.commit().await?;
+            continue;
+        };
+        let mut am: breakout_rooms::ActiveModel = room.clone().into();
+        am.status = Set("CLOSING".into());
+        am.closing_at = Set(Some(end.max(now)));
+        am.close_requested_at = Set(Some(now));
+        am.version = Set(room.version + 1);
+        am.updated_at = Set(now);
+        let updated = am.update(&txn).await?;
+        audit(
+            &txn,
+            &AuditActor::system("breakout-timer"),
+            AuditRecord {
+                meeting_space_id: conference.meeting_space_id,
+                conference_id: Some(conference.id),
+                action: action::BREAKOUT_CLOSE,
+                target_type: Some("BREAKOUT"),
+                target_ref: Some(updated.id.to_string()),
+                metadata: json!({ "countdownSeconds": (end - now).num_seconds().max(0), "timed": true }),
+            },
+        )
+        .await?;
+        emit(
+            &txn,
+            room_record(
+                &updated,
+                conference.meeting_space_id,
+                event::BREAKOUT_CLOSING,
+            ),
+        )
+        .await?;
+        txn.commit().await?;
+        started += 1;
+    }
+    Ok(started)
+}
+
 pub async fn close_due(core: &Core, limit: u64) -> ApiResult<u32> {
     use sea_orm::QuerySelect;
+    start_timed_countdowns(core, limit).await?;
     let due = breakout_rooms::Entity::find()
         .filter(breakout_rooms::Column::Status.eq("CLOSING"))
         .filter(breakout_rooms::Column::ClosingAt.lte(Utc::now()))

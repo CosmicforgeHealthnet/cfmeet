@@ -224,7 +224,7 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         )
         .route(
             "/conferences/:id/messages/:mid",
-            delete(collab::delete_message),
+            delete(collab::delete_message).patch(collab::edit_message),
         )
         .route(
             "/conferences/:id/chat-policy",

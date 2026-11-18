@@ -58,6 +58,8 @@ use super::{
 pub const MAX_PAGE: u64 = 100;
 pub const DEFAULT_PAGE: u64 = 50;
 pub const MAX_BODY: usize = 4000;
+/// Gap audit M17: how long after sending a message its sender can edit it.
+pub const EDIT_WINDOW_SECS: i64 = 15 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -105,6 +107,8 @@ pub struct StoredMessage {
     pub body: String,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Gap audit M17: when the sender last edited the message.
+    pub edited_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +191,15 @@ pub trait MessageStore: Send + Sync {
         message_id: Uuid,
         by: &str,
     ) -> ApiResult<bool>;
+    /// Gap audit M17: replace the text of the sender's own message.
+    async fn edit(
+        &self,
+        txn: &DatabaseTransaction,
+        conference_id: Uuid,
+        message_id: Uuid,
+        sender_participant_id: Uuid,
+        body: &str,
+    ) -> ApiResult<()>;
 }
 
 pub struct PgMessageStore;
@@ -203,11 +216,12 @@ fn row_to_message(r: &sea_orm::QueryResult) -> ApiResult<StoredMessage> {
         body: r.try_get_by_index(6)?,
         created_at: r.try_get_by_index(7)?,
         deleted_at: r.try_get_by_index(8)?,
+        edited_at: r.try_get_by_index(9)?,
     })
 }
 
 const COLUMNS: &str = "id, conference_id, breakout_room_id, sender_participant_id, \
-     recipient_participant_id, kind, body, created_at, deleted_at";
+     recipient_participant_id, kind, body, created_at, deleted_at, edited_at";
 
 #[async_trait]
 impl MessageStore for PgMessageStore {
@@ -323,6 +337,37 @@ impl MessageStore for PgMessageStore {
             .rows_affected()
             > 0)
     }
+
+    async fn edit(
+        &self,
+        txn: &DatabaseTransaction,
+        conference_id: Uuid,
+        message_id: Uuid,
+        sender_participant_id: Uuid,
+        body: &str,
+    ) -> ApiResult<()> {
+        txn.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE conference_messages SET body = $4, edited_at = now() \
+             WHERE id = $1 AND conference_id = $2 AND sender_participant_id = $3 \
+               AND deleted_at IS NULL",
+            [
+                message_id.into(),
+                conference_id.into(),
+                sender_participant_id.into(),
+                body.into(),
+            ],
+        ))
+        .await?;
+        Ok(())
+    }
+}
+
+/// Gap audit M17: the new text of an edited message.
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditMessageRequest {
+    pub body: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -352,6 +397,8 @@ pub struct MessageView {
     pub body: Option<String>,
     pub deleted: bool,
     pub created_at: DateTime<Utc>,
+    /// Gap audit M17: when the sender last edited the message (`null`: never edited).
+    pub edited_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -912,6 +959,96 @@ impl MeetingMessagingService {
         Ok(changed)
     }
 
+    /// Gap audit M17: the sender edits their own message, within
+    /// [`EDIT_WINDOW_SECS`] of sending, while the conference is live. Deleted messages
+    /// cannot be edited. Everyone who can see the message gets `chat.message_edited`.
+    pub async fn edit_message(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+        message_id: Uuid,
+        body: &str,
+    ) -> ApiResult<MessageView> {
+        let c = Collab::load(&self.core, ctx, conference_id).await?;
+        let me = c.me()?.clone();
+        c.require(
+            Permission::ChatSend,
+            "Your role does not allow sending messages",
+        )?;
+        c.require_live()?;
+        let body = body.trim().to_string();
+        if body.is_empty() || body.chars().count() > MAX_BODY {
+            return Err(ApiError::domain(
+                ErrorCode::ValidationError,
+                format!("Messages must be 1–{MAX_BODY} characters"),
+            ));
+        }
+        let txn = self.core.db.begin().await?;
+        let conference = lock_conference(&txn, conference_id).await?;
+        let main = self.main_store().await?;
+        let (m, store) = match main.find(&txn, conference_id, message_id).await? {
+            Some(m) if !Arc::ptr_eq(&main, &self.store) => (m, main),
+            _ => (
+                self.store
+                    .find(&txn, conference_id, message_id)
+                    .await?
+                    .ok_or_else(|| {
+                        ApiError::domain(ErrorCode::MessageNotFound, "Message not found")
+                    })?,
+                self.store.clone(),
+            ),
+        };
+        if m.sender_participant_id != me.id {
+            // Someone else's private message is indistinguishable from an unknown one.
+            if m.recipient_participant_id.is_some() && m.recipient_participant_id != Some(me.id) {
+                return Err(ApiError::domain(
+                    ErrorCode::MessageNotFound,
+                    "Message not found",
+                ));
+            }
+            return Err(permission_denied("Only the sender can edit a message"));
+        }
+        if m.deleted_at.is_some() {
+            return Err(ApiError::domain(
+                ErrorCode::MessageNotFound,
+                "Message not found",
+            ));
+        }
+        if Utc::now() - m.created_at > chrono::Duration::seconds(EDIT_WINDOW_SECS) {
+            return Err(ApiError::domain(
+                ErrorCode::ValidationError,
+                "Messages can only be edited for 15 minutes after sending",
+            ));
+        }
+        store
+            .edit(&txn, conference_id, message_id, me.id, &body)
+            .await?;
+        let edited = store
+            .find(&txn, conference_id, message_id)
+            .await?
+            .ok_or_else(|| ApiError::domain(ErrorCode::MessageNotFound, "Message not found"))?;
+        emit_to(
+            &txn,
+            OutboxRecord {
+                aggregate_type: "conference_message",
+                aggregate_id: m.id,
+                event_type: event::CHAT_MESSAGE_EDITED,
+                meeting_space_id: Some(conference.meeting_space_id),
+                conference_id: Some(conference_id),
+                payload: json!({
+                    "messageId": m.id,
+                    "breakoutId": m.breakout_room_id,
+                    "body": edited.body,
+                    "editedAt": edited.edited_at,
+                }),
+            },
+            Some(audience_for(&m)),
+        )
+        .await?;
+        txn.commit().await?;
+        Ok(view(&edited, &me.display_name))
+    }
+
     /// Disable / re-enable chat for one participant (idempotent).
     pub async fn moderate_participant_chat(
         &self,
@@ -1005,6 +1142,7 @@ fn view(m: &StoredMessage, sender_name: &str) -> MessageView {
         body: m.deleted_at.is_none().then(|| m.body.clone()),
         deleted: m.deleted_at.is_some(),
         created_at: m.created_at,
+        edited_at: m.edited_at,
     }
 }
 
@@ -1085,6 +1223,7 @@ mod tests {
             body: "x".into(),
             created_at: Utc::now(),
             deleted_at: None,
+            edited_at: None,
         };
         match audience_for(&m) {
             Audience::Participants {

@@ -4799,6 +4799,9 @@ export namespace Meetings {
     closedAt?: string | null;
     closingAt?: string | null;
     conferenceId: string;
+    /** Gap audit M17: timed rooms only — the length set at creation, and once open, when the room closes by itself. */
+    durationSeconds?: number | null;
+    endsAt?: string | null;
     id: string;
     name: string;
     openedAt?: string | null;
@@ -5007,9 +5010,13 @@ export namespace Meetings {
     capacity?: number | null;
     /** Number of automatically numbered rooms ("Room N"). */
     count?: number | null;
+    /** Gap audit M17: timed rooms. Once opened, a room closes by itself after this many seconds (60-14400), with a `warningSeconds` countdown first. */
+    durationSeconds?: number | null;
     /** Named rooms. Mutually exclusive with `count`. */
     names?: Array<string> | null;
     recordingPolicy?: BreakoutRecordingPolicy | null;
+    /** Countdown before a timed room closes (0-600, default 60). */
+    warningSeconds?: number | null;
   };
   export type CreateConferenceRequest = {
     scheduledEndAt?: string | null;
@@ -5085,6 +5092,10 @@ export namespace Meetings {
   };
   export type DuplicateMeetingSpaceRequest = {
     title?: string | null;
+  };
+  /** Gap audit M17: the new text of an edited message. */
+  export type EditMessageRequest = {
+    body: string;
   };
   /** What happened to a requested invitation email. */
   export type EmailDelivery = "DISABLED" | "ACCEPTED" | "FAILED";
@@ -5341,6 +5352,8 @@ export namespace Meetings {
     conferenceId: string;
     createdAt: string;
     deleted: boolean;
+    /** Gap audit M17: when the sender last edited the message (`null`: never edited). */
+    editedAt?: string | null;
     id: string;
     kind: MessageKind;
     recipientParticipantId?: string | null;
@@ -6349,6 +6362,11 @@ export namespace Meetings {
     v2DuplicateMeetingSpace: {
       params: { path: { id: string }; body?: DuplicateMeetingSpaceRequest };
       response: MeetingSpaceResponse;
+    };
+    /** PATCH /api/v2/conferences/{id}/messages/{messageId}; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    v2EditMessage: {
+      params: { path: { id: string; messageId: string }; body: EditMessageRequest };
+      response: MessageView;
     };
     /** POST /api/v2/conferences/{id}/end — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2EndConference: {

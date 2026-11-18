@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 285 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 286 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.26.0 | 142 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **674** |
+| **Total** | | | **675** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -155,6 +155,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | GET | `/api/v2/conferences/{id}/messages` | account session; participant token | Meeting chat history (database cursor pagination, newest first). | 200, 403, 404 | BREAKOUT_NOT_FOUND, CHAT_DISABLED, PARTICIPANT_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_messages` |
 | POST | `/api/v2/conferences/{id}/messages` | account session; participant token | Send a message (sender is always the caller's own participant). | 201, 400, 403, 404, 409, 429 | BREAKOUT_CLOSED, BREAKOUT_NOT_FOUND, CHAT_DISABLED, CHAT_PARTICIPANT_RESTRICTED, CONFERENCE_NOT_LIVE, PARTICIPANT_NOT_FOUND, PERMISSION_DENIED, PRIVATE_CHAT_DISABLED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_send_message` |
 | DELETE | `/api/v2/conferences/{id}/messages/{messageId}` | account session; participant token | Delete / hide a message (moderators, or the sender). | 200, 403, 404 | MESSAGE_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_delete_message` |
+| PATCH | `/api/v2/conferences/{id}/messages/{messageId}` | account session; participant token | Edit my message. | 200, 400, 403, 404 | MESSAGE_NOT_FOUND, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_edit_message` |
 | DELETE | `/api/v2/conferences/{id}/participants/{participantId}/chat-restriction` | account session; participant token | Re-enable chat for a participant. | 200, 403, 404 | PARTICIPANT_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_unrestrict_chat` |
 | POST | `/api/v2/conferences/{id}/participants/{participantId}/chat-restriction` | account session; participant token | Disable chat for a participant. | 200, 403, 404 | PARTICIPANT_NOT_FOUND, PERMISSION_DENIED | `openapi/meeting-service.json#v2_restrict_chat` |
 

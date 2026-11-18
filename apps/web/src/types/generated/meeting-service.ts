@@ -549,6 +549,12 @@ export interface BreakoutView {
   closedAt?: string | null;
   closingAt?: string | null;
   conferenceId: string;
+  /**
+   * Gap audit M17: timed rooms only — the length set at creation, and once open, when
+   * the room closes by itself.
+   */
+  durationSeconds?: number | null;
+  endsAt?: string | null;
   id: string;
   name: string;
   openedAt?: string | null;
@@ -913,9 +919,16 @@ export interface CreateBreakoutsRequest {
   capacity?: number | null;
   /** Number of automatically numbered rooms ("Room N"). */
   count?: number | null;
+  /**
+   * Gap audit M17: timed rooms. Once opened, a room closes by itself after this many
+   * seconds (60-14400), with a `warningSeconds` countdown first.
+   */
+  durationSeconds?: number | null;
   /** Named rooms. Mutually exclusive with `count`. */
   names?: Array<string> | null;
   recordingPolicy?: BreakoutRecordingPolicy | null;
+  /** Countdown before a timed room closes (0-600, default 60). */
+  warningSeconds?: number | null;
 }
 
 /** `POST /api/v2/organizations`. */
@@ -1286,6 +1299,11 @@ export interface DeviceView {
 
 export interface DuplicateMeetingSpaceRequest {
   title?: string | null;
+}
+
+/** Gap audit M17: the new text of an edited message. */
+export interface EditMessageRequest {
+  body: string;
 }
 
 
@@ -1861,6 +1879,8 @@ export interface MessageView {
   conferenceId: string;
   createdAt: string;
   deleted: boolean;
+  /** Gap audit M17: when the sender last edited the message (`null`: never edited). */
+  editedAt?: string | null;
   id: string;
   kind: MessageKind;
   recipientParticipantId?: string | null;
@@ -4013,6 +4033,7 @@ export const CONTRACT_OPERATIONS = {
   "PATCH /api/v2/conferences/{id}/breakouts/{breakoutId}/assignments": "v2_patch_breakout_assignments",
   "PATCH /api/v2/conferences/{id}/chat-policy": "v2_update_chat_policy",
   "PATCH /api/v2/conferences/{id}/collaboration-policy": "v2_update_collaboration_policy",
+  "PATCH /api/v2/conferences/{id}/messages/{messageId}": "v2_edit_message",
   "PATCH /api/v2/conferences/{id}/participants/{participantId}/role": "v2_change_role",
   "PATCH /api/v2/me/profile": "v2_update_my_profile",
   "PATCH /api/v2/meeting-spaces/{id}": "v2_update_meeting_space",
