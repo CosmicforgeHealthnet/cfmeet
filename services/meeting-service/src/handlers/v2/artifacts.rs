@@ -242,7 +242,9 @@ pub async fn conference_attendance(
 /// Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and
 /// stores it as a READY JSON artifact. Requires the export permission, and the meeting policy must
 /// allow the requested export type. Anonymous polls stay anonymous and private chat messages are
-/// never exported.
+/// never exported. Without artifact storage in the deployment this answers `501
+/// ARTIFACT_STORAGE_NOT_CONFIGURED`; `GET /api/v2/conferences/{id}/exports/{artifactType}`
+/// returns the same report directly.
 #[utoipa::path(
     post, path = "/api/v2/conferences/{id}/artifacts/reports", tag = "Artifacts (v2)", operation_id = "v2_generate_report",
     params(("id" = Uuid, Path, description = "Conference id")),
@@ -250,6 +252,7 @@ pub async fn conference_attendance(
     responses(
         (status = 201, description = "READY report", body = ArtifactView),
         (status = 403, description = "PERMISSION_DENIED / PROFILE_POLICY_DENIED", body = ErrorEnvelope),
+        (status = 501, description = "ARTIFACT_STORAGE_NOT_CONFIGURED (use the inline export)", body = ErrorEnvelope),
         (status = 503, description = "ARTIFACT_STORAGE_UNAVAILABLE", body = ErrorEnvelope),
     ),
     security(("bearer_auth" = []), ("participant_token" = []))
@@ -269,6 +272,50 @@ pub async fn generate_report(
                 .generate_report(&actor, id, &req)
                 .await?,
         ),
+    ))
+}
+
+/// Download an attendance report, poll report or chat export directly.
+///
+/// Returns the `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` JSON itself instead of storing
+/// it as an artifact, so it works without artifact storage. Same rules as generating a stored
+/// report: the export permission, the meeting policy for that export type, anonymous polls stay
+/// anonymous and private chat is never exported. Each download is audited.
+#[utoipa::path(
+    get, path = "/api/v2/conferences/{id}/exports/{artifactType}", tag = "Artifacts (v2)", operation_id = "v2_export_report",
+    params(
+        ("id" = Uuid, Path, description = "Conference id"),
+        ("artifactType" = String, Path, description = "ATTENDANCE_REPORT, POLL_REPORT or CHAT_EXPORT"),
+    ),
+    responses(
+        (status = 200, description = "The report", body = Object),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED / PROFILE_POLICY_DENIED", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []), ("participant_token" = []))
+)]
+pub async fn export_report(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path((id, artifact_type)): V2Path<(Uuid, String)>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let kind = crate::services::artifacts::ArtifactType::parse(&artifact_type)
+        .filter(|k| {
+            use crate::services::artifacts::ArtifactType as T;
+            matches!(k, T::AttendanceReport | T::PollReport | T::ChatExport)
+        })
+        .ok_or_else(|| {
+            crate::error::ApiError::domain(
+                crate::error::ErrorCode::ValidationError,
+                "artifactType must be ATTENDANCE_REPORT, POLL_REPORT or CHAT_EXPORT",
+            )
+        })?;
+    Ok(Json(
+        state
+            .meeting
+            .artifacts
+            .export_inline(&actor, id, kind)
+            .await?,
     ))
 }
 

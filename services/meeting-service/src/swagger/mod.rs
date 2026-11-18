@@ -310,6 +310,7 @@ use utoipa::OpenApi;
         crate::handlers::v2::artifacts::artifact_access,
         crate::handlers::v2::artifacts::delete_artifact,
         crate::handlers::v2::artifacts::generate_report,
+        crate::handlers::v2::artifacts::export_report,
         crate::handlers::v2::artifacts::conference_attendance,
         crate::handlers::v2::artifacts::consent_requirements,
         crate::handlers::v2::artifacts::record_consents,

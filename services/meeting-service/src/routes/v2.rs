@@ -364,6 +364,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             post(artifacts::generate_report),
         )
         .route(
+            "/conferences/:id/exports/:artifact_type",
+            get(artifacts::export_report),
+        )
+        .route(
             "/conferences/:id/artifacts/:aid",
             get(artifacts::get_artifact).delete(artifacts::delete_artifact),
         )

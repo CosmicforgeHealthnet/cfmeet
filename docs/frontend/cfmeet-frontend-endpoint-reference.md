@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 284 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 285 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.26.0 | 142 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **673** |
+| **Total** | | | **674** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -93,11 +93,12 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/conferences/{id}/artifacts` | account session; participant token | Artefacts of a conference (historical access still requires authorization). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_artifacts` |
-| POST | `/api/v2/conferences/{id}/artifacts/reports` | account session; participant token | Generate an attendance report, poll report or chat export (policy-gated). | 201, 403, 503 | ARTIFACT_STORAGE_UNAVAILABLE, PERMISSION_DENIED, PROFILE_POLICY_DENIED | `openapi/meeting-service.json#v2_generate_report` |
+| POST | `/api/v2/conferences/{id}/artifacts/reports` | account session; participant token | Generate an attendance report, poll report or chat export (policy-gated). | 201, 403, 501, 503 | ARTIFACT_STORAGE_NOT_CONFIGURED, ARTIFACT_STORAGE_UNAVAILABLE, PERMISSION_DENIED, PROFILE_POLICY_DENIED | `openapi/meeting-service.json#v2_generate_report` |
 | DELETE | `/api/v2/conferences/{id}/artifacts/{artifactId}` | account session; participant token | Delete an artefact (DELETED only after the object's absence is confirmed). | 200, 403, 409 | PERMISSION_DENIED, PROFILE_POLICY_DENIED, RECORDING_STATE_CONFLICT | `openapi/meeting-service.json#v2_delete_artifact` |
 | GET | `/api/v2/conferences/{id}/artifacts/{artifactId}` | account session; participant token | One artefact (conference id + artefact id; knowing an id is not authorization). | 200, 403, 404 | ARTIFACT_ACCESS_DENIED, ARTIFACT_NOT_FOUND | `openapi/meeting-service.json#v2_get_artifact` |
 | POST | `/api/v2/conferences/{id}/artifacts/{artifactId}/access` | account session; participant token | Mint a short-lived, read-only, single-object signed URL (never stored). | 200, 403, 404, 409, 410, 503 | ARTIFACT_ACCESS_DENIED, ARTIFACT_DELETED, ARTIFACT_NOT_FOUND, ARTIFACT_NOT_READY, ARTIFACT_STORAGE_UNAVAILABLE | `openapi/meeting-service.json#v2_artifact_access` |
 | GET | `/api/v2/conferences/{id}/attendance` | account session; participant token; platform credential (server-side only) | Conference attendance (Part J). | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, CONFERENCE_NOT_FOUND, PERMISSION_DENIED, PROFILE_POLICY_DENIED | `openapi/meeting-service.json#v2_conference_attendance` |
+| GET | `/api/v2/conferences/{id}/exports/{artifactType}` | account session; participant token | Download an attendance report, poll report or chat export directly. | 200, 400, 403 | PERMISSION_DENIED, PROFILE_POLICY_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_export_report` |
 
 ### Authentication
 

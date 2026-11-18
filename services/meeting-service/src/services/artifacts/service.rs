@@ -949,19 +949,20 @@ impl ArtifactService {
 
     /// Generate an attendance report, poll report or chat export (server-side data
     /// only; anonymous polls stay anonymous; private chat is never exported).
-    pub async fn generate_report(
+    /// The export permission and the meeting policy for one report type.
+    async fn export_ctx(
         &self,
         ctx: &ActorContext,
         conference_id: Uuid,
-        req: &GenerateReportRequest,
-    ) -> ApiResult<ArtifactView> {
+        artifact_type: ArtifactType,
+    ) -> ApiResult<ArtifactCtx> {
         let c = ArtifactCtx::load(&self.core, ctx, conference_id).await?;
         c.require(
             Permission::ArtifactExport,
             "You are not allowed to export meeting data",
         )?;
         let exports = &c.profile.policy.exports;
-        let allowed = match req.artifact_type {
+        let allowed = match artifact_type {
             ArtifactType::AttendanceReport => exports.attendance_report_allowed,
             ArtifactType::PollReport => exports.poll_report_allowed,
             ArtifactType::ChatExport => exports.chat_export_allowed,
@@ -977,6 +978,57 @@ impl ArtifactService {
             return Err(ApiError::domain(
                 ErrorCode::ProfilePolicyDenied,
                 "This export is disabled by the meeting policy",
+            ));
+        }
+        Ok(c)
+    }
+
+    /// Gap audit M13: the same report, returned directly instead of stored (needs no
+    /// artefact storage). Same permission, policy and privacy rules; audited.
+    pub async fn export_inline(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+        artifact_type: ArtifactType,
+    ) -> ApiResult<Value> {
+        let c = self.export_ctx(ctx, conference_id, artifact_type).await?;
+        let (body, _) = match artifact_type {
+            ArtifactType::AttendanceReport => self.attendance(&c.conference).await?,
+            ArtifactType::PollReport => self.poll_report(&c.conference).await?,
+            _ => self.chat_export(&c.conference).await?,
+        };
+        audit(
+            &self.core.db,
+            &c.audit,
+            AuditRecord {
+                meeting_space_id: c.space.id,
+                conference_id: Some(conference_id),
+                action: action::ARTIFACT_GENERATE,
+                target_type: Some("EXPORT"),
+                target_ref: Some(artifact_type.as_str().to_string()),
+                metadata: json!({ "artifactType": artifact_type.as_str(), "delivery": "INLINE" }),
+            },
+        )
+        .await?;
+        Ok(body)
+    }
+
+    pub async fn generate_report(
+        &self,
+        ctx: &ActorContext,
+        conference_id: Uuid,
+        req: &GenerateReportRequest,
+    ) -> ApiResult<ArtifactView> {
+        let c = self
+            .export_ctx(ctx, conference_id, req.artifact_type)
+            .await?;
+        // Gap audit M13: without an artefact bucket the report cannot be stored; say so
+        // plainly and point to the inline export, which needs no storage.
+        if !self.core.artifacts.storage.is_configured() {
+            return Err(ApiError::domain(
+                ErrorCode::ArtifactStorageNotConfigured,
+                "Stored reports need artifact storage, which this deployment has not configured; \
+                 download the report with GET /api/v2/conferences/{id}/exports/{artifactType} instead",
             ));
         }
         let (body, metadata) = match req.artifact_type {

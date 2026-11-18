@@ -1869,10 +1869,7 @@ async fn h_m10_registration_capacity_deadline_and_paging() {
         assert_eq!(s, StatusCode::OK, "{v}");
         let page = v["registrations"].as_array().unwrap();
         assert!(page.len() <= 1);
-        seen.extend(
-            page.iter()
-                .map(|r| r["id"].as_str().unwrap().to_string()),
-        );
+        seen.extend(page.iter().map(|r| r["id"].as_str().unwrap().to_string()));
         match v["nextCursor"].as_str() {
             Some(n) => after = Some(n.to_string()),
             None => break,
@@ -1902,5 +1899,76 @@ async fn h_m10_registration_capacity_deadline_and_paging() {
         (s, code(&v)),
         (StatusCode::CONFLICT, "REGISTRATION_CLOSED".into()),
         "{v}"
+    );
+}
+
+/// Gap audit M13: reports download directly (no artifact storage needed) under the same
+/// rules; without storage, a stored report says exactly that instead of "temporarily
+/// unavailable".
+#[tokio::test]
+async fn h_m13_reports_download_without_storage() {
+    let Some(app) = TestApp::with(TestOptions {
+        artifact_backends: Some(Default::default()),
+        ..Default::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let owner = app.user("owner").await;
+    let (_, cid) = live(&app, &owner, webinar()).await;
+    let (s, v) = app
+        .post(
+            format!("/api/v2/conferences/{cid}/artifacts/reports"),
+            Auth::Bearer(&owner.token),
+            json!({ "artifactType": "ATTENDANCE_REPORT" }),
+        )
+        .await;
+    assert_eq!(
+        (s, code(&v)),
+        (
+            StatusCode::NOT_IMPLEMENTED,
+            "ARTIFACT_STORAGE_NOT_CONFIGURED".into()
+        ),
+        "{v}"
+    );
+    for (kind, key) in [
+        ("ATTENDANCE_REPORT", "participants"),
+        ("POLL_REPORT", "polls"),
+        ("CHAT_EXPORT", "messages"),
+    ] {
+        let (s, v) = app
+            .get(
+                format!("/api/v2/conferences/{cid}/exports/{kind}"),
+                Auth::Bearer(&owner.token),
+            )
+            .await;
+        assert_eq!(s, StatusCode::OK, "{kind}: {v}");
+        assert!(v[key].is_array(), "{kind}: {v}");
+        assert_eq!(v["conferenceId"], json!(cid));
+    }
+    let (s, _) = app
+        .get(
+            format!("/api/v2/conferences/{cid}/exports/RECORDING"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // Someone without the export permission cannot download.
+    let stranger = app.user("stranger").await;
+    let (s, _) = app
+        .get(
+            format!("/api/v2/conferences/{cid}/exports/CHAT_EXPORT"),
+            Auth::Bearer(&stranger.token),
+        )
+        .await;
+    assert!(s.is_client_error() && s != StatusCode::BAD_REQUEST, "{s}");
+    assert!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM conference_audit_events WHERE conference_id = '{cid}' \
+              AND action = 'ARTIFACT_GENERATE' AND metadata->>'delivery' = 'INLINE'"
+        ))
+        .await
+            >= 3
     );
 }

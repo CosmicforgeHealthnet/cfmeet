@@ -333,6 +333,7 @@ fn every_v2_route_is_documented() {
         ),
         ("get", "/api/v2/conferences/{id}/artifacts"),
         ("post", "/api/v2/conferences/{id}/artifacts/reports"),
+        ("get", "/api/v2/conferences/{id}/exports/{artifactType}"),
         // Part J — attendance contract
         ("get", "/api/v2/conferences/{id}/attendance"),
         ("get", "/api/v2/conferences/{id}/artifacts/{artifactId}"),

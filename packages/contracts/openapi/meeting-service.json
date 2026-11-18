@@ -3915,7 +3915,7 @@
           "Artifacts (v2)"
         ],
         "summary": "Generate an attendance report, poll report or chat export (policy-gated).",
-        "description": "Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and\nstores it as a READY JSON artifact. Requires the export permission, and the meeting policy must\nallow the requested export type. Anonymous polls stay anonymous and private chat messages are\nnever exported.",
+        "description": "Builds an `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` from server-side meeting data and\nstores it as a READY JSON artifact. Requires the export permission, and the meeting policy must\nallow the requested export type. Anonymous polls stay anonymous and private chat messages are\nnever exported. Without artifact storage in the deployment this answers `501\nARTIFACT_STORAGE_NOT_CONFIGURED`; `GET /api/v2/conferences/{id}/exports/{artifactType}`\nreturns the same report directly.",
         "operationId": "v2_generate_report",
         "parameters": [
           {
@@ -3952,6 +3952,16 @@
           },
           "403": {
             "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "ARTIFACT_STORAGE_NOT_CONFIGURED (use the inline export)",
             "content": {
               "application/json": {
                 "schema": {
@@ -6010,6 +6020,77 @@
           },
           "404": {
             "description": "CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/exports/{artifactType}": {
+      "get": {
+        "tags": [
+          "Artifacts (v2)"
+        ],
+        "summary": "Download an attendance report, poll report or chat export directly.",
+        "description": "Returns the `ATTENDANCE_REPORT`, `POLL_REPORT` or `CHAT_EXPORT` JSON itself instead of storing\nit as an artifact, so it works without artifact storage. Same rules as generating a stored\nreport: the export permission, the meeting policy for that export type, anonymous polls stay\nanonymous and private chat is never exported. Each download is audited.",
+        "operationId": "v2_export_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "artifactType",
+            "in": "path",
+            "description": "ATTENDANCE_REPORT, POLL_REPORT or CHAT_EXPORT",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
             "content": {
               "application/json": {
                 "schema": {
@@ -25740,6 +25821,7 @@
           "ARTIFACT_DELETED",
           "ARTIFACT_ACCESS_DENIED",
           "ARTIFACT_STORAGE_UNAVAILABLE",
+          "ARTIFACT_STORAGE_NOT_CONFIGURED",
           "ARTIFACT_INTEGRITY_FAILED",
           "TRANSCRIPTION_DISABLED",
           "TRANSCRIPTION_NOT_ALLOWED",

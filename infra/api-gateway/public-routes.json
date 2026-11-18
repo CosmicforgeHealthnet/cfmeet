@@ -1667,6 +1667,12 @@
     },
     {
       "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/exports/{artifactType}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
       "method": "DELETE",
       "path": "/api/v2/conferences/{id}/artifacts/{artifactId}",
       "class": "PUBLIC_CUSTOMER"
