@@ -305,10 +305,12 @@ impl AccountProfiles for HttpAccountProfiles {
         let scopes = scopes.join(" ");
         let response = self
             .client
-            .get_query(
+            .exchange_json_query::<Value>(
                 &request,
+                axum::http::Method::GET,
                 "/internal/v1/oauth/userinfo",
                 &[("accountId", account.as_str()), ("scopes", scopes.as_str())],
+                None,
             )
             .await
             .map_err(unavailable)?;
