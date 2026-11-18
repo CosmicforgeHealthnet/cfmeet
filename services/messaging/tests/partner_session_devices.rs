@@ -1249,6 +1249,111 @@ async fn partner_meeting_chat_is_synchronised_in_the_partner_scope() {
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     assert_eq!(r.json["securityProfile"], "MANAGED");
 
+    // The lifecycle route accepts the partner scope too.
+    let r = h
+        .call_internal(
+            &meeting,
+            Method::POST,
+            &format!("/internal/v1/meeting-conversations/{id}/lifecycle"),
+            Some(json!({ "state": "ENDED", "sourceVersion": 2 })),
+            Some(scope.clone()),
+            &[],
+        )
+        .await;
+    assert_ne!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    assert_ne!(r.code(), "DELEGATED_CONTEXT_INVALID", "{}", r.text);
+    // Another environment's principal is never admitted; nor a non-partner kind; nor a
+    // non-system owner.
+    let other = environment(h, false);
+    let stranger = h.principal(&other);
+    let r2 = resolve("MANAGED").await;
+    assert!(r2.status.is_success(), "{}", r2.text);
+    for (who, reason) in [
+        (stranger, "PRINCIPAL_UNKNOWN"),
+        (
+            h.principal_of_kind(&c, "NATIVE_CF_USER"),
+            "PARTNER_MEETING_MEMBER_KIND",
+        ),
+    ] {
+        let r = h
+            .call_internal(
+                &meeting,
+                Method::PUT,
+                &format!("/internal/v1/meeting-conversations/{id}/members/{who}"),
+                Some(json!({ "state": "ACTIVE", "sourceVersion": 3 })),
+                Some(scope.clone()),
+                &[],
+            )
+            .await;
+        assert_eq!(
+            (r.code(), r.reason()),
+            ("PRINCIPAL_NOT_AUTHORIZED", reason),
+            "{}",
+            r.text
+        );
+    }
+    let r = h
+        .call_internal(
+            &meeting,
+            Method::POST,
+            "/internal/v1/meeting-conversations",
+            Some(json!({ "meetingRef": "conf:partner-9", "ownerPrincipalId": alice, "securityProfile": "MANAGED" })),
+            Some(scope.clone()),
+            &[],
+        )
+        .await;
+    assert_eq!(r.reason(), "PARTNER_MEETING_OWNER_KIND", "{}", r.text);
+    // A peer without either meeting permission is refused.
+    let r = h
+        .call_internal(
+            &common::peers().privacy_relay,
+            Method::POST,
+            "/internal/v1/meeting-conversations",
+            Some(json!({ "meetingRef": "conf:partner-1", "ownerPrincipalId": system, "securityProfile": "MANAGED" })),
+            Some(scope.clone()),
+            &[],
+        )
+        .await;
+    assert_eq!(r.code(), "INTERNAL_PERMISSION_DENIED", "{}", r.text);
+
+    // A Meeting Service holding ONLY messaging-meeting.sync-platform: the partner scope is
+    // accepted, a FIRST_PARTY scope is refused.
+    let (runtime, platform_only) = platform_only_meeting();
+    let (d, rg, w) = (
+        peers.directory.clone(),
+        peers.registrations.clone(),
+        peers.wakeups.clone(),
+    );
+    let Some(rt3) = Rt::with_state(test_settings(), move |s| {
+        s.partner = Arc::new(Partner::new(all_on(), d).with_push(rg, w));
+        s.service_auth = runtime;
+    })
+    .await
+    else {
+        return;
+    };
+    let h3 = &rt3.h;
+    let partner = environment(h3, false);
+    let first_party = environment(h3, true);
+    for (env, ok) in [(&partner, true), (&first_party, false)] {
+        let owner = h3.principal_of_kind(env, "BOT_OR_SERVICE");
+        let r = h3
+            .call_internal(
+                &platform_only,
+                Method::POST,
+                "/internal/v1/meeting-conversations",
+                Some(json!({ "meetingRef": "conf:p", "ownerPrincipalId": owner, "securityProfile": "MANAGED" })),
+                Some(env.context.scope.delegated()),
+                &[],
+            )
+            .await;
+        if ok {
+            assert!(r.status.is_success(), "{}", r.text);
+        } else {
+            assert_eq!(r.code(), "INTERNAL_PERMISSION_DENIED", "{}", r.text);
+        }
+    }
+
     // The partner flag off: an EXTERNAL scope is refused exactly as before.
     let Some((off, _)) = start(PartnerSettings::default()).await else {
         return;
@@ -1308,4 +1413,59 @@ async fn the_partner_migration_rolls_back_and_reapplies() {
         .unwrap();
     assert!(present("messaging_message_sent_facts").await);
     assert!(present("messaging_partner_push_registrations").await);
+}
+
+/// Messaging's runtime trusting a Meeting Service that holds ONLY
+/// `messaging-meeting.sync-platform`, and that Meeting Service's signer.
+fn platform_only_meeting() -> (
+    messaging::config::service_auth::ServiceAuthRuntime,
+    Arc<cf_service_auth::ServiceTokenSigner>,
+) {
+    use cf_service_auth::{
+        client::{InternalServiceClient, InternalTargets},
+        services, ServiceId, ServiceTokenSigner, ServiceTokenVerifier, SharedClock, SystemClock,
+        TokenTtl, TrustPolicy,
+    };
+    let clock: SharedClock = Arc::new(SystemClock);
+    let meeting_key = common::key("meeting-platform-only-1");
+    let bundle = json!({
+        "bundle_version": 1,
+        "receiver": services::MESSAGING,
+        "runtime_environment": ENV,
+        "trusted_issuers": [{
+            "issuer": services::MEETING_SERVICE,
+            "audience": services::MESSAGING,
+            "runtime_environment": ENV,
+            "keys": [meeting_key.public_jwk()],
+            "permissions": ["messaging-meeting.sync-platform"],
+        }],
+    })
+    .to_string();
+    let policy = TrustPolicy::from_json(&bundle, &ServiceId::messaging(), ENV).unwrap();
+    let signer = Arc::new(ServiceTokenSigner::new(
+        ServiceId::messaging(),
+        ENV,
+        common::key("messaging-test-2"),
+        TokenTtl::default(),
+        clock.clone(),
+    ));
+    let verifier = Arc::new(ServiceTokenVerifier::new(policy, clock.clone()));
+    let client = Arc::new(
+        InternalServiceClient::new(
+            signer.clone(),
+            InternalTargets::new(ENV),
+            Duration::from_secs(2),
+        )
+        .unwrap(),
+    );
+    let runtime =
+        messaging::config::service_auth::ServiceAuthRuntime::new(signer, verifier, client).unwrap();
+    let meeting = Arc::new(ServiceTokenSigner::new(
+        ServiceId::meeting_service(),
+        ENV,
+        meeting_key,
+        TokenTtl::default(),
+        clock,
+    ));
+    (runtime, meeting)
 }
