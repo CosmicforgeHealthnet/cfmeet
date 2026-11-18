@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Search } from "lucide-react";
 import { OPEN_COMMANDS_EVENT } from "./CommandPalette";
+import NotificationBell from "./NotificationBell";
 
 /** Signed-in header: the search / command bar, centred (Gmail / Teams pattern). */
 export default function TopBar() {
@@ -30,6 +31,7 @@ export default function TopBar() {
           <kbd className="hidden rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] sm:inline">Ctrl K</kbd>
         </button>
       </div>
+      <NotificationBell />
     </header>
   );
 }

@@ -58,6 +58,7 @@ export default function AccountProfileSettings() {
     <div className="space-y-6">
       {/* Remount on a new server version so the form starts from the saved values. */}
       <ProfileEditor key={`${profile.data.userId}:${profile.data.profileUpdatedAt ?? ""}:${profile.data.username}`} profile={profile.data} />
+      <YourData />
       <DangerZone profile={profile.data} />
     </div>
   );
@@ -102,12 +103,8 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
     <form onSubmit={(e) => void submit(e)} className="space-y-6">
       {/* Identity card */}
       <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-card p-5 sm:p-6">
-        {avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={avatar} alt="" className="size-16 shrink-0 rounded-full object-cover" />
-        ) : (
-          <span className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xl font-semibold text-primary">{name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")}</span>
-        )}
+        <AvatarUpload avatar={avatar} initials={name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("")}
+          onUploaded={(url) => setForm((f) => ({ ...f, avatarUrl: url }))} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-lg font-semibold">{name}</p>
           <p className="flex items-center gap-1.5 truncate text-sm text-muted-foreground"><Mail className="size-3.5 shrink-0" />{profile.email}{profile.emailVerified ? <BadgeCheck className="size-4 shrink-0 text-primary" aria-label="Verified" /> : null}</p>
@@ -134,7 +131,6 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
         <div className="grid gap-5 sm:grid-cols-2">
           {field("displayName", "Display name", "Up to 64 characters.", profile.username)}
           {field("username", "Username", "3–50 letters, numbers or underscores.")}
-          <div className="sm:col-span-2">{field("avatarUrl", "Profile photo link", "Optional. A https:// link to an image.", "https://")}</div>
         </div>
       </section>
 
@@ -187,9 +183,67 @@ const LANGUAGES = [
   { value: "sw", label: "Kiswahili" },
 ];
 
+/** Tap the photo to upload a new one (PNG, JPEG or WebP, up to 512 KB). */
+function AvatarUpload({ avatar, initials, onUploaded }: { avatar: string | null; initials: string; onUploaded: (url: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setError("Use a PNG, JPEG or WebP image."); return; }
+    if (file.size > 512 * 1024) { setError("That photo is too big. Use one under 512 KB."); return; }
+    setBusy(true); setError(null);
+    try { const p = await accountService.uploadAvatar(file); if (p.avatarUrl) onUploaded(p.avatarUrl); }
+    catch (e) { setError(getErrorMessage(e, "The photo couldn't be uploaded. Try again.")); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <label className="group relative size-16 shrink-0 cursor-pointer overflow-hidden rounded-full" title="Change photo">
+        {avatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={avatar} alt="" className="size-16 object-cover" />
+        ) : (
+          <span className="flex size-16 items-center justify-center bg-primary/10 text-xl font-semibold text-primary">{initials}</span>
+        )}
+        <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-[11px] font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">{busy ? "Uploading…" : "Change"}</span>
+        <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
+      </label>
+      {error ? <p role="alert" className="max-w-[10rem] text-center text-[11px] text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+/** Download everything CF Meet keeps about you (one JSON file). */
+function YourData() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const download = async () => {
+    setBusy(true); setError(null);
+    try {
+      const data = await accountService.dataExport();
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = `cfmeet-my-data-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError(getErrorMessage(e, "Your data couldn't be prepared. Try again.")); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="flex flex-col justify-between gap-3 rounded-2xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:p-6">
+      <div className="space-y-1">
+        <p className="font-semibold">Your data</p>
+        <p className="text-sm text-muted-foreground">Download a copy of what CF Meet keeps about you.</p>
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      </div>
+      <Button variant="outline" className="w-full rounded-xl sm:w-auto" loading={busy} onClick={() => void download()}>Download my data</Button>
+    </div>
+  );
+}
+
 function DangerZone({ profile }: { profile: AccountProfile }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   return (
     <div className="rounded-2xl border border-destructive/30 bg-card p-5 sm:p-6">
@@ -217,6 +271,33 @@ function DangerZone({ profile }: { profile: AccountProfile }) {
                   await accountService.deactivate(stepUpToken);
                   await authService.forgetLocalSession();
                   router.replace("/login?reason=deactivated");
+                }} />
+            ) : null}
+          </DialogContent>
+        </Dialog>
+      </div>
+      <div className="mt-5 flex flex-col justify-between gap-4 border-t border-destructive/20 pt-5 sm:flex-row sm:items-center">
+        <div className="space-y-1">
+          <p className="font-semibold text-destructive">Delete account</p>
+          <p className="text-sm text-muted-foreground">Deletes your account and data for good. This can&apos;t be undone.</p>
+        </div>
+        <Dialog open={deleting} onOpenChange={setDeleting}>
+          <DialogTrigger asChild>
+            <Button variant="destructive" className="w-full rounded-xl sm:w-auto">Delete account</Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Delete your account for good?</DialogTitle>
+              <DialogDescription>Your account, contacts, chats on CF Meet and settings are deleted and can&apos;t be brought back. Download your data first if you want a copy. To confirm, enter the code we email you.</DialogDescription>
+            </DialogHeader>
+            {deleting ? (
+              <EmailCodeConfirm email={profile.email} danger confirmLabel="Delete my account"
+                send={() => accountService.requestStepUp("DELETE_ACCOUNT")}
+                verify={async (code) => {
+                  const { stepUpToken } = await accountService.verifyStepUp("DELETE_ACCOUNT", code);
+                  await accountService.deleteAccount(stepUpToken);
+                  await authService.forgetLocalSession();
+                  router.replace("/login?reason=deleted");
                 }} />
             ) : null}
           </DialogContent>

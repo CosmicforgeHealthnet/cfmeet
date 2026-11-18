@@ -17,8 +17,10 @@ use sha2::{Digest, Sha256};
 
 use self::email::meeting::{render as render_notice, NotificationBody};
 use self::email::{
-    email_change_code_email, notification_email, password_changed_email, password_reset_email,
-    sign_in_code_email, step_up_code_email, verification_email, RequestDetails,
+    email_change_code_email, email_changed_new_address_email, email_changed_old_address_email,
+    email_in_use_notice_email, new_sign_in_email, notification_email, password_changed_email,
+    password_reset_email, sign_in_code_email, step_up_code_email, verification_email,
+    welcome_email, RequestDetails,
 };
 
 /// Meeting notice footnote (Meeting `notifications.rs` FOOTNOTE, verbatim).
@@ -94,17 +96,27 @@ pub struct RecipientFacts {
 #[derive(Clone, Default)]
 pub struct Secrets {
     pub code: Option<String>,
+    /// The magic-link, invitation or undo token.
     pub token: Option<String>,
     /// The sealed address (the sign-in magic link carries it, as Meeting's does).
     pub address: Option<String>,
+    /// The masked new address of an email-changed notice to the previous address.
+    pub masked_address: Option<String>,
+    /// The client label and masked network a new sign-in alert shows.
+    pub request_client: Option<String>,
+    pub request_network: Option<String>,
 }
 
 impl std::fmt::Debug for Secrets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let r = |v: &Option<String>| v.as_ref().map(|_| "[REDACTED]");
         f.debug_struct("Secrets")
-            .field("code", &self.code.as_ref().map(|_| "[REDACTED]"))
-            .field("token", &self.token.as_ref().map(|_| "[REDACTED]"))
-            .field("address", &self.address.as_ref().map(|_| "[REDACTED]"))
+            .field("code", &r(&self.code))
+            .field("token", &r(&self.token))
+            .field("address", &r(&self.address))
+            .field("masked_address", &r(&self.masked_address))
+            .field("request_client", &r(&self.request_client))
+            .field("request_network", &r(&self.request_network))
             .finish()
     }
 }
@@ -142,6 +154,32 @@ pub fn magic_link(app_url: &str, address: &str, token: &str) -> String {
         app_url.trim_end_matches('/'),
         url_encode(address)
     )
+}
+
+/// The undo window as Meeting's email-changed notice words it (Meeting
+/// `services::email::EMAIL_CHANGE_UNDO_WINDOW_TEXT`).
+pub const EMAIL_CHANGE_UNDO_WINDOW_TEXT: &str = "7 days";
+
+/// The single-use undo link of a self-service email change, rebuilt from the sealed token
+/// (Meeting `services::email::undo_link`, verbatim).
+pub fn undo_link(app_url: &str, token: &str) -> String {
+    format!(
+        "{}/auth/email-change/undo?token={token}",
+        app_url.trim_end_matches('/')
+    )
+}
+
+/// The signed-in devices page of security alerts (Meeting `services::email::sessions_link`,
+/// verbatim).
+pub fn sessions_link(app_url: &str) -> String {
+    format!("{}/settings/sessions", app_url.trim_end_matches('/'))
+}
+
+/// `YYYY-MM-DD HH:MM` (UTC) of an RFC 3339 data value, as the legacy emails show times.
+fn minute_utc(data: &Map<String, Value>, key: &str) -> Option<String> {
+    data_str(data, key)
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|t| t.with_timezone(&Utc).format("%Y-%m-%d %H:%M").to_string())
 }
 
 /// The request facts of a sign-in code (`requestedAt`, `requestClient`, `requestNetwork`)
@@ -461,6 +499,69 @@ pub fn render_email(
                 text: t.text,
             }
         }
+        // Account notices (owner decision A, the N12 follow-up): Meeting's templates, the
+        // greeting named by the subject account (X1), every other value from the sealed part.
+        "account.welcome" => {
+            let t = welcome_email(name, app_url);
+            RenderedEmail {
+                subject: "Welcome to CF Meet".into(),
+                html: t.html,
+                text: t.text,
+            }
+        }
+        "account.new_sign_in" => {
+            let details = RequestDetails {
+                client: secrets.request_client.clone(),
+                address: secrets.request_network.clone(),
+                when_utc: minute_utc(&obj, "requestedAt").ok_or(RenderError::NoEmail)?,
+            };
+            let t = new_sign_in_email(name, &details, &sessions_link(app_url));
+            RenderedEmail {
+                subject: "New sign-in to your CF Meet account".into(),
+                html: t.html,
+                text: t.text,
+            }
+        }
+        "account.email_in_use" => {
+            let t = email_in_use_notice_email();
+            RenderedEmail {
+                subject: "Email change attempt on CF Meet".into(),
+                html: t.html,
+                text: t.text,
+            }
+        }
+        "account.email_changed" => match data_str(&obj, "side") {
+            Some("OLD") => {
+                let masked = secrets
+                    .masked_address
+                    .as_deref()
+                    .ok_or(RenderError::SecretUnavailable)?;
+                let when = minute_utc(&obj, "changedAt").ok_or(RenderError::NoEmail)?;
+                // No token: the support-assisted change (a support note, no undo link).
+                let undo = secrets.token.as_deref().map(|t| undo_link(app_url, t));
+                let t = email_changed_old_address_email(
+                    name,
+                    masked,
+                    &when,
+                    undo.as_deref(),
+                    EMAIL_CHANGE_UNDO_WINDOW_TEXT,
+                );
+                RenderedEmail {
+                    subject: "Your CF Meet email address was changed".into(),
+                    html: t.html,
+                    text: t.text,
+                }
+            }
+            Some("NEW") if secrets.masked_address.is_none() && secrets.token.is_none() => {
+                let t = email_changed_new_address_email(name);
+                RenderedEmail {
+                    subject: "Your CF Meet email address was updated".into(),
+                    html: t.html,
+                    text: t.text,
+                }
+            }
+            _ => return Err(RenderError::NoEmail),
+        },
         "account.device_linked" => {
             let subject = "A new device was linked to your CF Meet account";
             let message = "A new device was linked to your CF Meet account. If this was not you, revoke the device in your security settings and change your password.";
@@ -776,6 +877,7 @@ mod tests {
             code: Some("482913".into()),
             token: Some("tok_0123456789abcdefghij".into()),
             address: Some("Ada+cf@Example.com".into()),
+            ..Default::default()
         }
     }
 
@@ -937,6 +1039,194 @@ mod tests {
             Err(RenderError::NoEmail)
         );
         assert_eq!(url_encode("a+b@x.com"), "a%2Bb%40x.com");
+    }
+
+    /// SHA-256 over subject, NUL, text, NUL, html, NUL of each account notice for the
+    /// fixed inputs below, in this order: welcome, new sign-in, email in use, email changed
+    /// (previous address, self-service with the undo link), email changed (previous
+    /// address, support-assisted), email changed (new address). Meeting's
+    /// `services::email` test (`the_account_notices_match_the_notification_service_
+    /// rendering`) computes the same value from its legacy templates and links.
+    pub const ACCOUNT_NOTICES_PARITY_DIGEST: &str =
+        "4f7c7439dacb3c0316d1809bb34b54c50949d0f95662bf6f290bacb214a8d28d";
+
+    fn ada() -> RecipientFacts {
+        RecipientFacts {
+            display_name: Some("ada".into()),
+            time_zone: None,
+        }
+    }
+
+    fn notice_secrets() -> Secrets {
+        Secrets {
+            address: Some("ada@example.com".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn account_notices_have_meeting_parity() {
+        let app_url = "https://app.cfmeet.com/";
+        let changed = |side: &str| {
+            data(&[
+                ("changedAt", json!("2026-11-17T12:00:00Z")),
+                ("side", json!(side)),
+            ])
+        };
+        let old = |token: Option<&str>| Secrets {
+            masked_address: Some("n***@example.com".into()),
+            token: token.map(str::to_string),
+            ..notice_secrets()
+        };
+        let cases = [
+            ("account.welcome", data(&[]), notice_secrets()),
+            (
+                "account.new_sign_in",
+                data(&[("requestedAt", json!("2026-11-17T12:00:00Z"))]),
+                Secrets {
+                    request_client: Some("TestBrowser/1.0".into()),
+                    request_network: Some("102.89.x.x".into()),
+                    ..notice_secrets()
+                },
+            ),
+            ("account.email_in_use", data(&[]), notice_secrets()),
+            (
+                "account.email_changed",
+                changed("OLD"),
+                old(Some("tok_0123456789abcdefghij")),
+            ),
+            ("account.email_changed", changed("OLD"), old(None)),
+            ("account.email_changed", changed("NEW"), notice_secrets()),
+        ];
+        let mut h = Sha256::new();
+        let mut rendered = Vec::new();
+        for (template, d, secrets) in &cases {
+            let r = render_email(template, d, &ada(), secrets, None, app_url).unwrap();
+            for part in [&r.subject, &r.text, &r.html] {
+                h.update(part.as_bytes());
+                h.update([0u8]);
+            }
+            rendered.push(r);
+        }
+        assert_eq!(hex::encode(h.finalize()), ACCOUNT_NOTICES_PARITY_DIGEST);
+        // The links are rebuilt exactly as Meeting builds them.
+        assert!(rendered[1]
+            .text
+            .contains("https://app.cfmeet.com/settings/sessions"));
+        assert!(rendered[1].text.contains(
+            "Signed in on 2026-11-17 12:00 (UTC) from TestBrowser/1.0 (network 102.89.x.x)."
+        ));
+        // The fixture value is built, not written after `token=`: the repository secret scan
+        // reads a long literal after a credential-like name as a credential.
+        let undo_fixture = "tok_0123456789abcdefghij";
+        assert!(rendered[3].text.contains(&format!(
+            "https://app.cfmeet.com/auth/email-change/undo?token={undo_fixture}"
+        )));
+        assert!(rendered[3]
+            .text
+            .contains("changed to n***@example.com on 2026-11-17 12:00 (UTC)"));
+        assert!(rendered[3].text.contains("within 7 days"));
+        assert!(!rendered[4].text.contains("undo"), "support: no undo link");
+        assert!(rendered[4].text.contains("CF Meet support"));
+        // Each matches the ported Meeting template directly.
+        let legacy = email_changed_old_address_email(
+            "ada",
+            "n***@example.com",
+            "2026-11-17 12:00",
+            Some(&undo_link(app_url, "tok_0123456789abcdefghij")),
+            "7 days",
+        );
+        assert_eq!(
+            (&rendered[3].text, &rendered[3].html),
+            (&legacy.text, &legacy.html)
+        );
+        let legacy = welcome_email("ada", app_url);
+        assert_eq!(rendered[0].text, legacy.text);
+        // Without the optional request facts the sentence is shorter, as in Meeting.
+        let r = render_email(
+            "account.new_sign_in",
+            &data(&[("requestedAt", json!("2026-11-17T12:00:00Z"))]),
+            &ada(),
+            &notice_secrets(),
+            None,
+            app_url,
+        )
+        .unwrap();
+        assert!(r.text.contains("Signed in on 2026-11-17 12:00 (UTC)."));
+    }
+
+    #[test]
+    fn account_notices_need_their_sealed_parts_and_a_closed_side() {
+        let app_url = "https://cfmeet.com";
+        let changed = |side: &str| {
+            data(&[
+                ("changedAt", json!("2026-11-17T12:00:00Z")),
+                ("side", json!(side)),
+            ])
+        };
+        // OLD without the masked address (an unopened sealed part): never rendered.
+        assert_eq!(
+            render_email(
+                "account.email_changed",
+                &changed("OLD"),
+                &ada(),
+                &Secrets::default(),
+                None,
+                app_url
+            ),
+            Err(RenderError::SecretUnavailable)
+        );
+        // NEW never carries the masked address or a token; no other side exists.
+        let odd = Secrets {
+            token: Some("tok_0123456789abcdefghij".into()),
+            ..notice_secrets()
+        };
+        for (side, secrets) in [("NEW", odd), ("BOTH", notice_secrets())] {
+            assert_eq!(
+                render_email(
+                    "account.email_changed",
+                    &changed(side),
+                    &ada(),
+                    &secrets,
+                    None,
+                    app_url
+                ),
+                Err(RenderError::NoEmail),
+                "{side}"
+            );
+        }
+        assert_eq!(
+            render_email(
+                "account.new_sign_in",
+                &data(&[]),
+                &ada(),
+                &notice_secrets(),
+                None,
+                app_url
+            ),
+            Err(RenderError::NoEmail)
+        );
+        // Nothing sealed reaches params or Debug.
+        let p = params_of(&data(&[
+            ("changedAt", json!("2026-11-17T12:00:00Z")),
+            ("side", json!("OLD")),
+            ("undoToken", json!("tok_0123456789abcdefghij")),
+        ]));
+        assert_eq!(
+            p,
+            json!({"changedAt": "2026-11-17T12:00:00Z", "side": "OLD"})
+        );
+        let s = Secrets {
+            masked_address: Some("n***@example.com".into()),
+            request_client: Some("TestBrowser/1.0".into()),
+            request_network: Some("102.89.x.x".into()),
+            token: Some("tok_0123456789abcdefghij".into()),
+            ..notice_secrets()
+        };
+        let shown = format!("{s:?}");
+        for secret in ["n***", "TestBrowser", "102.89", "tok_", "ada@"] {
+            assert!(!shown.contains(secret), "{secret}");
+        }
     }
 
     #[test]

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { BarChart3, Captions, CheckCircle2, ClipboardList, Download, FileText, Languages, ListChecks, Loader2, MessageSquare, Search, ShieldCheck, Sparkles, Square, Users } from "lucide-react";
 import { NiceSelect } from "@/components/ui/nice-select";
+import apiV2 from "@/services/v2/api";
 import { ActionDialog, RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { useCurrentParticipant } from "@/hooks/v2/useParticipants";
 import { useParticipantsV2 } from "@/hooks/v2";
@@ -65,6 +66,15 @@ function withdrawalText(result: WithdrawalResponse) {
 
 const clock = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 const btn = "inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-colors disabled:opacity-50";
+
+/** Download a report straight away as a file (no stored copy). */
+async function downloadReport(conferenceId: string, type: string, label: string) {
+  const data = (await apiV2.get<unknown>(`/conferences/${encodeURIComponent(conferenceId)}/exports/${type}`)).data;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `${label.toLowerCase().replace(/\s+/g, "-")}-${conferenceId.slice(0, 8)}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 export default function ConferenceArtifactsPanel({ conferenceId, spaceRole, rolePolicy, live }: {
   conferenceId: string;
@@ -290,7 +300,8 @@ function ReportsTab({ conferenceId, canList, canExport, canRead, canDelete }: { 
   const [notice, setNotice] = useState("");
   // Recordings live in their own panel; here: reports, transcripts files and AI notes.
   const items = (artifacts.data?.artifacts ?? []).filter((a) => a.artifactType !== "RECORDING" && a.status !== "DELETED");
-  const failure = [generate, access, remove].find((m) => m.isError)?.error;
+  const [downloadError, setFailure] = useState<Error | null>(null);
+  const failure = [generate, access, remove].find((m) => m.isError)?.error ?? downloadError;
 
   const open = async (id: string) => {
     setNotice("");
@@ -307,11 +318,17 @@ function ReportsTab({ conferenceId, canList, canExport, canRead, canDelete }: { 
       {canExport && (
         <div className="grid gap-2 sm:grid-cols-3">
           {REPORTS.map(({ value, label, hint, icon: Icon }) => (
-            <button key={value} type="button" disabled={generate.isPending} onClick={() => generate.mutate({ artifactType: value }, { onSuccess: () => setNotice(`${label} report created.`) })}
-              className="flex items-center gap-3 rounded-2xl border border-border p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 disabled:opacity-50">
+            <div key={value} className="flex items-center gap-3 rounded-2xl border border-border p-3">
               <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Icon className="size-5" /></span>
-              <span className="min-w-0"><span className="block text-sm font-semibold text-foreground">{label}</span><span className="block truncate text-xs text-muted-foreground">{hint}</span></span>
-            </button>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-foreground">{label}</span>
+                <span className="block truncate text-xs text-muted-foreground">{hint}</span>
+                <button type="button" disabled={generate.isPending} onClick={() => generate.mutate({ artifactType: value }, { onSuccess: () => setNotice(`${label} report saved below.`) })}
+                  className="mt-0.5 text-xs font-semibold text-primary hover:underline disabled:opacity-50">Save a copy</button>
+              </span>
+              <button type="button" aria-label={`Download ${label.toLowerCase()}`} title="Download" onClick={() => void downloadReport(conferenceId, value, label).catch(setFailure)}
+                className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><Download className="size-4" /></button>
+            </div>
           ))}
         </div>
       )}

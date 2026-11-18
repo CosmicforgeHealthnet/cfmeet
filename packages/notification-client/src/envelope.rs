@@ -370,6 +370,20 @@ pub fn validate(env: &Envelope, issuer: Option<&str>) -> Result<&'static EventSp
     {
         return Err(MissingData(missing));
     }
+    // `account.security.email-changed`: the legacy key names the side (`email-changed:old:`
+    // / `email-changed:new:`), and `side` must be that side.
+    if spec.event_type == "account.security.email-changed" {
+        let side = env.data.get("side").and_then(Value::as_str).unwrap_or("");
+        let key_side = d
+            .idempotency_key
+            .as_deref()
+            .and_then(|k| k.strip_prefix("email-changed:"))
+            .and_then(|k| k.split_once(':'))
+            .map(|(s, _)| s.to_ascii_uppercase());
+        if key_side.as_deref() != Some(side) {
+            return Err(DataValue("side".into()));
+        }
+    }
     // Sealed part: only for types that declare it, and then mandatory.
     match (&env.sealed, spec.sealed_allowed()) {
         (Some(_), false) => return Err(SealedNotAllowed),
@@ -556,8 +570,22 @@ impl EnvelopeBuilder {
         if let Some(missing) = self.spec.sealed.iter().find(|f| !fields.contains(f)) {
             return Err(EnvelopeError::SealedRequired(missing.as_str()));
         }
-        if fields.iter().any(|f| !self.spec.sealed.contains(f)) {
+        if fields.iter().any(|f| !self.spec.seals(*f)) {
             return Err(EnvelopeError::SealedNotAllowed);
+        }
+        // `account.security.email-changed`: the notice to the previous address carries the
+        // masked new address (and the undo token of a self-service change); the notice to
+        // the new address carries neither.
+        if self.spec.event_type == "account.security.email-changed" {
+            match self.env.data.get("side").and_then(Value::as_str) {
+                Some("OLD") if plaintext.masked_address.is_none() => {
+                    return Err(EnvelopeError::SealedRequired("maskedAddress"))
+                }
+                Some("NEW") if plaintext.masked_address.is_some() || plaintext.token.is_some() => {
+                    return Err(EnvelopeError::SealedNotAllowed)
+                }
+                _ => {}
+            }
         }
         self.env.sealed = Some(seal::seal(
             key,

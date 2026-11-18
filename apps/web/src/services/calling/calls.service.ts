@@ -167,6 +167,25 @@ export const callsService = {
   },
 
   /** C5: VOICE -> VIDEO (never turns a camera on; the camera button becomes available). */
+  /** C13: hide a finished call from your own history. */
+  hideFromHistory: async (callId: Uuid): Promise<void> => {
+    await callingApi.delete(`/v1/calls/${callId}/history`);
+  },
+  /** C4: the host hands the role to another participant. */
+  transferHost: async (callId: Uuid, hostParticipantId: Uuid, idempotencyKey?: string) =>
+    (await callingApi.post<ControlResult>(`/v1/calls/${callId}/host`, { hostParticipantId }, { headers: idempotencyHeader(idempotencyKey) })).data,
+  /** C4: the host removes or mutes a participant. */
+  removeParticipant: async (callId: Uuid, participantId: Uuid, idempotencyKey?: string) =>
+    (await callingApi.post<ControlResult>(`/v1/calls/${callId}/participants/${participantId}/remove`, {}, { headers: idempotencyHeader(idempotencyKey) })).data,
+  muteParticipant: async (callId: Uuid, participantId: Uuid, muted: boolean, idempotencyKey?: string) =>
+    (await callingApi.post<ControlResult>(`/v1/calls/${callId}/participants/${participantId}/mute`, { muted }, { headers: idempotencyHeader(idempotencyKey) })).data,
+  /** C6: come back into an ongoing call you left; returns the new session to join. */
+  rejoin: async (callId: Uuid, participantId: Uuid, endpointId: Uuid, idempotencyKey?: string) =>
+    (await callingApi.post<{ sessionId: Uuid; rejoined: boolean }>(`/v1/calls/${callId}/participants/${participantId}/rejoin`, { endpointId }, { headers: idempotencyHeader(idempotencyKey) })).data,
+  /** C8: call quality per participant (estimated MOS 1–5). */
+  quality: async (callId: Uuid) =>
+    (await callingApi.get<{ participants: { participantId: Uuid; sampleCount: number; mosEstimate: { avg: number; min: number }; packetLossPercent: { avg: number }; rttMs: { avg: number } }[] }>(`/v1/calls/${callId}/quality`)).data,
+
   upgrade: async (callId: Uuid, body: UpgradeRequest, idempotencyKey?: string): Promise<ControlResult> => {
     const response = await callingApi.post<ControlResult>(`/v1/calls/${callId}/upgrade`, body, { headers: idempotencyHeader(idempotencyKey) });
     return response.data;

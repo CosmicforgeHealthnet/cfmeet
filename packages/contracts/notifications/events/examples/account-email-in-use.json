@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "eventId": "evt_0123456789abcdef0123456789abcdef",
+  "eventType": "account.security.email-in-use",
+  "eventVersion": 1,
+  "producer": "cfmeet.meeting-service",
+  "occurredAt": "2026-11-15T12:00:00Z",
+  "correlationId": "corr_fedcba9876543210fedcba9876543210",
+  "recipients": [
+    {
+      "ref": "meeting-email-principal:7c3e9a51-2b4d-8e6f-9a1b-3c5d7e9f1a2b"
+    }
+  ],
+  "delivery": {
+    "priority": "CRITICAL",
+    "dedupeKey": "email-in-use:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b:2026111512",
+    "idempotencyKey": "email-in-use:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b:2026111512",
+    "expiresAt": "2026-11-16T12:00:00Z"
+  },
+  "route": {
+    "decisionId": "0b9f6c1e-2d3a-4b5c-8d7e-6f5a4b3c2d1e",
+    "routingVersion": 3,
+    "protocol": 1
+  },
+  "data": {},
+  "sealed": {
+    "kid": "notif-hpke-2026-11",
+    "enc": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "ct": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  }
+}

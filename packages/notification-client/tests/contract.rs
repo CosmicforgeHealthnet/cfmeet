@@ -90,6 +90,7 @@ fn sample(key: &str) -> Value {
     match key {
         "startsAt" | "changedAt" | "expiresAt" | "requestedAt" => json!("2026-11-20T09:00:00Z"),
         "purpose" => json!("CHANGE_EMAIL"),
+        "side" => json!("OLD"),
         "requestClient" => json!("Mozilla/5.0 (X11; Linux x86_64) Firefox/133.0"),
         "requestNetwork" => json!("102.89.x.x"),
         "ttlMinutes" => json!(1440),
@@ -110,7 +111,11 @@ fn sample(key: &str) -> Value {
 
 fn sample_idempotency_key(format: LegacyKey) -> String {
     match format {
-        LegacyKey::DeviceLinked | LegacyKey::MeetingInvitation => format!("{}{U}", format.prefix()),
+        LegacyKey::DeviceLinked
+        | LegacyKey::MeetingInvitation
+        | LegacyKey::Welcome
+        | LegacyKey::NewSignIn => format!("{}{U}", format.prefix()),
+        LegacyKey::EmailChanged => format!("{}old:{U}", format.prefix()),
         LegacyKey::OrgInvitation => format!("{}{U}:3", format.prefix()),
         _ => format!("{}{U}:1", format.prefix()),
     }
@@ -128,8 +133,12 @@ fn build(spec: &cf_notification_client::EventSpec, key: &SealingKey) -> Envelope
         b = b.recipient("operator-group:platform-operators");
     } else if spec.recipient == Some(RecipientKind::EmailPrincipal) {
         b = b.recipient(format!("meeting-email-principal:{U}"));
-        // The sign-in code may be for an address without an account: it names no subject.
-        if spec.event_type != "account.sign-in-code.requested" {
+        // The sign-in code may be for an address without an account, and the email-in-use
+        // notice must not reveal one: they name no subject.
+        if !matches!(
+            spec.event_type,
+            "account.sign-in-code.requested" | "account.security.email-in-use"
+        ) {
             b = b.subject(Uuid::parse_str(U).unwrap(), Some(1));
         }
     } else {
@@ -145,11 +154,14 @@ fn build(spec: &cf_notification_client::EventSpec, key: &SealingKey) -> Envelope
     }
     if spec.sealed_allowed() {
         let mut p = SealedPlaintext::default();
-        for f in spec.sealed {
+        for f in spec.sealed.iter().chain(spec.sealed_optional) {
             match f {
                 SealedField::Code => p.code = Some("482913".into()),
                 SealedField::Token => p.token = Some("tok_0123456789abcdefghij".into()),
                 SealedField::Address => p.address = Some("invitee@example.com".into()),
+                SealedField::MaskedAddress => p.masked_address = Some("n***@example.com".into()),
+                SealedField::RequestClient => p.request_client = Some("TestBrowser/1.0".into()),
+                SealedField::RequestNetwork => p.request_network = Some("102.89.x.x".into()),
             }
         }
         b.secret(p).build_sealed(key).unwrap()
@@ -163,7 +175,7 @@ fn the_rust_catalogue_equals_the_contract_catalogue() {
     let contract = read(EVENTS);
     let entries = contract["x-cfmeet-catalogue"].as_array().unwrap();
     assert_eq!(entries.len(), CATALOGUE.len());
-    assert_eq!(CATALOGUE.iter().filter(|s| !s.is_control()).count(), 34);
+    assert_eq!(CATALOGUE.iter().filter(|s| !s.is_control()).count(), 38);
     assert_eq!(CATALOGUE.iter().filter(|s| s.optional).count(), 1);
     for (e, s) in entries.iter().zip(CATALOGUE) {
         let what = s.event_type;
@@ -182,6 +194,9 @@ fn the_rust_catalogue_equals_the_contract_catalogue() {
         let sealed: Option<Vec<&str>> =
             (!s.sealed.is_empty()).then(|| s.sealed.iter().map(|f| f.as_str()).collect());
         assert_eq!(e["sealed"], json!(sealed), "{what}");
+        let optional: Option<Vec<&str>> = (!s.sealed_optional.is_empty())
+            .then(|| s.sealed_optional.iter().map(|f| f.as_str()).collect());
+        assert_eq!(e["sealedOptional"], json!(optional), "{what}");
         assert_eq!(
             e["idempotencyKey"],
             json!(s.idempotency_key.map(LegacyKey::name)),
@@ -508,11 +523,19 @@ fn counter_examples_are_refused_for_their_intended_reason() {
             "critical-priority-on-standard-type.json",
             Some(PriorityMismatch),
         ),
+        (
+            "email-changed-side-mismatch.json",
+            Some(DataValue("side".into())),
+        ),
         ("email-in-data.json", Some(DataKey("inviteeEmail".into()))),
         // No `route`: not even an envelope.
         ("missing-route.json", None),
         ("no-recipients.json", Some(Invalid("recipients"))),
         ("operator-alert-to-user.json", Some(Invalid("recipients"))),
+        (
+            "request-network-in-data.json",
+            Some(DataKey("requestNetwork".into())),
+        ),
         ("sealed-not-allowed.json", Some(SealedNotAllowed)),
         ("sign-in-code-to-account.json", Some(Invalid("recipients"))),
         (
@@ -520,6 +543,7 @@ fn counter_examples_are_refused_for_their_intended_reason() {
             Some(DataValue("purpose".into())),
         ),
         ("token-in-data.json", Some(DataKey("inviteToken".into()))),
+        ("undo-token-in-data.json", Some(DataKey("undoToken".into()))),
         ("unknown-event-type.json", Some(UnknownEventType)),
         ("unsealed-code.json", Some(SealedRequired("code"))),
         (
@@ -651,4 +675,184 @@ fn passwordless_account_codes_follow_their_catalogue_rules() {
         to_principal.unwrap_err(),
         EnvelopeError::Invalid("recipients")
     );
+}
+
+/// The account notices (contract 1.3.0): one email principal with its address sealed;
+/// what the legacy email shows beyond ids and times (the undo token, the masked new
+/// address, the request's client label and network) only in the sealed part, never in
+/// data; `side` closed and agreeing with the legacy key — in Rust and in the schema.
+#[test]
+fn account_notices_follow_their_catalogue_rules() {
+    let v = validator();
+    let key = key();
+    let conforms = |env: &Envelope| v.is_valid(&serde_json::to_value(env).unwrap());
+    let principal = format!("meeting-email-principal:{U}");
+    let b = |t: &str| {
+        EnvelopeBuilder::new(Producer::MeetingService, t, "2026-11-15T12:00:00Z", route())
+            .unwrap()
+            .recipient(principal.clone())
+            .dedupe_key("d")
+    };
+    let account = Uuid::parse_str(U).unwrap();
+    let address = || SealedPlaintext::default().with_address("ada@example.com");
+
+    // Welcome: the address only; an account recipient is refused.
+    let welcome = b("account.welcome.requested")
+        .subject(account, None)
+        .idempotency_key(format!("welcome:{U}"))
+        .secret(address())
+        .build_sealed(&key)
+        .unwrap();
+    assert!(conforms(&welcome));
+    let mut to_account = welcome.clone();
+    to_account.recipients[0].reference = format!("cfmeet-user:{U}");
+    assert_eq!(
+        validate(&to_account, None).unwrap_err(),
+        EnvelopeError::Invalid("recipients")
+    );
+    assert!(!conforms(&to_account));
+    let mut no_subject = welcome.clone();
+    no_subject.subject = None;
+    assert!(!conforms(&no_subject), "the welcome names its account");
+    let with_token = b("account.welcome.requested")
+        .subject(account, None)
+        .idempotency_key(format!("welcome:{U}"))
+        .secret(address().with_token("tok_0123456789abcdefghij"))
+        .build_sealed(&key);
+    assert_eq!(with_token.unwrap_err(), EnvelopeError::SealedNotAllowed);
+
+    // New sign-in: the request details are optional and sealed; never data.
+    for (client, network) in [
+        (Some("TestBrowser/1.0"), Some("102.89.x.x")),
+        (None, Some("2001:db8:x:x")),
+        (Some("curl/8"), None),
+        (None, None),
+    ] {
+        let mut p = address();
+        if let Some(c) = client {
+            p = p.with_request_client(c);
+        }
+        if let Some(n) = network {
+            p = p.with_request_network(n);
+        }
+        let env = b("account.security.new-sign-in")
+            .subject(account, None)
+            .idempotency_key(format!("new-sign-in:{U}"))
+            .data("requestedAt", "2026-11-15T12:00:00Z")
+            .secret(p)
+            .build_sealed(&key)
+            .unwrap();
+        assert!(conforms(&env));
+    }
+    for (k, val) in [
+        ("requestClient", "TestBrowser/1.0"),
+        ("requestNetwork", "102.89.x.x"),
+    ] {
+        let clear = b("account.security.new-sign-in")
+            .subject(account, None)
+            .idempotency_key(format!("new-sign-in:{U}"))
+            .data("requestedAt", "2026-11-15T12:00:00Z")
+            .data(k, val)
+            .secret(address())
+            .build_sealed(&key);
+        assert_eq!(clear.unwrap_err(), EnvelopeError::DataKey(k.into()));
+    }
+    // A full network address is not a masked one.
+    let full = b("account.security.new-sign-in")
+        .subject(account, None)
+        .idempotency_key(format!("new-sign-in:{U}"))
+        .data("requestedAt", "2026-11-15T12:00:00Z")
+        .secret(address().with_request_network("102.89.10.11"))
+        .build_sealed(&key);
+    assert!(full.is_err());
+
+    // Email in use: no subject in the schema (the event never names the account).
+    let in_use = b("account.security.email-in-use")
+        .idempotency_key("email-in-use:6b86b273:2026111512")
+        .secret(address())
+        .build_sealed(&key)
+        .unwrap();
+    assert!(conforms(&in_use));
+    let mut named = in_use.clone();
+    named.subject = Some(cf_notification_client::envelope::Subject {
+        kind: "ACCOUNT".into(),
+        id: account,
+        version: None,
+    });
+    assert!(!conforms(&named));
+
+    // Email changed: OLD seals the masked new address (+ the undo token of a self-service
+    // change); NEW neither; the side agrees with the key.
+    let changed = |side: &str, key_side: &str, p: SealedPlaintext| {
+        b("account.security.email-changed")
+            .subject(account, None)
+            .idempotency_key(format!("email-changed:{key_side}:{U}"))
+            .data("changedAt", "2026-11-15T12:00:00Z")
+            .data("side", side)
+            .secret(p)
+            .build_sealed(&key)
+    };
+    let masked = || address().with_masked_address("n***@example.com");
+    for p in [masked().with_token("tok_0123456789abcdefghij"), masked()] {
+        let env = changed("OLD", "old", p).unwrap();
+        assert!(conforms(&env));
+        assert!(!serde_json::to_string(&env).unwrap().contains("n***"));
+    }
+    assert!(conforms(&changed("NEW", "new", address()).unwrap()));
+    assert_eq!(
+        changed("OLD", "old", address()).unwrap_err(),
+        EnvelopeError::SealedRequired("maskedAddress")
+    );
+    assert_eq!(
+        changed("NEW", "new", masked()).unwrap_err(),
+        EnvelopeError::SealedNotAllowed
+    );
+    assert_eq!(
+        changed(
+            "NEW",
+            "new",
+            address().with_token("tok_0123456789abcdefghij")
+        )
+        .unwrap_err(),
+        EnvelopeError::SealedNotAllowed
+    );
+    assert_eq!(
+        changed("NEW", "old", address()).unwrap_err(),
+        EnvelopeError::DataValue("side".into())
+    );
+    assert_eq!(
+        changed("BOTH", "old", masked()).unwrap_err(),
+        EnvelopeError::DataValue("side".into())
+    );
+    // A full address is not a masked one.
+    assert!(changed(
+        "OLD",
+        "old",
+        address().with_masked_address("nadia@example.com")
+    )
+    .is_err());
+    // The undo token in clear data is refused, whatever the key is called.
+    for k in ["undoToken", "token", "undoLink"] {
+        let clear = b("account.security.email-changed")
+            .subject(account, None)
+            .idempotency_key(format!("email-changed:old:{U}"))
+            .data("changedAt", "2026-11-15T12:00:00Z")
+            .data("side", "OLD")
+            .data(k, "tok_0123456789abcdefghij")
+            .secret(masked())
+            .build_sealed(&key);
+        assert!(
+            matches!(clear, Err(EnvelopeError::DataKey(_))),
+            "{k}: {clear:?}"
+        );
+    }
+    // The sealed plaintext of a notice never shows in Debug.
+    let p = masked()
+        .with_token("tok_0123456789abcdefghij")
+        .with_request_client("TestBrowser/1.0")
+        .with_request_network("102.89.x.x");
+    let shown = format!("{p:?}");
+    for secret in ["ada@", "n***", "tok_", "TestBrowser", "102.89"] {
+        assert!(!shown.contains(secret), "{secret}");
+    }
 }

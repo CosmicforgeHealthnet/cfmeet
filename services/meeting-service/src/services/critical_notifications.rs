@@ -11,6 +11,13 @@
 //! | `EmailService::send_step_up_code` | `SECURITY_DEVICE_STEP_UP`, `otp:stepup:…` | `account.step-up-code.requested` (sealed code; `purpose`) |
 //! | `email::device_step_up_code_on` (device links) | `SECURITY_DEVICE_STEP_UP`, `device-step-up:…` | `account.device-step-up-code.requested` |
 //! | `email::device_notice_on` (device linked) | `NOTIFICATION`, `device-linked:…` | `account.security.device-linked` |
+//! | `EmailService::send_welcome_email` | `AUTH_WELCOME`, `welcome:…` | `account.welcome.requested` (sealed address; one email principal, ACCOUNT subject) |
+//! | `EmailService::send_new_sign_in_alert` | `NOTIFICATION`, `new-sign-in:…` | `account.security.new-sign-in` (sealed address, client label and masked network; ACCOUNT subject) |
+//! | `EmailService::send_email_in_use_notice` | `NOTIFICATION`, `email-in-use:…` | `account.security.email-in-use` (sealed address; no subject) |
+//! | `email::email_changed_notices_on` (both notices, self-service and support) | `NOTIFICATION`, `email-changed:{old,new}:…` | `account.security.email-changed` (sealed address; `OLD` also the masked new address and the undo token; ACCOUNT subject) |
+//!
+//! The last four rows are the fence category `ACCOUNT_NOTICES` (owner decision A, the N12
+//! follow-up): until then they were sent only through the legacy ledger.
 //!
 //! (`AUTH_PASSWORD_RESET` and `SECURITY_PASSWORD_CHANGED` have no producer since #97.)
 //! The category's routing mode is read first ([`fence::current_mode`]):
@@ -117,6 +124,10 @@ pub mod event_type {
     pub const SIGN_IN_CODE: &str = "account.sign-in-code.requested";
     pub const EMAIL_CHANGE_CODE: &str = "account.email-change-code.requested";
     pub const STEP_UP_CODE: &str = "account.step-up-code.requested";
+    pub const WELCOME: &str = "account.welcome.requested";
+    pub const NEW_SIGN_IN: &str = "account.security.new-sign-in";
+    pub const EMAIL_IN_USE: &str = "account.security.email-in-use";
+    pub const EMAIL_CHANGED: &str = "account.security.email-changed";
 }
 
 fn rfc3339(t: DateTime<Utc>) -> String {
@@ -153,11 +164,12 @@ impl std::fmt::Debug for FallbackEmail {
     }
 }
 
-/// The ledger categories a fallback email may carry (`NOTIFICATION`: device notices;
-/// `OPERATIONS_ACCEPTANCE`: the fallback drill).
+/// The ledger categories a fallback email may carry (`NOTIFICATION`: device and account
+/// notices; `AUTH_WELCOME`: the welcome email; `OPERATIONS_ACCEPTANCE`: the fallback drill).
 fn ledger_category(value: &str) -> Option<&'static str> {
     [
         category::AUTH_VERIFICATION,
+        category::AUTH_WELCOME,
         category::AUTH_PASSWORD_RESET,
         category::SECURITY_DEVICE_STEP_UP,
         category::SECURITY_PASSWORD_CHANGED,
@@ -411,8 +423,8 @@ pub fn keys_from_env(sealing: Option<SealingKey>) -> Result<CriticalKeys, String
 // ------------------------------------------------------------------------------ event
 
 /// The catalogue event of one CRITICAL message (ids and bounded facts only; the code, the
-/// magic-link token and an address are sealed to the service key and never stored in
-/// clear).
+/// magic-link or undo token, an address, a masked address and a request's client label and
+/// network are sealed to the service key and never stored in clear).
 #[derive(Clone)]
 pub struct CriticalEvent {
     pub category: MeetingCategory,
@@ -432,8 +444,13 @@ pub struct CriticalEvent {
     pub data: Vec<(&'static str, Value)>,
     /// The one-time code (code events only).
     pub code: Option<Zeroizing<String>>,
-    /// The magic-link token (sign-in codes only).
+    /// The magic-link token (sign-in codes) or the undo token (email-changed, `OLD`).
     pub token: Option<Zeroizing<String>>,
+    /// The masked new address (email-changed, `OLD`).
+    pub masked_address: Option<Zeroizing<String>>,
+    /// The request's client label and masked network (new sign-in alert).
+    pub request_client: Option<Zeroizing<String>>,
+    pub request_network: Option<Zeroizing<String>>,
 }
 
 impl std::fmt::Debug for CriticalEvent {
@@ -461,6 +478,9 @@ impl CriticalEvent {
             data: Vec::new(),
             code: None,
             token: None,
+            masked_address: None,
+            request_client: None,
+            request_network: None,
         }
     }
 
@@ -481,6 +501,9 @@ impl CriticalEvent {
             data,
             code: code.map(|c| Zeroizing::new(c.to_string())),
             token: None,
+            masked_address: None,
+            request_client: None,
+            request_network: None,
         }
     }
 
@@ -529,6 +552,9 @@ impl CriticalEvent {
             data,
             code: Some(Zeroizing::new(code.to_string())),
             token: Some(Zeroizing::new(token.to_string())),
+            masked_address: None,
+            request_client: None,
+            request_network: None,
         }
     }
 
@@ -633,9 +659,126 @@ impl CriticalEvent {
         )
     }
 
+    /// An account notice (`ACCOUNT_NOTICES`) to exactly `address`: one email principal
+    /// with the address sealed (the legacy recipient, which a later change of the
+    /// account's address cannot redirect), on behalf of `account` (the ACCOUNT subject:
+    /// X1 authorizes the send and names the greeting) when there is one.
+    fn notice(
+        event_type: &'static str,
+        account: Option<Uuid>,
+        address: &str,
+        data: Vec<(&'static str, Value)>,
+    ) -> Self {
+        Self {
+            category: MeetingCategory::AccountNotices,
+            event_type: Some(event_type),
+            account_id: account.unwrap_or_else(Uuid::nil),
+            subject: account.is_some(),
+            address: Some(Zeroizing::new(address.to_string())),
+            data,
+            code: None,
+            token: None,
+            masked_address: None,
+            request_client: None,
+            request_network: None,
+        }
+    }
+
+    /// The welcome email (`AUTH_WELCOME`, once per account).
+    pub fn welcome(account_id: Uuid, address: &str) -> Self {
+        Self::notice(event_type::WELCOME, Some(account_id), address, Vec::new())
+    }
+
+    /// The new sign-in alert: `requestedAt` as data; the client label and the masked
+    /// network the email shows are sealed (never data). Request facts the catalogue cannot
+    /// carry exactly as the legacy email shows them stay on the legacy path
+    /// (`UNPUBLISHABLE`).
+    pub fn new_sign_in(account_id: Uuid, address: &str, details: &RequestDetails) -> Self {
+        let requested_at =
+            chrono::NaiveDateTime::parse_from_str(&details.when_utc, "%Y-%m-%d %H:%M")
+                .ok()
+                .map(|t| t.and_utc().to_rfc3339_opts(SecondsFormat::Secs, true));
+        let client_ok = details
+            .client
+            .as_deref()
+            .is_none_or(cf_notification_client::seal::request_client_ok);
+        let network_ok = details.address.as_deref().is_none_or(masked_network);
+        let (Some(requested_at), true, true) = (requested_at, client_ok, network_ok) else {
+            return Self::not_in_catalogue(MeetingCategory::AccountNotices);
+        };
+        Self {
+            request_client: details.client.as_deref().map(|c| Zeroizing::new(c.into())),
+            request_network: details.address.as_deref().map(|n| Zeroizing::new(n.into())),
+            ..Self::notice(
+                event_type::NEW_SIGN_IN,
+                Some(account_id),
+                address,
+                vec![("requestedAt", json!(requested_at))],
+            )
+        }
+    }
+
+    /// The email-change attempt notice to an address that already has an account: no
+    /// subject (the event never names the account).
+    pub fn email_in_use(address: &str) -> Self {
+        Self::notice(event_type::EMAIL_IN_USE, None, address, Vec::new())
+    }
+
+    /// The notice to the PREVIOUS address of an email change: the masked new address and,
+    /// for a self-service change, the undo token, both sealed (the service rebuilds the
+    /// undo link from `NOTIFICATIONS_APP_URL`). A masked address that is not the
+    /// catalogue's form stays on the legacy path.
+    pub fn email_changed_old(
+        account_id: Uuid,
+        old_address: &str,
+        new_address_masked: &str,
+        undo_token: Option<&str>,
+        changed_at: DateTime<Utc>,
+    ) -> Self {
+        if !cf_notification_client::seal::masked_address_ok(new_address_masked) {
+            return Self::not_in_catalogue(MeetingCategory::AccountNotices);
+        }
+        Self {
+            masked_address: Some(Zeroizing::new(new_address_masked.to_string())),
+            token: undo_token.map(|t| Zeroizing::new(t.to_string())),
+            ..Self::notice(
+                event_type::EMAIL_CHANGED,
+                Some(account_id),
+                old_address,
+                vec![
+                    ("changedAt", json!(minute(changed_at))),
+                    ("side", json!("OLD")),
+                ],
+            )
+        }
+    }
+
+    /// The notice to the NEW address of an email change.
+    pub fn email_changed_new(
+        account_id: Uuid,
+        new_address: &str,
+        changed_at: DateTime<Utc>,
+    ) -> Self {
+        Self::notice(
+            event_type::EMAIL_CHANGED,
+            Some(account_id),
+            new_address,
+            vec![
+                ("changedAt", json!(minute(changed_at))),
+                ("side", json!("NEW")),
+            ],
+        )
+    }
+
     /// The sealed part of this event (`None`: it carries no secret).
     fn secret(&self) -> Option<SealedPlaintext> {
-        if self.code.is_none() && self.token.is_none() && self.address.is_none() {
+        if self.code.is_none()
+            && self.token.is_none()
+            && self.address.is_none()
+            && self.masked_address.is_none()
+            && self.request_client.is_none()
+            && self.request_network.is_none()
+        {
             return None;
         }
         let mut p = SealedPlaintext::default();
@@ -647,6 +790,15 @@ impl CriticalEvent {
         }
         if let Some(address) = &self.address {
             p = p.with_address(address.as_str());
+        }
+        if let Some(masked) = &self.masked_address {
+            p = p.with_masked_address(masked.as_str());
+        }
+        if let Some(client) = &self.request_client {
+            p = p.with_request_client(client.as_str());
+        }
+        if let Some(network) = &self.request_network {
+            p = p.with_request_network(network.as_str());
         }
         Some(p)
     }
@@ -660,6 +812,12 @@ fn masked_network(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_hexdigit() || matches!(b, b'.' | b':' | b'x'))
+}
+
+/// `changedAt` of an email-changed notice: the minute the legacy email shows
+/// (`%Y-%m-%d %H:%M`, UTC), as RFC 3339.
+fn minute(at: DateTime<Utc>) -> String {
+    format!("{}:00Z", at.format("%Y-%m-%dT%H:%M"))
 }
 
 /// The envelope event id of an outbox row.
@@ -714,8 +872,9 @@ pub fn build_envelope(
 // ---------------------------------------------------------------------------- enqueue
 
 /// The legacy enqueue's own refusals, checked before anything is routed so a fenced
-/// category answers exactly as `LEGACY_ONLY` would (the five CRITICAL categories are never
-/// suppressed, so suppression cannot refuse them).
+/// category answers exactly as `LEGACY_ONLY` would (suppression, which refuses only the
+/// welcome email's suppressible `AUTH_WELCOME` among the CRITICAL messages, is checked in
+/// [`enqueue`]).
 fn legacy_precheck(email: &NewEmail) -> ApiResult<String> {
     if !valid_address(email.to.trim()) {
         return Err(ApiError::BadRequest(
@@ -757,6 +916,18 @@ where
         Some(_) => {}
     }
     let key = legacy_precheck(&email)?;
+    if !email_delivery::UNSUPPRESSIBLE_CATEGORIES.contains(&email.category)
+        && email_delivery::recipient_suppressed(
+            conn,
+            &email_delivery::recipient_hash(email.to.trim()),
+        )
+        .await?
+    {
+        inc(&OM.email_suppressed);
+        return Err(ApiError::Conflict(
+            email_delivery::RECIPIENT_SUPPRESSED.into(),
+        ));
+    }
     let now = Utc::now();
     let expires_at = email.expires_at.unwrap_or(now + Duration::days(2));
     let sealing = keys.and_then(|k| k.sealing.as_ref());
@@ -1596,7 +1767,8 @@ pub async fn maintain(
             "DELETE FROM notification_route_decisions WHERE idempotency_key IN (
                  SELECT d.idempotency_key FROM notification_route_decisions d
                   WHERE d.category IN ('AUTH_VERIFICATION', 'AUTH_PASSWORD_RESET',
-                          'SECURITY_DEVICE_STEP_UP', 'SECURITY_PASSWORD_CHANGED', 'SECURITY_DEVICE_LINKED')
+                          'SECURITY_DEVICE_STEP_UP', 'SECURITY_PASSWORD_CHANGED', 'SECURITY_DEVICE_LINKED',
+                          'ACCOUNT_NOTICES')
                     AND d.expires_at < $1 AND d.expires_at <= now()
                     AND NOT EXISTS (SELECT 1 FROM account_notification_outbox o WHERE o.decision_id = d.decision_id)
                   ORDER BY d.expires_at LIMIT $2)",
@@ -1929,6 +2101,32 @@ mod tests {
                 CriticalEvent::step_up_code(account, "DEACTIVATE_ACCOUNT", "123456", 10),
                 "otp:stepup:aa:bb",
             ),
+            (
+                CriticalEvent::welcome(account, "ada@example.com"),
+                &*format!("welcome:{account}"),
+            ),
+            (
+                CriticalEvent::new_sign_in(account, "ada@example.com", &details()),
+                &*format!("new-sign-in:{}", Uuid::new_v4()),
+            ),
+            (
+                CriticalEvent::email_in_use("taken@example.com"),
+                "email-in-use:aa:2026111712",
+            ),
+            (
+                CriticalEvent::email_changed_old(
+                    account,
+                    "ada@example.com",
+                    "n***@example.com",
+                    Some("0123456789abcdef0123456789abcdef"),
+                    now,
+                ),
+                &*format!("email-changed:old:{}", Uuid::new_v4()),
+            ),
+            (
+                CriticalEvent::email_changed_new(account, "ada.new@example.com", now),
+                &*format!("email-changed:new:{}", Uuid::new_v4()),
+            ),
         ];
         for (event, key) in &cases {
             let v = build_envelope(
@@ -1952,12 +2150,29 @@ mod tests {
                 None => assert_eq!(v["recipients"][0]["ref"], format!("cfmeet-user:{account}")),
             }
             assert_eq!(v["subject"].is_object(), event.subject);
-            assert_eq!(v["subject"].is_object(), *key != "otp:signin:aa:bb");
+            assert_eq!(
+                v["subject"].is_object(),
+                !key.starts_with("otp:signin:") && !key.starts_with("email-in-use:")
+            );
             assert_eq!(v["delivery"]["priority"], "CRITICAL");
             assert_eq!(v["delivery"]["idempotencyKey"], *key);
-            assert_eq!(v.get("sealed").is_some(), event.code.is_some());
+            assert_eq!(v.get("sealed").is_some(), event.secret().is_some());
             assert!(!v.to_string().contains("123456"));
             assert!(!v.to_string().contains("0123456789abcdef0123456789abcdef"));
+            // The account notices seal what their emails show (the sign-in code of PR #99
+            // carries its request facts as data).
+            if !key.starts_with("otp:signin:") {
+                for clear in ["n***", "TestBrowser", "102.89"] {
+                    assert!(!v.to_string().contains(clear), "{key}");
+                }
+            }
+            // Nothing sealed travels without the service key.
+            if event.secret().is_some() {
+                assert_eq!(
+                    build_envelope(event, key, Uuid::new_v4(), route, None, now, now),
+                    Err(DecisionReason::Unpublishable)
+                );
+            }
             // A code never travels without the service key.
             if event.code.is_some() {
                 assert_eq!(
@@ -1966,5 +2181,70 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The account notices carry exactly what their legacy emails show, sealed; what the
+    /// catalogue cannot carry exactly stays on the legacy path.
+    #[test]
+    fn account_notices_seal_what_their_emails_show_or_stay_legacy() {
+        let account = Uuid::new_v4();
+        let e = CriticalEvent::new_sign_in(account, "ada@example.com", &details());
+        assert_eq!(e.category, MeetingCategory::AccountNotices);
+        assert_eq!(e.event_type, Some(event_type::NEW_SIGN_IN));
+        let data: HashMap<&str, Value> = e.data.iter().cloned().collect();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data["requestedAt"], "2026-11-17T12:00:00Z");
+        let p = e.secret().unwrap();
+        assert_eq!(p.request_client.as_deref(), Some("TestBrowser/1.0"));
+        assert_eq!(p.request_network.as_deref(), Some("102.89.x.x"));
+        assert_eq!(p.address.as_deref(), Some("ada@example.com"));
+        let bare = RequestDetails {
+            client: None,
+            address: None,
+            ..details()
+        };
+        let p = CriticalEvent::new_sign_in(account, "ada@example.com", &bare)
+            .secret()
+            .unwrap();
+        assert!(p.request_client.is_none() && p.request_network.is_none());
+        for odd in [
+            RequestDetails {
+                when_utc: "yesterday".into(),
+                ..details()
+            },
+            RequestDetails {
+                address: Some("102.89.12.7".into()),
+                ..details()
+            },
+            RequestDetails {
+                client: Some("a\u{7}b".into()),
+                ..details()
+            },
+        ] {
+            let e = CriticalEvent::new_sign_in(account, "ada@example.com", &odd);
+            assert_eq!(e.event_type, None, "{odd:?}");
+            assert_eq!(e.category, MeetingCategory::AccountNotices);
+        }
+        let at = DateTime::parse_from_rfc3339("2026-11-17T12:34:56.789Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let old = CriticalEvent::email_changed_old(account, "a@x.com", "n***@y.com", None, at);
+        let data: HashMap<&str, Value> = old.data.iter().cloned().collect();
+        assert_eq!(data["changedAt"], "2026-11-17T12:34:00Z");
+        assert_eq!(data["side"], "OLD");
+        assert!(
+            old.token.is_none(),
+            "the support-assisted change has no undo link"
+        );
+        assert_eq!(
+            CriticalEvent::email_changed_old(account, "a@x.com", "nadia@y.com", None, at)
+                .event_type,
+            None,
+            "a full address is never a masked one"
+        );
+        let e = CriticalEvent::email_in_use("taken@example.com");
+        assert!(!e.subject);
+        assert_eq!(e.account_id, Uuid::nil());
+        assert!(e.category.is_critical());
     }
 }

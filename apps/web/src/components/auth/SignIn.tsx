@@ -4,12 +4,12 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Mail } from "lucide-react";
+import { ArrowLeft, Mail, ShieldCheck } from "lucide-react";
 import AuthInput from "@/components/auth/AuthInput";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
-import { authService } from "@/services/auth.service";
+import { authService, MfaRequired } from "@/services/auth.service";
 import { accountService } from "@/services/account.service";
 import { accountSession } from "@/lib/auth/session";
 import { signInNotice } from "@/lib/account/account-core";
@@ -22,7 +22,7 @@ const returnPath = () =>
 const RESEND_SECONDS = 60;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type Step = "email" | "code" | "username";
+type Step = "email" | "code" | "mfa" | "username";
 
 /**
  * Passwordless sign-in and sign-up (one flow): email → 6-digit code (or the link in the email)
@@ -38,6 +38,8 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+  const [ticket, setTicket] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
   const search = useSyncExternalStore(noSubscription, () => window.location.search, () => "");
   const notice = signInNotice(new URLSearchParams(search).get("reason"));
 
@@ -68,6 +70,7 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
       router.push(returnPath());
     } catch (e) {
       setCode("");
+      if (e instanceof MfaRequired) { setTicket(e.ticket); setStep("mfa"); return; }
       const status = (e as { response?: { status?: number } }).response?.status;
       setError(status === 429 ? "Too many tries. Wait 15 minutes, then ask for a new code." : getErrorMessage(e, "That code isn't right or has expired."));
     } finally { setBusy(false); }
@@ -81,6 +84,38 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
     catch (e) { setError(getErrorMessage(e, "That username can't be used. Try another.")); }
     finally { setBusy(false); }
   };
+
+  const verifyMfa = async () => {
+    const value = mfaCode.trim();
+    if (!value) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await authService.verifyMfa(ticket, value, remember);
+      if (res.is_new_account) { setStep("username"); return; }
+      router.push(returnPath());
+    } catch (e) {
+      setMfaCode("");
+      const status = (e as { response?: { status?: number } }).response?.status;
+      if (status === 429) { setStep("email"); setError("Too many tries. Sign in again."); return; }
+      setError(getErrorMessage(e, "That code isn't right. Try again."));
+    } finally { setBusy(false); }
+  };
+
+  if (step === "mfa") {
+    return (
+      <div>
+        <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary"><ShieldCheck className="size-6" /></span>
+        <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">Two-step sign-in</h1>
+        <p className="mt-2 text-base text-muted-foreground">Enter the 6-digit code from your authenticator app. Lost your phone? Use one of your recovery codes.</p>
+        {error ? <p role="alert" className="mt-5 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p> : null}
+        <form className="mt-6 space-y-5" onSubmit={(e) => { e.preventDefault(); void verifyMfa(); }} noValidate>
+          <AuthInput label="Code" autoComplete="one-time-code" placeholder="123456 or xxxxx-xxxxx" value={mfaCode}
+            onChange={(e) => { setMfaCode(e.target.value); setError(null); }} />
+          <Button type="submit" className="h-12 w-full rounded-xl text-base shadow-none" loading={busy}>Sign in</Button>
+        </form>
+      </div>
+    );
+  }
 
   if (step === "username") {
     return (

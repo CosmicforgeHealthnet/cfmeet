@@ -13,6 +13,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20261116_000001_notifications_foundation;
 mod m20261117_000001_preference_copy;
+mod m20261118_000001_account_notices;
 
 /// Name of the table recording which Notifications migrations have been applied.
 pub const MIGRATION_TABLE: &str = "notifications_seaql_migrations";
@@ -25,6 +26,8 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20261116_000001_notifications_foundation::Migration),
             Box::new(m20261117_000001_preference_copy::Migration),
+            // Owner decision A (N12 follow-up): the ACCOUNT_NOTICES / EMAIL routing row.
+            Box::new(m20261118_000001_account_notices::Migration),
         ]
     }
 

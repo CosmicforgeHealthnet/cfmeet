@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import { storageStore } from "@/store";
 import { useBusinessOrganization, useOrganizationProvisioning } from "@/hooks/v2/useBusinessOrganizations";
 import {
+  ORG_CAPABILITIES,
+  orgCan,
   legalVerificationLabel,
   organizationSections,
   provisioningLabel,
@@ -21,10 +23,11 @@ const nice = (v?: string | null) => (v ? v.charAt(0) + v.slice(1).toLowerCase().
 import OrganizationMembers from "./OrganizationMembers";
 import OrganizationInvitations from "./OrganizationInvitations";
 import OrganizationSettings from "./OrganizationSettings";
+import OrganizationModeration, { canModerate } from "./OrganizationModeration";
 import OrganizationAudit from "./OrganizationAudit";
 import { ORGANIZATION_CALLING_CAPABILITY, OrganizationCallingPanel } from "@/components/calling/OrganizationCallingAdmin";
 
-type Tab = "overview" | "members" | "teams" | "invitations" | "settings" | "audit" | "calling";
+type Tab = "overview" | "members" | "teams" | "invitations" | "settings" | "audit" | "calling" | "moderation";
 
 const TABS: Array<{ id: Tab; label: string; visible: (s: OrganizationSections) => boolean }> = [
   { id: "overview", label: "Overview", visible: (s) => s.overview },
@@ -59,7 +62,7 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
   const sections = organizationSections(data);
   // Enterprise calling administration (Section 12 relay): only with calling.enterprise.manage.
   const callingAdmin = data.viewer?.status === "ACTIVE" && Array.isArray(data.viewer.capabilities) && data.viewer.capabilities.includes(ORGANIZATION_CALLING_CAPABILITY);
-  const tabs = [...TABS.filter((t) => t.visible(sections)), ...(callingAdmin ? [{ id: "calling" as Tab, label: "Calling", visible: () => true }] : [])];
+  const tabs = [...TABS.filter((t) => t.visible(sections) || (t.id === "settings" && orgCan(data, ORG_CAPABILITIES.policiesManage))), ...(callingAdmin ? [{ id: "calling" as Tab, label: "Calling", visible: () => true }] : []), ...(canModerate(data) ? [{ id: "moderation" as Tab, label: "Moderation", visible: () => true }] : [])];
   const active = tabs.some((t) => t.id === tab) ? tab : "overview";
 
   return (
@@ -106,6 +109,7 @@ export default function OrganizationAdmin({ organizationId }: { organizationId: 
       {active === "invitations" && <OrganizationInvitations org={data} />}
       {active === "settings" && <OrganizationSettings org={data} />}
       {active === "audit" && <OrganizationAudit organizationId={data.id} />}
+      {active === "moderation" && <OrganizationModeration org={data} />}
       {active === "calling" && <OrganizationCallingPanel organizationId={data.id} name={data.name} embedded />}
       </div>
     </div>

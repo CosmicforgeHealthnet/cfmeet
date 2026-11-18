@@ -1,5 +1,6 @@
 "use client";
 
+import TwoStepCard from "./TwoStepCard";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Eye, EyeOff, Globe, Laptop, LogOut, Smartphone } from "lucide-react";
@@ -14,9 +15,9 @@ import { apiErrorOf, passwordProblem } from "@/lib/account/account-core";
 import { validationMessageOf } from "@/lib/validation-errors";
 import type { SessionRecord } from "@/types/generated/meeting-service";
 
-/** Settings → Security: where you're signed in (ACC-007). Sign-in is by email code: no password. */
+/** Settings → Security: two-step sign-in and where you're signed in (ACC-007). */
 export default function AccountSecuritySettings() {
-  return <Sessions />;
+  return <div className="space-y-4"><TwoStepCard /><Sessions /></div>;
 }
 
 function ago(value: string | null | undefined) {
@@ -53,10 +54,12 @@ function Sessions() {
     setEverywhere("pending");
     setError("");
     try {
-      await authService.logoutEverywhere();
-      router.replace("/login?reason=signed_out_everywhere");
+      // WhatsApp "Log out from all other devices": this device stays signed in.
+      await accountService.revokeOtherSessions();
+      setEverywhere("idle");
+      void sessions.refetch();
     } catch (cause) {
-      setError(apiErrorOf(cause).message ?? "Could not sign out everywhere. Try again.");
+      setError(apiErrorOf(cause).message ?? "Could not sign out your other devices. Try again.");
       setEverywhere("idle");
     }
   };
@@ -73,10 +76,10 @@ function Sessions() {
         {everywhere === "confirm" ? (
           <div className="flex gap-2">
             <button type="button" onClick={() => setEverywhere("idle")} className="h-9 rounded-full px-4 text-sm font-semibold hover:bg-muted">Cancel</button>
-            <button type="button" onClick={() => void revokeAll()} className="h-9 rounded-full bg-destructive px-4 text-sm font-semibold text-white hover:bg-destructive/90">Sign out everywhere</button>
+            <button type="button" onClick={() => void revokeAll()} className="h-9 rounded-xl bg-destructive px-4 text-sm font-semibold text-white hover:bg-destructive/90">Sign out other devices</button>
           </div>
         ) : (
-          <button type="button" disabled={everywhere === "pending"} onClick={() => setEverywhere("confirm")} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold text-destructive ring-1 ring-destructive/30 hover:bg-destructive/10 disabled:opacity-50"><LogOut className="size-4" />{everywhere === "pending" ? "Signing out…" : "Sign out everywhere"}</button>
+          <button type="button" disabled={everywhere === "pending"} onClick={() => setEverywhere("confirm")} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold text-destructive ring-1 ring-destructive/30 hover:bg-destructive/10 disabled:opacity-50"><LogOut className="size-4" />{everywhere === "pending" ? "Signing out…" : "Sign out other devices"}</button>
         )}
       </div>
       {error && <p role="alert" className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p>}
