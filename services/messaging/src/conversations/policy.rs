@@ -1479,6 +1479,48 @@ mod tests {
         assert_eq!(r.attachments.allowed_kinds, vec!["IMAGE"]);
     }
 
+    /// ADR 0062: the partner baseline makes MANAGED the default of every context with
+    /// both profiles allowed and turns attachments on; explicit settings win and a policy
+    /// without MANAGED keeps its own default.
+    #[test]
+    fn the_partner_baseline_defaults_to_managed_and_explicit_settings_win() {
+        let b = ApplicationBaseline::PlatformPartner;
+        assert_eq!(ApplicationBaseline::parse(b.as_str()), Some(b));
+        let r = resolve(&b.under(&ApplicationPolicy::default()), 0).unwrap();
+        assert!(r.attachments.enabled);
+        assert!(!r.backups.enabled, "no secure backups for MANAGED-only partner devices");
+        for c in r.contexts.values() {
+            assert_eq!(
+                c.allowed_profiles,
+                vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]
+            );
+            assert_eq!(c.default_profile, Some(SecurityProfile::Managed));
+        }
+        let own: ApplicationPolicy = serde_json::from_value(json!({
+            "contexts": {
+                "DIRECT": { "allowedProfiles": ["PRIVATE_E2EE"] },
+                "GROUP": { "defaultProfile": "PRIVATE_E2EE" },
+                "SUPPORT": { "allowedProfiles": ["MANAGED"] }
+            },
+            "attachments": { "enabled": false }
+        }))
+        .unwrap();
+        let r = resolve(&b.under(&own), 2).unwrap();
+        assert!(!r.attachments.enabled, "an explicit application setting wins");
+        let ctx = |c: ContextClass| r.contexts.get(&c).unwrap();
+        assert_eq!(ctx(ContextClass::Direct).allowed_profiles, vec![SecurityProfile::PrivateE2ee]);
+        assert_eq!(ctx(ContextClass::Direct).default_profile, Some(SecurityProfile::PrivateE2ee));
+        assert_eq!(ctx(ContextClass::Group).default_profile, Some(SecurityProfile::PrivateE2ee));
+        assert_eq!(ctx(ContextClass::Support).default_profile, Some(SecurityProfile::Managed));
+        assert_eq!(ctx(ContextClass::Meeting).default_profile, Some(SecurityProfile::Managed));
+        // The first-party baseline leaves contexts alone.
+        let r = resolve(&ApplicationBaseline::CfMeetFirstParty.under(&ApplicationPolicy::default()), 0).unwrap();
+        assert_eq!(
+            r.contexts.get(&ContextClass::Direct).unwrap().default_profile,
+            Some(SecurityProfile::PrivateE2ee)
+        );
+    }
+
     #[test]
     fn canonical_json_sorts_keys_recursively() {
         let a: Value =

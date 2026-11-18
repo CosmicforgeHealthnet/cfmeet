@@ -26,7 +26,7 @@ use crate::{
     conversations::service::rfc3339,
     db,
     error::{Error, ErrorCode, Result},
-    identity::{DelegatedScope, OwnerScope, PrincipalStatus},
+    identity::{CustomerAuthority, DelegatedScope, OwnerScope, PrincipalStatus},
     limits::{self, Window},
     realtime::{
         session_devices::{MAX_LIFETIME_HOURS, PLATFORM_USER_TOKEN},

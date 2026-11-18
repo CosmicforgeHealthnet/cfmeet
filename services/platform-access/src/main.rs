@@ -101,7 +101,12 @@ async fn main() -> anyhow::Result<()> {
         user_tokens = config.build.user_tokens_enabled,
         environment_origins = config.build.environment_origins_enabled,
         meeting_platform = config.build.meeting_platform_enabled,
-        user_token_kid = config.build.user_token_keys.as_ref().map(|k| k.kid()).unwrap_or(""),
+        user_token_kid = config
+            .build
+            .user_token_keys
+            .as_ref()
+            .map(|k| k.kid())
+            .unwrap_or(""),
         "platform build features"
     );
     let state = AppState::new(platform, authenticator, service_auth).with_build(config.build);

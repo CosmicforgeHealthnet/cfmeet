@@ -186,7 +186,9 @@ mod open {
         let secret = "{\"type\":\"service_account\",\"project_id\":\"demo\"}";
         let sealed = seal_push_credential(&pk, t, a, e, secret).unwrap();
         assert_eq!(
-            open_push_credential(&sk, t, a, e, &sealed).unwrap().as_str(),
+            open_push_credential(&sk, t, a, e, &sealed)
+                .unwrap()
+                .as_str(),
             secret
         );
         for (t2, a2, e2) in [

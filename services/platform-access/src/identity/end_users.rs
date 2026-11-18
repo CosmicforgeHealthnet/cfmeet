@@ -458,9 +458,7 @@ fn entry(action: OperatorAction, row: &EndUserRow) -> AuditEntry {
 }
 
 async fn reload(db: &DatabaseConnection, id: Uuid) -> EndUserResult<EndUserRow> {
-    Ok(load(db, id)
-        .await?
-        .ok_or(PlatformError::NotFound("user"))?)
+    Ok(load(db, id).await?.ok_or(PlatformError::NotFound("user"))?)
 }
 
 impl PlatformService {
@@ -546,7 +544,9 @@ impl PlatformService {
     ) -> EndUserResult<EndUserRow> {
         let profile = profile.validated()?;
         if status.is_some_and(|s| s == PrincipalStatus::Deactivated) {
-            return Err(invalid("status must be ACTIVE or SUSPENDED (DELETE removes a user)").into());
+            return Err(
+                invalid("status must be ACTIVE or SUSPENDED (DELETE removes a user)").into(),
+            );
         }
         let now = self.clock.now();
         let txn = self.db.begin().await?;
@@ -570,11 +570,13 @@ impl PlatformService {
         }
         let changed = apply_profile(&txn, &row, &profile, now).await?;
         let audit = match status_change {
-            Some(s) => Some(entry(OperatorAction::PrincipalStatusSet, &row).detail(json!({
-                "status": s.as_str(),
-                "fields": changed,
-                "source": "partner-users",
-            }))),
+            Some(s) => Some(
+                entry(OperatorAction::PrincipalStatusSet, &row).detail(json!({
+                    "status": s.as_str(),
+                    "fields": changed,
+                    "source": "partner-users",
+                })),
+            ),
             None if !changed.is_empty() => Some(
                 entry(OperatorAction::PrincipalProfileSet, &row)
                     .detail(json!({ "fields": changed, "source": "partner-users" })),
@@ -635,10 +637,7 @@ impl PlatformService {
         id: Uuid,
     ) -> EndUserResult<DateTime<Utc>> {
         let now = self.clock.now();
-        let epoch = now
-            .duration_trunc(Duration::seconds(1))
-            .unwrap_or(now)
-            + Duration::seconds(1);
+        let epoch = now.duration_trunc(Duration::seconds(1)).unwrap_or(now) + Duration::seconds(1);
         let txn = self.db.begin().await?;
         let row = in_scope(&txn, scope, id)
             .await?
@@ -725,7 +724,13 @@ mod tests {
 
     #[test]
     fn external_ids_are_opaque_bounded_ascii() {
-        for ok in ["user-1", "u_ABC.def", "12345", "acct:9f8e", &"x".repeat(128)] {
+        for ok in [
+            "user-1",
+            "u_ABC.def",
+            "12345",
+            "acct:9f8e",
+            &"x".repeat(128),
+        ] {
             assert_eq!(validate_external_id(ok).unwrap(), ok);
         }
         for bad in [

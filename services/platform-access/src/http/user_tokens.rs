@@ -8,7 +8,12 @@
 //! | `POST /user-tokens/verify` `{token}` | `200` the token's scope, user and EFFECTIVE grants · `401 USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED` |
 //! | `GET /user-tokens/keys` | `{keys:[{kid, alg, crv, x, status}]}` |
 
-use axum::{extract::State, response::IntoResponse, routing::{get, post}, Json, Router};
+use axum::{
+    extract::State,
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
 use cf_service_auth::InternalPermission;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -55,7 +60,8 @@ fn rejected(r: TokenRejection) -> AccessError {
 }
 
 fn timestamp(seconds: i64) -> AccessResult<DateTime<Utc>> {
-    DateTime::<Utc>::from_timestamp(seconds, 0).ok_or(AccessError::Refused(ErrorCode::UserTokenInvalid))
+    DateTime::<Utc>::from_timestamp(seconds, 0)
+        .ok_or(AccessError::Refused(ErrorCode::UserTokenInvalid))
 }
 
 async fn verify(
@@ -79,7 +85,11 @@ async fn verify(
     {
         Ok(v) => v,
         Err(VerifyError::Rejected(r)) => {
-            tracing::info!(caller = caller.service(), outcome = r.as_str(), "user token refused");
+            tracing::info!(
+                caller = caller.service(),
+                outcome = r.as_str(),
+                "user token refused"
+            );
             return Err(rejected(r));
         }
         Err(VerifyError::Unavailable(summary)) => {

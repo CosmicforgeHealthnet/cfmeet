@@ -133,6 +133,7 @@ impl MessageSent {
 }
 
 /// The fact of one recorded message.
+#[allow(clippy::too_many_arguments)]
 pub fn message_sent_fact(
     message_id: Uuid,
     tenant_id: Uuid,

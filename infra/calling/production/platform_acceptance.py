@@ -71,7 +71,7 @@ class Client(da.Client):
         try:
             return self._call(method, path, body, expected, token, idempotent, headers)
         except da.Expired:
-            self.token = da.login(self.account)
+            self.token = login(self.account)
             return self._call(method, path, body, expected, token, idempotent, headers)
 
     def _call(self, method, path, body, expected, token, idempotent, headers=None):
@@ -105,6 +105,12 @@ class Client(da.Client):
             code = (value.get('error') or {}).get('code') if isinstance(value, dict) else None
             raise da.Failed('%s %s answered %d %s' % (method, path.split('?')[0], status, code or ''))
         return status, value
+
+
+def login(account):
+    """Passwordless sign-in of a controlled account (code replaced in Redis, VPS only)."""
+    client = Client()
+    return app_acceptance.sign_in_via(lambda path, body: client.call('POST', path, body)[1], account)['access_token']
 
 
 def data(value):
@@ -156,10 +162,16 @@ class Journey:
             raise da.Failed(name)
 
     def step(self, name, fn, *args):
+        """One independent group of checks: an unexpected answer, a missing result of an
+        earlier failed group (KeyError) or a network error fails only this group."""
         try:
             return fn(*args)
         except da.Failed as error:
             self.check(name + ': ' + str(error), False)
+        except KeyError as error:
+            self.check('%s: skipped, an earlier step did not produce %s' % (name, error), False)
+        except (OSError, ValueError) as error:
+            self.check('%s: %s' % (name, type(error).__name__), False)
 
     def undo(self, client, method, path):
         self.cleanup.insert(0, (method, path, client))
@@ -178,7 +190,7 @@ class Journey:
         return out
 
     def tenant(self, label, account):
-        console = Client(da.login(account), account)
+        console = Client(login(account), account)
         _, org = console.call('POST', '/v1/organizations', {'displayName': 'Platform acceptance %s %s' % (label, self.run_id)},
                               expected=(201,), idempotent=True)
         self.cleanup.append(('POST', '/v1/organizations/%s/close' % org['id'], console))
@@ -490,8 +502,8 @@ class Journey:
         status, _ = join(t['customerToken'], expected=(200, 201, 403))
         self.check('meetings %s: token without a grant for the conference -> 403' % label, status == 403)
         if joined.get('participantToken'):
-            status, value = Client(joined['participantToken']).call('GET', '/api/v2/conferences/%s/messages' % conf,
-                                                                    expected=(200, 403, 409, 503))
+            status, value = Client().call('GET', '/api/v2/conferences/%s/messages' % conf, expected=(200, 403, 409, 503),
+                                          headers={'X-Participant-Token': joined['participantToken']})
             self.check('meetings %s: partner meeting chat available' % label,
                        status == 200 and code(value) != 'CHAT_UNAVAILABLE')
         t.update(conference=conf)
@@ -514,16 +526,17 @@ class Journey:
         """Stages that are not on: their feature must answer like an unknown / refused route."""
         machine, console, env = t['machine'], t['console'], t['env']['id']
         token = t.get('riderToken') or 'cfut_sbx_acceptance.invalid.invalid'
+        session = (200, 403, 404, 405)  # a console 401 is an expired session (re-signed), never "off"
         probes = {
             'users': lambda: machine.call('POST', '/v1/users', {'externalId': 'off-%s' % self.tag},
                                           expected=(201,) + REFUSED)[0],
-            'tokens': lambda: console.call('GET', '/v1/environments/%s/allowed-origins' % env, expected=(200,) + REFUSED)[0],
+            'tokens': lambda: console.call('GET', '/v1/environments/%s/allowed-origins' % env, expected=session)[0],
             'chat': lambda: Client().call('POST', '/v1/messaging/user-sessions', {'installationId': 'off-%s' % self.tag},
                                           token=token, expected=(200, 201) + REFUSED)[0],
             'calls': lambda: Client().call('POST', '/v1/calling/user-sessions', {'installationId': 'off-%s' % self.tag,
                                                                                  'kind': 'MOBILE'},
                                            token=token, expected=(200, 201) + REFUSED)[0],
-            'push': lambda: console.call('GET', '/v1/environments/%s/push-credentials' % env, expected=(200,) + REFUSED)[0],
+            'push': lambda: console.call('GET', '/v1/environments/%s/push-credentials' % env, expected=session)[0],
             'meetings': lambda: Client().call('POST', '/api/v2/conferences/%s/join' % uuid.uuid4(), {}, token=token,
                                               expected=(200, 201) + REFUSED)[0],
         }
@@ -535,11 +548,13 @@ class Journey:
     def revocation(self, t):
         _, value = t['machine'].call('POST', '/v1/users/%s/revoke-sessions' % t['rider']['id'])
         self.check('revocation: revoke-sessions answers tokensNotBefore', bool(value.get('tokensNotBefore')))
-        product = '/v1/messaging/user-sessions' if self.on('chat') else '/v1/calling/user-sessions' \
-            if self.on('calls') else None
-        if not product:
+        installation = 'acc-revoked-%s' % self.tag
+        if self.on('chat'):
+            product, body = '/v1/messaging/user-sessions', {'installationId': installation}
+        elif self.on('calls'):
+            product, body = '/v1/calling/user-sessions', {'installationId': installation, 'kind': 'MOBILE'}
+        else:
             return
-        body = {'installationId': 'acc-revoked-%s' % self.tag, 'kind': 'MOBILE'}
 
         def refused():
             status, _ = Client().call('POST', product, body, token=t['riderToken'], expected=(200, 201, 401))
@@ -581,12 +596,12 @@ def run(run_id, stages, emit):
         if journey.on('tokens'):
             plan.append(('revocation', journey.revocation, a))
         for name, fn, *args in plan:
-            if all(t.get('rider') or not journey.on('users') for t in args) or name.startswith('users'):
-                journey.step(name, fn, *args)
-            else:
-                journey.check(name + ': skipped (setup failed)', False)
-    except da.Failed:
-        pass  # a fatal setup check is already recorded
+            journey.step(name, fn, *args)
+    except da.Failed as error:
+        if str(error) not in journey.checks:  # a fatal check is already recorded
+            journey.check('setup: %s' % error, False)
+    except (OSError, KeyError, ValueError) as error:
+        journey.check('setup: %s' % type(error).__name__, False)
     finally:
         journey.close()
     emit('platformAcceptanceVerdict', {'stages': list(journey.stages),

@@ -29,8 +29,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::{DateTime, Utc};
 use cf_service_auth::InternalPermission;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer};
 use serde_json::json;
 use uuid::Uuid;
@@ -66,10 +66,7 @@ pub fn routes() -> Router<AppState> {
             "/end-users/:user_id",
             get(get_user).patch(update_user).delete(delete_user),
         )
-        .route(
-            "/end-users/:user_id/revoke-sessions",
-            post(revoke_sessions),
-        )
+        .route("/end-users/:user_id/revoke-sessions", post(revoke_sessions))
         .route("/end-users/:user_id/tokens", post(mint_for_user))
         .route(
             "/delegation/environments/:environment_id/end-users",
@@ -122,7 +119,11 @@ impl Partner {
     }
 }
 
-async fn partner(state: &AppState, caller: &InternalCaller, headers: &HeaderMap) -> AccessResult<Partner> {
+async fn partner(
+    state: &AppState,
+    caller: &InternalCaller,
+    headers: &HeaderMap,
+) -> AccessResult<Partner> {
     if !state.build.end_users_enabled {
         return Err(disabled());
     }
@@ -177,11 +178,8 @@ async fn partner(state: &AppState, caller: &InternalCaller, headers: &HeaderMap)
             "the credential's tenant, application or environment is suspended".to_string(),
         ));
     }
-    let op = OperatorContext::new(&format!(
-        "devplat.s-{}",
-        chain.service_account.id.simple()
-    ))
-    .map_err(|_| AccessError::Refused(ErrorCode::InternalError))?;
+    let op = OperatorContext::new(&format!("devplat.s-{}", chain.service_account.id.simple()))
+        .map_err(|_| AccessError::Refused(ErrorCode::InternalError))?;
     let scope = EndUserScope {
         tenant_id: chain.tenant.id,
         application_id: chain.application.id,

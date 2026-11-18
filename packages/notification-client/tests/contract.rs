@@ -217,7 +217,9 @@ fn the_rust_catalogue_equals_the_contract_catalogue() {
         );
         // 1.4.0 (ADR 0063 N-P4): the types that may address partner end users.
         assert_eq!(
-            e.get("partnerRecipients").and_then(Value::as_bool).unwrap_or(false),
+            e.get("partnerRecipients")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             cf_notification_client::PARTNER_EVENT_TYPES.contains(&s.event_type),
             "{what}"
         );
@@ -876,9 +878,15 @@ fn partner_recipients_follow_their_rules_in_rust_and_in_the_schema() {
     assert_eq!(parse_platform_principal(&r), Some((env_id, principal)));
     assert!(RecipientKind::PlatformPrincipal.matches(&r));
     // The single-id form stays what it was (not a partner reference).
-    assert_eq!(parse_platform_principal(&format!("platform-principal:{U}")), None);
     assert_eq!(
-        parse_platform_principal(&r.to_ascii_uppercase().replace("PLATFORM-PRINCIPAL", "platform-principal")),
+        parse_platform_principal(&format!("platform-principal:{U}")),
+        None
+    );
+    assert_eq!(
+        parse_platform_principal(
+            &r.to_ascii_uppercase()
+                .replace("PLATFORM-PRINCIPAL", "platform-principal")
+        ),
         None
     );
     let example: Value = read("notifications/events/examples/partner-message-created.json");
@@ -890,22 +898,31 @@ fn partner_recipients_follow_their_rules_in_rust_and_in_the_schema() {
     // Another environment than the envelope's scope.
     let mut other = base.clone();
     other.recipients[0].reference = platform_principal_ref(Uuid::new_v4(), principal);
-    assert_eq!(validate(&other, None).unwrap_err(), EnvelopeError::Invalid("recipients"));
+    assert_eq!(
+        validate(&other, None).unwrap_err(),
+        EnvelopeError::Invalid("recipients")
+    );
     // Without a scope, any environment is acceptable.
     other.scope = None;
     validate(&other, None).unwrap();
     // Several partner recipients of one environment.
     let mut many = base.clone();
     many.recipients
-        .push(cf_notification_client::envelope::Recipient { reference: platform_principal_ref(env_id, Uuid::new_v4()) });
+        .push(cf_notification_client::envelope::Recipient {
+            reference: platform_principal_ref(env_id, Uuid::new_v4()),
+        });
     validate(&many, None).unwrap();
     // Not a partner event type: refused (Rust).
-    let mut wrong = serde_json::from_value::<Envelope>(read(
-        "notifications/events/examples/missed-call.json",
-    ))
-    .unwrap();
-    wrong.recipients = vec![cf_notification_client::envelope::Recipient { reference: r.clone() }];
-    assert_eq!(validate(&wrong, None).unwrap_err(), EnvelopeError::Invalid("recipients"));
+    let mut wrong =
+        serde_json::from_value::<Envelope>(read("notifications/events/examples/missed-call.json"))
+            .unwrap();
+    wrong.recipients = vec![cf_notification_client::envelope::Recipient {
+        reference: r.clone(),
+    }];
+    assert_eq!(
+        validate(&wrong, None).unwrap_err(),
+        EnvelopeError::Invalid("recipients")
+    );
 }
 
 /// Partner push credentials (ADR 0063 N-P1) are sealed to the service for exactly one
@@ -926,5 +943,7 @@ fn push_credentials_are_sealed_per_scope() {
     assert!(seal_push_credential(&key, t, a, e, &"x".repeat(16 * 1024 + 1)).is_err());
     let fp = push_credential_fingerprint(secret);
     assert_eq!(fp.len(), 64);
-    assert!(fp.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+    assert!(fp
+        .bytes()
+        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
 }

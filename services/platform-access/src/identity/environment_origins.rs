@@ -66,7 +66,9 @@ pub fn validate_origin(value: &str, kind: EnvironmentKind) -> Result<String, Str
         return fail("must not contain a wildcard");
     }
     if rest.contains(['/', '?', '#', '@', '\\', '%', ' ']) || rest.is_empty() {
-        return fail("must be exactly scheme://host[:port] (no path, query, fragment or user info)");
+        return fail(
+            "must be exactly scheme://host[:port] (no path, query, fragment or user info)",
+        );
     }
     let (host, port) = match rest.split_once(':') {
         Some((host, port)) => (host, Some(port)),
@@ -118,7 +120,10 @@ pub fn validate_origins(values: &[String], kind: EnvironmentKind) -> PlatformRes
 }
 
 /// The origins of an environment (empty when none were set).
-pub async fn origins_of<C: ConnectionTrait>(db: &C, environment_id: Uuid) -> Result<Vec<String>, DbErr> {
+pub async fn origins_of<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+) -> Result<Vec<String>, DbErr> {
     Ok(db
         .query_one(Statement::from_sql_and_values(
             DbBackend::Postgres,
@@ -317,7 +322,10 @@ mod tests {
             "http://127.0.0.1:5173",
             "https://localhost:8443",
         ] {
-            assert!(validate_origin(ok, EnvironmentKind::Sandbox).is_ok(), "{ok}");
+            assert!(
+                validate_origin(ok, EnvironmentKind::Sandbox).is_ok(),
+                "{ok}"
+            );
             assert!(validate_origin(ok, EnvironmentKind::Test).is_ok(), "{ok}");
             assert!(
                 validate_origin(ok, EnvironmentKind::Production).is_err(),
@@ -329,7 +337,9 @@ mod tests {
 
     #[test]
     fn lists_are_bounded_and_deduplicated() {
-        let many: Vec<String> = (0..21).map(|i| format!("https://a{i}.example.com")).collect();
+        let many: Vec<String> = (0..21)
+            .map(|i| format!("https://a{i}.example.com"))
+            .collect();
         assert!(validate_origins(&many, EnvironmentKind::Sandbox).is_err());
         assert_eq!(
             validate_origins(&many[..20], EnvironmentKind::Sandbox)

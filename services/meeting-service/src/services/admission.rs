@@ -2577,6 +2577,25 @@ mod tests {
     }
 
     #[test]
+    fn platform_grants_are_clamped_by_grant_authority_and_never_owner() {
+        let ctx = PermissionContext::default();
+        for role in [
+            Role::Host,
+            Role::CoHost,
+            Role::Presenter,
+            Role::Participant,
+            Role::Viewer,
+        ] {
+            // The environment owns its spaces: every contract role is grantable.
+            assert_eq!(clamp_granted_role(role, &ctx), role);
+        }
+        // OWNER (or anything above HOST) is never the result.
+        assert_eq!(clamp_granted_role(Role::Owner, &ctx), Role::Host);
+        // MODERATOR is not a contract role: it clamps to the next contract role below.
+        assert_eq!(clamp_granted_role(Role::Moderator, &ctx), Role::Presenter);
+    }
+
+    #[test]
     fn display_name_sanitization() {
         assert_eq!(sanitize_display_name("  Ada \u{0007}").unwrap(), "Ada");
         assert!(sanitize_display_name("   ").is_err());

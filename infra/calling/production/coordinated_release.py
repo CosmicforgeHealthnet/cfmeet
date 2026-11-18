@@ -24,7 +24,10 @@ Operations
   deploy-monitoring            Prometheus, Alertmanager, blackbox and heartbeat exporters
                                (monitoring_stack.py); also run after every successful release,
                                where a monitoring failure is reported but never fails it.
-  activate-* / org-cutover-*   separately approved activation steps (see ACTIVATIONS).
+  activate-* / org-cutover-*   separately approved activation steps (see ACTIVATIONS); the CF Meet
+                               Platform "Build" phases live in platform_operations.py.
+  platform-acceptance          two fresh developer workspaces through the public API (cleaned up):
+                               every recorded platform phase, cross-tenant refusals, flag-off checks.
 
 Secrets (database URLs, passwords, keys) stay on the VPS: they are written only to 0600
 files under root-only directories and are never printed. Only containers this module owns

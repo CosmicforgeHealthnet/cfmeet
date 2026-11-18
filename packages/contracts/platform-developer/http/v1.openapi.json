@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform — Developer Console API",
-    "version": "1.6.0",
-    "description": "The Developer Console of the CF Meet Platform: the control plane where a partner manages its workspaces, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access. (A workspace is called an organization in paths and fields: /v1/organizations, organizationId.) The partner's product traffic (meetings, messaging, calling) goes to the domain APIs of the same gateway, not here. Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests."
+    "version": "1.7.0",
+    "description": "The Developer Console of the CF Meet Platform: the control plane where a partner manages its workspaces, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access. (A workspace is called an organization in paths and fields: /v1/organizations, organizationId.) The partner's product traffic (meetings, messaging, calling) goes to the domain APIs of the same gateway, not here. Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests. 1.7.0 (ADR 0062 / 0063, CF Meet Platform Build): the partner Users API for machine credentials (/v1/users*, delegated to Platform Access; principals.read / principals.write / user_tokens.issue; user tokens returned once), the console user list and SANDBOX test token generator, allowed websites (/v1/environments/{environmentId}/allowed-origins) and push credentials (/v1/environments/{environmentId}/push-credentials*, secrets sealed to the Notification Service, metadata only), each behind its own default-off flag; LIMIT_EXCEEDED for the optional workspace / project creation caps."
   },
   "tags": [
     {
@@ -65,6 +65,18 @@
     {
       "name": "Support",
       "description": "Support profiles and incident status."
+    },
+    {
+      "name": "Partner users",
+      "description": "ADR 0062: partner users (Platform Access principals of an environment) and CF Meet user tokens, the device login of partner apps; the console's user list and SANDBOX token generator."
+    },
+    {
+      "name": "Allowed websites",
+      "description": "ADR 0062: an environment's allowed websites (exact origins) for browser device logins."
+    },
+    {
+      "name": "Push credentials",
+      "description": "ADR 0063: partner APNs / FCM push credentials, sealed to the Notification Service (metadata only here)."
     }
   ],
   "servers": [
@@ -5152,6 +5164,1100 @@
           }
         },
         "x-cfmeet-required-scope": "organizations.manage"
+      }
+    },
+    "/v1/users": {
+      "get": {
+        "operationId": "listUsers",
+        "summary": "List the partner users of the credential's environment (optionally by `externalId`)",
+        "description": "List the partner users of the credential's environment (optionally by `externalId`). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.read`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "externalId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EndUserList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "principals.read"
+      },
+      "post": {
+        "operationId": "createUser",
+        "summary": "Create a partner user (idempotent on `externalId`: 201 new, 200 existing; environment caps answer 409 LIMIT_EXCEEDED)",
+        "description": "Create a partner user (idempotent on `externalId`: 201 new, 200 existing; environment caps answer 409 LIMIT_EXCEEDED). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.write`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing user.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EndUser"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EndUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CreateEndUserRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "principals.write"
+      }
+    },
+    "/v1/users/tokens": {
+      "post": {
+        "operationId": "upsertUserToken",
+        "summary": "Create the user if new and mint a CF Meet user token (returned once; Cache-Control no-store; a replay never returns the token)",
+        "description": "Create the user if new and mint a CF Meet user token (returned once; Cache-Control no-store; a replay never returns the token). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Needs `principals.write` as well. Machine credentials need `user_tokens.issue`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UserWithToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UpsertUserTokenRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "user_tokens.issue"
+      }
+    },
+    "/v1/users/{userId}": {
+      "get": {
+        "operationId": "getUser",
+        "summary": "Read a partner user (another environment's user is 404)",
+        "description": "Read a partner user (another environment's user is 404). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.read`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EndUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "principals.read"
+      },
+      "patch": {
+        "operationId": "updateUser",
+        "summary": "Change a partner user's profile or suspend / reactivate them",
+        "description": "Change a partner user's profile or suspend / reactivate them. Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.write`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EndUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UpdateEndUserRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "principals.write"
+      },
+      "delete": {
+        "operationId": "deleteUser",
+        "summary": "Delete a partner user (tombstone: profile erased, id kept; their tokens and device credentials stop working)",
+        "description": "Delete a partner user (tombstone: profile erased, id kept; their tokens and device credentials stop working). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.write`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "principals.write"
+      }
+    },
+    "/v1/users/{userId}/revoke-sessions": {
+      "post": {
+        "operationId": "revokeUserSessions",
+        "summary": "Revoke every token and device session of a partner user issued so far",
+        "description": "Revoke every token and device session of a partner user issued so far. Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.write`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/RevokeSessionsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "principals.write"
+      }
+    },
+    "/v1/users/{userId}/tokens": {
+      "post": {
+        "operationId": "issueUserToken",
+        "summary": "Mint a CF Meet user token for a partner user (grants within the credential's scopes; returned once; at most 120 per user per hour)",
+        "description": "Mint a CF Meet user token for a partner user (grants within the credential's scopes; returned once; at most 120 per user per hour). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `user_tokens.issue`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UserToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/IssueUserTokenRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "user_tokens.issue"
+      }
+    },
+    "/v1/environments/{environmentId}/users": {
+      "get": {
+        "operationId": "listEnvironmentUsers",
+        "summary": "List an environment's partner users in the Developer Console",
+        "description": "List an environment's partner users in the Developer Console. Roles: OWNER, ADMIN, DEVELOPER (human session; delegated to Platform Access). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/EndUserList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/test-user-tokens": {
+      "post": {
+        "operationId": "issueTestUserToken",
+        "summary": "Development token generator: create the user if new and mint a user token in a SANDBOX environment (other kinds: 422 POLICY_VIOLATION)",
+        "description": "Development token generator: create the user if new and mint a user token in a SANDBOX environment (other kinds: 422 POLICY_VIOLATION). Roles: OWNER, ADMIN, DEVELOPER (human session). Flag DEVELOPER_PLATFORM_TEST_TOKENS_ENABLED.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UserWithToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/UpsertUserTokenRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/allowed-origins": {
+      "get": {
+        "operationId": "getAllowedOrigins",
+        "summary": "Read the environment's allowed websites (exact origins that may use device logins from a browser)",
+        "description": "Read the environment's allowed websites (exact origins that may use device logins from a browser). Roles: every member. Flag DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED. Machine credentials need `projects.read`.",
+        "tags": [
+          "Allowed websites"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AllowedOrigins"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read"
+      },
+      "put": {
+        "operationId": "putAllowedOrigins",
+        "summary": "Replace the environment's allowed websites (at most 20; https only, http://localhost and http://127.0.0.1 in SANDBOX / TEST)",
+        "description": "Replace the environment's allowed websites (at most 20; https only, http://localhost and http://127.0.0.1 in SANDBOX / TEST). Roles: OWNER, ADMIN. Flag DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED. Machine credentials need `credentials.manage`.",
+        "tags": [
+          "Allowed websites"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AllowedOrigins"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PutAllowedOriginsRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "credentials.manage"
+      }
+    },
+    "/v1/environments/{environmentId}/push-credentials": {
+      "get": {
+        "operationId": "listPushCredentials",
+        "summary": "List the environment's push credentials (metadata only)",
+        "description": "List the environment's push credentials (metadata only). Roles: OWNER, ADMIN (human session). Flag DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED.",
+        "tags": [
+          "Push credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PushCredentialList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPushCredential",
+        "summary": "Upload (replace) an APNs or FCM push credential: the secret is sealed to the Notification Service on receipt and never stored or returned; SANDBOX / TEST may only use the APNs sandbox host; PRODUCTION needs the PUSH capability live",
+        "description": "Upload (replace) an APNs or FCM push credential: the secret is sealed to the Notification Service on receipt and never stored or returned; SANDBOX / TEST may only use the APNs sandbox host; PRODUCTION needs the PUSH capability live. Roles: OWNER, ADMIN (human session). Flag DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED.",
+        "tags": [
+          "Push credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Uploaded.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PushCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/CreatePushCredentialRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/push-credentials/{credentialRef}": {
+      "delete": {
+        "operationId": "deletePushCredential",
+        "summary": "Delete a push credential (removed from the Notification Service; pushes with it stop)",
+        "description": "Delete a push credential (removed from the Notification Service; pushes with it stop). Roles: OWNER, ADMIN (human session). Flag DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED.",
+        "tags": [
+          "Push credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "credentialRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/push-credentials/{credentialRef}/verify": {
+      "post": {
+        "operationId": "verifyPushCredential",
+        "summary": "Verify a push credential with its provider (APNs JWT / FCM OAuth token) and record the outcome",
+        "description": "Verify a push credential with its provider (APNs JWT / FCM OAuth token) and record the outcome. Roles: OWNER, ADMIN (human session). Flag DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED.",
+        "tags": [
+          "Push credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "credentialRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verified (see status).",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PushCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   },

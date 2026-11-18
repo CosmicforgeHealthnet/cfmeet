@@ -397,8 +397,9 @@ mod tests {
         assert!(!index.registered("https://b.example"));
         assert!(!index.allows("https://a.example", a));
         assert!(index.allows("https://a2.example", a));
-        assert_eq!(*feed.calls.lock().unwrap().last().unwrap(), 5001);
+        assert_eq!(*feed.calls.lock().unwrap().last().unwrap(), 1202);
         let mut state = index.state.write().unwrap();
+        assert_eq!(state.cursor, 5001, "the cursor follows the feed");
         state.apply(item(a, &["https://old.example"], "ACTIVE", 7));
         state.rebuild();
         assert!(state.by_origin.contains_key("https://a2.example"));

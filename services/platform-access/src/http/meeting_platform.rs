@@ -60,7 +60,11 @@ pub fn allowed_combination(kind: &str, reference: &str) -> Option<PrincipalKind>
         }
         "TEMPORARY_EXTERNAL_PARTICIPANT" => reference
             .strip_prefix(MEETING_PARTICIPANT_PREFIX)
-            .and_then(|id| Uuid::parse_str(id).ok().filter(|u| u.hyphenated().to_string() == id))
+            .and_then(|id| {
+                Uuid::parse_str(id)
+                    .ok()
+                    .filter(|u| u.hyphenated().to_string() == id)
+            })
             .map(|_| PrincipalKind::TemporaryExternalParticipant),
         _ => None,
     }
@@ -166,7 +170,10 @@ mod tests {
         for (kind, reference) in [
             ("BOT_OR_SERVICE", "cfmeet:other".to_string()),
             ("BOT_OR_SERVICE", format!("meeting-participant:{id}")),
-            ("TEMPORARY_EXTERNAL_PARTICIPANT", "cfmeet:meeting-system".to_string()),
+            (
+                "TEMPORARY_EXTERNAL_PARTICIPANT",
+                "cfmeet:meeting-system".to_string(),
+            ),
             (
                 "TEMPORARY_EXTERNAL_PARTICIPANT",
                 format!("meeting-participant:{}", id.to_string().to_uppercase()),
@@ -175,11 +182,21 @@ mod tests {
                 "TEMPORARY_EXTERNAL_PARTICIPANT",
                 format!("meeting-participant:{}", id.simple()),
             ),
-            ("TEMPORARY_EXTERNAL_PARTICIPANT", "meeting-participant:".to_string()),
-            ("EXTERNAL_APPLICATION_PRINCIPAL", "cfmeet:meeting-system".to_string()),
+            (
+                "TEMPORARY_EXTERNAL_PARTICIPANT",
+                "meeting-participant:".to_string(),
+            ),
+            (
+                "EXTERNAL_APPLICATION_PRINCIPAL",
+                "cfmeet:meeting-system".to_string(),
+            ),
             ("NATIVE_CF_USER", format!("meeting-participant:{id}")),
         ] {
-            assert_eq!(allowed_combination(kind, &reference), None, "{kind} {reference}");
+            assert_eq!(
+                allowed_combination(kind, &reference),
+                None,
+                "{kind} {reference}"
+            );
         }
     }
 }

@@ -185,7 +185,9 @@ pub enum UserTokenVerification {
     Valid(Arc<VerifiedUserToken>),
     /// Refused by Platform Access (`USER_TOKEN_INVALID` / `_EXPIRED` / `_REVOKED`), or a
     /// user who is not ACTIVE. The code is for operator logs only.
-    Rejected { code: String },
+    Rejected {
+        code: String,
+    },
 }
 
 #[async_trait]
@@ -214,7 +216,10 @@ fn bounded_code(v: &str) -> String {
 }
 
 /// Maps Platform Access's answer (contract §2.2).
-pub fn verification_of(status: u16, body: &Value) -> Result<UserTokenVerification, AuthorityUnavailable> {
+pub fn verification_of(
+    status: u16,
+    body: &Value,
+) -> Result<UserTokenVerification, AuthorityUnavailable> {
     match status {
         200 => {
             let token = VerifiedUserToken::from_verify_response(body)
@@ -356,13 +361,18 @@ mod tests {
 
     #[test]
     fn the_wire_shape_is_recognised_by_prefix_and_tag() {
-        assert!(looks_like_user_token("cfut_sbx_eyJhbGciOiJFZERTQSJ9.e30.c2ln"));
+        assert!(looks_like_user_token(
+            "cfut_sbx_eyJhbGciOiJFZERTQSJ9.e30.c2ln"
+        ));
         assert!(looks_like_user_token("cfut_live_a.b.c"));
         assert!(!looks_like_user_token("cfut_prod_a.b.c"));
         assert!(!looks_like_user_token("cfut_sbx_"));
         assert!(!looks_like_user_token("eyJhbGciOi.e30.sig"));
         assert!(!looks_like_user_token("cfut_test_a b"));
-        assert!(!looks_like_user_token(&format!("cfut_test_{}", "a".repeat(2048))));
+        assert!(!looks_like_user_token(&format!(
+            "cfut_test_{}",
+            "a".repeat(2048)
+        )));
     }
 
     #[test]
@@ -430,6 +440,10 @@ mod tests {
         let cache = CachedUserTokens::new(refused.clone(), Duration::from_secs(30));
         cache.verify("cfut_sbx_a.b.c").await.unwrap();
         cache.verify("cfut_sbx_a.b.c").await.unwrap();
-        assert_eq!(refused.0.load(Ordering::SeqCst), 2, "refusals are never cached");
+        assert_eq!(
+            refused.0.load(Ordering::SeqCst),
+            2,
+            "refusals are never cached"
+        );
     }
 }

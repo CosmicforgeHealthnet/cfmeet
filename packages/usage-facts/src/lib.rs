@@ -439,12 +439,23 @@ mod tests {
         .into();
         let f = f.sealed();
         assert!(f.validate(producers::MESSAGING).is_ok());
-        for other in [producers::CALLING, producers::MEETING_SERVICE, producers::API_GATEWAY] {
-            assert_eq!(f.validate(other), Err(Refusal::ProducerNotAllowed), "{other}");
+        for other in [
+            producers::CALLING,
+            producers::MEETING_SERVICE,
+            producers::API_GATEWAY,
+        ] {
+            assert_eq!(
+                f.validate(other),
+                Err(Refusal::ProducerNotAllowed),
+                "{other}"
+            );
         }
         let mut g = f.clone();
         g.unit = "SEGMENT".into();
-        assert_eq!(g.sealed().validate(producers::MESSAGING), Err(Refusal::WrongUnit));
+        assert_eq!(
+            g.sealed().validate(producers::MESSAGING),
+            Err(Refusal::WrongUnit)
+        );
         let mut g = f.clone();
         g.dimensions.insert("conversationId".into(), json!("c1"));
         assert_eq!(

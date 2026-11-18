@@ -469,7 +469,10 @@ pub fn conforms(reference: &str, value: &Value) {
 // ---------------------------------------------------------------------------
 
 use developer_platform::{
-    platform_access::{Delegated, DelegationActor, DelegationCall},
+    platform_access::{
+        Delegated, DelegationActor, DelegationCall, EndUserCall, EndUsersReply,
+        ForwardedCredential,
+    },
     session::{HumanSessions, HumanUser, SessionAuthorityUnavailable, SessionOutcome},
     webhooks::{WebhookService, WebhookSettings},
 };
@@ -560,9 +563,88 @@ pub struct MemoryPlatformAccess {
     /// Delegated mutations: (actor header, call).
     pub audit: StdMutex<Vec<(String, DelegationCall)>>,
     pub down: std::sync::atomic::AtomicBool,
+    /// ADR 0062: partner users (§2.1).
+    pub end_users: StdMutex<std::collections::HashMap<Uuid, MemEndUser>>,
+    /// ADR 0062: every Partner Users API call (forwarded credential, call).
+    pub end_user_calls: StdMutex<Vec<(Uuid, EndUserCall)>>,
+    /// A scripted refusal of the next Partner Users API calls (status, code).
+    pub end_users_refusal: StdMutex<Option<(u16, String)>>,
+    /// ADR 0062 §2.3: environment -> allowed origins.
+    pub origins: StdMutex<std::collections::HashMap<Uuid, Vec<String>>>,
+}
+
+/// A partner user of the fake (§2.1).
+#[derive(Debug, Clone)]
+pub struct MemEndUser {
+    pub env: Uuid,
+    pub external_id: String,
+    pub display_name: Option<String>,
+    pub image_url: Option<String>,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl MemEndUser {
+    fn view(&self, id: Uuid) -> Value {
+        json!({ "id": id, "externalId": self.external_id, "displayName": self.display_name,
+            "imageUrl": self.image_url, "status": self.status,
+            "createdAt": self.created_at.to_rfc3339(), "updatedAt": self.created_at.to_rfc3339() })
+    }
 }
 
 impl MemoryPlatformAccess {
+    /// The partner user of `env` with `external_id` (created if new): `(id, created)`.
+    fn upsert_end_user(&self, env: Uuid, body: &Value) -> (Uuid, bool) {
+        let external = body["externalId"].as_str().unwrap_or_default().to_string();
+        let mut users = self.end_users.lock().unwrap();
+        if let Some((id, _)) = users
+            .iter()
+            .find(|(_, u)| u.env == env && u.external_id == external)
+        {
+            return (*id, false);
+        }
+        let id = Uuid::new_v4();
+        users.insert(
+            id,
+            MemEndUser {
+                env,
+                external_id: external,
+                display_name: body["displayName"].as_str().map(str::to_string),
+                image_url: body["imageUrl"].as_str().map(str::to_string),
+                status: "ACTIVE".into(),
+                created_at: chrono::Utc::now(),
+            },
+        );
+        (id, true)
+    }
+
+    fn mint(&self, env: Uuid) -> Value {
+        let kind = self
+            .envs
+            .lock()
+            .unwrap()
+            .get(&env)
+            .map(|e| e.kind.clone())
+            .unwrap_or_default();
+        let tag = match kind.as_str() {
+            "PRODUCTION" => "live",
+            "TEST" => "test",
+            _ => "sbx",
+        };
+        json!({ "token": format!("cfut_{tag}_eyJhbGciOiJFZERTQSJ9.e30.{}", Uuid::new_v4().simple()),
+            "tokenId": Uuid::new_v4(),
+            "expiresAt": (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339() })
+    }
+
+    /// Platform Access's own §2.1 scope rule for a call.
+    fn end_user_scopes(call: &EndUserCall) -> &'static [&'static str] {
+        match call {
+            EndUserCall::List { .. } | EndUserCall::Get { .. } => &["principals.read"],
+            EndUserCall::IssueToken { .. } => &["user_tokens.issue"],
+            EndUserCall::UpsertToken { .. } => &["principals.write", "user_tokens.issue"],
+            _ => &["principals.write"],
+        }
+    }
     pub fn first_party_tenant(&self) -> Uuid {
         let id = Uuid::new_v4();
         self.tenants.lock().unwrap().insert(
@@ -817,6 +899,122 @@ impl PlatformAccessPort for MemoryPlatformAccess {
             return Ok(false);
         };
         Ok(scopes.iter().all(|s| held.iter().any(|h| h == s)))
+    }
+
+    async fn end_users(
+        &self,
+        call: EndUserCall,
+        forwarded: &ForwardedCredential,
+        _correlation: &CorrelationId,
+    ) -> Result<EndUsersReply, AuthorityUnavailable> {
+        if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        self.end_user_calls
+            .lock()
+            .unwrap()
+            .push((forwarded.credential_id, call.clone()));
+        let refused = |status: u16, code: &str| {
+            Ok(EndUsersReply::Refused {
+                status,
+                code: code.into(),
+            })
+        };
+        if let Some((status, code)) = self.end_users_refusal.lock().unwrap().clone() {
+            return refused(status, &code);
+        }
+        // The forwarded credential is re-verified live; the environment comes from it.
+        let Some(held) = self
+            .credential_scopes
+            .lock()
+            .unwrap()
+            .get(&forwarded.credential_id)
+            .cloned()
+        else {
+            return refused(403, "CREDENTIAL_INVALID");
+        };
+        if !Self::end_user_scopes(&call)
+            .iter()
+            .all(|s| held.iter().any(|h| h == s))
+        {
+            return refused(403, "SCOPE_REQUIRED");
+        }
+        let env = forwarded.delegated.application_environment_id();
+        let ok = |status: u16, body: Value| Ok(EndUsersReply::Ok { status, body });
+        let own = |id: Uuid| {
+            self.end_users
+                .lock()
+                .unwrap()
+                .get(&id)
+                .filter(|u| u.env == env)
+                .cloned()
+        };
+        match call {
+            EndUserCall::Create { body } => {
+                let (id, created) = self.upsert_end_user(env, &body);
+                let u = own(id).unwrap();
+                ok(if created { 201 } else { 200 }, json!({ "user": u.view(id) }))
+            }
+            EndUserCall::List { external_id, .. } => {
+                let users = self.end_users.lock().unwrap();
+                let items: Vec<Value> = users
+                    .iter()
+                    .filter(|(_, u)| u.env == env)
+                    .filter(|(_, u)| external_id.as_ref().is_none_or(|e| &u.external_id == e))
+                    .map(|(id, u)| u.view(*id))
+                    .collect();
+                ok(200, json!({ "items": items, "nextCursor": null }))
+            }
+            EndUserCall::Get { user_id } => match own(user_id) {
+                Some(u) => ok(200, json!({ "user": u.view(user_id) })),
+                None => refused(404, "NOT_FOUND"),
+            },
+            EndUserCall::Update { user_id, body } => {
+                if own(user_id).is_none() {
+                    return refused(404, "NOT_FOUND");
+                }
+                let mut users = self.end_users.lock().unwrap();
+                let u = users.get_mut(&user_id).unwrap();
+                if let Some(v) = body.get("displayName") {
+                    u.display_name = v.as_str().map(str::to_string);
+                }
+                if let Some(v) = body.get("imageUrl") {
+                    u.image_url = v.as_str().map(str::to_string);
+                }
+                if let Some(v) = body.get("status").and_then(Value::as_str) {
+                    u.status = v.into();
+                }
+                ok(200, json!({ "user": u.view(user_id) }))
+            }
+            EndUserCall::Delete { user_id } => {
+                if own(user_id).is_none() {
+                    return refused(404, "NOT_FOUND");
+                }
+                let mut users = self.end_users.lock().unwrap();
+                let u = users.get_mut(&user_id).unwrap();
+                u.status = "DEACTIVATED".into();
+                u.display_name = None;
+                u.image_url = None;
+                ok(204, Value::Null)
+            }
+            EndUserCall::RevokeSessions { user_id } => match own(user_id) {
+                Some(_) => ok(
+                    200,
+                    json!({ "tokensNotBefore": chrono::Utc::now().to_rfc3339() }),
+                ),
+                None => refused(404, "NOT_FOUND"),
+            },
+            EndUserCall::IssueToken { user_id, .. } => match own(user_id) {
+                Some(_) => ok(201, self.mint(env)),
+                None => refused(404, "NOT_FOUND"),
+            },
+            EndUserCall::UpsertToken { body } => {
+                let (id, _) = self.upsert_end_user(env, &body);
+                let mut t = self.mint(env);
+                t["user"] = own(id).unwrap().view(id);
+                ok(201, t)
+            }
+        }
     }
 
     async fn delegate(
@@ -1349,6 +1547,63 @@ impl PlatformAccessPort for MemoryPlatformAccess {
                 Ok(Delegated::Ok(
                     json!({ "id": environment_id, "liveTelecomAllowed": allowed }),
                 ))
+            }
+            DelegationCall::ListEnvironmentEndUsers { environment_id, .. } => {
+                let users = self.end_users.lock().unwrap();
+                let items: Vec<Value> = users
+                    .iter()
+                    .filter(|(_, u)| u.env == environment_id)
+                    .map(|(id, u)| u.view(*id))
+                    .collect();
+                Ok(Delegated::Ok(json!({ "items": items, "nextCursor": null })))
+            }
+            DelegationCall::GetAllowedOrigins { environment_id } => {
+                if !self.envs.lock().unwrap().contains_key(&environment_id) {
+                    return refused(404, "NOT_FOUND");
+                }
+                let origins = self
+                    .origins
+                    .lock()
+                    .unwrap()
+                    .get(&environment_id)
+                    .cloned()
+                    .unwrap_or_default();
+                Ok(Delegated::Ok(
+                    json!({ "environmentId": environment_id, "origins": origins }),
+                ))
+            }
+            DelegationCall::PutAllowedOrigins {
+                environment_id,
+                origins,
+                ..
+            } => {
+                if !self.envs.lock().unwrap().contains_key(&environment_id) {
+                    return refused(404, "NOT_FOUND");
+                }
+                self.origins
+                    .lock()
+                    .unwrap()
+                    .insert(environment_id, origins.clone());
+                Ok(Delegated::Ok(
+                    json!({ "environmentId": environment_id, "origins": origins }),
+                ))
+            }
+            DelegationCall::IssueTestUserToken {
+                environment_id,
+                body,
+                ..
+            } => {
+                let Some(env) = self.envs.lock().unwrap().get(&environment_id).cloned() else {
+                    return refused(404, "NOT_FOUND");
+                };
+                if env.kind != "SANDBOX" {
+                    return refused(403, "POLICY_VIOLATION");
+                }
+                let (id, _) = self.upsert_end_user(environment_id, &body);
+                let user = self.end_users.lock().unwrap()[&id].view(id);
+                let mut t = self.mint(environment_id);
+                t["user"] = user;
+                Ok(Delegated::Ok(t))
             }
         }
     }

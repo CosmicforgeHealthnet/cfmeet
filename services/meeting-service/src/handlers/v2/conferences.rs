@@ -375,13 +375,15 @@ pub async fn join_conference(
         actor.platform_user(),
         state.platform_users.as_ref().and_then(|u| u.chat.as_ref()),
     ) {
-        let kind = crate::services::platform::partner_chat::environment_kind(
-            &user.token.environment_kind,
-        );
+        let kind =
+            crate::services::platform::partner_chat::environment_kind(&user.token.environment_kind);
         if let (Some(kind), crate::domain::AdmissionState::Admitted) =
             (kind, o.participant.admission_state)
         {
-            if let Err(e) = chat.after_join(o.conference.id, o.participant.id, kind).await {
+            if let Err(e) = chat
+                .after_join(o.conference.id, o.participant.id, kind)
+                .await
+            {
                 tracing::warn!(error = %e, conference_id = %o.conference.id,
                     "partner meeting chat sync deferred after join");
             }

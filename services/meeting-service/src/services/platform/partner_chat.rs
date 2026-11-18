@@ -132,7 +132,8 @@ impl PartnerChatGateway for ServiceAuthPartnerChatGateway {
             scope.kind,
             scope.service_account_id,
         );
-        let request = OutboundServiceRequest::new_operation(audience).with_delegated_context(delegated);
+        let request =
+            OutboundServiceRequest::new_operation(audience).with_delegated_context(delegated);
         let response = self
             .client
             .exchange_json(&request, method, path, body)
@@ -400,7 +401,13 @@ impl PartnerChat {
             link.conversation_id
         );
         self.gateway
-            .call(Peer::Messaging, &link.scope, Method::PUT, &path, Some(&body))
+            .call(
+                Peer::Messaging,
+                &link.scope,
+                Method::PUT,
+                &path,
+                Some(&body),
+            )
             .await
             .map_err(|e| chat_error(&e))?;
         exec(
@@ -500,7 +507,13 @@ impl PartnerChat {
             let path = format!("{CONVERSATIONS_PATH}/{}/lifecycle", link.conversation_id);
             match self
                 .gateway
-                .call(Peer::Messaging, &link.scope, Method::POST, &path, Some(&body))
+                .call(
+                    Peer::Messaging,
+                    &link.scope,
+                    Method::POST,
+                    &path,
+                    Some(&body),
+                )
                 .await
             {
                 // Applied, or already closed by a newer update: either way it is done.

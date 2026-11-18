@@ -362,10 +362,56 @@ async fn main() -> anyhow::Result<()> {
         public_events_destination = destination.as_str(),
         "webhook relay receivers"
     );
+    // ADR 0062 / 0063 (CF Meet Platform "Build"): partner session devices, partner push
+    // and MESSAGE_SENT facts, each behind its own default-off flag.
+    let partner_settings =
+        messaging::partner::PartnerSettings::from_env(|k| std::env::var(k).ok())
+            .map_err(|e| anyhow!("partner configuration: {e}"))?;
+    messaging::partner::install_process_flags(&partner_settings);
+    {
+        let mut partner = messaging::partner::Partner::new(
+            partner_settings,
+            Arc::new(messaging::partner::PlatformAccessPartners::new(
+                state.service_auth.client(),
+            )),
+        );
+        if partner_settings.push_enabled {
+            if !has_target(cf_service_auth::services::NOTIFICATIONS) {
+                anyhow::bail!("MESSAGING_PARTNER_PUSH_ENABLED=true needs CF_NOTIFICATIONS_BASE_URL");
+            }
+            partner = partner.with_push(
+                Arc::new(
+                    messaging::partner::push::NotificationServicePartnerRegistrations::new(
+                        state.service_auth.client(),
+                    ),
+                ),
+                Arc::new(
+                    messaging::notification_publications::NotificationServiceEvents::new(
+                        state.service_auth.client(),
+                    ),
+                ),
+            );
+        }
+        state.partner = Arc::new(partner);
+        if partner_settings.session_devices_enabled {
+            tokio::spawn(messaging::partner::revocation::run(
+                state.clone(),
+                Duration::from_secs(15),
+            ));
+            tracing::info!("partner session devices are enabled (MESSAGING_PARTNER_SESSION_DEVICES_ENABLED)");
+        }
+        if partner_settings.push_enabled {
+            tokio::spawn(messaging::partner::push::run(
+                state.clone(),
+                Duration::from_secs(2),
+            ));
+            tracing::info!("partner push is enabled (MESSAGING_PARTNER_PUSH_ENABLED)");
+        }
+    }
     // Part VI §55: attachment STORAGE_BYTE_TIME usage facts to the Developer Platform.
     match cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok()) {
         Ok(s) if s.enabled && has_target(cf_service_auth::services::DEVELOPER_PLATFORM) => {
-            let exporter = cf_usage_facts::exporter::Exporter::new(
+            let mut exporter = cf_usage_facts::exporter::Exporter::new(
                 Arc::new(cf_usage_facts::exporter::DeveloperPlatformSink::new(
                     state.service_auth.client(),
                 )),
@@ -374,6 +420,17 @@ async fn main() -> anyhow::Result<()> {
             .with_intervals(Arc::new(messaging::usage_export::AttachmentStorage::new(
                 state.db.clone(),
             )));
+            // ADR 0062: MESSAGE_SENT facts, only once the usage catalogue knows the type.
+            if partner_settings.message_sent_export_enabled {
+                if messaging::usage_export::MessageSent::catalogued() {
+                    exporter = exporter.with_events(Arc::new(
+                        messaging::usage_export::MessageSent::new(state.db.clone()),
+                    ));
+                    tracing::info!("MESSAGE_SENT usage facts are exported to the Developer Platform");
+                } else {
+                    tracing::warn!("MESSAGING_MESSAGE_SENT_EXPORT_ENABLED is set but the usage catalogue does not know MESSAGE_SENT: not exported");
+                }
+            }
             tokio::spawn(Arc::new(exporter).run());
             tracing::info!("attachment storage usage facts are exported to the Developer Platform");
         }

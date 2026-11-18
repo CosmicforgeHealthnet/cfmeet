@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json",
   "title": "CF Meet Developer Platform control plane v1",
-  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's. 1.2.0 (Part VI Chapters 10–13): credentials (metadata only; the secret once), credential policy and quota restrictions, scope registry and grants, production-access requests / status / decisions, usage summaries, facts, limits and warnings, support profiles, entitlement overrides and the usage ingestion / reconciliation contract.",
+  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's. 1.2.0 (Part VI Chapters 10–13): credentials (metadata only; the secret once), credential policy and quota restrictions, scope registry and grants, production-access requests / status / decisions, usage summaries, facts, limits and warnings, support profiles, entitlement overrides and the usage ingestion / reconciliation contract. 1.4.0 (ADR 0062 / 0063, CF Meet Platform Build): partner users (EndUser, EndUserList, Create/UpdateEndUserRequest), user tokens (UserTokenGrants, IssueUserTokenRequest, UpsertUserTokenRequest, UserToken, UserWithToken, RevokeSessionsResult), allowed websites (AllowedOrigins, PutAllowedOriginsRequest), push credential metadata (PushCredential(List), CreatePushCredentialRequest; secrets are write-only and sealed), production capabilities END_USERS and PUSH, usage type MESSAGE_SENT.",
   "anyOf": [
     {
       "$ref": "#/$defs/Organization"
@@ -48,6 +48,27 @@
     },
     {
       "$ref": "#/$defs/FirstPartyRegistration"
+    },
+    {
+      "$ref": "#/$defs/EndUser"
+    },
+    {
+      "$ref": "#/$defs/EndUserList"
+    },
+    {
+      "$ref": "#/$defs/UserToken"
+    },
+    {
+      "$ref": "#/$defs/UserWithToken"
+    },
+    {
+      "$ref": "#/$defs/AllowedOrigins"
+    },
+    {
+      "$ref": "#/$defs/PushCredential"
+    },
+    {
+      "$ref": "#/$defs/PushCredentialList"
     }
   ],
   "$defs": {
@@ -2575,7 +2596,9 @@
                 "PUBLIC_NETWORK_CALLING",
                 "PRIVACY_RELAY",
                 "NUMBERS",
-                "SMS"
+                "SMS",
+                "END_USERS",
+                "PUSH"
               ]
             },
             {
@@ -2695,7 +2718,9 @@
         "PUBLIC_NETWORK_CALLING",
         "PRIVACY_RELAY",
         "NUMBERS",
-        "SMS"
+        "SMS",
+        "END_USERS",
+        "PUSH"
       ]
     },
     "ProductionRequestState": {
@@ -3077,7 +3102,8 @@
         "NUMBER_ACTIVE",
         "SMS_SEGMENT",
         "RECORDING_MINUTE",
-        "STORAGE_BYTE_TIME"
+        "STORAGE_BYTE_TIME",
+        "MESSAGE_SENT"
       ]
     },
     "UsageUnit": {
@@ -4278,6 +4304,679 @@
           ]
         }
       }
+    },
+    "EndUserStatus": {
+      "enum": [
+        "ACTIVE",
+        "SUSPENDED",
+        "DEACTIVATED"
+      ]
+    },
+    "EndUser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "externalId",
+        "displayName",
+        "imageUrl",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "The Platform Access principal id (kind EXTERNAL_APPLICATION_PRINCIPAL)."
+        },
+        "externalId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "displayName": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "imageUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/EndUserStatus"
+        },
+        "createdAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "ADR 0062: a partner user (a Platform Access principal of the credential's environment). DEACTIVATED: deleted (profile erased, id kept)."
+    },
+    "EndUserList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/EndUser"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "A page of partner users; pass `nextCursor` as `cursor` for the next page (null: last page)."
+    },
+    "CreateEndUserRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalId"
+      ],
+      "properties": {
+        "externalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-~]{1,128}$",
+          "description": "The partner's opaque user id (printable ASCII, no spaces); never a phone number, tel: / sip: URI."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Display name (no control characters)."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^https://",
+          "description": "https:// image URL."
+        }
+      }
+    },
+    "UpdateEndUserRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "displayName": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "description": "Display name (no control characters)."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "imageUrl": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 512,
+              "pattern": "^https://",
+              "description": "https:// image URL."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "SUSPENDED"
+          ]
+        }
+      },
+      "minProperties": 1,
+      "description": "Profile changes (`null` clears) and suspension / reactivation; deletion is DELETE."
+    },
+    "UserTokenGrants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "msg": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "read",
+              "send"
+            ]
+          },
+          "description": "Chat: needs `messages.read` / `messages.send` on the minting credential."
+        },
+        "call": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 1,
+          "items": {
+            "enum": [
+              "receive"
+            ]
+          },
+          "description": "Receive calls: needs `calls.write`."
+        },
+        "mtg": {
+          "type": "array",
+          "maxItems": 10,
+          "description": "Meetings the user may join, with a role: needs `meetings.write`. The token's compact `{c, r}` form is accepted too.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "conferenceId",
+                  "role"
+                ],
+                "properties": {
+                  "conferenceId": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  "role": {
+                    "enum": [
+                      "HOST",
+                      "CO_HOST",
+                      "PRESENTER",
+                      "PARTICIPANT",
+                      "VIEWER"
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "c",
+                  "r"
+                ],
+                "properties": {
+                  "c": {
+                    "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                  },
+                  "r": {
+                    "enum": [
+                      "HOST",
+                      "CO_HOST",
+                      "PRESENTER",
+                      "PARTICIPANT",
+                      "VIEWER"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "description": "ADR 0062 user token grants; effective grants are re-intersected with the minting credential's CURRENT scopes on every verification."
+    },
+    "IssueUserTokenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grants"
+      ],
+      "properties": {
+        "grants": {
+          "$ref": "#/$defs/UserTokenGrants"
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "description": "Token lifetime in seconds (default 3600)."
+        }
+      }
+    },
+    "UpsertUserTokenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "externalId",
+        "grants"
+      ],
+      "properties": {
+        "externalId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-~]{1,128}$",
+          "description": "The partner's opaque user id (printable ASCII, no spaces); never a phone number, tel: / sip: URI."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Display name (no control characters)."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^https://",
+          "description": "https:// image URL."
+        },
+        "grants": {
+          "$ref": "#/$defs/UserTokenGrants"
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "description": "Token lifetime in seconds (default 3600)."
+        }
+      },
+      "description": "Creates the user if new (idempotent on externalId), then mints a token."
+    },
+    "UserToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokenId",
+        "expiresAt"
+      ],
+      "properties": {
+        "token": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^cfut_(sbx|test|live)_",
+          "description": "The CF Meet user token, shown ONCE (`Authorization: Bearer cfut_…` on the device)."
+        },
+        "tokenRedacted": {
+          "const": true,
+          "description": "An Idempotency-Key replay: the token is never returned again."
+        },
+        "tokenId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "UserWithToken": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "user",
+        "tokenId",
+        "expiresAt"
+      ],
+      "properties": {
+        "user": {
+          "$ref": "#/$defs/EndUser"
+        },
+        "token": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^cfut_(sbx|test|live)_",
+          "description": "The CF Meet user token, shown ONCE (`Authorization: Bearer cfut_…` on the device)."
+        },
+        "tokenRedacted": {
+          "const": true
+        },
+        "tokenId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "RevokeSessionsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokensNotBefore"
+      ],
+      "properties": {
+        "tokensNotBefore": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Tokens issued before this instant (and every device credential derived from them) no longer work."
+        }
+      }
+    },
+    "AllowedOrigins": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentId",
+        "origins"
+      ],
+      "properties": {
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "origins": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        }
+      },
+      "description": "ADR 0062: an environment's allowed websites (exact origins)."
+    },
+    "PutAllowedOriginsRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origins"
+      ],
+      "properties": {
+        "origins": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 300,
+            "pattern": "^(https://[a-z0-9.-]+(:[1-9][0-9]{0,4})?|http://(localhost|127\\.0\\.0\\.1)(:[1-9][0-9]{0,4})?)$"
+          }
+        }
+      },
+      "description": "The complete list (replaces it): exact `scheme://host[:port]`, lowercase host, no path, no wildcard, no explicit default port; https only, except http://localhost and http://127.0.0.1 in SANDBOX / TEST."
+    },
+    "PushCredentialStatus": {
+      "enum": [
+        "UNVERIFIED",
+        "VERIFIED",
+        "FAILED"
+      ]
+    },
+    "PushCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "credentialRef",
+        "environmentId",
+        "provider",
+        "voip",
+        "teamId",
+        "keyId",
+        "bundleId",
+        "apnsHost",
+        "projectId",
+        "fingerprint",
+        "status",
+        "lastVerifiedAt",
+        "lastError",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "credentialRef": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "environmentId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "provider": {
+          "enum": [
+            "APNS",
+            "FCM"
+          ]
+        },
+        "voip": {
+          "type": "boolean",
+          "description": "APNs VoIP (PushKit) key."
+        },
+        "teamId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{10}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keyId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9]{10}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bundleId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 155
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "apnsHost": {
+          "oneOf": [
+            {
+              "enum": [
+                "SANDBOX",
+                "PRODUCTION"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 30
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the uploaded secret (hex)."
+        },
+        "status": {
+          "$ref": "#/$defs/PushCredentialStatus"
+        },
+        "lastVerifiedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastError": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z0-9_]{1,64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0063: push credential METADATA. The secret (APNs .p8 key / FCM service-account JSON) is sealed to the Notification Service on receipt and never stored, logged or returned."
+    },
+    "PushCredentialList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/PushCredential"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        }
+      }
+    },
+    "ApnsPushCredentialUpload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "teamId",
+        "keyId",
+        "bundleId",
+        "voip",
+        "apnsHost",
+        "p8"
+      ],
+      "properties": {
+        "provider": {
+          "const": "APNS"
+        },
+        "teamId": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{10}$"
+        },
+        "keyId": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{10}$"
+        },
+        "bundleId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 155,
+          "pattern": "^[A-Za-z0-9.-]+$"
+        },
+        "voip": {
+          "type": "boolean"
+        },
+        "apnsHost": {
+          "enum": [
+            "SANDBOX",
+            "PRODUCTION"
+          ],
+          "description": "SANDBOX and TEST environments may only use SANDBOX."
+        },
+        "p8": {
+          "type": "string",
+          "maxLength": 8192,
+          "pattern": "^-----BEGIN PRIVATE KEY-----",
+          "description": "The APNs token signing key (.p8, PEM). Write-only."
+        }
+      }
+    },
+    "FcmPushCredentialUpload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "projectId",
+        "serviceAccountJson"
+      ],
+      "properties": {
+        "provider": {
+          "const": "FCM"
+        },
+        "projectId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+        },
+        "serviceAccountJson": {
+          "type": "string",
+          "maxLength": 16384,
+          "description": "The Firebase service-account key JSON (type service_account; its project_id, when present, must equal projectId). Write-only."
+        }
+      }
+    },
+    "CreatePushCredentialRequest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ApnsPushCredentialUpload"
+        },
+        {
+          "$ref": "#/$defs/FcmPushCredentialUpload"
+        }
+      ],
+      "description": "Uploads (replaces) the environment's credential of that provider (APNS with voip false / true, or FCM)."
     }
   }
 }

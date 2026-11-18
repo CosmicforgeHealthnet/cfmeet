@@ -625,6 +625,9 @@ fn every_operation_declares_its_authentication() {
                 || path.starts_with("/v1/calling/sessions/")
             {
                 "signalingCredential"
+            } else if path == "/v1/calling/user-sessions" {
+                // ADR 0062: the device exchange of a CF Meet user token.
+                "userToken"
             } else {
                 "platformCredential"
             };

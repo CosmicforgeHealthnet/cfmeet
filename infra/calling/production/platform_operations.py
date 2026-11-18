@@ -185,7 +185,7 @@ def run_acceptance(cr, run_id, operation):
     stages = enabled_stages(cr, operation)
     checks = platform_acceptance.run(run_id, stages, cr.emit)
     failed = sorted(k for k, v in checks.items() if v != 'PASS')
-    if failed:
+    if failed or not checks:
         raise RuntimeError('Platform acceptance failed after %s (%d of %d checks): %s'
                            % (operation, len(failed), len(checks), '; '.join(failed[:5])))
     return checks
@@ -457,7 +457,7 @@ def acceptance(cr, sha, run_id, confirm):
     import platform_acceptance
     checks = platform_acceptance.run(run_id, enabled_stages(cr), cr.emit)
     cr.emit('platformAcceptanceSummary', checks)
-    if any(v != 'PASS' for v in checks.values()):
+    if not checks or any(v != 'PASS' for v in checks.values()):
         raise RuntimeError('Platform acceptance failed')
     return checks
 

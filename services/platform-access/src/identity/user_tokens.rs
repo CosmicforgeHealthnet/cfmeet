@@ -19,14 +19,16 @@ use std::collections::BTreeSet;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
-use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::{
-    authentication::{AuthFailureReason, AuthenticationError, AuthorityMode, CredentialAuthenticator},
+    authentication::{
+        AuthFailureReason, AuthenticationError, AuthorityMode, CredentialAuthenticator,
+    },
     end_users::{self, EndUserRow},
     scopes::names,
 };
@@ -82,7 +84,11 @@ impl Grants {
     /// Validates and normalizes (sorted, de-duplicated) grants. The message is safe to
     /// return.
     pub fn validated(self) -> Result<Grants, String> {
-        fn closed(values: Vec<String>, allowed: &[&str], part: &str) -> Result<Vec<String>, String> {
+        fn closed(
+            values: Vec<String>,
+            allowed: &[&str],
+            part: &str,
+        ) -> Result<Vec<String>, String> {
             let set: BTreeSet<String> = values.into_iter().collect();
             if let Some(bad) = set.iter().find(|v| !allowed.contains(&v.as_str())) {
                 let shown: String = bad.chars().take(32).collect();
@@ -102,7 +108,9 @@ impl Grants {
         let mut seen = BTreeSet::new();
         for g in &self.mtg {
             if !MEETING_ROLES.contains(&g.role.as_str()) {
-                return Err(format!("grants.mtg[].role must be one of {MEETING_ROLES:?}"));
+                return Err(format!(
+                    "grants.mtg[].role must be one of {MEETING_ROLES:?}"
+                ));
             }
             if !seen.insert(g.conference_id) {
                 return Err("grants.mtg names a conference more than once".to_string());
@@ -328,7 +336,11 @@ impl std::fmt::Debug for UserTokenKeys {
 }
 
 impl UserTokenKeys {
-    pub fn new(signing: SigningKey, previous: Vec<VerifyingKey>, retired: Vec<VerifyingKey>) -> Self {
+    pub fn new(
+        signing: SigningKey,
+        previous: Vec<VerifyingKey>,
+        retired: Vec<VerifyingKey>,
+    ) -> Self {
         let kid = kid_of(&signing.verifying_key());
         let retired: Vec<(String, VerifyingKey)> =
             retired.into_iter().map(|k| (kid_of(&k), k)).collect();
@@ -439,7 +451,11 @@ impl UserTokenKeys {
     }
 
     /// Stateless verification at `now` (see the module documentation).
-    pub fn decode(&self, token: &str, now: DateTime<Utc>) -> Result<UserTokenClaims, TokenRejection> {
+    pub fn decode(
+        &self,
+        token: &str,
+        now: DateTime<Utc>,
+    ) -> Result<UserTokenClaims, TokenRejection> {
         use TokenRejection::*;
         if token.len() > MAX_TOKEN_BYTES || !token.is_ascii() {
             return Err(Invalid);
@@ -675,7 +691,10 @@ mod tests {
         let header = String::from_utf8(URL_SAFE_NO_PAD.decode(&parts[0]).unwrap()).unwrap();
         assert_eq!(
             header,
-            format!(r#"{{"alg":"EdDSA","typ":"cfmeet-user+jwt","kid":"{}"}}"#, keys.kid())
+            format!(
+                r#"{{"alg":"EdDSA","typ":"cfmeet-user+jwt","kid":"{}"}}"#,
+                keys.kid()
+            )
         );
         assert_eq!(keys.kid().len(), 16);
         let body: serde_json::Value =
@@ -713,11 +732,20 @@ mod tests {
         assert_eq!(keys.decode(&join(&forged), now), Err(Invalid));
         // Another algorithm / type / kid shape / non-canonical header.
         for h in [
-            format!(r#"{{"alg":"none","typ":"cfmeet-user+jwt","kid":"{}"}}"#, keys.kid()),
+            format!(
+                r#"{{"alg":"none","typ":"cfmeet-user+jwt","kid":"{}"}}"#,
+                keys.kid()
+            ),
             format!(r#"{{"alg":"EdDSA","typ":"JWT","kid":"{}"}}"#, keys.kid()),
             r#"{"alg":"EdDSA","typ":"cfmeet-user+jwt","kid":"0123"}"#.to_string(),
-            format!(r#"{{"typ":"cfmeet-user+jwt","alg":"EdDSA","kid":"{}"}}"#, keys.kid()),
-            format!(r#"{{"alg":"EdDSA", "typ":"cfmeet-user+jwt","kid":"{}"}}"#, keys.kid()),
+            format!(
+                r#"{{"typ":"cfmeet-user+jwt","alg":"EdDSA","kid":"{}"}}"#,
+                keys.kid()
+            ),
+            format!(
+                r#"{{"alg":"EdDSA", "typ":"cfmeet-user+jwt","kid":"{}"}}"#,
+                keys.kid()
+            ),
             format!(
                 r#"{{"alg":"EdDSA","typ":"cfmeet-user+jwt","kid":"{}","x":1}}"#,
                 keys.kid()
@@ -779,7 +807,10 @@ mod tests {
         assert_eq!(keys[0].kid, rotated.kid());
         assert_eq!(keys[1].kid, old.kid());
         assert_eq!(keys[2].status, "RETIRED");
-        assert_eq!(parse_public_key(&keys[2].x), Some(gone.signing.verifying_key()));
+        assert_eq!(
+            parse_public_key(&keys[2].x),
+            Some(gone.signing.verifying_key())
+        );
         assert_eq!(parse_public_key("not-a-key"), None);
     }
 

@@ -98,7 +98,10 @@ fn cap(
     var: &'static str,
     default: i64,
 ) -> Result<i64, ConfigError> {
-    match get(var).map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+    match get(var)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
         None => Ok(default),
         Some(v) => v
             .parse::<i64>()
@@ -114,7 +117,11 @@ impl PlatformBuildConfig {
     pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
         let defaults = EndUserCaps::default();
         let end_user_caps = EndUserCaps {
-            sandbox: cap(get, "PLATFORM_ACCESS_MAX_END_USERS_SANDBOX", defaults.sandbox)?,
+            sandbox: cap(
+                get,
+                "PLATFORM_ACCESS_MAX_END_USERS_SANDBOX",
+                defaults.sandbox,
+            )?,
             test: cap(get, "PLATFORM_ACCESS_MAX_END_USERS_TEST", defaults.test)?,
             production: cap(
                 get,
@@ -129,17 +136,17 @@ impl PlatformBuildConfig {
                 format!("inline private keys are not accepted; set {SIGNING_KEY_FILE_VAR}"),
             ));
         }
-        let user_token_keys =
-            match secret::read_secret(get, SIGNING_KEY_VAR, SIGNING_KEY_FILE_VAR)? {
-                None => None,
-                Some(pem) => {
-                    let previous = public_keys(get, PREVIOUS_KEYS_VAR)?;
-                    let retired = public_keys(get, RETIRED_KEYS_VAR)?;
-                    let keys = UserTokenKeys::from_pkcs8_pem(pem.expose_secret(), previous, retired)
-                        .map_err(|reason| ConfigError::invalid(SIGNING_KEY_FILE_VAR, reason))?;
-                    Some(Arc::new(keys))
-                }
-            };
+        let user_token_keys = match secret::read_secret(get, SIGNING_KEY_VAR, SIGNING_KEY_FILE_VAR)?
+        {
+            None => None,
+            Some(pem) => {
+                let previous = public_keys(get, PREVIOUS_KEYS_VAR)?;
+                let retired = public_keys(get, RETIRED_KEYS_VAR)?;
+                let keys = UserTokenKeys::from_pkcs8_pem(pem.expose_secret(), previous, retired)
+                    .map_err(|reason| ConfigError::invalid(SIGNING_KEY_FILE_VAR, reason))?;
+                Some(Arc::new(keys))
+            }
+        };
         if user_tokens_enabled && user_token_keys.is_none() {
             return Err(ConfigError::Missing {
                 var: SIGNING_KEY_FILE_VAR,
@@ -257,15 +264,13 @@ mod tests {
                 var: SIGNING_KEY_FILE_VAR
             }
         ));
-        let err = PlatformBuildConfig::from_lookup(&lookup(&[(SIGNING_KEY_VAR, "abc")]))
-            .unwrap_err();
+        let err =
+            PlatformBuildConfig::from_lookup(&lookup(&[(SIGNING_KEY_VAR, "abc")])).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid { .. }));
         assert!(!err.to_string().contains("abc"));
-        assert!(PlatformBuildConfig::from_lookup(&lookup(&[(
-            PREVIOUS_KEYS_VAR,
-            "not-a-key"
-        )]))
-        .is_ok());
+        assert!(
+            PlatformBuildConfig::from_lookup(&lookup(&[(PREVIOUS_KEYS_VAR, "not-a-key")])).is_ok()
+        );
     }
 
     #[test]
