@@ -1,5 +1,5 @@
-import LoginModal from "@/components/auth/LoginModal";
+import SignIn from "@/components/auth/SignIn";
 
 export default function LoginPage() {
-  return <LoginModal />;
+  return <SignIn mode="signin" />;
 }

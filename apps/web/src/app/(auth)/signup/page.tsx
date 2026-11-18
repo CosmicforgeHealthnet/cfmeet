@@ -1,5 +1,5 @@
-import SignupModal from "@/components/auth/SignupModal";
+import SignIn from "@/components/auth/SignIn";
 
 export default function SignupPage() {
-  return <SignupModal />;
+  return <SignIn mode="signup" />;
 }

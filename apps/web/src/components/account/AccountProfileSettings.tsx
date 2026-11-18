@@ -10,6 +10,8 @@ import { NiceSelect } from "@/components/ui/nice-select";
 import { TimeZoneField } from "@/components/meetings/ScheduleFields";
 import { viewerTimeZone } from "@/lib/meeting-time";
 import { BadgeCheck, Check, Mail } from "lucide-react";
+import EmailCodeConfirm from "./EmailCodeConfirm";
+import { getErrorMessage } from "@/utils/error";
 import {
   Dialog,
   DialogContent,
@@ -110,11 +112,12 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
           <p className="truncate text-lg font-semibold">{name}</p>
           <p className="flex items-center gap-1.5 truncate text-sm text-muted-foreground"><Mail className="size-3.5 shrink-0" />{profile.email}{profile.emailVerified ? <BadgeCheck className="size-4 shrink-0 text-primary" aria-label="Verified" /> : null}</p>
           <p className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
-            <span className="rounded-full bg-muted px-2 py-0.5 font-medium capitalize text-muted-foreground">Signs in with {profile.authType.toLowerCase() === "google" ? "Google" : "password"}</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">Signs in with {profile.authType.toLowerCase() === "google" ? "Google" : "an email code"}</span>
             <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">{accountStatusLabel(normalizeAccountStatus(profile.status))}</span>
             {!profile.emailVerified && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300">Email not verified</span>}
           </p>
         </div>
+        <ChangeEmail current={profile.email} />
       </section>
 
       {error && (
@@ -187,36 +190,6 @@ const LANGUAGES = [
 function DangerZone({ profile }: { profile: AccountProfile }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [password, setPassword] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-  // ACC-026: password accounts confirm with their password; Google accounts rely on a recent sign-in.
-  const passwordAccount = profile.authType.toLowerCase() !== "google";
-
-  const deactivate = async () => {
-    setPending(true);
-    setError("");
-    const sent = password.length > 0;
-    try {
-      await accountService.deactivate(sent ? password : null);
-      setPassword("");
-      await authService.forgetLocalSession();
-      router.replace("/login?reason=deactivated");
-    } catch (cause) {
-      setPassword("");
-      switch (deactivationOutcome(cause, sent)) {
-        case "wrong_password":
-          setError("That password is not correct.");
-          break;
-        case "reauthenticate":
-          setError(passwordAccount ? "Enter your current password to confirm." : "For your security, sign out and sign in with Google again, then retry within 10 minutes.");
-          break;
-        default:
-          setError(apiErrorOf(cause).message ?? "Your account could not be deactivated. Try again.");
-      }
-      setPending(false);
-    }
-  };
 
   return (
     <div className="rounded-2xl border border-destructive/30 bg-card p-5 sm:p-6">
@@ -225,66 +198,89 @@ function DangerZone({ profile }: { profile: AccountProfile }) {
           <p className="font-semibold text-destructive">Deactivate account</p>
           <p className="text-sm text-muted-foreground">Signs you out everywhere and stops you signing in. Only CF Meet support can turn it back on.</p>
         </div>
-        <Dialog
-          open={open}
-          onOpenChange={(value) => {
-            if (pending) return;
-            setOpen(value);
-            setError("");
-            setPassword("");
-          }}
-        >
+        <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button variant="outline" className="w-full rounded-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive sm:w-auto">
+            <Button variant="outline" className="w-full rounded-xl border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive sm:w-auto">
               Deactivate
             </Button>
           </DialogTrigger>
-          <DialogContent>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void deactivate();
-              }}
-              className="space-y-4"
-            >
-              <DialogHeader>
-                <DialogTitle>Deactivate account</DialogTitle>
-                <DialogDescription>
-                  You will be signed out on every device and will not be able to sign in until CF Meet support reactivates the account.
-                </DialogDescription>
-              </DialogHeader>
-              {passwordAccount ? (
-                <div className="space-y-2">
-                  <Label htmlFor="deactivate-password">Current password</Label>
-                  <Input
-                    id="deactivate-password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">Google accounts confirm with a sign-in made in the last 10 minutes.</p>
-              )}
-              {error && (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
-              )}
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-                  Cancel
-                </Button>
-                <Button type="submit" variant="destructive" loading={pending} disabled={pending || (passwordAccount && !password)}>
-                  Deactivate account
-                </Button>
-              </DialogFooter>
-            </form>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Deactivate account</DialogTitle>
+              <DialogDescription>You&apos;ll be signed out on every device and can&apos;t sign in until CF Meet support turns the account back on. To confirm, enter the code we email you.</DialogDescription>
+            </DialogHeader>
+            {open ? (
+              <EmailCodeConfirm email={profile.email} danger confirmLabel="Deactivate account"
+                send={() => accountService.requestStepUp("DEACTIVATE_ACCOUNT")}
+                verify={async (code) => {
+                  const { stepUpToken } = await accountService.verifyStepUp("DEACTIVATE_ACCOUNT", code);
+                  await accountService.deactivate(stepUpToken);
+                  await authService.forgetLocalSession();
+                  router.replace("/login?reason=deactivated");
+                }} />
+            ) : null}
           </DialogContent>
         </Dialog>
       </div>
     </div>
+  );
+}
+
+/** Change email: confirm with a code to the current address, then a code to the new one. */
+function ChangeEmail({ current }: { current: string }) {
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<"confirm" | "address" | "verify" | "done">("confirm");
+  const [token, setToken] = useState("");
+  const [address, setAddress] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const reset = (v: boolean) => { setOpen(v); if (!v) { setStep("confirm"); setToken(""); setAddress(""); setError(null); } };
+  const submitAddress = async () => {
+    const next = address.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) { setError("Enter a valid email address."); return; }
+    setBusy(true); setError(null);
+    try { await accountService.requestEmailChange(next, token); setAddress(next); setStep("verify"); }
+    catch (e) {
+      const status = (e as { response?: { status?: number } }).response?.status;
+      setError(status === 429 ? "You can change your email once every 7 days." : getErrorMessage(e, "That didn't work. Try again."));
+    } finally { setBusy(false); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={reset}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="h-9 shrink-0 rounded-xl px-3.5 text-sm">Change email</Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Change email</DialogTitle>
+          <DialogDescription>
+            {step === "confirm" ? "First, confirm it's you with a code sent to your current email."
+              : step === "address" ? "Enter your new email. We'll send a code there."
+              : step === "verify" ? "Enter the code we sent to your new email. Your other devices will be signed out."
+              : "Your email was changed."}
+          </DialogDescription>
+        </DialogHeader>
+        {step === "confirm" && open ? (
+          <EmailCodeConfirm email={current} confirmLabel="Continue"
+            send={() => accountService.requestStepUp("CHANGE_EMAIL")}
+            verify={async (code) => { const r = await accountService.verifyStepUp("CHANGE_EMAIL", code); setToken(r.stepUpToken); setStep("address"); }} />
+        ) : step === "address" ? (
+          <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void submitAddress(); }}>
+            <Input type="email" autoFocus autoComplete="email" placeholder="new@example.com" value={address} onChange={(e) => { setAddress(e.target.value); setError(null); }} />
+            {error ? <p role="alert" className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+            <Button type="submit" className="h-11 w-full rounded-xl" loading={busy}>Send code</Button>
+          </form>
+        ) : step === "verify" ? (
+          <EmailCodeConfirm email={address} confirmLabel="Change email"
+            send={async () => undefined}
+            verify={async (code) => { await accountService.verifyEmailChange(address, code); setStep("done"); }} />
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm">You now sign in with <span className="font-semibold">{address}</span>. We emailed your old address a link to undo this, valid for 7 days.</p>
+            <Button className="h-11 w-full rounded-xl" onClick={() => { reset(false); window.location.reload(); }}>Done</Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

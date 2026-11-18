@@ -194,7 +194,7 @@ const KEY_PACKAGE_STOCK = 10;
 const POLL_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_POLL_MS) || 15_000);
 /** A new browser checks whether a trusted device approved it. */
 const LINK_POLL_MS = 2_000;
-const PENDING_SETUP_NOTE = "Waiting for secure setup on their side. It will be sent automatically.";
+const PENDING_SETUP_NOTE = "Waiting for secure setup. It will be sent automatically.";
 
 /** The API error code of an Account authority call (axios), if any. */
 function accountErrorCode(e: unknown): string | null {
@@ -1907,7 +1907,10 @@ export class MessagingEngine {
     }
     const key = `p${uuid()}`;
     this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text, file: null, note: null, transferred: false });
-    if (conv.securityProfile === "PRIVATE_E2EE" && this.crypto && this.snapshot.phase === "ready" && (await this.updateAwaitingSetup(conv))) {
+    // Not sendable yet (the others aren't reachable, or this browser isn't in the chat's encryption
+    // group yet): hold it sealed on this device and send it automatically once it can (WhatsApp).
+    const notInGroup = conv.securityProfile === "PRIVATE_E2EE" && !this.snapshot.conversations.find((c) => c.id === conversationId)?.groupReady;
+    if (conv.securityProfile === "PRIVATE_E2EE" && this.crypto && this.snapshot.phase === "ready" && (notInGroup || (await this.updateAwaitingSetup(conv)))) {
       // Nobody else can decrypt yet: hold it sealed on this device, never report it sent.
       this.settlePending(conversationId, key, null);
       const clientMessageId = uuid();

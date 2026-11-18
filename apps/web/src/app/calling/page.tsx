@@ -13,7 +13,8 @@ function Calls() {
   const contactId = params.get("contactId") ?? "";
   const conversationId = params.get("conversationId") ?? "";
   const kind = params.get("kind") === "VIDEO" ? "VIDEO" : "VOICE";
-  const launch = ID.test(contactId) ? { contactId, kind } as const : ID.test(conversationId) ? { conversationId, kind } as const : null;
+  const name = (params.get("name") ?? "").slice(0, 80) || null;
+  const launch = ID.test(contactId) ? { contactId, kind, name } as const : ID.test(conversationId) ? { conversationId, kind, name } as const : null;
   return <CallsContent initialCallId={ID.test(call) ? call : ""} launch={launch} />;
 }
 

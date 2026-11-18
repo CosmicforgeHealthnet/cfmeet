@@ -14,6 +14,7 @@
  * It is inert for guests and signed-out pages (no request is made).
  */
 
+import { rememberCallName } from "@/lib/calling/call-names";
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import axios from "axios";
 import { useProfile } from "@/hooks";
@@ -59,6 +60,10 @@ export interface CallingContextValue {
   placing: { kind: CallKind; label: string | null } | null;
   /** Cancel the call being placed: the screen closes now, the call is cancelled as soon as it exists. */
   cancelPlacing: () => void;
+  /** Show the call screen now for a call about to be placed (e.g. arriving from a Call button). */
+  announce: (kind: CallKind, label: string | null) => void;
+  /** The name shown since the call was placed; kept until the call screen closes. */
+  callLabel: string | null;
   /** Media callbacks for the dock. */
   mediaEvents: {
     connected: () => void;
@@ -201,11 +206,30 @@ function CallingSession({ principalId, children }: { principalId: string; childr
   // The call screen opens the moment you tap call (WhatsApp); the server work happens behind it.
   const [placing, setPlacing] = useState<{ kind: CallKind; label: string | null } | null>(null);
   const cancelled = useRef(false);
-  const place = useCallback(async (kind: CallKind, label: string | undefined, create: () => Promise<string>) => {
+  const announced = useRef(false);
+  const [callLabel, setCallLabel] = useState<string | null>(null);
+  const placingLabel = useRef<string | null>(null);
+  const handover = useRef<string | null>(null);
+  // The call's own screen is up: the calling screen hands over.
+  useEffect(() => { if (media && handover.current) { handover.current = null; setPlacing(null); } }, [media]);
+  const announce = useCallback((kind: CallKind, label: string | null) => {
+    placingLabel.current = label;
+    announced.current = true;
     cancelled.current = false;
-    setPlacing({ kind, label: label ?? null });
+    setCallLabel(label);
+    setPlacing({ kind, label });
+  }, []);
+  const place = useCallback(async (kind: CallKind, label: string | undefined, create: () => Promise<string>) => {
+    // A cancel pressed while the call was announced still counts.
+    if (!announced.current) cancelled.current = false;
+    announced.current = false;
+    const shown = label ?? placingLabel.current;
+    placingLabel.current = null;
+    setCallLabel(shown ?? null);
+    setPlacing((current) => ({ kind, label: label ?? current?.label ?? null }));
     try {
       const callId = await create();
+      if (shown) rememberCallName(callId, shown);
       if (cancelled.current) {
         // Hung up while it was being placed: drop the media and cancel the call.
         dispatch({ type: "LEAVE" });
@@ -215,12 +239,33 @@ function CallingSession({ principalId, children }: { principalId: string; childr
           await callsService.cancel(callId, { expectedVersion: call.version }, newIdempotencyKey());
         })().catch(() => undefined);
       }
+      // Keep the calling screen up until this call's own screen takes over (no blank gap).
+      if (!cancelled.current && !mediaRef.current) {
+        handover.current = callId;
+        window.setTimeout(() => { if (handover.current === callId) { handover.current = null; setPlacing(null); } }, 20_000);
+      } else {
+        setPlacing(null);
+      }
       return callId;
-    } finally {
+    } catch (error) {
       setPlacing(null);
+      throw error;
     }
   }, []);
-  const cancelPlacing = useCallback(() => { cancelled.current = true; setPlacing(null); }, []);
+  const cancelPlacing = useCallback(() => {
+    cancelled.current = true;
+    announced.current = false;
+    setPlacing(null);
+    // Cancelled during the hand-over: the call already exists, so cancel it now.
+    const callId = handover.current;
+    handover.current = null;
+    if (callId) {
+      void (async () => {
+        const call = await callsService.get(callId);
+        await callsService.cancel(callId, { expectedVersion: call.version }, newIdempotencyKey());
+      })().catch(() => undefined);
+    }
+  }, []);
 
   const startCall = useCallback((kind: CallKind, target: CallTarget, label?: string) => place(kind, label, async () => {
     const endpointId = requireEndpoint();
@@ -247,8 +292,8 @@ function CallingSession({ principalId, children }: { principalId: string; childr
   const value = useMemo<CallingContextValue>(() => ({
     principalId, device, media: activeMedia, mediaState: activeMediaState, joinMedia, leaveMedia,
     retryMedia: () => dispatch({ type: "RETRY_NOW" }),
-    answer, startCall, callContact, callConversation, mediaEvents, placing, cancelPlacing,
-  }), [principalId, device, activeMedia, activeMediaState, joinMedia, leaveMedia, answer, startCall, callContact, callConversation, mediaEvents, placing, cancelPlacing]);
+    answer, startCall, callContact, callConversation, mediaEvents, placing, cancelPlacing, announce, callLabel,
+  }), [principalId, device, activeMedia, activeMediaState, joinMedia, leaveMedia, answer, startCall, callContact, callConversation, mediaEvents, placing, cancelPlacing, announce, callLabel]);
 
   return (
     <CallingContext.Provider value={value}>

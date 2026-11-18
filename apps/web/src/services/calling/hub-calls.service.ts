@@ -67,6 +67,14 @@ export const hubCallsService = {
   callConversation: (conversationId: string, kind: CallKind, endpointId: string, clientRequestId?: string) =>
     launch(`/communications/conversations/${encodeURIComponent(conversationId)}/calls`, kind, endpointId, clientRequestId),
 
+  /** Personal contacts into an ongoing call (POST /api/v2/communications/calls/{id}/participants). */
+  addContactsToCall: (callId: string, body: { targetContactIds: string[]; invitingParticipantId: string; expectedVersion: number }, clientRequestId = newIdempotencyKey()) =>
+    meetingCallingApi.post<{ addedContactIds: string[]; replayed: boolean }>(
+      `/communications/calls/${encodeURIComponent(callId)}/participants`,
+      { ...body, clientRequestId },
+      { headers: { "Idempotency-Key": clientRequestId } },
+    ).then((r) => r.data),
+
   contacts: async (cursor?: string): Promise<HubContactsPage> =>
     (await meetingCallingApi.get<HubContactsPage>("/communications/contacts", { params: { limit: 100, ...(cursor ? { cursor } : {}) } })).data,
 };

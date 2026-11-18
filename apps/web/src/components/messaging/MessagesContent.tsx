@@ -806,7 +806,9 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     : others[0].lastSeenAt ? lastSeenText(others[0].lastSeenAt) : null;
   const e2ee = conversation.securityProfile === "PRIVATE_E2EE";
   const managed = conversation.securityProfile === "MANAGED";
-  const canSend = !!s.identity && (!e2ee || (s.phase === "ready" && conversation.groupReady));
+  // Private chats: you can type as soon as this browser is set up; until the chat's encryption
+  // is ready here, messages wait on this device and go out automatically.
+  const canSend = !!s.identity && (!e2ee || s.phase === "ready");
   // Files follow Messaging's effective attachment policy (Hub capabilities): the attach
   // control is disabled when the server would refuse every file.
   const hubCapabilities = useHubCapabilities();
@@ -930,8 +932,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 {starting ? <Spinner /> : <Video className="size-4" />}Meet now
               </button>
             ) : null}
-            {actions.videoCall ? <Link href={callHref({ conversationId: conversation.id }, "VIDEO")} aria-label="Video call" title="Video call" data-testid="conversation-video-call" className={iconBtn}><Video className="size-5" /></Link> : null}
-            {actions.voiceCall ? <Link href={callHref({ conversationId: conversation.id }, "VOICE")} aria-label="Voice call" title="Voice call" data-testid="conversation-call" className={iconBtn}><Phone className="size-5" /></Link> : null}
+            {actions.videoCall ? <Link href={callHref({ conversationId: conversation.id }, "VIDEO", title)} aria-label="Video call" title="Video call" data-testid="conversation-video-call" className={iconBtn}><Video className="size-5" /></Link> : null}
+            {actions.voiceCall ? <Link href={callHref({ conversationId: conversation.id }, "VOICE", title)} aria-label="Voice call" title="Voice call" data-testid="conversation-call" className={iconBtn}><Phone className="size-5" /></Link> : null}
             <button type="button" className={cn(iconBtn, searching && "bg-muted text-foreground")} onClick={() => setSearching(!searching)} aria-expanded={searching} aria-label="Search messages" data-testid="conversation-search-toggle"><Search className="size-5" /></button>
             <button type="button" className={cn(iconBtn, details && "bg-muted text-foreground")} onClick={() => setDetails(!details)} aria-expanded={details} aria-label="Chat info" data-testid="conversation-members-toggle"><Info className="size-5" /></button>
           </div>
@@ -948,7 +950,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
           {e2ee && !conversation.groupReady ? (
             <p className="mx-auto my-4 flex max-w-md items-start gap-3 rounded-2xl bg-muted/60 p-4 text-sm" data-testid="e2ee-unavailable">
               <Lock className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-              {s.phase === "ready" ? "Waiting for this browser to be added to the encrypted chat. It usually takes a moment." : "Setting up private messaging in this browser…"}
+              {s.phase === "ready" ? "Securing this chat on this browser. It finishes when someone in the chat is online. You can still write; your messages are sent automatically." : "Setting up private messaging in this browser…"}
             </p>
           ) : null}
           <ol className="mx-auto max-w-3xl pb-2" data-testid="messages">

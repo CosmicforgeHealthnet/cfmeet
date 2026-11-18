@@ -2,6 +2,7 @@
 
 import ChatSettings from "@/components/account/ChatSettings";
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import ApiKeysContent from "./ApiKeysContent";
 import WebhooksContent from "./WebhooksContent";
 import AccountProfileSettings from "@/components/account/AccountProfileSettings";
@@ -14,7 +15,7 @@ type Tab = "profile" | "security" | "chats" | "api-keys" | "webhooks";
 
 const MAIN: { id: Tab; label: string; hint: string; icon: typeof UserRound }[] = [
   { id: "profile", label: "Profile", hint: "Name, username, time zone", icon: UserRound },
-  { id: "security", label: "Security", hint: "Password and devices", icon: ShieldCheck },
+  { id: "security", label: "Security", hint: "Devices and sign-ins", icon: ShieldCheck },
   { id: "chats", label: "Chats & notifications", hint: "Alerts, storage, backup", icon: BellRing },
 ];
 // Retired integrations: kept reachable so people can revoke what they still have.
@@ -25,7 +26,9 @@ const OLD: { id: Tab; label: string; icon: typeof UserRound }[] = [
 
 /** Settings (Google Account pattern): a section list on the left, the section on the right. */
 export default function SettingsContent() {
-  const [activeTab, setActiveTab] = useState<Tab>("profile");
+  // "?tab=security" (e.g. from the new sign-in email) opens that section.
+  const requested = useSearchParams().get("tab");
+  const [activeTab, setActiveTab] = useState<Tab>(() => ([...MAIN, ...OLD].some((t) => t.id === requested) ? requested as Tab : "profile"));
   const item = (active: boolean) => cn(
     "flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors lg:w-full",
     active ? "bg-primary/10 font-semibold text-primary" : "text-foreground hover:bg-muted",

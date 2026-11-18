@@ -29,7 +29,7 @@ export type CallKind = "VOICE" | "VIDEO";
  * client, which owns call launch (`POST /contacts/{id}/calls` or
  * `POST /conversations/{id}/calls`), ringing and media. This module never launches a call.
  */
-export function callHref(target: { contactId: string } | { conversationId: string }, kind: CallKind = "VOICE"): string {
+export function callHref(target: { contactId: string } | { conversationId: string }, kind: CallKind = "VOICE", name?: string | null): string {
   const params = new URLSearchParams();
   if ("contactId" in target) {
     if (!isUuid(target.contactId)) throw new Error("Invalid contact id");
@@ -39,6 +39,7 @@ export function callHref(target: { contactId: string } | { conversationId: strin
     params.set("conversationId", target.conversationId);
   }
   params.set("kind", kind);
+  if (name?.trim()) params.set("name", name.trim().slice(0, 80));
   return `/calling?${params.toString()}`;
 }
 

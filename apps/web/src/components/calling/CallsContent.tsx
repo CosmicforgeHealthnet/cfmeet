@@ -42,8 +42,8 @@ const callStatePresentation: Record<CallState, { title: string; description: str
   AUTHORIZED: { title: "Calling…", description: "Finding the best way to reach them." },
   RESOLVING: { title: "Calling…", description: "Finding the best way to reach them." },
   ROUTING: { title: "Calling…", description: "Finding the best way to reach them." },
-  DIALING: { title: "Dialing…", description: "Reaching their devices." },
-  RINGING: { title: "Calling…", description: "Waiting for them to answer." },
+  DIALING: { title: "Calling…", description: "Waiting for their device." },
+  RINGING: { title: "Ringing…", description: "Their device is ringing." },
   ANSWERED: { title: "Connecting…", description: "They answered. Connecting audio." },
   CONNECTED: { title: "Connected", description: "" },
   HELD: { title: "On hold", description: "Nobody can hear each other until someone resumes." },
@@ -95,7 +95,7 @@ const outcomeText: Record<string, string> = {
   ANSWERED: "", NOT_ANSWERED: "No answer", MISSED: "Missed", DECLINED: "Declined", ANSWERED_ELSEWHERE: "Answered on another device", RINGING: "Ringing", NOT_REACHED: "Couldn't connect", IN_PROGRESS: "In progress",
 };
 
-type Launch = { contactId: string; kind: CallKind } | { conversationId: string; kind: CallKind };
+type Launch = ({ contactId: string } | { conversationId: string }) & { kind: CallKind; name: string | null };
 
 export default function CallsContent({ initialCallId = "", launch = null }: { initialCallId?: string; launch?: Launch | null }) {
   const identity = useCallingIdentity();
@@ -141,27 +141,34 @@ function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; laun
   const callBack = (entry: CallHistoryEntry, kind: CallKind) => run(async () => {
     const ids = entry.counterparts.map((p) => p.principalId).filter(Boolean);
     if (!ids.length) throw new Error("This call can't be returned from here.");
-    open(await calling.startCall(kind, { targetPrincipalIds: ids }));
+    open(await calling.startCall(kind, { targetPrincipalIds: ids }, entryName(entry)));
   });
   const rightVisible = !!selected || dialerOpen;
 
-  // Arriving from a Call button (Contacts, Messages): place that call once this browser is ready.
+  // Arriving from a Call button (Contacts, Messages): the call screen shows at once with the
+  // name; the call is placed as soon as this browser is connected (unless cancelled meanwhile).
   const router = useRouter();
   const launched = useRef(false);
+  const announcedLaunch = useRef(false);
   useEffect(() => {
-    if (!launch || launched.current || !device.endpoint || calling.media) return;
-    launched.current = true;
-    void run(async () => {
-      const id = "contactId" in launch ? await calling.callContact(launch.contactId, launch.kind) : await calling.callConversation(launch.conversationId, launch.kind);
-      if ("contactId" in launch) {
-        const contact = (await hubCallsService.contacts().catch(() => null))?.data.find((c) => c.contactId === launch.contactId);
-        rememberCallName(id, contact?.alias || contact?.displayName);
-      }
-      open(id);
-    });
+    if (!launch || announcedLaunch.current || calling.media) return;
+    announcedLaunch.current = true;
+    calling.announce(launch.kind, launch.name);
     router.replace("/calling");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [launch, device.endpoint, calling.media]);
+  }, [launch]);
+  useEffect(() => {
+    if (!launch || launched.current || !announcedLaunch.current || !device.endpoint || calling.media) return;
+    if (!calling.placing) { launched.current = true; return; } // cancelled before it started
+    launched.current = true;
+    void run(async () => {
+      const label = launch.name ?? undefined;
+      const id = "contactId" in launch ? await calling.callContact(launch.contactId, launch.kind, label) : await calling.callConversation(launch.conversationId, launch.kind, label);
+      rememberCallName(id, launch.name);
+      open(id);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [launch, device.endpoint, calling.media, calling.placing]);
 
   return (
     <div className="flex h-full min-h-[32rem] flex-col bg-background">

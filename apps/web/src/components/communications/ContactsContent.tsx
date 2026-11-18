@@ -205,11 +205,13 @@ const NOTIFY: { value: Contact["notifications"]; label: string }[] = [
 /** "N groups in common" on Contact info (the server shares group ids only, not names). */
 function CommonGroups({ contactId }: { contactId: string }) {
   const groups = useQuery({ queryKey: ["contact", contactId, "common-groups"], queryFn: () => hub.commonGroups(contactId), retry: false });
-  const n = groups.data?.groups.length;
-  if (n === undefined) return null;
+  const list = groups.data?.groups;
+  if (!list) return null;
   return (
     <SideSection title="Groups in common">
-      <SideRow icon={<Users />} label={n === 0 ? "No groups in common" : `${n} ${n === 1 ? "group" : "groups"} in common`} hint={n ? "Open Chats to see them" : undefined} />
+      {list.length === 0 ? <SideRow icon={<Users />} label="No groups in common" /> : list.map((g) => (
+        <SideRow key={g.conversationId} icon={<Users />} label={g.title || "Group"} hint={g.memberCount ? `${g.memberCount} members` : undefined} />
+      ))}
     </SideSection>
   );
 }
@@ -245,8 +247,8 @@ function ContactRow({ contact, areas }: { contact: Contact; areas: Communication
           {areas.managedMessaging && connected ? <button type="button" data-testid="contact-message" disabled={open.isPending} onClick={() => open.mutate()} aria-label={`Message ${name}`} title="Message" className={iconBtn}><MessageSquare className="size-[18px]" /></button> : null}
           {areas.calling && connected ? (
             <>
-              <Link href={callHref({ contactId: contact.contactId }, "VOICE")} data-testid="contact-call" aria-label={`Call ${name}`} title="Voice call" className={cn(iconBtn, "max-sm:hidden")}><Phone className="size-[18px]" /></Link>
-              <Link href={callHref({ contactId: contact.contactId }, "VIDEO")} aria-label={`Video call ${name}`} title="Video call" className={cn(iconBtn, "max-sm:hidden")}><Video className="size-[18px]" /></Link>
+              <Link href={callHref({ contactId: contact.contactId }, "VOICE", name)} data-testid="contact-call" aria-label={`Call ${name}`} title="Voice call" className={cn(iconBtn, "max-sm:hidden")}><Phone className="size-[18px]" /></Link>
+              <Link href={callHref({ contactId: contact.contactId }, "VIDEO", name)} aria-label={`Video call ${name}`} title="Video call" className={cn(iconBtn, "max-sm:hidden")}><Video className="size-[18px]" /></Link>
             </>
           ) : null}
           <button type="button" aria-pressed={contact.favorite} aria-label={contact.favorite ? "Remove from favorites" : "Add to favorites"} title={contact.favorite ? "Favorite" : "Add to favorites"} disabled={actions.updateContact.isPending} onClick={() => update({ favorite: !contact.favorite })} className={cn(iconBtn, contact.favorite && "text-amber-500 hover:text-amber-500")}>
@@ -258,8 +260,8 @@ function ContactRow({ contact, areas }: { contact: Contact; areas: Communication
               <Popover.Content align="end" sideOffset={4} collisionPadding={12} className="z-50 w-60 rounded-xl border border-border bg-popover p-1.5 shadow-xl">
                 {areas.calling && connected ? (
                   <div className="sm:hidden">
-                    <Link href={callHref({ contactId: contact.contactId }, "VOICE")} className={menu}><Phone className="size-4 text-muted-foreground" />Voice call</Link>
-                    <Link href={callHref({ contactId: contact.contactId }, "VIDEO")} className={menu}><Video className="size-4 text-muted-foreground" />Video call</Link>
+                    <Link href={callHref({ contactId: contact.contactId }, "VOICE", name)} className={menu}><Phone className="size-4 text-muted-foreground" />Voice call</Link>
+                    <Link href={callHref({ contactId: contact.contactId }, "VIDEO", name)} className={menu}><Video className="size-4 text-muted-foreground" />Video call</Link>
                   </div>
                 ) : null}
                 <Popover.Close asChild><button type="button" className={menu} onClick={() => setRenaming(true)}><Pencil className="size-4 text-muted-foreground" />Edit nickname</button></Popover.Close>
@@ -290,8 +292,8 @@ function ContactRow({ contact, areas }: { contact: Contact; areas: Communication
           {connected && (areas.managedMessaging || areas.calling) ? (
             <div className="mt-6 flex w-full justify-center gap-3">
               {areas.managedMessaging ? <button type="button" disabled={open.isPending} onClick={() => open.mutate()} className={profileAction}><MessageSquare className="size-5" />Message</button> : null}
-              {areas.calling ? <Link href={callHref({ contactId: contact.contactId }, "VOICE")} className={profileAction}><Phone className="size-5" />Voice</Link> : null}
-              {areas.calling ? <Link href={callHref({ contactId: contact.contactId }, "VIDEO")} className={profileAction}><Video className="size-5" />Video</Link> : null}
+              {areas.calling ? <Link href={callHref({ contactId: contact.contactId }, "VOICE", name)} className={profileAction}><Phone className="size-5" />Voice</Link> : null}
+              {areas.calling ? <Link href={callHref({ contactId: contact.contactId }, "VIDEO", name)} className={profileAction}><Video className="size-5" />Video</Link> : null}
             </div>
           ) : null}
         </div>

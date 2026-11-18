@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Home, ArrowLeft, LogIn, UserPlus, KeyRound } from "lucide-react";
+import { Home, ArrowLeft, LogIn, UserPlus } from "lucide-react";
 
 export default function NotFound() {
   const router = useRouter();
@@ -53,19 +53,13 @@ export default function NotFound() {
             <Link href="/login">
               <Button variant="ghost" size="sm" className="text-primary">
                 <LogIn className="w-4 h-4 mr-1.5" />
-                Login
+                Sign in
               </Button>
             </Link>
-            <Link href="/register">
+            <Link href="/signup">
               <Button variant="ghost" size="sm" className="text-primary">
                 <UserPlus className="w-4 h-4 mr-1.5" />
-                Register
-              </Button>
-            </Link>
-            <Link href="/forgot-password">
-              <Button variant="ghost" size="sm" className="text-primary">
-                <KeyRound className="w-4 h-4 mr-1.5" />
-                Reset Password
+                Create an account
               </Button>
             </Link>
           </div>

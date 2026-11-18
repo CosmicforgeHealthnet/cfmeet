@@ -11,7 +11,8 @@
 //
 //   PROD_WEB_URL   https://www.cfmeet.com
 //   PROD_ACCOUNTS  path of the JSON written by the VPS step (never printed):
-//                  [{email,password,cfMeetId,labels:{<cfMeetId>: label}}, ...] (a, b, c)
+//                  [{email,refreshToken,cfMeetId,labels:{<cfMeetId>: label}}, ...] (a, b, c)
+//                  (passwordless sign-in: one fresh session per account, supplied by the VPS step)
 //   PROD_EVIDENCE  path of the evidence JSON (no secrets, no message text)
 //
 //   node --test tests/messaging-production.browser.mjs
@@ -57,11 +58,12 @@ async function signIn(who, name) {
     const path = new URL(r.url()).pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, "{id}");
     (evidence.apiFailures ??= []).push({ who: name, method: r.request().method(), path, status: r.status(), code });
   });
-  await page.goto(`${WEB}/login?next=%2Fdashboard%2Fmessages`, { waitUntil: "load" });
-  await page.fill('input[placeholder="you@example.com"]', who.email);
-  await page.fill('input[placeholder="Enter your password"]', who.password);
+  // Passwordless: the browser can't read an emailed code, so the app's own session route
+  // stores the session the VPS step created for this account (handover §6).
+  const stored = await ctx.request.post(`${WEB}/api/session`, { data: { refresh_token: who.refreshToken, remember: false } });
+  assert.ok(stored.ok(), `the web app stored the session for ${name} (${stored.status()})`);
   const started = Date.now();
-  await page.click('button[type="submit"]');
+  await page.goto(`${WEB}/dashboard/messages`, { waitUntil: "load" });
   await page.waitForURL(/\/dashboard\/messages/, { timeout: T });
   return { ctx, page, errors, name, started };
 }
