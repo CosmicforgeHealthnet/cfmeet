@@ -40,7 +40,7 @@ It exposes no customer API. Consumers call the service-authenticated `/internal/
 | `PUT` / `GET /internal/v1/organization-scopes/{organizationRef}/{capability}`, `POST …/status` | `platform-identity.provision-first-party` | Organizations only ([ADR 0058](../../docs/decisions/0058-first-party-organization-scopes-and-provisioning.md)): idempotent create-or-return / read-back / suspend-resume of one FIRST_PARTY tenant + first-party application + PRODUCTION environment per first-party organization; no credentials or scope grants |
 
 | `POST`/`GET /internal/v1/end-users`, `GET`/`PATCH`/`DELETE /internal/v1/end-users/{userId}`, `POST …/revoke-sessions`, `POST /internal/v1/end-users/{userId}/tokens`, `POST /internal/v1/end-users/tokens` (+ `CF-Forwarded-Credential-Id`) | `platform-end-users.delegate` | Developer Console only ([ADR 0062](../../docs/decisions/0062-cf-meet-platform-build-users-tokens-devices.md)): partner users (EXTERNAL_APPLICATION_PRINCIPAL) of the forwarded credential's own EXTERNAL environment, re-verified live; user-token minting (`user_tokens.issue`) |
-| `GET /internal/v1/delegation/environments/{id}/end-users`, `GET`/`PUT …/allowed-origins` | `platform-identity.delegate` | Developer Console (console reads / allowed-websites management) |
+| `GET /internal/v1/delegation/environments/{id}/end-users`, `GET`/`PUT …/allowed-origins`, `POST …/test-user-tokens` | `platform-identity.delegate` | Developer Console (console reads / allowed-websites management / console test tokens, SANDBOX only) |
 | `POST /internal/v1/user-tokens/verify`, `GET /internal/v1/user-tokens/keys` | `platform-user-token.verify` | Messaging, Calling, Meeting Service, API Gateway |
 | `GET /internal/v1/environment-origins`, `GET /internal/v1/environments/{id}/origins` | `platform-environment-origins.read` | API Gateway, Messaging, Calling, Meeting Service |
 | `POST /internal/v1/principals/ensure-meeting-platform` | `platform-principal.ensure-meeting-platform` | Meeting Service only (partner meeting chat) |
@@ -76,6 +76,12 @@ default**; with a flag off its routes answer `404 NOT_FOUND` exactly like an unk
   minting credential still authenticating, tenant EXTERNAL and chain ACTIVE, key not
   retired; effective grants = claimed grants ∩ the credential's current scopes. At most 120
   mints per user per hour (`429 RATE_LIMITED`).
+* **Console test tokens** (`POST /internal/v1/delegation/environments/{id}/test-user-tokens`,
+  a named human actor, no credential): ACTIVE SANDBOX environments of EXTERNAL tenants only
+  (otherwise `POLICY_VIOLATION`), TTL ≤ 3600 s, audited `USER_TOKEN_TEST_ISSUED`. The token's
+  `crd` / `sva` are the environment's synthetic console-test markers (UUIDv8 from the
+  environment id). Verify checks the live environment chain in place of a credential, and
+  bounds the grants by the application's current SANDBOX scope grants.
 * **Allowed websites**: at most 20 exact origins per environment, `https` only except
   `http://localhost[:port]` / `http://127.0.0.1[:port]` in SANDBOX / TEST; every change (and
   every effective status change of an environment with origins) appends to the feed.
