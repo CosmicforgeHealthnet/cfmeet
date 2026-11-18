@@ -1769,13 +1769,13 @@ async fn contact_names_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         .find(|x| x["cfMeetId"] == json!(b.public_id))
         .context("b in a's contacts")?
         .clone();
-    // Since contract cfmeet.communications.http-api 1.7.0 (PR #107) a CONNECTED contact names
-    // the other person's calling principal, so clients can tell who is already in a call.
-    assert!(
-        row["principalId"]
-            .as_str()
-            .is_some_and(|p| Uuid::parse_str(p).is_ok()),
-        "a connected Hub contact carries the other person's calling principal"
+    // A CONNECTED contact carries the other person's calling principal (so clients can
+    // tell which contacts are already in a call); the same pairing principal-names below
+    // already discloses, and only for connected contacts.
+    assert_eq!(
+        row["principalId"],
+        json!(b.principal),
+        "a connected contact names its calling principal"
     );
     let shown = row["displayName"]
         .as_str()

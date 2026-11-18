@@ -239,6 +239,16 @@ impl ActingUser {
     pub fn user_id(&self) -> Uuid {
         self.user_id
     }
+
+    /// A stored user acting in the background (no session, no verified email), for
+    /// work a person set up earlier, such as a team chat that follows its team.
+    /// Organizations still decides every capability for that user on each call.
+    pub fn for_user(user_id: Uuid) -> Self {
+        Self {
+            user_id,
+            verified_email: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------
