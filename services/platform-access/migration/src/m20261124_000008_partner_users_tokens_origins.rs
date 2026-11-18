@@ -20,7 +20,7 @@
 //!   written on every origin change and, by trigger, on every status change of an
 //!   environment that has origins (or of its application / tenant), under a
 //!   transaction-scoped advisory lock so a committed sequence is never overtaken.
-//! * The operator audit vocabulary gains `PRINCIPAL_PROFILE_SET`,
+//! * The operator audit vocabulary gains `USER_TOKEN_TEST_ISSUED`, `PRINCIPAL_PROFILE_SET`,
 //!   `PRINCIPAL_SESSIONS_REVOKED` and `ENVIRONMENT_ORIGINS_SET`.
 //! * An index for listing an environment's principals of one kind in creation order.
 //!
@@ -171,7 +171,7 @@ impl MigrationTrait for Migration {
             "ALTER TABLE platform_access_audit DROP CONSTRAINT ck_platform_access_audit_action; \
              ALTER TABLE platform_access_audit ADD CONSTRAINT ck_platform_access_audit_action \
              CHECK (action IN ({ACTIONS_V4}, 'PRINCIPAL_PROFILE_SET', 'PRINCIPAL_SESSIONS_REVOKED', \
-             'ENVIRONMENT_ORIGINS_SET'));"
+             'ENVIRONMENT_ORIGINS_SET', 'USER_TOKEN_TEST_ISSUED'));"
         ))
         .await?;
         Ok(())
@@ -185,7 +185,8 @@ impl MigrationTrait for Migration {
                   OR EXISTS (SELECT 1 FROM platform_environment_origins) \
                   OR EXISTS (SELECT 1 FROM platform_environment_origin_changes) \
                   OR EXISTS (SELECT 1 FROM platform_access_audit WHERE action IN \
-                     ('PRINCIPAL_PROFILE_SET', 'PRINCIPAL_SESSIONS_REVOKED', 'ENVIRONMENT_ORIGINS_SET')) THEN \
+                     ('PRINCIPAL_PROFILE_SET', 'PRINCIPAL_SESSIONS_REVOKED', 'ENVIRONMENT_ORIGINS_SET', \
+                      'USER_TOKEN_TEST_ISSUED')) THEN \
                  RAISE EXCEPTION 'partner users / allowed websites exist; refusing to downgrade'; \
                END IF; END $$;",
         )

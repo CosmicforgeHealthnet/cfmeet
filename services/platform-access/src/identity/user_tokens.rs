@@ -14,13 +14,25 @@
 //! tenant is EXTERNAL, every id of the token matches the persisted chain, and the
 //! effective grants are the claimed grants ∩ what the credential's CURRENT scopes allow.
 //! Tokens signed by a retired key are `USER_TOKEN_REVOKED`.
+//!
+//! **Console test tokens** (`POST /delegation/environments/{id}/test-user-tokens`) are
+//! minted by a human member in the Developer Console, without a credential. Their `crd` /
+//! `sva` are the environment's synthetic console-test markers
+//! ([`console_test_credential_id`] / [`console_test_service_account_id`]: UUIDv8 derived
+//! from the environment id, so they never collide with a real (v4) credential). Verify
+//! recognises the marker and, instead of the credential, checks: the environment exists,
+//! is SANDBOX, belongs to the claimed application / tenant, the tenant is EXTERNAL
+//! (otherwise `USER_TOKEN_INVALID`), the chain is ACTIVE (otherwise `USER_TOKEN_REVOKED`)
+//! and the token lived at most [`CONSOLE_TEST_MAX_TTL_SECONDS`]. The user rules are the
+//! same. Effective grants = claimed grants ∩ the application's CURRENT scope grants that
+//! apply to SANDBOX.
 
 use std::collections::BTreeSet;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
-use sea_orm::DatabaseConnection;
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -50,6 +62,8 @@ pub const MAX_TTL_SECONDS: i64 = 86_400;
 pub const MAX_MEETING_GRANTS: usize = 10;
 /// Mints per user per clock hour.
 pub const MINTS_PER_HOUR: i64 = 120;
+/// Upper bound of a console test token's lifetime.
+pub const CONSOLE_TEST_MAX_TTL_SECONDS: i64 = 3600;
 
 pub const MESSAGE_GRANTS: &[&str] = &["read", "send"];
 pub const CALL_GRANTS: &[&str] = &["receive"];
@@ -586,6 +600,10 @@ pub async fn verify_live(
 ) -> Result<VerifiedUserToken, VerifyError> {
     use TokenRejection::*;
     let claims = keys.decode(token, now)?;
+    if is_console_test(&claims) {
+        let scopes = console_test_chain(db, &claims).await?;
+        return verify_user(db, claims, &scopes).await;
+    }
     // The minting credential: revocation, expiry, supersession, suspension and the
     // service account are evaluated now, exactly as at authentication.
     let chain = match authenticator.authority_of(claims.credential_id).await {
@@ -614,6 +632,20 @@ pub async fn verify_live(
     if chain.authority_mode != AuthorityMode::Full {
         return Err(Revoked.into());
     }
+    verify_user(db, claims, &chain.scopes).await
+}
+
+fn unavailable(e: DbErr) -> VerifyError {
+    VerifyError::Unavailable(super::error::summarize_db_error(&e))
+}
+
+/// The user rules shared by every token, and the effective grants under `scopes`.
+async fn verify_user(
+    db: &DatabaseConnection,
+    claims: UserTokenClaims,
+    scopes: &[String],
+) -> Result<VerifiedUserToken, VerifyError> {
+    use TokenRejection::*;
     let user = end_users::load(db, claims.principal_id)
         .await
         .map_err(|e| VerifyError::Unavailable(super::error::summarize_db_error(&e)))?
@@ -634,12 +666,132 @@ pub async fn verify_live(
     {
         return Err(Revoked.into());
     }
-    let effective = claims.grants.intersect(&chain.scopes);
+    let effective = claims.grants.intersect(scopes);
     Ok(VerifiedUserToken {
         claims,
         user,
         effective,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Console test tokens
+// ---------------------------------------------------------------------------
+
+fn console_marker(label: &str, environment_id: Uuid) -> Uuid {
+    let digest = Sha256::digest(
+        format!("cfmeet.platform-access/console-test/{label}/{environment_id}").as_bytes(),
+    );
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    uuid::Builder::from_custom_bytes(bytes).into_uuid()
+}
+
+/// The `crd` of every console test token of `environment_id` (not a real credential).
+pub fn console_test_credential_id(environment_id: Uuid) -> Uuid {
+    console_marker("credential", environment_id)
+}
+
+/// The `sva` of every console test token of `environment_id` (not a real service account).
+pub fn console_test_service_account_id(environment_id: Uuid) -> Uuid {
+    console_marker("service-account", environment_id)
+}
+
+/// Whether `claims` name their environment's console-test marker as the credential.
+pub fn is_console_test(claims: &UserTokenClaims) -> bool {
+    claims.credential_id == console_test_credential_id(claims.environment_id)
+}
+
+/// An environment's chain as console test tokens need it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleTestEnvironment {
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    pub kind: Option<EnvironmentKind>,
+    pub external: bool,
+    /// The environment, its application and its tenant are ACTIVE.
+    pub active: bool,
+}
+
+pub async fn console_test_environment<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+) -> Result<Option<ConsoleTestEnvironment>, DbErr> {
+    let Some(row) = db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT e.tenant_id, e.application_id, e.kind, t.classification, \
+                    (e.status = 'ACTIVE' AND a.status = 'ACTIVE' AND t.status = 'ACTIVE') AS active \
+             FROM platform_environments e \
+             JOIN platform_applications a ON a.id = e.application_id AND a.tenant_id = e.tenant_id \
+             JOIN platform_tenants t ON t.id = e.tenant_id \
+             WHERE e.id = $1",
+            [environment_id.into()],
+        ))
+        .await?
+    else {
+        return Ok(None);
+    };
+    let kind: String = row.try_get("", "kind")?;
+    let classification: String = row.try_get("", "classification")?;
+    Ok(Some(ConsoleTestEnvironment {
+        tenant_id: row.try_get("", "tenant_id")?,
+        application_id: row.try_get("", "application_id")?,
+        environment_id,
+        kind: EnvironmentKind::parse(&kind),
+        external: classification == "EXTERNAL",
+        active: row.try_get("", "active")?,
+    }))
+}
+
+/// The application's CURRENT scope grants that apply to SANDBOX environments: the
+/// ceiling of a console test token's grants.
+pub async fn console_test_scopes<C: ConnectionTrait>(
+    db: &C,
+    application_id: Uuid,
+) -> Result<Vec<String>, DbErr> {
+    db.query_all(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT scope FROM platform_application_scopes \
+         WHERE application_id = $1 \
+           AND (allowed_environment_kinds IS NULL \
+                OR 'SANDBOX' = ANY (allowed_environment_kinds)) \
+         ORDER BY scope",
+        [application_id.into()],
+    ))
+    .await?
+    .into_iter()
+    .map(|r| r.try_get_by_index::<String>(0))
+    .collect()
+}
+
+/// The live chain of a console test token; returns the scopes bounding its grants.
+async fn console_test_chain(
+    db: &DatabaseConnection,
+    claims: &UserTokenClaims,
+) -> Result<Vec<String>, VerifyError> {
+    use TokenRejection::*;
+    let env = console_test_environment(db, claims.environment_id)
+        .await
+        .map_err(unavailable)?
+        .ok_or(Invalid)?;
+    if env.tenant_id != claims.tenant_id
+        || env.application_id != claims.application_id
+        || env.kind != Some(EnvironmentKind::Sandbox)
+        || claims.environment_kind != EnvironmentKind::Sandbox
+        || claims.service_account_id != console_test_service_account_id(claims.environment_id)
+        || claims.expires_at - claims.issued_at > CONSOLE_TEST_MAX_TTL_SECONDS
+        || !env.external
+    {
+        return Err(Invalid.into());
+    }
+    if !env.active {
+        return Err(Revoked.into());
+    }
+    console_test_scopes(db, env.application_id)
+        .await
+        .map_err(unavailable)
 }
 
 #[cfg(test)]
@@ -784,6 +936,24 @@ mod tests {
             assert_eq!(keys.decode(bad, now), Err(Invalid), "{bad}");
         }
         assert!(!format!("{keys:?}").contains("signing:"));
+    }
+
+    #[test]
+    fn console_test_markers_are_per_environment_and_never_v4() {
+        let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
+        assert_eq!(console_test_credential_id(a), console_test_credential_id(a));
+        assert_ne!(console_test_credential_id(a), console_test_credential_id(b));
+        assert_ne!(
+            console_test_credential_id(a),
+            console_test_service_account_id(a)
+        );
+        assert_eq!(console_test_credential_id(a).get_version_num(), 8);
+        let mut c = claims(Utc::now().timestamp());
+        assert!(!is_console_test(&c));
+        c.credential_id = console_test_credential_id(c.environment_id);
+        assert!(is_console_test(&c));
+        c.environment_id = b;
+        assert!(!is_console_test(&c));
     }
 
     #[test]

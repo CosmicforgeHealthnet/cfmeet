@@ -75,6 +75,7 @@ text_enum!(
         PrincipalProfileSet = "PRINCIPAL_PROFILE_SET",
         PrincipalSessionsRevoked = "PRINCIPAL_SESSIONS_REVOKED",
         EnvironmentOriginsSet = "ENVIRONMENT_ORIGINS_SET",
+        UserTokenTestIssued = "USER_TOKEN_TEST_ISSUED",
     }
 );
 

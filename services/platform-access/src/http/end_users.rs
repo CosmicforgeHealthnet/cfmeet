@@ -15,12 +15,20 @@
 //! | `POST /end-users/{userId}/tokens` | `user_tokens.issue` + grant scopes | `201 {token, tokenId, expiresAt}` |
 //! | `POST /end-users/tokens` | `principals.write` + `user_tokens.issue` + grant scopes | `201 {user, token, tokenId, expiresAt}` |
 //! | `GET /delegation/environments/{environmentId}/end-users` | — (`platform-identity.delegate`, console read) | `{items, nextCursor}` |
+//! | `POST /delegation/environments/{environmentId}/test-user-tokens` | — (`platform-identity.delegate` + actor; application scope grants) | `201 {user, token, tokenId, expiresAt}` |
 //!
 //! Every partner request carries `CF-Forwarded-Credential-Id`: the API credential the
 //! gateway authenticated. It is re-verified LIVE here (revocation, expiry, suspension,
 //! service account, current scopes) and is the ONLY source of the environment; its tenant
 //! must be EXTERNAL (`POLICY_VIOLATION`) and its chain ACTIVE (`INVALID_STATE`). A user of
 //! another environment is `NOT_FOUND`.
+//!
+//! Console test tokens are minted by a named human member (`X-CF-Delegated-Actor`) for an
+//! ACTIVE SANDBOX environment of an EXTERNAL tenant (otherwise `POLICY_VIOLATION`), with no
+//! credential: see [`crate::identity::user_tokens`] for the synthetic `crd` / `sva` markers
+//! and how verify checks them. TTL at most 3600 s; the grants need the application's
+//! current SANDBOX scope grants (`SCOPE_REQUIRED`); caps and the mint rate limit apply;
+//! each mint is audited (`USER_TOKEN_TEST_ISSUED`).
 
 use axum::{
     extract::{Path, Query, State},
@@ -36,20 +44,20 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{
-    delegation::read_only,
+    delegation::{delegated, read_only},
     error::{AccessError, AccessResult, ErrorCode},
     middleware::InternalCaller,
 };
 use crate::{
-    domain::{EnvironmentId, PrincipalStatus, TenantClassification},
+    domain::{EnvironmentId, EnvironmentKind, PrincipalStatus, TenantClassification},
     identity::{
         authentication::{AuthenticationError, AuthorityChain, AuthorityMode},
         end_users::{self, EndUserError, EndUserRow, EndUserScope, EndUserView, ProfileInput},
-        operator::OperatorContext,
+        operator::{self, AuditEntry, AuditTargetKind, OperatorAction, OperatorContext},
         scopes::names,
         user_tokens::{
-            Grants, UserTokenClaims, DEFAULT_TTL_SECONDS, MAX_TOKEN_BYTES, MAX_TTL_SECONDS,
-            MIN_TTL_SECONDS,
+            self, Grants, UserTokenClaims, CONSOLE_TEST_MAX_TTL_SECONDS, DEFAULT_TTL_SECONDS,
+            MAX_TOKEN_BYTES, MAX_TTL_SECONDS, MIN_TTL_SECONDS,
         },
     },
     state::AppState,
@@ -71,6 +79,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/delegation/environments/:environment_id/end-users",
             get(console_list_users),
+        )
+        .route(
+            "/delegation/environments/:environment_id/test-user-tokens",
+            post(console_test_token),
         )
 }
 
@@ -404,14 +416,35 @@ fn validated_grants(grants: Grants) -> AccessResult<Grants> {
 }
 
 fn ttl(ttl_seconds: Option<i64>) -> AccessResult<i64> {
-    let ttl = ttl_seconds.unwrap_or(DEFAULT_TTL_SECONDS);
-    if !(MIN_TTL_SECONDS..=MAX_TTL_SECONDS).contains(&ttl) {
+    ttl_within(ttl_seconds, MAX_TTL_SECONDS)
+}
+
+fn ttl_within(ttl_seconds: Option<i64>, max: i64) -> AccessResult<i64> {
+    let ttl = ttl_seconds.unwrap_or(DEFAULT_TTL_SECONDS.min(max));
+    if !(MIN_TTL_SECONDS..=max).contains(&ttl) {
         return Err(AccessError::Operator(
             ErrorCode::ValidationError,
-            format!("ttlSeconds must be between {MIN_TTL_SECONDS} and {MAX_TTL_SECONDS}"),
+            format!("ttlSeconds must be between {MIN_TTL_SECONDS} and {max}"),
         ));
     }
     Ok(ttl)
+}
+
+/// Who a token is minted under: the claims' chain ids.
+struct Minter {
+    scope: EndUserScope,
+    service_account_id: Uuid,
+    credential_id: Uuid,
+}
+
+impl Partner {
+    fn minter(&self) -> Minter {
+        Minter {
+            scope: self.scope,
+            service_account_id: self.chain.service_account.id,
+            credential_id: self.chain.credential.id,
+        }
+    }
 }
 
 struct Minted {
@@ -423,7 +456,7 @@ struct Minted {
 /// Mints a token for the ACTIVE user `user` (rate-limited per user and hour).
 async fn mint(
     state: &AppState,
-    p: &Partner,
+    p: &Minter,
     user: &EndUserRow,
     grants: Grants,
     ttl: i64,
@@ -456,8 +489,8 @@ async fn mint(
         application_id: p.scope.application_id,
         environment_id: p.scope.environment_id,
         environment_kind: p.scope.kind,
-        service_account_id: p.chain.service_account.id,
-        credential_id: p.chain.credential.id,
+        service_account_id: p.service_account_id,
+        credential_id: p.credential_id,
         token_id,
         issued_at,
         not_before: issued_at,
@@ -510,7 +543,7 @@ async fn mint_for_user(
     let ttl = ttl(body.ttl_seconds)?;
     p.require(std::iter::once(names::USER_TOKENS_ISSUE).chain(grants.required_scopes()))?;
     let user = scoped_user(&state, &p, user_id).await?;
-    let m = mint(&state, &p, &user, grants, ttl).await?;
+    let m = mint(&state, &p.minter(), &user, grants, ttl).await?;
     Ok(no_store(
         StatusCode::CREATED,
         json!({ "token": m.token, "tokenId": m.token_id, "expiresAt": m.expires_at }),
@@ -560,7 +593,7 @@ async fn upsert_and_mint(
         )
         .await
         .map_err(user_err)?;
-    let m = mint(&state, &p, &user, grants, ttl).await?;
+    let m = mint(&state, &p.minter(), &user, grants, ttl).await?;
     Ok(no_store(
         StatusCode::CREATED,
         json!({
@@ -612,4 +645,111 @@ async fn console_list_users(
     .await
     .map_err(AccessError::operator)?;
     Ok(Json(page_json(page)))
+}
+
+// ---------------------------------------------------------------------------
+// Console test tokens (human members, `platform-identity.delegate` + actor)
+// ---------------------------------------------------------------------------
+
+async fn console_test_token(
+    State(state): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(environment_id): Path<Uuid>,
+    Json(body): Json<UpsertMintBody>,
+) -> AccessResult<Response> {
+    minting_partner_enabled(&state)?;
+    let op = delegated(&caller, &headers)?;
+    let grants = validated_grants(body.grants)?;
+    let ttl = ttl_within(body.ttl_seconds, CONSOLE_TEST_MAX_TTL_SECONDS)?;
+    let db = state.platform.db();
+    let env = user_tokens::console_test_environment(db, environment_id)
+        .await
+        .map_err(internal)?
+        .ok_or(AccessError::Refused(ErrorCode::NotFound))?;
+    let refuse = |m: &str| {
+        Err(AccessError::Operator(
+            ErrorCode::PolicyViolation,
+            m.to_string(),
+        ))
+    };
+    if !env.external {
+        return refuse("test user tokens exist only for EXTERNAL tenants");
+    }
+    if env.kind != Some(EnvironmentKind::Sandbox) {
+        return refuse("test user tokens are minted only in SANDBOX environments");
+    }
+    if !env.active {
+        return refuse("the environment, its application or its tenant is suspended");
+    }
+    let scopes = user_tokens::console_test_scopes(db, env.application_id)
+        .await
+        .map_err(internal)?;
+    for scope in grants.required_scopes() {
+        if !scopes.iter().any(|s| s == scope) {
+            crate::metrics::inc("platform_access_end_user_scope_required_total", &[]);
+            return Err(AccessError::Operator(
+                ErrorCode::ScopeRequired,
+                format!("the application lacks the {scope} scope"),
+            ));
+        }
+    }
+    let scope = EndUserScope {
+        tenant_id: env.tenant_id,
+        application_id: env.application_id,
+        environment_id,
+        kind: EnvironmentKind::Sandbox,
+    };
+    let (user, _) = state
+        .platform
+        .upsert_end_user(
+            &op,
+            &scope,
+            state.build.end_user_caps.for_kind(EnvironmentKind::Sandbox),
+            &body.external_id,
+            ProfileInput {
+                display_name: body.display_name,
+                image_url: body.image_url,
+            },
+        )
+        .await
+        .map_err(user_err)?;
+    let minter = Minter {
+        scope,
+        service_account_id: user_tokens::console_test_service_account_id(environment_id),
+        credential_id: user_tokens::console_test_credential_id(environment_id),
+    };
+    let m = mint(&state, &minter, &user, grants.clone(), ttl).await?;
+    operator::record(
+        db,
+        &op,
+        &AuditEntry::new(
+            OperatorAction::UserTokenTestIssued,
+            AuditTargetKind::Principal,
+            user.id,
+        )
+        .scope(
+            Some(scope.tenant_id),
+            Some(scope.application_id),
+            Some(environment_id),
+        )
+        .detail(json!({
+            "tokenId": m.token_id,
+            "expiresAt": m.expires_at,
+            "grants": grants,
+        })),
+        state.platform.clock().now(),
+    )
+    .await
+    .map_err(AccessError::operator)?;
+    crate::metrics::inc("platform_access_console_test_tokens_minted_total", &[]);
+    Ok(no_store(
+        StatusCode::CREATED,
+        json!({
+            "user": EndUserView::from(&user),
+            "token": m.token,
+            "tokenId": m.token_id,
+            "expiresAt": m.expires_at,
+        }),
+    ))
 }
