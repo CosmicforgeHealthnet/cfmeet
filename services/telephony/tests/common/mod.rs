@@ -393,6 +393,11 @@ pub struct FakeNumbering {
     pub voice_routes: StdMutex<HashMap<Uuid, (String, Option<DcnVoiceRoute>)>>,
     pub acknowledged: StdMutex<Vec<(Uuid, Uuid, i64)>>,
     pub verifications: StdMutex<Vec<String>>,
+    /// Gap C10: usage reports / risk signals Numbering accepted (bodies).
+    pub usage_reports: StdMutex<Vec<Value>>,
+    pub risk_signals: StdMutex<Vec<Value>>,
+    /// `None`: reports are accepted; `Some(Err)`: answered with that port error.
+    pub report_refusal: StdMutex<Option<PortError>>,
 }
 
 impl FakeNumbering {
@@ -404,7 +409,26 @@ impl FakeNumbering {
             voice_routes: StdMutex::default(),
             acknowledged: StdMutex::default(),
             verifications: StdMutex::default(),
+            usage_reports: StdMutex::default(),
+            risk_signals: StdMutex::default(),
+            report_refusal: StdMutex::default(),
         }
+    }
+
+    /// How Numbering answers usage reports / risk signals from now on.
+    pub fn refuse_reports(&self, refusal: Option<PortError>) {
+        *self.report_refusal.lock().unwrap() = refusal;
+    }
+
+    fn report(&self, into: &StdMutex<Vec<Value>>, body: &Value) -> Result<(), PortError> {
+        if !*self.available.lock().unwrap() {
+            return Err(PortError::Unavailable);
+        }
+        if let Some(e) = self.report_refusal.lock().unwrap().clone() {
+            return Err(e);
+        }
+        into.lock().unwrap().push(body.clone());
+        Ok(())
     }
 
     pub fn set_available(&self, up: bool) {
@@ -504,6 +528,14 @@ impl NumberingPort for FakeNumbering {
             scope: g.dcn.scope,
             inventory_class: g.dcn.inventory_class.clone(),
         }))
+    }
+
+    async fn report_usage(&self, report: &Value) -> Result<(), PortError> {
+        self.report(&self.usage_reports, report)
+    }
+
+    async fn report_risk_signal(&self, signal: &Value) -> Result<(), PortError> {
+        self.report(&self.risk_signals, signal)
     }
 
     async fn voice_route(

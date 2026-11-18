@@ -10,6 +10,10 @@
 //! * an application's origination hit a blocked / unclassified destination range
 //!   (`DESTINATION_CLASS_REFUSED`, raised by the executor's pre-toll check).
 //!
+//! * one DCN originates too many calls / too many unanswered or very short calls
+//!   (`DCN_CALL_VELOCITY`, `DCN_NUISANCE_CALLS`; gap C10: also reported to Numbering as
+//!   `SPAM_CALLS` / `NUISANCE_CALLS` when enabled — see [`crate::numbering_reports`]).
+//!
 //! Evidence holds opaque identifiers and counts only (never a number). Nothing is
 //! blocked here: enforcement stays with the spend / velocity policy in Calling and the
 //! kill switches; these signals are for operators and later analytics.
@@ -97,6 +101,8 @@ impl TelephonyService {
                 raised += 1;
             }
         }
+        // Gap C10: DCN call patterns (local incidents; Numbering signals when enabled).
+        raised += self.dcn_risk_scan(now).await?;
         Ok(raised)
     }
 
