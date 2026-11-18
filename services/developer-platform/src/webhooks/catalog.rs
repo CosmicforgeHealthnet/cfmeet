@@ -530,6 +530,8 @@ const MEETING_KEYS: &[(&str, &str, bool)] = &[
     ("meeting_id", "meetingId", false),
     ("conference_id", "conferenceId", false),
     ("participant_id", "participantId", false),
+    // Staged by the Meeting Service on participant.joined / participant.left for partner users.
+    ("principal_id", "principalId", false),
     ("recording_id", "recordingId", false),
     ("artifact_id", "artifactId", false),
     ("artifact_kind", "artifactKind", false),
@@ -754,6 +756,28 @@ mod tests {
         let text = Value::Object(e.data).to_string();
         for leaked in ["recordings/", "https", "Alice", "c2VjcmV0"] {
             assert!(!text.contains(leaked), "{leaked}");
+        }
+    }
+
+    #[test]
+    fn meeting_participant_events_project_the_partner_principal_id() {
+        let meeting = "33333333-3333-4333-8333-333333333333";
+        let participant = "55555555-5555-4555-8555-555555555555";
+        let principal = "66666666-6666-4666-8666-666666666666";
+        for (internal, public) in [
+            ("meeting-service.participant.joined", "participant.joined"),
+            ("meeting-service.participant.left", "participant.left"),
+        ] {
+            let env = json!({ "event_type": internal, "payload": {
+                "meeting_id": meeting, "participant_id": participant,
+                "principal_id": principal, "display_name": "Alice" } });
+            let e = project(PRODUCER_MEETING, &env).unwrap().unwrap();
+            assert_eq!(e.event_type, public);
+            assert_eq!(
+                Value::Object(e.data),
+                json!({ "meetingId": meeting, "participantId": participant,
+                        "principalId": principal })
+            );
         }
     }
 

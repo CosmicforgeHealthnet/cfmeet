@@ -1273,7 +1273,7 @@ async fn partner_meeting_chat_is_synchronised_in_the_partner_scope() {
 /// gap-closure history), and widens the baseline CHECK without touching existing rows.
 #[tokio::test]
 async fn the_partner_migration_rolls_back_and_reapplies() {
-    use messaging_migration::{MigrationName, MigratorTrait};
+    use messaging_migration::MigratorTrait;
     let Some(db) = TestDb::new().await else {
         return;
     };
