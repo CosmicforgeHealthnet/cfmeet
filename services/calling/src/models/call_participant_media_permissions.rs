@@ -21,6 +21,8 @@ pub struct Model {
     pub policy_version: String,
     /// C6: set while this participant is the Call's (single) presenter.
     pub screen_share_started_at: Option<DateTimeUtc>,
+    /// C4: set while the Call's host muted this participant (no audio publishing).
+    pub host_muted_at: Option<DateTimeUtc>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }

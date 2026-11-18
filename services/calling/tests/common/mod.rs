@@ -61,7 +61,6 @@ use calling::{
     signaling::{InMemorySignalBus, NoPushTransport, RealtimeSignalBus, SignalingKeys},
     state::{AppState, CallingRuntime},
 };
-use calling_migration::MigratorTrait;
 use cf_service_auth::{
     client::{InternalServiceClient, InternalTargets},
     InternalPermission, KeyId, RuntimeEnvironment, ServiceId, ServiceSigningKey,
@@ -159,7 +158,7 @@ async fn template(admin: &str) -> String {
                 .unwrap();
             conn.close().await.ok();
             let tmpl = Database::connect(with_db(admin, &name)).await.unwrap();
-            calling_migration::Migrator::up(&tmpl, None)
+            calling_migration::up_all(&tmpl)
                 .await
                 .expect("migrations apply");
             tmpl.close().await.ok();

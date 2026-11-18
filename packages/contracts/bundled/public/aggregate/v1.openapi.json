@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.20.0"
+      "description": "cfmeet.calling.http-api 1.25.0"
     },
     {
       "name": "privacy-relay",
@@ -24965,7 +24965,7 @@
           "calling"
         ],
         "summary": "Create and ring an application call",
-        "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice.",
+        "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice. 1.25.0 (direct forwarding): a one-to-one application call (one targetPrincipalIds entry, no privacyRelaySessionId) to a callee with an ACTIVE forwarding rule (/v1/enterprise/forwarding-rules) or an ACTIVE mailbox of its own is routed like an extension call from the callee: ALWAYS forwards before ringing; with no eligible endpoint the UNAVAILABLE rule (else the mailbox) takes it instead of FAILED; BUSY (every offer declined) / NO_ANSWER (offers expired) follow the matching rule, else the callee's mailbox, on the same Call. Loops (including back to the caller) are blocked, the scope's effective enterprise policy applies (forwardingAllowed, voicemailAllowed), ENTERPRISE_CALLING_ENABLED off disables it, and in a scope governed by the Communications personal policy only the voicemail fallback applies. The response of such a call carries no enterprise block; without a rule or mailbox nothing changes.",
         "security": [
           {
             "calling.platformCredential": [
@@ -25663,7 +25663,7 @@
           "calling"
         ],
         "summary": "End an active call",
-        "description": "Requires calls.write. Moves the Call to ENDING, removes every media connection and terminates the media resource; the Call becomes ENDED only on cleanup evidence (otherwise it stays ENDING and the reconciler retries). Usage and quality are finalized.",
+        "description": "Requires calls.write. Moves the Call to ENDING, removes every media connection and terminates the media resource; the Call becomes ENDED only on cleanup evidence (otherwise it stays ENDING and the reconciler retries). Usage and quality are finalized. 1.21.0 (host): actingParticipantId names the participant acting for everyone; in a group Call (more than two participants, ever) only the host may do this (another participant: 403 CALL_NOT_AUTHORIZED - it leaves by removing its session). Without actingParticipantId the application backend acts on its own authority, as before.",
         "security": [
           {
             "calling.platformCredential": [
@@ -25741,6 +25741,77 @@
         ]
       }
     },
+    "/v1/calls/{call_id}/history": {
+      "delete": {
+        "operationId": "hideCallFromHistory",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Hide a finished call from a principal's history",
+        "description": "Requires calls.write. 1.24.0: the named principal (a participant of the Call) hides the finished Call from its own history: GET /v1/calls?principalId= and GET /v1/calling/history no longer list it for that principal. Other participants' histories, the Call itself, its events and usage are unchanged (retained evidence). Idempotent; the hide is final. A Call the principal took no part in (or of another scope): 404; a Call not finished yet: 409 CALL_STATE_CONFLICT; any query parameter other than principalId: 400. Separately, the retention worker removes every finished Call from every history CALLING_RETENTION_CALL_HISTORY_DAYS (default 400) after it ended.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "name": "principalId",
+            "in": "query",
+            "required": true,
+            "description": "The participant principal whose history hides the Call.",
+            "schema": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Hidden (or already hidden).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.hideCallFromHistory",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
     "/v1/calls/{call_id}/hold": {
       "post": {
         "operationId": "holdCall",
@@ -25748,7 +25819,7 @@
           "calling"
         ],
         "summary": "Hold a connected call",
-        "description": "Requires calls.write. Enforced at the media provider: every admitted connection loses audio and video publishing (subscription unchanged) before the Call becomes HELD. A provider that cannot update permissions is 422 CAPABILITY_UNAVAILABLE; an unconfirmed update is 503 MEDIA_UNAVAILABLE and the Call stays CONNECTED.",
+        "description": "Requires calls.write. Enforced at the media provider: every admitted connection loses audio and video publishing (subscription unchanged) before the Call becomes HELD. A provider that cannot update permissions is 422 CAPABILITY_UNAVAILABLE; an unconfirmed update is 503 MEDIA_UNAVAILABLE and the Call stays CONNECTED. 1.21.0 (host): actingParticipantId names the participant acting for everyone; in a group Call (more than two participants, ever) only the host may do this (another participant: 403 CALL_NOT_AUTHORIZED - it leaves by removing its session). Without actingParticipantId the application backend acts on its own authority, as before.",
         "security": [
           {
             "calling.platformCredential": [
@@ -25824,6 +25895,85 @@
         },
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.holdCall",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/host": {
+      "post": {
+        "operationId": "transferCallHost",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Hand the host role to another participant",
+        "description": "Requires calls.write. 1.21.0: the host hands the host role to another active participant (signal data hostParticipantId). The acting participant must be the Call's host (else 403 CALL_NOT_AUTHORIZED): the participant the role was last transferred to, else the creator (initiator); when the host is no longer present (its sessions removed) the role falls to the longest-standing present participant until it returns. Only a live Call (ANSWERED, CONNECTED, HELD; else 409). Every change is a Call event in the same transaction and a call.participants_changed signal to every endpoint of the Call.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.TransferHostRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Call and its new host.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.HostControlResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.transferCallHost",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
         ]
@@ -26000,6 +26150,270 @@
         ]
       }
     },
+    "/v1/calls/{call_id}/participants/{participant_id}/mute": {
+      "post": {
+        "operationId": "muteCallParticipant",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Mute or unmute a participant (host only)",
+        "description": "Requires calls.write. 1.21.0: the host mutes (muted: true) or unmutes a participant's audio. Enforced at the media provider: the participant's effective permissions grant no audio publishing until the host unmutes (it survives hold / resume); recorded as CALL_MEDIA_PERMISSIONS_UPDATED (HOST_MUTED / HOST_UNMUTED); the Call view lists the muted participants (mutedParticipantIds). The acting participant must be the Call's host (else 403 CALL_NOT_AUTHORIZED): the participant the role was last transferred to, else the creator (initiator); when the host is no longer present (its sessions removed) the role falls to the longest-standing present participant until it returns. Only a live Call (ANSWERED, CONNECTED, HELD; else 409). Every change is a Call event in the same transaction and a call.participants_changed signal to every endpoint of the Call.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.ParticipantId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.MuteParticipantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Call after the change.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.HostControlResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.muteCallParticipant",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/participants/{participant_id}/rejoin": {
+      "post": {
+        "operationId": "rejoinCall",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Rejoin an ongoing call",
+        "description": "Requires calls.write. 1.22.0: a participant who left a live Call (ANSWERED, CONNECTED, HELD) by removing its sessions comes back with a new session on one of its own ACTIVE endpoints (201, rejoined: true); media credentials are then issued for that session as after an answer. A live session on the same endpoint is returned as is (200, rejoined: false). The participant must have joined before (else 409 CALL_RESOURCE_STATE_CONFLICT: it answers its invitation instead); a participant the host removed (or that left the Call for good) is refused with 403 CALL_NOT_AUTHORIZED; a Call that is not live: 409 CALL_STATE_CONFLICT; an endpoint that is not the participant's own active endpoint: 404. The Communications personal policy is re-checked as for an answer. Every endpoint of the Call receives call.participants_changed (data.rejoinedParticipantId).",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.ParticipantId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.RejoinRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The participant's existing live session on that endpoint.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.RejoinResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The new session of the rejoined participant.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.RejoinResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.rejoinCall",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/participants/{participant_id}/remove": {
+      "post": {
+        "operationId": "removeCallParticipant",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Remove a participant (host only)",
+        "description": "Requires calls.write. 1.21.0: the host removes a participant for good: its sessions end, its media access is revoked at the provider, its live ring offers are cancelled (CALL_PARTICIPANT_REMOVED with removal reason HOST_REMOVED) and it can never rejoin. The Call ends automatically when fewer than two parties remain. The host cannot remove itself (400). Repeating a removal is a no-op. The acting participant must be the Call's host (else 403 CALL_NOT_AUTHORIZED): the participant the role was last transferred to, else the creator (initiator); when the host is no longer present (its sessions removed) the role falls to the longest-standing present participant until it returns. Only a live Call (ANSWERED, CONNECTED, HELD; else 409). Every change is a Call event in the same transaction and a call.participants_changed signal to every endpoint of the Call.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.ParticipantId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.HostActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The Call after the removal.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.HostControlResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.removeCallParticipant",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
     "/v1/calls/{call_id}/quality": {
       "get": {
         "operationId": "getCallQuality",
@@ -26151,7 +26565,7 @@
           "calling"
         ],
         "summary": "Record a participant's recording consent",
-        "description": "Requires calls.write and enterprise.calls.use. The participant's OWN decision through its endpoint; idempotent on replay.",
+        "description": "Requires calls.write and enterprise.calls.use. The participant's OWN decision through its endpoint; idempotent on replay. 1.23.0 (late joiners): a participant whose session starts while a recording runs (an answered transfer, a later answer, a rejoin) receives call.recording_started at once with data.lateJoin, data.participantId and data.consentRequired. When the policy requires its consent and it has not GRANTED it for this Call, it has 60 seconds to do so through POST /v1/calls/{call_id}/recording-consent; a DECLINED, or no grant by then, stops the recording with stopReason CONSENT_WITHDRAWN.",
         "security": [
           {
             "calling.platformCredential": [
@@ -26237,7 +26651,7 @@
           "calling"
         ],
         "summary": "Start recording a Call",
-        "description": "Requires enterprise.recording.manage. Creates an immutable recording authorization first (kill switch CALL_RECORDING_ENABLED, enterprise Call, ACTIVE default policy and mode, CONNECTED, actor, server-issued notice, each required participant's own consent, protected storage, a capture path). ALLOWED: 201 with the recording; a Call already being recorded: 200 with it (idempotent); DENIED: 403 RECORDING_NOT_AUTHORIZED (the decision and reason are in recording-authorizations).",
+        "description": "Requires enterprise.recording.manage. Creates an immutable recording authorization first (kill switch CALL_RECORDING_ENABLED, enterprise Call, ACTIVE default policy and mode, CONNECTED, actor, server-issued notice, each required participant's own consent, protected storage, a capture path). ALLOWED: 201 with the recording; a Call already being recorded: 200 with it (idempotent); DENIED: 403 RECORDING_NOT_AUTHORIZED (the decision and reason are in recording-authorizations). 1.23.0 (late joiners): a participant whose session starts while a recording runs (an answered transfer, a later answer, a rejoin) receives call.recording_started at once with data.lateJoin, data.participantId and data.consentRequired. When the policy requires its consent and it has not GRANTED it for this Call, it has 60 seconds to do so through POST /v1/calls/{call_id}/recording-consent; a DECLINED, or no grant by then, stops the recording with stopReason CONSENT_WITHDRAWN.",
         "security": [
           {
             "calling.platformCredential": [
@@ -26492,7 +26906,7 @@
           "calling"
         ],
         "summary": "Resume a held call",
-        "description": "Requires calls.write. Re-derives every connection's permissions from the currently authorized server state (never from a stored pre-hold grant) and applies them at the provider before the Call becomes CONNECTED.",
+        "description": "Requires calls.write. Re-derives every connection's permissions from the currently authorized server state (never from a stored pre-hold grant) and applies them at the provider before the Call becomes CONNECTED. 1.21.0 (host): actingParticipantId names the participant acting for everyone; in a group Call (more than two participants, ever) only the host may do this (another participant: 403 CALL_NOT_AUTHORIZED - it leaves by removing its session). Without actingParticipantId the application backend acts on its own authority, as before.",
         "security": [
           {
             "calling.platformCredential": [
@@ -32840,7 +33254,7 @@
           "calling"
         ],
         "summary": "Create a forwarding rule",
-        "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting forwarding (public targets: public forwarding). Audited.",
+        "description": "Requires enterprise.config.write, MANAGE_ROUTING and an enterprise policy permitting forwarding (public targets: public forwarding). Audited. 1.25.0: a principal's rules also apply to direct one-to-one application calls to that principal (see POST /v1/calls).",
         "security": [
           {
             "calling.platformCredential": [
@@ -53624,7 +54038,9 @@
           "invitations",
           "transfers",
           "screenShare",
-          "canViewRecordings"
+          "canViewRecordings",
+          "hostParticipantId",
+          "mutedParticipantIds"
         ],
         "properties": {
           "connectedDurationMs": {
@@ -53676,6 +54092,24 @@
           "canViewRecordings": {
             "type": "boolean",
             "description": "Whether this caller may read the call's recordings and recording authorizations (GET /v1/calls/{call_id}/recordings, /recording-authorizations): the credential holds enterprise.recording.read. Request recordings only when true; otherwise those routes answer 403. 1.17.0."
+          },
+          "hostParticipantId": {
+            "description": "1.21.0: the Call's host participant (the creator unless the role was transferred; while the host is not present, the longest-standing present participant); null once nobody is active.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mutedParticipantIds": {
+            "description": "1.21.0: participants the host muted (no audio publishing until unmuted).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+            }
           }
         },
         "unevaluatedProperties": false
@@ -55296,7 +55730,7 @@
         }
       },
       "calling.calling.control.v1.CommandRequest": {
-        "description": "Body of cancel, end, hold, resume and session removal: the expected Call version and nothing else (no state, reason or permission can be sent).",
+        "description": "Body of cancel, end, hold, resume and session removal: the expected Call version and, for end / hold / resume only, the acting participant (no state, reason or permission can be sent).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -55307,6 +55741,10 @@
             "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
             "type": "integer",
             "minimum": 1
+          },
+          "actingParticipantId": {
+            "description": "1.8.0: end / hold / resume only (cancel and session removal refuse it, 400). The participant acting for everyone. In a group Call (more than two participants, ever) only its host may end or hold / resume it for everyone (another participant: 403 CALL_NOT_AUTHORIZED; it leaves by removing its session instead). Absent: the application backend acting on its own authority (unchanged).",
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
           }
         }
       },
@@ -55756,6 +56194,55 @@
           }
         }
       },
+      "calling.calling.control.v1.HostActionRequest": {
+        "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/remove (1.8.0): the acting participant, which must be the Call's host.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "actingParticipantId"
+        ],
+        "properties": {
+          "actingParticipantId": {
+            "description": "The Call's host.",
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          }
+        }
+      },
+      "calling.calling.control.v1.HostControlResult": {
+        "description": "Result of a host operation (1.8.0): the Call after the command and what changed (hostParticipantId for TRANSFER_HOST; participantId plus removed / muted for the participant operations).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call",
+          "operation"
+        ],
+        "properties": {
+          "call": {
+            "$ref": "#/components/schemas/calling.calling.common.v1.CallSummary"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "TRANSFER_HOST",
+              "REMOVE_PARTICIPANT",
+              "MUTE_PARTICIPANT",
+              "UNMUTE_PARTICIPANT"
+            ]
+          },
+          "hostParticipantId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "participantId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "removed": {
+            "type": "boolean"
+          },
+          "muted": {
+            "type": "boolean"
+          }
+        }
+      },
       "calling.calling.control.v1.InvitationCommandRequest": {
         "description": "Body of POST /v1/calls/{call_id}/accept|decline (backend answering on behalf of one of the target's endpoints).",
         "type": "object",
@@ -55813,6 +56300,24 @@
           },
           "capabilities": {
             "$ref": "#/components/schemas/calling.calling.common.v1.CallMediaCapabilities"
+          }
+        }
+      },
+      "calling.calling.control.v1.MuteParticipantRequest": {
+        "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/mute (1.8.0): the host mutes (true) or unmutes (false) the participant's audio.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "actingParticipantId",
+          "muted"
+        ],
+        "properties": {
+          "actingParticipantId": {
+            "description": "The Call's host.",
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "muted": {
+            "type": "boolean"
           }
         }
       },
@@ -56090,6 +56595,51 @@
           }
         }
       },
+      "calling.calling.control.v1.RejoinRequest": {
+        "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "endpointId"
+        ],
+        "properties": {
+          "endpointId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          }
+        }
+      },
+      "calling.calling.control.v1.RejoinResult": {
+        "description": "Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call",
+          "operation",
+          "participantId",
+          "sessionId",
+          "rejoined"
+        ],
+        "properties": {
+          "call": {
+            "$ref": "#/components/schemas/calling.calling.common.v1.CallSummary"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "REJOIN"
+            ]
+          },
+          "participantId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "rejoined": {
+            "type": "boolean"
+          }
+        }
+      },
       "calling.calling.control.v1.ScreenShare": {
         "description": "The Call's current presenter (C6).",
         "type": "object",
@@ -56223,6 +56773,25 @@
             "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
           },
           "endpointId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          }
+        }
+      },
+      "calling.calling.control.v1.TransferHostRequest": {
+        "description": "Body of POST /v1/calls/{call_id}/host (1.8.0): the current host hands the host role to another active participant.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "actingParticipantId",
+          "hostParticipantId"
+        ],
+        "properties": {
+          "actingParticipantId": {
+            "description": "The current host.",
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "hostParticipantId": {
+            "description": "The new host (an active participant).",
             "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
           }
         }
@@ -90734,6 +91303,15 @@
         "in": "path",
         "required": true,
         "description": "Ring offer (invitation) id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "calling.ParticipantId": {
+        "name": "participant_id",
+        "in": "path",
+        "required": true,
+        "description": "Call participant id.",
         "schema": {
           "type": "string"
         }

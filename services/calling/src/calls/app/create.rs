@@ -345,6 +345,14 @@ impl AppCallService {
                 None,
             )
             .await?;
+        // A one-to-one call whose callee has a forwarding rule or a mailbox is routed even
+        // when the callee has no eligible endpoint (its UNAVAILABLE handling takes it).
+        let direct_handled = privacy.is_none()
+            && targets.len() == 1
+            && self
+                .direct_handlers_in(&txn, scope, targets[0].id().as_uuid())
+                .await?
+                .any();
         let mut endpoint_count = 0usize;
         let mut unreachable = 0usize;
         let mut destinations = Vec::with_capacity(targets.len());
@@ -365,13 +373,13 @@ impl AppCallService {
                     self.config.max_endpoints_per_participant,
                 )
                 .await?;
-            if endpoints.is_empty() {
+            if endpoints.is_empty() && !direct_handled {
                 unreachable += 1;
             }
             endpoint_count += endpoints.len();
             destinations.push(DestinationFacts {
                 class: EndpointClass::Application,
-                app_reachable: Evidence::Known(!endpoints.is_empty()),
+                app_reachable: Evidence::Known(!endpoints.is_empty() || direct_handled),
                 contact: None,
             });
         }
@@ -785,6 +793,9 @@ impl AppCallService {
                 self.calls.authorize_session_media_in(&txn, session).await?;
             }
         }
+        // A direct call whose callee forwards ALWAYS, or cannot be reached but has a
+        // forwarding rule / mailbox for that, is routed like an enterprise Call from here.
+        self.direct_routing_before_ring_in(&txn, &call).await?;
         // An enterprise Call rings what its enterprise destination resolves to (the
         // router: principal, ring group, queue, IVR, voicemail, forwarding).
         if let Some((call, invitations)) =

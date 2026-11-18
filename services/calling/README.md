@@ -234,6 +234,21 @@ references or telephone numbers.
 5. Hold / resume / transfer / session removal / end are commands with `expectedVersion`;
    the provider enforces them. END reaches ENDED only on cleanup evidence; usage is
    finalized.
+6. Group calls have a host (C4, gap-closure migration 000052): the creator, unless the role was
+   handed over (`POST /v1/calls/{id}/host`); while the host is not present (its sessions
+   removed) the longest-standing present participant holds the role. In a group call
+   (more than two participants, ever) END / HOLD / RESUME naming an
+   `actingParticipantId` are the host's (403 for anyone else, who leaves by removing its
+   session); the backend acting without one is unchanged. The host removes a participant
+   for good (`…/participants/{participant_id}/remove`, HOST_REMOVED) or mutes it
+   (`…/participants/{participant_id}/mute`, enforced at the provider until unmuted). The
+   Call view shows `hostParticipantId` and `mutedParticipantIds`.
+7. Leaving is removing one's sessions; a participant who left a live call (ANSWERED,
+   CONNECTED, HELD) rejoins with `POST /v1/calls/{id}/participants/{participant_id}/rejoin`
+   (`endpointId`: one of its own active endpoints). The new session continues the
+   participant's winning session lineage and gets media credentials as after an answer;
+   a participant the host removed (403), one that never joined (409) or one still live on
+   another device (409) is refused.
 
 Signals are sent only after the authoritative transaction commits and fan out across
 instances through PostgreSQL `LISTEN` / `NOTIFY` (`PgNotifySignalBus`); only endpoints
@@ -285,10 +300,10 @@ Meeting Service dependency; Telephony only executes edge primitives.
 | §55 | Ring groups: SIMULTANEOUS / ORDERED, group single winner, bounded fan-out, fallback | ADR 0019 |
 | §56 | Queues: FIFO, authoritative positions, one offer per entry / agent, timeouts, overflow, abandonment | ADR 0019 |
 | §57 | Declarative versioned IVR (keys never stored or logged), built-in prompts, RTC keypad and SIP DTMF | ADR 0020 |
-| §58 | Business hours (IANA zones, DST, exceptions), typed forwarding (`/v1/enterprise/forwarding-rules`), loop / hop protection; public forwarding only through every Part E gate. Forwarding and voicemail apply to calls routed over `ENTERPRISE_INTERNAL` (extensions, ring groups, queues) only: an ordinary person-to-person application call is neither forwarded nor sent to voicemail | ADR 0021 |
+| §58 | Business hours (IANA zones, DST, exceptions), typed forwarding (`/v1/enterprise/forwarding-rules`), loop / hop protection; public forwarding only through every Part E gate. Forwarding and voicemail also apply to an ordinary one-to-one application call (C3, `calls/app/enterprise/direct.rs`, gap-closure migration 000054): when the callee has an ACTIVE rule or mailbox, the call gets a context without entry extension (`direct`) and the router applies ALWAYS / UNAVAILABLE / BUSY / NO_ANSWER, else the callee's mailbox; off with `ENTERPRISE_CALLING_ENABLED`; voicemail only in Communications-governed personal scopes | ADR 0021 |
 | §59 | Hold / resume / transfer to enterprise targets on the same Call | ADR 0022 |
 | §60 | Voicemail: mailboxes, edge (SIP) / LiveKit Egress (RTC) capture, protected object storage (`packages/object-storage`), READY, authorized signed retrieval, read state, deletion, retention | ADR 0023, 0027 |
-| §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge (SIP) / audio-only room-composite (RTC) capture, protected artifacts, audited access | ADR 0024, 0027 |
+| §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge (SIP) / audio-only room-composite (RTC) capture, protected artifacts, audited access. A participant who joins while a recording runs (answered transfer, later answer, rejoin) gets the notice at once (`call.recording_started`, `lateJoin`) and, when the policy requires its consent, 60 s to grant it; a decline or no grant stops the recording (CONSENT_WITHDRAWN) | ADR 0024, 0027 |
 | §62 | Missed calls and history derived per logical participant from Call evidence; `GET /v1/calls?principalId=`, `GET /v1/calling/history` | ADR 0025 |
 | cross-cutting | Durable `ENTERPRISE_ROUTING_STEP` outbox events, `calling_incidents`, bounded metrics, races, failure injection, load | ADR 0026 |
 
@@ -360,6 +375,7 @@ data class has one policy; bounds are configuration (`CALLING_RETENTION_*`, see
 | Class | Action | Bound (default) |
 |---|---|---|
 | `CALL_RECORD` | MINIMIZE display metadata of terminal Calls (participant display names, enterprise entry label → extension code) | `CALLING_RETENTION_CALL_DISPLAY_DAYS` (365) |
+| `CALL_HISTORY` | MINIMIZE: terminal Calls leave every participant's history (`call_participants.history_hidden_at`, reason RETENTION); the Call, events and usage stay. A principal can also hide a finished Call from its own history at any time: `DELETE /v1/calls/{id}/history?principalId=` (reason USER) | `CALLING_RETENTION_CALL_HISTORY_DAYS` (400) |
 | `CALL_EVENT`, `CALL_USAGE`, `SPEND_EVIDENCE`, `ADMIN_AUDIT`, `RECORDING_ACCESS_AUDIT` | RETAIN (evidence other records need; `CALLING_RETENTION_CALL_EVENTS_DAYS` refuses startup) | — |
 | `WEBHOOK_DELIVERY_HISTORY` / `WEBHOOK_EVENT_HISTORY` | DELETE terminal deliveries + attempts, then events without deliveries | `CALLING_RETENTION_WEBHOOK_HISTORY_DAYS` (90) |
 | `CALLING_INCIDENT` | DELETE RESOLVED incidents | `CALLING_RETENTION_INCIDENTS_DAYS` (365) |
@@ -711,6 +727,14 @@ curl http://127.0.0.1:8090/health
 ```
 
 From the repository root: `make calling-migrate`, `make calling`.
+
+`calling-migration up` applies two histories: the main one (`calling_seaql_migrations`,
+fail-closed on versions it does not know) and then the additive gap-closure history
+(`calling_gap_closure_seaql_migrations`, `migration/src/gap/`). New additive changes go
+to the gap-closure history so the previous image still starts against a database that
+has them; this image refuses to start until both are applied
+(`calling_migration::pending_migrations`). `reset` rolls the gap-closure history back
+first; other subcommands concern the main history.
 
 ## Administration
 

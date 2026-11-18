@@ -93,6 +93,24 @@
     },
     {
       "$ref": "#/$defs/CallQualitySummary"
+    },
+    {
+      "$ref": "#/$defs/TransferHostRequest"
+    },
+    {
+      "$ref": "#/$defs/HostActionRequest"
+    },
+    {
+      "$ref": "#/$defs/MuteParticipantRequest"
+    },
+    {
+      "$ref": "#/$defs/HostControlResult"
+    },
+    {
+      "$ref": "#/$defs/RejoinRequest"
+    },
+    {
+      "$ref": "#/$defs/RejoinResult"
     }
   ],
   "$defs": {
@@ -374,7 +392,7 @@
       }
     },
     "CommandRequest": {
-      "description": "Body of cancel, end, hold, resume and session removal: the expected Call version and nothing else (no state, reason or permission can be sent).",
+      "description": "Body of cancel, end, hold, resume and session removal: the expected Call version and, for end / hold / resume only, the acting participant (no state, reason or permission can be sent).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -385,6 +403,10 @@
           "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
           "type": "integer",
           "minimum": 1
+        },
+        "actingParticipantId": {
+          "description": "1.8.0: end / hold / resume only (cancel and session removal refuse it, 400). The participant acting for everyone. In a group Call (more than two participants, ever) only its host may end or hold / resume it for everyone (another participant: 403 CALL_NOT_AUTHORIZED; it leaves by removing its session instead). Absent: the application backend acting on its own authority (unchanged).",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       }
     },
@@ -1858,6 +1880,137 @@
               }
             }
           }
+        }
+      }
+    },
+    "TransferHostRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/host (1.8.0): the current host hands the host role to another active participant.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actingParticipantId",
+        "hostParticipantId"
+      ],
+      "properties": {
+        "actingParticipantId": {
+          "description": "The current host.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "hostParticipantId": {
+          "description": "The new host (an active participant).",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "HostActionRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/remove (1.8.0): the acting participant, which must be the Call's host.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actingParticipantId"
+      ],
+      "properties": {
+        "actingParticipantId": {
+          "description": "The Call's host.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "MuteParticipantRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/mute (1.8.0): the host mutes (true) or unmutes (false) the participant's audio.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actingParticipantId",
+        "muted"
+      ],
+      "properties": {
+        "actingParticipantId": {
+          "description": "The Call's host.",
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "muted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "HostControlResult": {
+      "description": "Result of a host operation (1.8.0): the Call after the command and what changed (hostParticipantId for TRANSFER_HOST; participantId plus removed / muted for the participant operations).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "TRANSFER_HOST",
+            "REMOVE_PARTICIPANT",
+            "MUTE_PARTICIPANT",
+            "UNMUTE_PARTICIPANT"
+          ]
+        },
+        "hostParticipantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "muted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RejoinRequest": {
+      "description": "Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "endpointId"
+      ],
+      "properties": {
+        "endpointId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "RejoinResult": {
+      "description": "Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "call",
+        "operation",
+        "participantId",
+        "sessionId",
+        "rejoined"
+      ],
+      "properties": {
+        "call": {
+          "$ref": "https://schemas.cfmeet.com/calling/common/v1.schema.json#/$defs/CallSummary"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "REJOIN"
+          ]
+        },
+        "participantId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "rejoined": {
+          "type": "boolean"
         }
       }
     }

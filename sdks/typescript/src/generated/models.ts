@@ -158,6 +158,10 @@ export namespace Calling {
     screenShare: ScreenShare | null;
     /** Whether this caller may read the call's recordings and recording authorizations (GET /v1/calls/{call_id}/recordings, /recording-authorizations): the credential holds enterprise.recording.read. Request recordings only when true; otherwise those routes answer 403. 1.17.0. */
     canViewRecordings: boolean;
+    /** 1.21.0: the Call's host participant (the creator unless the role was transferred; while the host is not present, the longest-standing present participant); null once nobody is active. */
+    hostParticipantId: Uuid | null;
+    /** 1.21.0: participants the host muted (no audio publishing until unmuted). */
+    mutedParticipantIds: Array<Uuid>;
   }) & (CallCore);
   /** Fields of every Call representation (HTTP API, call-control results). Provider-independent: no provider or carrier identifiers, execution bindings, media identities, telephone numbers or protected contact data. */
   export type CallCore = {
@@ -410,10 +414,12 @@ export namespace Calling {
   export type CallTransferFailureReason = "TARGET_DECLINED" | "TARGET_NO_ANSWER" | "TARGET_UNAVAILABLE" | "MEDIA_PATH_LOST" | "CALL_ENDED" | "CANCELLED";
   /** Application transfer lifecycle, kept out of the Call state (the Call is TRANSFERRING while a transfer is active). */
   export type CallTransferState = "REQUESTED" | "RINGING_TARGET" | "ACCEPTED" | "COMPLETED" | "FAILED" | "CANCELLED";
-  /** Body of cancel, end, hold, resume and session removal: the expected Call version and nothing else (no state, reason or permission can be sent). */
+  /** Body of cancel, end, hold, resume and session removal: the expected Call version and, for end / hold / resume only, the acting participant (no state, reason or permission can be sent). */
   export type CommandRequest = {
     /** The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION. */
     expectedVersion: number;
+    /** 1.8.0: end / hold / resume only (cancel and session removal refuse it, 400). The participant acting for everyone. In a group Call (more than two participants, ever) only its host may end or hold / resume it for everyone (another participant: 403 CALL_NOT_AUTHORIZED; it leaves by removing its session instead). Absent: the application backend acting on its own authority (unchanged). */
+    actingParticipantId?: Uuid;
   };
   /** A call as listed and as returned by call-control commands. */
   export type CommonCallSummary = CallCore;
@@ -758,6 +764,20 @@ export namespace Calling {
   export type HistoryDestinationType = "EXTENSION" | "RING_GROUP" | "QUEUE" | "IVR" | "VOICEMAIL";
   /** Direction of a Call relative to the principal whose history it is. */
   export type HistoryDirection = "INBOUND" | "OUTBOUND";
+  /** Body of POST /v1/calls/{call_id}/participants/{participant_id}/remove (1.8.0): the acting participant, which must be the Call's host. */
+  export type HostActionRequest = {
+    /** The Call's host. */
+    actingParticipantId: Uuid;
+  };
+  /** Result of a host operation (1.8.0): the Call after the command and what changed (hostParticipantId for TRANSFER_HOST; participantId plus removed / muted for the participant operations). */
+  export type HostControlResult = {
+    call: CommonCallSummary;
+    operation: "TRANSFER_HOST" | "REMOVE_PARTICIPANT" | "MUTE_PARTICIPANT" | "UNMUTE_PARTICIPANT";
+    hostParticipantId?: Uuid;
+    participantId?: Uuid;
+    removed?: boolean;
+    muted?: boolean;
+  };
   /** An exception date (holiday, special hours). It governs its whole local date: the date's weekly windows, and a previous day's window crossing midnight, do not apply on it. No global holiday calendar is used. */
   export type HoursException = {
     /** Local date YYYY-MM-DD. */
@@ -940,6 +960,12 @@ export namespace Calling {
     token: string;
     expiresAt: string;
     capabilities: CallMediaCapabilities;
+  };
+  /** Body of POST /v1/calls/{call_id}/participants/{participant_id}/mute (1.8.0): the host mutes (true) or unmutes (false) the participant's audio. */
+  export type MuteParticipantRequest = {
+    /** The Call's host. */
+    actingParticipantId: Uuid;
+    muted: boolean;
   };
   /** The outcome of a Call for ONE logical participant, derived from Call evidence only (participant, ring offers on every device, session connection intervals, the Call's state) — never from a push, a realtime signal or a client acknowledgement, and never stored as a flag. OUTBOUND: ANSWERED, NOT_ANSWERED (ended unanswered), IN_PROGRESS. INBOUND, first match wins: ANSWERED (an offer accepted on any … */
   export type ParticipantOutcome = "ANSWERED" | "NOT_ANSWERED" | "MISSED" | "DECLINED" | "ANSWERED_ELSEWHERE" | "RINGING" | "NOT_REACHED" | "IN_PROGRESS";
@@ -1227,6 +1253,18 @@ export namespace Calling {
     capabilities: EndpointCapabilities;
     pushTargetRef?: Uuid | null;
   };
+  /** Body of POST /v1/calls/{call_id}/participants/{participant_id}/rejoin (1.9.0): the participant's own ACTIVE endpoint the new session runs on. */
+  export type RejoinRequest = {
+    endpointId: Uuid;
+  };
+  /** Result of a rejoin (1.9.0): the Call and the participant's session (new when rejoined is true; the existing live session on that endpoint otherwise). Media credentials are then issued for sessionId as after an answer. */
+  export type RejoinResult = {
+    call: CommonCallSummary;
+    operation: "REJOIN";
+    participantId: Uuid;
+    sessionId: Uuid;
+    rejoined: boolean;
+  };
   /** Body of PATCH /v1/enterprise/ivr-flows/{ivr_flow_id}. */
   export type RenameIvrFlowRequest = {
     /** The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing. */
@@ -1374,6 +1412,13 @@ export namespace Calling {
   };
   /** Where public-network spend of enterprise calls is accounted: the application's Part E telecom spend limits (one spend authority, referenced — never duplicated). */
   export type SpendPolicy = "APPLICATION_TELECOM_LIMITS";
+  /** Body of POST /v1/calls/{call_id}/host (1.8.0): the current host hands the host role to another active participant. */
+  export type TransferHostRequest = {
+    /** The current host. */
+    actingParticipantId: Uuid;
+    /** The new host (an active participant). */
+    hostParticipantId: Uuid;
+  };
   /** Body of POST /v1/calls/{call_id}/transfer (Idempotency-Key required): the participant who hands its place over, and the principal who takes it. The same Call continues; no second Call is created. Part F: exactly one target — a principal, an enterprise extension or a typed enterprise destination; an enterprise Call's policy must permit transfers (else 403). */
   export type TransferRequest = ({
     transferringParticipantId: Uuid;
@@ -1991,6 +2036,11 @@ export namespace Calling {
       params: { path: { webhook_id: string } };
       response: Webhook;
     };
+    /** DELETE /v1/calls/{call_id}/history — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    hideCallFromHistory: {
+      params: { path: { call_id: string }; query: { principalId: Uuid } };
+      response: void;
+    };
     /** POST /v1/calls/{call_id}/hold — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     holdCall: {
       params: { path: { call_id: string }; body: CommandRequest; idempotencyKey?: string };
@@ -2165,6 +2215,11 @@ export namespace Calling {
       params: { body: SignalingCredentialRequest };
       response: SignalingCredential;
     };
+    /** POST /v1/calls/{call_id}/participants/{participant_id}/mute — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    muteCallParticipant: {
+      params: { path: { call_id: string; participant_id: string }; body: MuteParticipantRequest };
+      response: HostControlResult;
+    };
     /** POST /v1/enterprise/ivr-flows/{ivr_flow_id}/versions — scope enterprise.config.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     publishIvrVersion: {
       params: { path: { ivr_flow_id: string }; body: PublishIvrVersionRequest };
@@ -2196,10 +2251,20 @@ export namespace Calling {
       params: { body: RegisterEndpointRequest };
       response: Endpoint;
     };
+    /** POST /v1/calls/{call_id}/participants/{participant_id}/rejoin — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    rejoinCall: {
+      params: { path: { call_id: string; participant_id: string }; body: RejoinRequest };
+      response: RejoinResult;
+    };
     /** DELETE /v1/blocks/{block_id} — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     releaseBlock: {
       params: { path: { block_id: string } };
       response: { [key: string]: unknown };
+    };
+    /** POST /v1/calls/{call_id}/participants/{participant_id}/remove — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    removeCallParticipant: {
+      params: { path: { call_id: string; participant_id: string }; body: HostActionRequest };
+      response: HostControlResult;
     };
     /** POST /v1/calls/{call_id}/sessions/{session_id}/remove — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     removeCallSession: {
@@ -2285,6 +2350,11 @@ export namespace Calling {
     transferCall: {
       params: { path: { call_id: string }; body: TransferRequest; idempotencyKey?: string };
       response: TransferResult;
+    };
+    /** POST /v1/calls/{call_id}/host — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    transferCallHost: {
+      params: { path: { call_id: string }; body: TransferHostRequest };
+      response: HostControlResult;
     };
     /** PATCH /v1/enterprise/departments/{department_id} — scope enterprise.config.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     updateDepartment: {

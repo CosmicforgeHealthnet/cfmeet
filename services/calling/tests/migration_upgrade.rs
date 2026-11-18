@@ -25,7 +25,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use axum::http::{Method, StatusCode};
 use calling::platform::scopes::names;
-use calling_migration::{MigratorTrait, MIGRATION_TABLE};
+use calling_migration::{
+    GapClosureMigrator, Migrator, MigratorTrait, GAP_CLOSURE_MIGRATION_TABLE, MIGRATION_TABLE,
+};
 use common::{
     deployment::{Deployment, Receiver},
     telephony::leg_event,
@@ -215,7 +217,7 @@ async fn fingerprint(
 ) -> BTreeMap<String, (i64, String)> {
     let mut out = BTreeMap::new();
     for (table, columns) in cols {
-        if table == MIGRATION_TABLE {
+        if table == MIGRATION_TABLE || table == GAP_CLOSURE_MIGRATION_TABLE {
             continue;
         }
         let row = columns
@@ -265,7 +267,7 @@ async fn copy_rows(donor: &DatabaseConnection, target: &DatabaseConnection) -> u
         .await
         .unwrap();
     for table in tables(target).await {
-        if table == MIGRATION_TABLE {
+        if table == MIGRATION_TABLE || table == GAP_CLOSURE_MIGRATION_TABLE {
             continue;
         }
         let rows = strings(donor, &donor_rows(&table)).await.pop().unwrap();
@@ -435,6 +437,88 @@ async fn seed(d: &Deployment) {
     )
     .await
     .unwrap();
+    // Retention: an operator hold on the Call and a retention audit row (the vocabularies
+    // the gap-closure history widens).
+    use calling::retention::{audit, holds, DataClass, RetentionAction, RetentionOutcome};
+    holds::operator_place(
+        h.conn(),
+        &calling::platform::operator::OperatorContext::new("ops.upgrade-cert").unwrap(),
+        holds::HoldScope {
+            data_class: Some(DataClass::CallRecord),
+            resource_id: Some(call),
+            owner: Some(holds::HoldOwner {
+                tenant_id: s.tenant_id().as_uuid(),
+                application_id: s.application_id().as_uuid(),
+                environment_id: s.environment_id().as_uuid(),
+            }),
+        },
+        holds::HoldReason::Dispute,
+        chrono::Utc::now(),
+    )
+    .await
+    .unwrap();
+    audit::record(
+        h.conn(),
+        &audit::RetentionAuditEntry::batch(
+            DataClass::CallRecord,
+            RetentionAction::Minimize,
+            "CALLING_RETENTION_CALL_DISPLAY_DAYS=365".to_string(),
+            1,
+            RetentionOutcome::SkippedHold,
+        ),
+        chrono::Utc::now(),
+    )
+    .await
+    .unwrap();
+}
+
+/// The newest migration lives in the gap-closure history when it has any (applied after
+/// the main history), else in the main history.
+fn gap_closure_newest() -> bool {
+    !GapClosureMigrator::migrations().is_empty()
+}
+
+/// Every migration but the newest.
+async fn up_previous(conn: &DatabaseConnection) {
+    if gap_closure_newest() {
+        let g = GapClosureMigrator::migrations().len();
+        Migrator::up(conn, None).await.unwrap();
+        GapClosureMigrator::up(conn, Some((g - 1) as u32))
+            .await
+            .unwrap();
+    } else {
+        let n = Migrator::migrations().len();
+        Migrator::up(conn, Some((n - 1) as u32)).await.unwrap();
+    }
+}
+
+async fn up_head(conn: &DatabaseConnection) {
+    calling_migration::up_all(conn).await.unwrap();
+}
+
+async fn down_one(conn: &DatabaseConnection) {
+    if gap_closure_newest() {
+        GapClosureMigrator::down(conn, Some(1)).await.unwrap();
+    } else {
+        Migrator::down(conn, Some(1)).await.unwrap();
+    }
+}
+
+async fn pending(conn: &DatabaseConnection) -> Vec<String> {
+    let mut out: Vec<String> = Migrator::get_pending_migrations(conn)
+        .await
+        .unwrap()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    out.extend(
+        GapClosureMigrator::get_pending_migrations(conn)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.name().to_string()),
+    );
+    out
 }
 
 #[tokio::test]
@@ -446,28 +530,24 @@ async fn the_newest_migration_upgrades_seeded_data_and_rolls_back_one_step() {
     let donor = d.h().conn();
     let head_schema = schema(donor).await;
 
-    let all: Vec<String> = <calling_migration::Migrator as MigratorTrait>::migrations()
-        .iter()
-        .map(|m| m.name().to_string())
-        .collect();
+    let all: Vec<String> = if gap_closure_newest() {
+        <GapClosureMigrator as MigratorTrait>::migrations()
+    } else {
+        <Migrator as MigratorTrait>::migrations()
+    }
+    .iter()
+    .map(|m| m.name().to_string())
+    .collect();
     let n = all.len();
-    assert!(n >= 2);
+    assert!(n >= 1);
     let newest = all[n - 1].clone();
-    println!("previous head: {}, newest: {newest}", all[n - 2]);
+    println!("newest: {newest}");
 
     let target = TestDb::empty().await.unwrap();
     let conn = &target.conn;
-    calling_migration::Migrator::up(conn, Some((n - 1) as u32))
-        .await
-        .unwrap();
-    let pending: Vec<String> = calling_migration::Migrator::get_pending_migrations(conn)
-        .await
-        .unwrap()
-        .iter()
-        .map(|m| m.name().to_string())
-        .collect();
+    up_previous(conn).await;
     assert_eq!(
-        pending,
+        pending(conn).await,
         vec![newest.clone()],
         "exactly the newest is pending"
     );
@@ -501,11 +581,8 @@ async fn the_newest_migration_upgrades_seeded_data_and_rolls_back_one_step() {
     );
 
     // Upgrade to head over the data.
-    calling_migration::Migrator::up(conn, None).await.unwrap();
-    assert!(calling_migration::Migrator::get_pending_migrations(conn)
-        .await
-        .unwrap()
-        .is_empty());
+    up_head(conn).await;
+    assert!(pending(conn).await.is_empty());
     let upgraded = schema(conn).await;
     assert_eq!(
         added(&head_schema, &upgraded),
@@ -547,18 +624,8 @@ async fn the_newest_migration_upgrades_seeded_data_and_rolls_back_one_step() {
     }
 
     // One step down: N-1 again, data intact.
-    calling_migration::Migrator::down(conn, Some(1))
-        .await
-        .unwrap();
-    assert_eq!(
-        calling_migration::Migrator::get_pending_migrations(conn)
-            .await
-            .unwrap()
-            .iter()
-            .map(|m| m.name().to_string())
-            .collect::<Vec<_>>(),
-        vec![newest.clone()]
-    );
+    down_one(conn).await;
+    assert_eq!(pending(conn).await, vec![newest.clone()]);
     let down_schema = schema(conn).await;
     // A rollback may only RELAX validation of a restored constraint (append-only audit
     // rows written under the newer vocabulary must not make the rollback fail — documented
@@ -592,7 +659,7 @@ async fn the_newest_migration_upgrades_seeded_data_and_rolls_back_one_step() {
     );
 
     // And up again.
-    calling_migration::Migrator::up(conn, None).await.unwrap();
+    up_head(conn).await;
     let again = schema(conn).await;
     assert_eq!(added(&head_schema, &again), vec![]);
     assert_eq!(added(&again, &head_schema), vec![]);

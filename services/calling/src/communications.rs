@@ -52,7 +52,7 @@ impl AppCallService {
             .db()
             .query_one(Statement::from_sql_and_values(
                 DbBackend::Postgres,
-                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1",
+                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1 AND entry_extension_id IS NOT NULL",
                 [call.id.into()],
             ))
             .await?
@@ -118,7 +118,7 @@ impl AppCallService {
             .db()
             .query_one(Statement::from_sql_and_values(
                 DbBackend::Postgres,
-                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1",
+                "SELECT 1 FROM enterprise_call_contexts WHERE call_id=$1 AND entry_extension_id IS NOT NULL",
                 [call.id.into()],
             ))
             .await?;

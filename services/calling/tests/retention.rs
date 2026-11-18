@@ -1325,3 +1325,134 @@ async fn enterprise_entry_labels_are_minimized_to_the_extension_code() {
     assert_eq!(tick_one_day_display(&e.a).await.calls_minimized, 0);
     assert_eq!(label(&e).await, ["1002"]);
 }
+
+// ---------------------------------------------------------------------------------------
+// Call history: per-user hide and the retention purge (CALL_HISTORY)
+// ---------------------------------------------------------------------------------------
+
+fn listed(list: &Value, call: Uuid) -> bool {
+    list["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["callId"] == call.to_string())
+}
+
+async fn hide(a: &AppWorld, call: Uuid, query: &str) -> common::TestResponse {
+    a.h()
+        .request_with(
+            axum::http::Method::DELETE,
+            &format!("/v1/calls/{call}/history{query}"),
+            Some(a.secret()),
+            None,
+            &[],
+        )
+        .await
+}
+
+#[tokio::test]
+async fn a_user_hides_a_finished_call_from_their_own_history_only() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let ended = named_call(&a, "Hidden Caller", true).await;
+    let live = named_call(&a, "Live Caller", false).await;
+    let caller = a.w.initiator.id().as_uuid();
+    let callee = a.w.recipient.id().as_uuid();
+    assert!(listed(&app_history(&a, caller).await, ended));
+
+    let r = hide(&a, ended, &format!("?principalId={caller}")).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{}", r.text);
+    assert!(!listed(&app_history(&a, caller).await, ended));
+    // The other participant's history, the Call itself and its evidence are untouched.
+    assert!(listed(&app_history(&a, callee).await, ended));
+    assert_eq!(a.call_view(ended).await["state"], "ENDED");
+    // Idempotent.
+    let r = hide(&a, ended, &format!("?principalId={caller}")).await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT, "{}", r.text);
+    // A live call cannot be hidden; a non-participant learns nothing; the query is strict.
+    let r = hide(&a, live, &format!("?principalId={caller}")).await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    let stranger = Uuid::new_v4();
+    let r = hide(&a, ended, &format!("?principalId={stranger}")).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    assert_eq!(hide(&a, ended, "").await.status, StatusCode::BAD_REQUEST);
+    let r = hide(&a, ended, &format!("?principalId={caller}&x=1")).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    // The marker can never be cleared.
+    assert!(conn(&a)
+        .execute_unprepared(&format!(
+            "UPDATE call_participants SET history_hidden_at = NULL, history_hidden_reason = NULL \
+             WHERE call_id = '{ended}'"
+        ))
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn finished_calls_leave_every_history_after_the_retention_bound() {
+    let Some(a) = AppWorld::new().await else {
+        return;
+    };
+    let purged = named_call(&a, "Old Caller", true).await;
+    let held = named_call(&a, "Held Caller", true).await;
+    let live = named_call(&a, "Live Caller", false).await;
+    let caller = a.w.initiator.id().as_uuid();
+    let callee = a.w.recipient.id().as_uuid();
+    let before = evidence(&a).await;
+    holds::operator_place(
+        conn(&a),
+        &op(),
+        HoldScope {
+            data_class: Some(DataClass::CallHistory),
+            resource_id: Some(held),
+            owner: Some(owner(&a)),
+        },
+        HoldReason::Dispute,
+        now(&a),
+    )
+    .await
+    .unwrap();
+    let worker = |a: &AppWorld| {
+        let settings = RetentionSettings::from_lookup(&|k: &str| {
+            (k == "CALLING_RETENTION_CALL_HISTORY_DAYS").then(|| "1".to_string())
+        })
+        .unwrap();
+        RetentionWorker::new(
+            a.h().conn().clone(),
+            Arc::new(a.h().clock.clone()),
+            settings,
+        )
+    };
+    // Not before the bound.
+    a.h().clock.advance(Duration::hours(23));
+    let r = worker(&a).retention_tick(500).await.unwrap();
+    assert_eq!(r.call_histories_purged, 0, "{r:?}");
+    assert!(listed(&app_history(&a, caller).await, purged));
+
+    a.h().clock.advance(Duration::hours(2));
+    let r = worker(&a).retention_tick(500).await.unwrap();
+    assert_eq!(r.call_histories_purged, 1, "{r:?}");
+    assert!(r.failed.is_empty(), "{r:?}");
+    for principal in [caller, callee] {
+        let list = app_history(&a, principal).await;
+        assert!(!listed(&list, purged), "{list}");
+        // A held Call and a live Call stay listed.
+        assert!(listed(&list, held));
+        assert!(listed(&list, live));
+    }
+    assert_eq!(audited(&a, "CALL_HISTORY", "MINIMIZED").await, 1);
+    // Nothing deleted: the Call and every evidence row stay.
+    assert_eq!(evidence(&a).await, before);
+    assert_eq!(a.call_view(purged).await["state"], "ENDED");
+    // Idempotent.
+    let r = worker(&a).retention_tick(500).await.unwrap();
+    assert_eq!(r.call_histories_purged, 0, "{r:?}");
+    // The generous default bound (400 days) is what production runs.
+    assert_eq!(
+        RetentionSettings::default()
+            .policy(DataClass::CallHistory)
+            .days(),
+        Some(400)
+    );
+}

@@ -1999,3 +1999,97 @@ async fn the_scopes_recordings_are_listed_filtered_paginated_and_audited() {
     conforms("RecordingAccessList", &audit.json);
     assert_eq!(audit.json["records"][0]["reason"], "LISTED");
 }
+
+/// A participant who joins while a recording runs (here: the target of a transfer) is
+/// given the notice at once; when the policy requires its consent it must grant it within
+/// the grace, or the recording stops (CONSENT_WITHDRAWN).
+#[tokio::test]
+async fn a_participant_who_joins_a_recorded_call_gets_the_notice_and_must_consent() {
+    use calling::signaling::RealtimeSignalBus;
+    let Some(rec) = Rec::new().await else {
+        return;
+    };
+    let e = &rec.e;
+    let caller = rec.desk("caller").await;
+    let callee = rec.desk("callee").await;
+    let third = rec.desk("third").await;
+    e.extension("4240", "ENTERPRISE_MEMBER", callee.principal.id())
+        .await;
+    rec.policy("MANUAL_ALLOWED", true, "ALL_PARTICIPANTS", 600)
+        .await;
+    for grants in [true, false] {
+        let call = rec.connected(&caller, "4240", &callee).await;
+        for d in [&caller, &callee] {
+            let r = rec.consent(call, d, "GRANTED").await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        }
+        let r = rec.start(call, Some(caller.principal.id().as_uuid())).await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+        let recording = recording_id(&r);
+        let mut third_signals = e.h().bus.subscribe(third.phone.endpoint);
+
+        // The callee hands its place to the third desk, which answers and connects.
+        let from =
+            e.a.participant_of(call, callee.principal.id().as_uuid())
+                .await;
+        let (_, v) = e.a.state(call).await;
+        let r =
+            e.a.transfer(call, from, &third.principal, v, &Uuid::new_v4().to_string())
+                .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        let inv =
+            e.a.invitation_for(call, third.phone.endpoint)
+                .await
+                .unwrap();
+        let (_, v) = e.a.state(call).await;
+        let r = e.a.accept(call, inv, &third.phone, v).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+        let session = e.a.session_on(call, third.phone.endpoint).await.unwrap();
+        e.a.connect(call, session).await;
+        let joined =
+            e.a.participant_of(call, third.principal.id().as_uuid())
+                .await;
+
+        // The notice reached the newcomer, which still has to consent.
+        let mut notices = Vec::new();
+        while let Some(signal) = third_signals.try_recv() {
+            if signal["type"] == "call.recording_started" {
+                notices.push(signal);
+            }
+        }
+        assert_eq!(notices.len(), 1, "{notices:?}");
+        let data = &notices[0]["data"];
+        assert_eq!(data["recordingId"], recording.to_string());
+        assert_eq!(data["participantId"], joined.to_string());
+        assert_eq!(data["lateJoin"], true);
+        assert_eq!(data["noticeRequired"], true);
+        assert_eq!(data["consentRequired"], true);
+
+        // Within the grace nothing changes.
+        e.h().clock.advance(chrono::Duration::seconds(30));
+        rec.tick().await;
+        assert_eq!(rec.recording_state(recording).await, "RECORDING::");
+        if grants {
+            let r = rec.consent(call, &third, "GRANTED").await;
+            assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+            e.h().clock.advance(chrono::Duration::seconds(31));
+            rec.tick().await;
+            assert_eq!(rec.recording_state(recording).await, "RECORDING::");
+            // A later withdrawal by the newcomer stops it like any participant's.
+            rec.consent(call, &third, "DECLINED").await;
+            assert_eq!(
+                rec.recording_state(recording).await,
+                "STOPPING:CONSENT_WITHDRAWN:"
+            );
+        } else {
+            e.h().clock.advance(chrono::Duration::seconds(31));
+            rec.tick().await;
+            assert_eq!(
+                rec.recording_state(recording).await,
+                "STOPPING:CONSENT_WITHDRAWN:"
+            );
+        }
+        let (_, v) = e.a.state(call).await;
+        e.a.command(call, "end", v).await;
+    }
+}
