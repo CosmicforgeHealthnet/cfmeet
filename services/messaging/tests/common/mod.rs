@@ -367,8 +367,11 @@ fn communications_key() -> &'static ServiceSigningKey {
     KEY.get_or_init(|| key("communications-test-1"))
 }
 
-pub const MEETING_PERMISSIONS: &[&str] =
-    &["messaging-application.delegate", "messaging-meeting.sync"];
+pub const MEETING_PERMISSIONS: &[&str] = &[
+    "messaging-application.delegate",
+    "messaging-meeting.sync",
+    "messaging-organization.govern",
+];
 
 fn peer_keys() -> &'static (ServiceSigningKey, ServiceSigningKey, ServiceSigningKey) {
     static KEYS: std::sync::OnceLock<(ServiceSigningKey, ServiceSigningKey, ServiceSigningKey)> =

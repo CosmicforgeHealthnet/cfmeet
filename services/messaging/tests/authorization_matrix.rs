@@ -205,6 +205,9 @@ struct Fx {
     bridge: String,
     /// The conversation the fixture bridge belongs to.
     sms_conv: String,
+    /// S12: an open invite link of `conv` and its token.
+    invite_link: String,
+    invite_token: String,
     /// A second TELEPHONE_ENDPOINT party (not yet bridged).
     party2: Uuid,
     policy_version: i64,
@@ -370,6 +373,17 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let r = h.send_managed(&a, &conv_v, owner.principal, &canary).await;
     ok(&r, "owner message");
     let msg = s(&r.json, "messageId");
+    let r = h
+        .post(
+            &a,
+            Some(owner.principal),
+            &format!("/v1/conversations/{conv}/invite-links"),
+            json!({}),
+        )
+        .await;
+    ok(&r, "invite link");
+    let invite_link = s(&r.json, "inviteLinkId");
+    let invite_token = s(&r.json, "token");
     let invitee = h.principal(&a);
     let r = h
         .post(
@@ -731,6 +745,8 @@ async fn fixture(h: &Harness, store: &MemoryObjectStore) -> Fx {
     let backup_create_body = json!({ "deviceId": owner_device, "size": create_bytes.len(),
         "sha256": sha256_hex(&create_bytes), "format": cf_messaging_crypto::backup::BACKUP_FORMAT_V1 });
     Fx {
+        invite_link,
+        invite_token,
         invitee,
         backup_create_body,
         backup_ready,
@@ -991,6 +1007,19 @@ fn ops() -> Vec<Op> {
         Op { method: M::DELETE, template: "/v1/conversations/{conversationId}/bans/{principalId}", scopes: MANAGE, acting: AM, res: ADMIN,
              req: |f| r(format!("/v1/conversations/{}/bans/{}", f.conv, f.banned), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // S12: invite links (OWNER / ADMIN) and joining with a token (any principal of the environment).
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/invite-links", scopes: MANAGE, acting: AM, res: ADMIN,
+             req: |f| r(format!("/v1/conversations/{}/invite-links", f.conv), Some(f.owner.principal), Some(json!({ "maxUses": 5 }))),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::GET, template: "/v1/conversations/{conversationId}/invite-links", scopes: MANAGE, acting: AM, res: ADMIN,
+             req: |f| r(format!("/v1/conversations/{}/invite-links", f.conv), Some(f.owner.principal), None),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke", scopes: MANAGE, acting: AM, res: ADMIN,
+             req: |f| r(format!("/v1/conversations/{}/invite-links/{}/revoke", f.conv, f.invite_link), Some(f.owner.principal), Some(json!({}))),
+             ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        Op { method: M::POST, template: "/v1/messaging/invite-links/join", scopes: SEND, acting: AM, res: Res::Env,
+             req: |f| r("/v1/messaging/invite-links/join".into(), Some(f.newbie), Some(json!({ "token": f.invite_token }))),
+             ok: 201, skip: NO_SKIP, expect: &[(Case::CrossTenantIds, 404, "NOT_FOUND")] },
         // Gap audit S3: only the owner hands the conversation over.
         Op { method: M::POST, template: "/v1/conversations/{conversationId}/owner", scopes: MANAGE, acting: AM, res: ADMIN,
              req: |f| r(format!("/v1/conversations/{}/owner", f.conv), Some(f.owner.principal),
@@ -1014,6 +1043,11 @@ fn ops() -> Vec<Op> {
         Op { method: M::GET, template: "/v1/conversations/{conversationId}/messages/{messageId}/revisions", scopes: READ, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}/revisions", f.conv, f.msg), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
+        // S11: forwarding (source checks first; the target is the fixture's second MANAGED group).
+        Op { method: M::POST, template: "/v1/conversations/{conversationId}/messages/{messageId}/forward", scopes: SEND, acting: AM, res: CONV,
+             req: |f| r(format!("/v1/conversations/{}/messages/{}/forward", f.conv, f.msg), Some(f.owner.principal),
+                        Some(json!({ "targetConversationId": f.sms_conv, "clientMessageId": Uuid::new_v4() }))),
+             ok: 201, skip: NO_SKIP, expect: NO_EXPECT },
         Op { method: M::DELETE, template: "/v1/conversations/{conversationId}/messages/{messageId}", scopes: SEND, acting: AM, res: CONV,
              req: |f| r(format!("/v1/conversations/{}/messages/{}", f.conv, f.msg), Some(f.owner.principal), None),
              ok: 200, skip: NO_SKIP, expect: NO_EXPECT },
@@ -1702,6 +1736,7 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
     let cid = Uuid::new_v4();
     let pid = Uuid::new_v4();
     let mid = Uuid::new_v4();
+    let rid = Uuid::new_v4();
     // (method, path, the one peer allowed, a well-formed body)
     let table: Vec<(Method, String, &str, Value)> = vec![
         (
@@ -1746,6 +1781,37 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             "sms_gateway",
             json!({ "bridgeRef": Uuid::new_v4(), "smsMessageId": Uuid::new_v4(), "text": "x", "segmentCount": 1, "receivedAt": "2026-01-01T00:00:00Z" }),
         ),
+        // Gap audit G6 / G7: organization governance (messaging-organization.govern).
+        (
+            Method::GET,
+            "/internal/v1/organization-moderation/v1/messaging/reports".into(),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/organization-moderation/v1/messaging/reports/{rid}"),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/organization-moderation/v1/messaging/moderation/actions".into(),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/organization-moderation/v1/messaging/moderation/actions".into(),
+            "meeting",
+            json!({ "kind": "RESTRICT_PRINCIPAL", "principalId": pid, "reason": "MATRIX", "durationSeconds": 600 }),
+        ),
+        (
+            Method::PUT,
+            "/internal/v1/team-channels".into(),
+            "meeting",
+            json!({ "teamRef": "organization:matrix:team:matrix", "ownerPrincipalId": owner, "memberPrincipalIds": [], "sourceVersion": 1 }),
+        ),
     ];
     // Coverage: every internal operation of the contract is in the table.
     let mut published = BTreeSet::new();
@@ -1762,7 +1828,8 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             let t = p
                 .replace(&cid.to_string(), "{conversationId}")
                 .replace(&pid.to_string(), "{principalId}")
-                .replace(&mid.to_string(), "{messageId}");
+                .replace(&mid.to_string(), "{messageId}")
+                .replace(&rid.to_string(), "{reportId}");
             (m.to_string(), t)
         })
         .collect();

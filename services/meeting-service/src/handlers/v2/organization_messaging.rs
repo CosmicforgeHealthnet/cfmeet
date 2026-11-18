@@ -357,3 +357,155 @@ pub async fn messaging_resolve_members(
         .await?;
     Ok(respond(200, value))
 }
+
+async fn moderation_operation(
+    state: AppState,
+    actor: ActorContext,
+    method: Method,
+    (id, path): (String, String),
+    query: Option<String>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    actor.require_registered()?;
+    let core = &state.meeting.core;
+    let (Some(relay), Some(authority)) = (
+        core.organization_calling.as_ref(),
+        organization_policy::authoritative(core),
+    ) else {
+        return Err(disabled());
+    };
+    let organization = organization_id(&id)?;
+    let body = if body.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::from_slice::<Value>(&body)
+                .ok()
+                .filter(Value::is_object)
+                .ok_or_else(|| {
+                    ApiError::domain(ErrorCode::ValidationError, "The body must be a JSON object")
+                })?,
+        )
+    };
+    let (status, value) = relay
+        .messaging_moderation(
+            &state.db,
+            authority,
+            &actor,
+            organization,
+            method,
+            &path,
+            parse_query(query)?,
+            body,
+        )
+        .await?;
+    Ok(respond(status, value))
+}
+
+/// Organization moderation read (gap audit G6): `reports`, `reports/{reportId}` or
+/// `moderation/actions`.
+///
+/// Lists the reported content of the organization's conversations (the moderation queue,
+/// `status` / `limit`), reads one report with its evidence (audited with the caller as
+/// the viewer) or lists the organization's moderation actions (`limit`). The caller must be
+/// an active member of an active organization whose policy allows Messaging and whose
+/// organization grants `messaging.organization.moderate` (OWNER / ADMIN by default); the
+/// Organizations Service decides this on every request. Only the organization's own
+/// Messaging scope is visible. Messaging's status and JSON body are returned.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/messaging/moderation/{path}", tag = "Organizations (v2)", operation_id = "v2_organization_messaging_moderation_get",
+    params(("id" = String, Path, description = "Organization id"), ("path" = String, Path, description = "reports, reports/{reportId} or moderation/actions")),
+    responses((status = 200, description = "Messaging contract answer (ReportList, ReportDetail or ModerationActionList)", body = Object), (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED", body = ErrorEnvelope), (status = 404, description = "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND / FEATURE_DISABLED / NOT_FOUND", body = ErrorEnvelope), (status = 409, description = "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED", body = ErrorEnvelope), (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn moderation_get(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    Path(p): Path<(String, String)>,
+    RawQuery(query): RawQuery,
+) -> ApiResult<Response> {
+    moderation_operation(state, actor, Method::GET, p, query, Bytes::new()).await
+}
+
+/// Organization moderation action (gap audit G6): `moderation/actions`.
+///
+/// Removes a message, mutes / unmutes or removes a member, restricts / un-restricts a
+/// principal or dismisses a report in the organization's conversations. Each action is
+/// recorded append-only with the caller's organization principal as the moderator and
+/// audited. Requires active membership, an active organization, `features.messaging` and
+/// `messaging.organization.moderate`. Messaging's status and JSON body are returned.
+#[utoipa::path(
+    post, path = "/api/v2/organizations/{id}/messaging/moderation/{path}", tag = "Organizations (v2)", operation_id = "v2_organization_messaging_moderation_post",
+    params(("id" = String, Path, description = "Organization id"), ("path" = String, Path, description = "moderation/actions")),
+    request_body = Object,
+    responses((status = 201, description = "ModerationAction (Messaging contract)", body = Object), (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED", body = ErrorEnvelope), (status = 404, description = "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND / FEATURE_DISABLED / NOT_FOUND", body = ErrorEnvelope), (status = 409, description = "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED", body = ErrorEnvelope), (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn moderation_post(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    Path(p): Path<(String, String)>,
+    RawQuery(query): RawQuery,
+    body: Bytes,
+) -> ApiResult<Response> {
+    moderation_operation(state, actor, Method::POST, p, query, body).await
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TeamChannelRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// Create or resync a team's Messaging channel (gap audit G7).
+///
+/// Creates the organization team's MANAGED group conversation in the organization's own
+/// Messaging scope (201; the caller owns it) or resynchronizes its membership (200) from
+/// the team's current ACTIVE members, read from the Organizations Service. Members that
+/// joined by the team and left it are removed; the owner and members added another way
+/// are kept. The team is not followed automatically: Organizations does not deliver team
+/// membership events, so call this again after team changes. Requires active membership,
+/// an active organization, `features.messaging` and `organization.teams.manage`. Optional
+/// body `{title}` names a newly created channel.
+#[utoipa::path(
+    put, path = "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel", tag = "Organizations (v2)", operation_id = "v2_organization_team_messaging_channel",
+    params(("id" = String, Path, description = "Organization id"), ("teamId" = Uuid, Path, description = "Team id")),
+    request_body = Object,
+    responses((status = 200, description = "Resynchronized (TeamChannelSyncResult, Messaging contract)", body = Object), (status = 201, description = "Created (TeamChannelSyncResult)", body = Object), (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope), (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope), (status = 403, description = "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED", body = ErrorEnvelope), (status = 404, description = "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope), (status = 409, description = "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED", body = ErrorEnvelope), (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope)),
+    security(("bearer_auth" = []))
+)]
+pub async fn team_channel(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    Path((id, team)): Path<(String, Uuid)>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    actor.require_registered()?;
+    let core = &state.meeting.core;
+    let (Some(relay), Some(authority)) = (
+        core.organization_calling.as_ref(),
+        organization_policy::authoritative(core),
+    ) else {
+        return Err(disabled());
+    };
+    let organization = organization_id(&id)?;
+    let request: TeamChannelRequest = if body.is_empty() {
+        TeamChannelRequest::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| {
+            ApiError::domain(ErrorCode::ValidationError, "The body may name only title")
+        })?
+    };
+    let (status, value) = relay
+        .messaging_team_channel(
+            &state.db,
+            authority,
+            &actor,
+            organization,
+            team,
+            request.title,
+        )
+        .await?;
+    Ok(respond(status, value))
+}

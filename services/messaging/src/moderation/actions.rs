@@ -60,6 +60,7 @@ struct ActionRow {
     reason: String,
     effective_until: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
+    moderator_principal_id: Option<Uuid>,
 }
 
 fn view(a: &ActionRow) -> Value {
@@ -73,6 +74,7 @@ fn view(a: &ActionRow) -> Value {
         "reason": a.reason,
         "effectiveUntil": a.effective_until.map(rfc3339),
         "createdAt": rfc3339(a.created_at),
+        "moderatorPrincipalId": a.moderator_principal_id,
     })
 }
 
@@ -80,11 +82,14 @@ fn require<T>(v: Option<T>, field: &str) -> Result<T> {
     v.ok_or_else(|| Error::validation(format!("{field} is required for this kind")))
 }
 
-/// `POST /v1/messaging/moderation/actions`.
+/// `POST /v1/messaging/moderation/actions`. `moderator`: the organization moderator a
+/// relayed organization request acts for (gap audit G6), recorded on the action, its
+/// event and its audit entry; `None` for an application moderator credential.
 pub async fn apply(
     state: &AppState,
     ctx: &TrustedContext,
     request: ActionRequest,
+    moderator: Option<Uuid>,
 ) -> Result<Value> {
     crate::operations::require_open(
         &state.db,
@@ -221,8 +226,9 @@ pub async fn apply(
                 db::exec(
                     txn,
                     "INSERT INTO messaging_moderation_actions (id, tenant_id, application_id, environment_id, kind, conversation_id, \
-                       message_id, principal_id, report_id, reason, effective_until, credential_id, created_at) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+                       message_id, principal_id, report_id, reason, effective_until, credential_id, created_at, \
+                       moderator_principal_id) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
                     vec![
                         id.into(),
                         ctx2.scope.tenant_id.into(),
@@ -237,6 +243,7 @@ pub async fn apply(
                         until.into(),
                         ctx2.credential_id.into(),
                         now.into(),
+                        moderator.into(),
                     ],
                 )
                 .await?;
@@ -255,12 +262,13 @@ pub async fn apply(
                     txn,
                     AuditEntry {
                         ctx: &ctx2,
-                        principal_id: None,
+                        principal_id: moderator,
                         action: "MODERATION_ACTION",
                         target_kind: "MODERATION_ACTION",
                         target_id: id,
                         detail: json!({ "kind": req.kind, "reason": req.reason, "conversation_id": req.conversation_id,
-                                        "message_id": req.message_id, "principal_id": req.principal_id, "report_id": req.report_id }),
+                                        "message_id": req.message_id, "principal_id": req.principal_id, "report_id": req.report_id,
+                                        "organization_moderator_principal_id": moderator }),
                     },
                     &rctx,
                     now,
@@ -276,6 +284,7 @@ pub async fn apply(
                     reason: req.reason,
                     effective_until: until,
                     created_at: now,
+                    moderator_principal_id: moderator,
                 })
             })
         })
@@ -300,7 +309,8 @@ pub async fn list(state: &AppState, ctx: &TrustedContext, q: ListQuery) -> Resul
     }
     let rows: Vec<ActionRow> = db::all(
         &state.db,
-        "SELECT id, kind, conversation_id, message_id, principal_id, report_id, reason, effective_until, created_at \
+        "SELECT id, kind, conversation_id, message_id, principal_id, report_id, reason, effective_until, created_at, \
+                moderator_principal_id \
            FROM messaging_moderation_actions WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 \
           ORDER BY created_at DESC, id LIMIT $4",
         vec![ctx.scope.tenant_id.into(), ctx.scope.application_id.into(), ctx.scope.environment_id.into(), limit.into()],

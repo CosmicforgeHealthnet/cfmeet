@@ -20021,6 +20021,228 @@
         ]
       }
     },
+    "/api/v2/organizations/{id}/messaging/moderation/{path}": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization moderation read (gap audit G6): `reports`, `reports/{reportId}` or",
+        "description": "`moderation/actions`.\n\nLists the reported content of the organization's conversations (the moderation queue,\n`status` / `limit`), reads one report with its evidence (audited with the caller as\nthe viewer) or lists the organization's moderation actions (`limit`). The caller must be\nan active member of an active organization whose policy allows Messaging and whose\norganization grants `messaging.organization.moderate` (OWNER / ADMIN by default); the\nOrganizations Service decides this on every request. Only the organization's own\nMessaging scope is visible. Messaging's status and JSON body are returned.",
+        "operationId": "v2_organization_messaging_moderation_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "reports, reports/{reportId} or moderation/actions",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messaging contract answer (ReportList, ReportDetail or ModerationActionList)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND / FEATURE_DISABLED / NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization moderation action (gap audit G6): `moderation/actions`.",
+        "description": "Removes a message, mutes / unmutes or removes a member, restricts / un-restricts a\nprincipal or dismisses a report in the organization's conversations. Each action is\nrecorded append-only with the caller's organization principal as the moderator and\naudited. Requires active membership, an active organization, `features.messaging` and\n`messaging.organization.moderate`. Messaging's status and JSON body are returned.",
+        "operationId": "v2_organization_messaging_moderation_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "moderation/actions",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "ModerationAction (Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / ENDPOINT_NOT_FOUND / FEATURE_DISABLED / NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations/{id}/messaging/relay/{path}": {
       "get": {
         "tags": [
@@ -22179,6 +22401,134 @@
           },
           "409": {
             "description": "VERSION_CONFLICT / TEAM_ARCHIVED / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel": {
+      "put": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Create or resync a team's Messaging channel (gap audit G7).",
+        "description": "Creates the organization team's MANAGED group conversation in the organization's own\nMessaging scope (201; the caller owns it) or resynchronizes its membership (200) from\nthe team's current ACTIVE members, read from the Organizations Service. Members that\njoined by the team and left it are removed; the owner and members added another way\nare kept. The team is not followed automatically: Organizations does not deliver team\nmembership events, so call this again after team changes. Requires active membership,\nan active organization, `features.messaging` and `organization.teams.manage`. Optional\nbody `{title}` names a newly created channel.",
+        "operationId": "v2_organization_team_messaging_channel",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "path",
+            "description": "Team id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Resynchronized (TeamChannelSyncResult, Messaging contract)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created (TeamChannelSyncResult)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ORGANIZATION_POLICY_RESTRICTED / PERMISSION_DENIED / MEMBERSHIP_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PROVISIONING_PENDING / ORGANIZATION_SUSPENDED",
             "content": {
               "application/json": {
                 "schema": {

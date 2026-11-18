@@ -1258,6 +1258,10 @@
         },
         "inbox": {
           "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ConversationInbox"
+        },
+        "announcementOnly": {
+          "type": "boolean",
+          "description": "S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows."
         }
       },
       "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
@@ -1395,6 +1399,10 @@
             }
           ],
           "description": "Section 13: a new avatar reference; null clears it (MANAGED only, owner)."
+        },
+        "announcementOnly": {
+          "type": "boolean",
+          "description": "S13 (owner): announcement-only on / off; GROUP and CHANNEL only."
         }
       },
       "description": "Optimistic concurrency on the aggregate version. EXPIRED is set by the server only. A security profile can never be changed (SECURITY_PROFILE_IMMUTABLE)."
@@ -1633,6 +1641,14 @@
             },
             "pins": {
               "type": "boolean"
+            },
+            "forwarding": {
+              "type": "boolean",
+              "description": "S11: server-side forwarding of MANAGED messages (default true)."
+            },
+            "forwardShowsOriginalSender": {
+              "type": "boolean",
+              "description": "S11: forwarded copies show their original sender (default false)."
             }
           }
         },
@@ -1837,6 +1853,14 @@
             },
             "pins": {
               "type": "boolean"
+            },
+            "forwarding": {
+              "type": "boolean",
+              "description": "S11: server-side forwarding of MANAGED messages (default true)."
+            },
+            "forwardShowsOriginalSender": {
+              "type": "boolean",
+              "description": "S11: forwarded copies show their original sender (default false)."
             }
           }
         },
@@ -2367,9 +2391,11 @@
           "enum": [
             "API",
             "INVITATION",
-            "MEETING"
+            "MEETING",
+            "INVITE_LINK",
+            "ORGANIZATION_TEAM"
           ],
-          "description": "How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration."
+          "description": "How the membership came to be: an administrator or the application backend (API), an accepted invitation, the meeting integration, an invite link (INVITE_LINK) or an organization team snapshot (ORGANIZATION_TEAM, G7)."
         },
         "invitedByPrincipalId": {
           "oneOf": [
@@ -2584,6 +2610,11 @@
             "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
           },
           "description": "Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
+        },
+        "frankingCommitment": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY)."
         }
       },
       "required": [
@@ -2727,6 +2758,18 @@
             },
             "environmentId": {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "frankingCommitment": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "S2: the sender's franking commitment (HMAC-SHA256, see SendMessageRequest.frankingCommitment)."
             }
           },
           "required": [
@@ -2819,6 +2862,21 @@
             }
           ],
           "description": "The root of the reply thread (the first message replied to)."
+        },
+        "forwarded": {
+          "type": "boolean",
+          "description": "S11: a server-side forward (the source conversation and message are never disclosed)."
+        },
+        "forwardedFromPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "S11: the original sender, only when the policy shows it (messages.forwardShowsOriginalSender)."
         }
       },
       "required": [
@@ -4447,6 +4505,11 @@
               "text": {
                 "type": "string",
                 "maxLength": 4000
+              },
+              "frankingKey": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{43}$",
+                "description": "S2: the message's franking key the reporter's device decrypted (unpadded base64url, 32 bytes); with it the disclosure is verified against the sender's commitment."
               }
             },
             "required": [
@@ -4454,7 +4517,7 @@
               "text"
             ]
           },
-          "description": "PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest; presented as unverifiable)."
+          "description": "PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest). Unverifiable unless the message was franked and the disclosure carries its frankingKey (S2)."
         }
       },
       "required": [
@@ -4795,8 +4858,21 @@
                   },
                   "verification": {
                     "enum": [
+                      "FRANKING_VERIFIED",
+                      "FRANKING_MISMATCH",
                       "REPORTER_ATTESTED_UNVERIFIABLE",
                       "NO_PLAINTEXT_AVAILABLE"
+                    ]
+                  },
+                  "frankingCommitment": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   }
                 },
@@ -4984,6 +5060,17 @@
         "createdAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "moderatorPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "G6: the organization moderator (their principal in the organization's scope) an organization moderation request was relayed for; null for an application moderator credential."
         }
       },
       "required": [
@@ -7686,6 +7773,342 @@
         "webPush",
         "payload"
       ]
+    },
+    "InviteLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "S12: a group join link (never its token).",
+      "properties": {
+        "inviteLinkId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "enum": [
+            "MEMBER",
+            "READ_ONLY"
+          ]
+        },
+        "maxUses": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "useCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdByPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "EXPIRED",
+            "EXHAUSTED",
+            "REVOKED"
+          ]
+        }
+      },
+      "required": [
+        "inviteLinkId",
+        "conversationId",
+        "role",
+        "maxUses",
+        "useCount",
+        "expiresAt",
+        "createdByPrincipalId",
+        "createdAt",
+        "revokedAt",
+        "status"
+      ]
+    },
+    "InviteLinkCreated": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "S12: a new join link with its token, returned only here (stored as SHA-256).",
+      "properties": {
+        "inviteLinkId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "conversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "role": {
+          "enum": [
+            "MEMBER",
+            "READ_ONLY"
+          ]
+        },
+        "maxUses": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "useCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdByPrincipalId": {
+          "oneOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "revokedAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ACTIVE",
+            "EXPIRED",
+            "EXHAUSTED",
+            "REVOKED"
+          ]
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^mil_[A-Za-z0-9_-]{43}$"
+        }
+      },
+      "required": [
+        "inviteLinkId",
+        "conversationId",
+        "role",
+        "maxUses",
+        "useCount",
+        "expiresAt",
+        "createdByPrincipalId",
+        "createdAt",
+        "revokedAt",
+        "status",
+        "token"
+      ]
+    },
+    "InviteLinkList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inviteLinks"
+      ],
+      "properties": {
+        "inviteLinks": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/$defs/InviteLink"
+          }
+        }
+      }
+    },
+    "CreateInviteLinkRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "expiresInSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 2592000,
+          "description": "Default 604800 (7 days)."
+        },
+        "maxUses": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "role": {
+          "enum": [
+            "MEMBER",
+            "READ_ONLY"
+          ]
+        }
+      }
+    },
+    "JoinInviteLinkRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "token"
+      ],
+      "properties": {
+        "token": {
+          "type": "string",
+          "maxLength": 80
+        }
+      }
+    },
+    "ForwardMessageRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetConversationId",
+        "clientMessageId"
+      ],
+      "properties": {
+        "targetConversationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "clientMessageId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        }
+      }
+    },
+    "TeamChannelSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "teamRef",
+        "ownerPrincipalId",
+        "memberPrincipalIds",
+        "sourceVersion"
+      ],
+      "description": "G7: an organization team's ACTIVE members (principals in the organization's scope).",
+      "properties": {
+        "teamRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:/-]{1,256}$",
+          "description": "Opaque team reference, e.g. organization:{id}:team:{id}."
+        },
+        "ownerPrincipalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "Channel owner when this snapshot creates it."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Display title when this snapshot creates the channel."
+        },
+        "memberPrincipalIds": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "sourceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "format": "int64",
+          "description": "Monotonic snapshot version; at or below the applied one changes nothing."
+        }
+      }
+    },
+    "TeamChannelSyncResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "applied"
+      ],
+      "properties": {
+        "applied": {
+          "type": "boolean"
+        },
+        "reason": {
+          "enum": [
+            "STALE_VERSION"
+          ]
+        },
+        "created": {
+          "type": "boolean"
+        },
+        "conversation": {
+          "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Conversation"
+        },
+        "added": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "removed": {
+          "type": "array",
+          "items": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "principalId",
+              "reason"
+            ],
+            "properties": {
+              "principalId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

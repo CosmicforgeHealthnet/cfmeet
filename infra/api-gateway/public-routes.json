@@ -3075,6 +3075,27 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/organizations/{id}/messaging/moderation/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/messaging/moderation/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/organizations/{id}/teams",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_ORGANIZATIONS"
@@ -3704,6 +3725,36 @@
       "domain": "messaging",
       "method": "GET",
       "path": "/v1/messaging/invitations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/messages/{messageId}/forward",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "GET",
+      "path": "/v1/conversations/{conversationId}/invite-links",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/invite-links",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/invite-links/join",
       "class": "PUBLIC_CUSTOMER"
     },
     {

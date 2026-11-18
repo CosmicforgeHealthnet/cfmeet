@@ -1046,6 +1046,192 @@ impl OrganizationCalling {
     }
 }
 
+/// Gap audit G6: the organization capability organization moderation needs (OWNER /
+/// ADMIN by default, decided by the Organizations Service).
+pub const MESSAGING_ORGANIZATION_MODERATE: &str = "messaging.organization.moderate";
+/// Gap audit G7: the organization capability that creates / resyncs team channels.
+pub const ORGANIZATION_TEAMS_MANAGE: &str = "organization.teams.manage";
+
+/// The organization moderation operations (paths under Messaging's `v1/messaging/`).
+fn moderation_route(method: &Method, path: &str) -> Option<&'static [&'static str]> {
+    const LIST: &[&str] = &["status", "limit"];
+    const LIMIT: &[&str] = &["limit"];
+    let segments: Vec<&str> = path.split('/').collect();
+    match (method, segments.as_slice()) {
+        (&Method::GET, ["reports"]) => Some(LIST),
+        (&Method::GET, ["reports", id]) if Uuid::try_parse(id).is_ok() => Some(&[]),
+        (&Method::GET, ["moderation", "actions"]) => Some(LIMIT),
+        (&Method::POST, ["moderation", "actions"]) => Some(&[]),
+        _ => None,
+    }
+}
+
+impl OrganizationCalling {
+    /// Gap audit G6: relays one organization moderation request (list reports, read a
+    /// report, list / apply moderation actions) into the organization's OWN Messaging
+    /// scope. Organizations decides, on every request, that the caller is an active member
+    /// of an active organization whose policy allows Messaging AND holds
+    /// `messaging.organization.moderate`. Messaging serves it with its ordinary moderation
+    /// handlers (one moderation path) and records the caller's organization principal as
+    /// the moderator on report views, actions and audit entries.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn messaging_moderation(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+        method: Method,
+        path: &str,
+        query: Vec<(String, String)>,
+        body: Option<Value>,
+    ) -> ApiResult<(u16, Value)> {
+        let Some(allowed) = moderation_route(&method, path) else {
+            return Err(ApiError::domain(
+                ErrorCode::EndpointNotFound,
+                "No such organization moderation operation",
+            ));
+        };
+        let mut seen = HashSet::new();
+        for (k, _) in &query {
+            if !allowed.contains(&k.as_str()) || !seen.insert(k.clone()) {
+                return Err(ApiError::domain(
+                    ErrorCode::ValidationError,
+                    "Unsupported or repeated query parameter",
+                ));
+            }
+        }
+        let user = actor.require_registered()?;
+        workspaces::require_organization_capability(
+            authority,
+            &ActingUser::of(user),
+            organization,
+            OrganizationFeature::Messaging,
+            Some(MESSAGING_ORGANIZATION_MODERATE),
+        )
+        .await?;
+        let (messaging, scope, binding, principal, _) = self
+            .messaging_scope(db, authority, actor, organization)
+            .await?;
+        let context = Self::scope_context(&scope, binding)
+            .with_initiating_principal(principal, DelegatedPrincipalKind::NativeCfUser);
+        let body = match method {
+            Method::GET => None,
+            _ => Some(body.unwrap_or_else(|| json!({}))),
+        };
+        let (status, value) = self
+            .exchange(
+                ServiceId::messaging(),
+                &messaging,
+                method,
+                &format!("/internal/v1/organization-moderation/v1/messaging/{path}"),
+                &query,
+                None,
+                body.as_ref(),
+                context,
+            )
+            .await
+            .map_err(|why| {
+                tracing::warn!(
+                    error = why,
+                    "Messaging unavailable for an organization moderation request"
+                );
+                messaging_unavailable()
+            })?;
+        match status {
+            // The trust bundle lacks messaging-organization.govern, or the binding is no
+            // longer valid: never shown as the caller's own authentication.
+            401 => {
+                tracing::error!(
+                    organization_id = %organization,
+                    "Messaging refused the organization moderation relay (trust bundle or binding)"
+                );
+                Err(messaging_unavailable())
+            }
+            s if s >= 500 => Err(messaging_unavailable()),
+            s => Ok((s, value)),
+        }
+    }
+
+    /// Gap audit G7: creates or resynchronizes the team channel of an organization team
+    /// from a snapshot of the team's ACTIVE members (read from Organizations for the
+    /// caller, who needs `organization.teams.manage`), each mapped to their principal in
+    /// the organization's Messaging scope. The caller owns a newly created channel.
+    /// Organizations does not deliver team membership events to the Meeting Service, so
+    /// the channel follows the team when this is called again (an explicit resync).
+    pub async fn messaging_team_channel(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+        team: Uuid,
+        title: Option<String>,
+    ) -> ApiResult<(u16, Value)> {
+        let user = actor.require_registered()?;
+        let acting = ActingUser::of(user);
+        workspaces::require_organization_capability(
+            authority,
+            &acting,
+            organization,
+            OrganizationFeature::Messaging,
+            Some(ORGANIZATION_TEAMS_MANAGE),
+        )
+        .await?;
+        let (messaging, scope, binding, owner, _) = self
+            .messaging_scope(db, authority, actor, organization)
+            .await?;
+        let users = authority
+            .team_member_users(organization, team, &acting)
+            .await
+            .map_err(|e| match e {
+                AuthorityError::Refused(reply) => relayed_error(&reply),
+                AuthorityError::Unavailable(_) => unavailable(),
+            })?;
+        let mut members = Vec::with_capacity(users.len());
+        let mut seen = HashSet::new();
+        for u in users.into_iter().filter(|u| seen.insert(*u)) {
+            members.push(self.principal_for(db, &scope, binding, u).await?);
+        }
+        let mut body = json!({
+            "teamRef": format!("organization:{organization}:team:{team}"),
+            "ownerPrincipalId": owner,
+            "memberPrincipalIds": members,
+            "sourceVersion": chrono::Utc::now().timestamp_millis(),
+        });
+        if let Some(t) = title {
+            body["title"] = json!(t);
+        }
+        let (status, value) = self
+            .exchange(
+                ServiceId::messaging(),
+                &messaging,
+                Method::PUT,
+                "/internal/v1/team-channels",
+                &[],
+                None,
+                Some(&body),
+                Self::scope_context(&scope, binding),
+            )
+            .await
+            .map_err(|why| {
+                tracing::warn!(error = why, "Messaging unavailable for a team channel");
+                messaging_unavailable()
+            })?;
+        match status {
+            401 => {
+                tracing::error!(
+                    organization_id = %organization,
+                    "Messaging refused the team channel sync (trust bundle or binding)"
+                );
+                Err(messaging_unavailable())
+            }
+            s if s >= 500 => Err(messaging_unavailable()),
+            s => Ok((s, value)),
+        }
+    }
+}
+
 fn messaging_unavailable() -> ApiError {
     ApiError::domain(
         ErrorCode::ServiceUnavailable,

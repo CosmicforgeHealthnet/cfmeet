@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.18.0",
+    "version": "1.19.0",
     "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read)."
   },
   "tags": [
@@ -884,7 +884,7 @@
           }
         ],
         "x-cfmeet-required-scope": "conversations.manage",
-        "description": "Scope conversations.manage. Server-authoritative lifecycle transitions (ACTIVE, LOCKED, CLOSED, ARCHIVED, DELETED; EXPIRED by the server only) and expiry, with optimistic concurrency (expectedVersion). Expiry is evaluated first. A security profile change is refused (SECURITY_PROFILE_IMMUTABLE).",
+        "description": "Scope conversations.manage. Server-authoritative lifecycle transitions (ACTIVE, LOCKED, CLOSED, ARCHIVED, DELETED; EXPIRED by the server only) and expiry, with optimistic concurrency (expectedVersion). Expiry is evaluated first. A security profile change is refused (SECURITY_PROFILE_IMMUTABLE). S13: announcementOnly (GROUP / CHANNEL) restricts sending, editing and forwarding to OWNER / ADMIN members.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -1522,7 +1522,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200). PRIVATE_E2EE application content must use MLS PrivateMessage wire format; public application frames are rejected with 422 CONTENT_REJECTED / APPLICATION_MUST_BE_PRIVATE. Public handshake commits remain supported. The server checks public framing and authenticated device authorization, not AEAD authenticity; receiving clients verify ciphertext before accepting content.",
+        "description": "Scope messages.send, acting member. Commits the message with the next canonical sequence and its durable event in one transaction (no realtime publish before commit). PRIVATE_E2EE: the PUBLIC MLS framing must name this group, an application message and the group's current epoch (EPOCH_MISMATCH otherwise; MLS_REKEY_REQUIRED while removals are pending). Retries with the same clientMessageId and bytes replay (200). PRIVATE_E2EE application content must use MLS PrivateMessage wire format; public application frames are rejected with 422 CONTENT_REJECTED / APPLICATION_MUST_BE_PRIVATE. Public handshake commits remain supported. The server checks public framing and authenticated device authorization, not AEAD authenticity; receiving clients verify ciphertext before accepting content. S13: SEND_RESTRICTED / ANNOUNCEMENT_ONLY for a non-admin member of an announcement-only conversation. S2: PRIVATE_E2EE sends may carry frankingCommitment (verifiable reports).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -6657,7 +6657,7 @@
           }
         ],
         "x-cfmeet-required-scope": "attachments.read",
-        "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED image (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
+        "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED PNG, JPEG, WebP or GIF image (S14; an animated image's first frame; videos have no poster frame) (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -7608,6 +7608,423 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/messages/{messageId}/forward": {
+      "post": {
+        "operationId": "forwardMessage",
+        "tags": [
+          "Conversation Messages"
+        ],
+        "summary": "forward Message",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. S11: copies a MANAGED message the acting member can read (ACTIVE, in its history window, no attachments) into another MANAGED conversation it may send to, as a new message of the acting member marked forwarded. Every send rule of the TARGET applies (membership, read-only and muted members, announcement-only, blocks, personal policy, rate limits); the policy can turn forwarding off (FEATURE_DISABLED / FORWARDING_DISABLED). The source conversation and message are never disclosed; the original sender only with messages.forwardShowsOriginalSender. PRIVATE_E2EE messages are forwarded client-side (decrypt, re-send as new ciphertext): the server refuses them, and E2EE targets, with CONTENT_REJECTED / E2EE_FORWARD_CLIENT_SIDE. Idempotent per clientMessageId (200).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ForwardMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Message"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Idempotent replay.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Message"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/invite-links": {
+      "post": {
+        "operationId": "createInviteLink",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "create Invite Link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "conversations.manage",
+        "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). S12: an expiring (60 s - 30 days, default 7 days), optionally use-capped (1-10000) join link of a GROUP / CHANNEL conversation (MEMBER or READ_ONLY). The token is returned ONLY in this response and stored as its SHA-256. At most 100 open links per conversation (CONFLICT / TOO_MANY_INVITE_LINKS).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal acts (OWNER / ADMIN). Without it: the application's administration.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/CreateInviteLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/InviteLinkCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listInviteLinks",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "list Invite Links",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "conversations.manage",
+        "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). S12: the conversation's links, newest first (at most 200), never a token.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal acts (OWNER / ADMIN). Without it: the application's administration.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/InviteLinkList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke": {
+      "post": {
+        "operationId": "revokeInviteLink",
+        "tags": [
+          "Group Membership & Bans"
+        ],
+        "summary": "revoke Invite Link",
+        "security": [
+          {
+            "customerCredential": []
+          }
+        ],
+        "x-cfmeet-required-scope": "conversations.manage",
+        "description": "Scope conversations.manage (+ OWNER / ADMIN when a principal acts). S12: revokes the link for good (idempotent).",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": false,
+            "description": "Optional. With it: the principal acts (OWNER / ADMIN). Without it: the application's administration.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "inviteLinkId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/InviteLink"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/messaging/invite-links/join": {
+      "post": {
+        "operationId": "joinInviteLink",
+        "tags": [
+          "Conversation Invitations"
+        ],
+        "summary": "join Invite Link",
+        "security": [
+          {
+            "customerCredential": []
+          },
+          {
+            "clientToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.send",
+        "description": "Scope messages.send. S12: the authenticated acting principal joins a conversation with a link token (201 Member, authoritySource INVITE_LINK; 200 when already a member, no use consumed). Unknown, expired, revoked or used-up links are NOT_FOUND / INVITE_LINK_UNAVAILABLE alike; bans (PRINCIPAL_BANNED), the personal policy's group invitation rule (from the link's creator), the conversation's state and member limit apply as for any admission.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/JoinInviteLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Joined.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Member"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already a member.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Member"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }

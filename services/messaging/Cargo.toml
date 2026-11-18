@@ -97,7 +97,7 @@ hmac = "0.12"
 ring = "0.17"
 # MANAGED image thumbnails (src/attachments/derivatives.rs): PNG and JPEG decoders and the
 # PNG encoder only, decoding bounded by explicit limits. Never used for PRIVATE_E2EE.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
 
 [dev-dependencies]

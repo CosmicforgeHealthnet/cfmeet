@@ -154,6 +154,19 @@ fn every_v2_route_is_documented() {
             "post",
             "/api/v2/organizations/{id}/messaging/members/resolve",
         ),
+        // Gap audit G6 / G7 — organization moderation and team channels
+        (
+            "get",
+            "/api/v2/organizations/{id}/messaging/moderation/{path}",
+        ),
+        (
+            "post",
+            "/api/v2/organizations/{id}/messaging/moderation/{path}",
+        ),
+        (
+            "put",
+            "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel",
+        ),
         // Section 17 (ORG-006): Section 6 teams and policies through the Organizations relay
         ("get", "/api/v2/organizations/{id}/teams"),
         ("post", "/api/v2/organizations/{id}/teams"),

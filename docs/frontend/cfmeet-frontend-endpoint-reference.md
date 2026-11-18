@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 291 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 294 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.26.0 | 142 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.19.0 | 105 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **680** |
+| **Total** | | | **688** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -358,6 +358,8 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | PATCH | `/api/v2/organizations/{id}/members/{userId}` | account session | Change a member's role or status. | 200, 400, 403, 404, 409, 503 | FEATURE_DISABLED, LAST_OWNER, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_update_organization_membership` |
 | PUT | `/api/v2/organizations/{id}/members/{userId}` | account session | Add or change a membership (platform admins, organization OWNER/ADMIN within limits). | 200, 403, 409, 503 | INVITATION_REQUIRED, LAST_OWNER, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_upsert_organization_member` |
 | POST | `/api/v2/organizations/{id}/messaging/members/resolve` | account session | Resolve organization colleagues to their organization-scope Messaging principals. | 200, 400, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_messaging_resolve_members` |
+| GET | `/api/v2/organizations/{id}/messaging/moderation/{path}` | account session | Organization moderation read (gap audit G6): `reports`, `reports/{reportId}` or | 200, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, NOT_FOUND, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_messaging_moderation_get` |
+| POST | `/api/v2/organizations/{id}/messaging/moderation/{path}` | account session | Organization moderation action (gap audit G6): `moderation/actions`. | 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, NOT_FOUND, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_messaging_moderation_post` |
 | DELETE | `/api/v2/organizations/{id}/messaging/relay/{path}` | account session | Organization Messaging delete (allowlisted path under `v1/`, e.g. remove a member). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_messaging_delete` |
 | GET | `/api/v2/organizations/{id}/messaging/relay/{path}` | account session | Organization Messaging read (allowlisted path under `v1/`, e.g. `v1/conversations`). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_messaging_get` |
 | PATCH | `/api/v2/organizations/{id}/messaging/relay/{path}` | account session | Organization Messaging update (allowlisted path under `v1/`, e.g. edit a message). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_messaging_patch` |
@@ -379,6 +381,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | POST | `/api/v2/organizations/{id}/teams/{teamId}/members` | account session | Add a member to a team. | 200, 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_ARCHIVED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, SERVICE_UNAVAILABLE, TEAM_ARCHIVED, TEAM_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_add_organization_team_member` |
 | DELETE | `/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}` | account session | Remove a member from a team. | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_ARCHIVED, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, SERVICE_UNAVAILABLE, TEAM_NOT_FOUND | `openapi/meeting-service.json#v2_remove_organization_team_member` |
 | PATCH | `/api/v2/organizations/{id}/teams/{teamId}/members/{memberId}` | account session | Change a team member's role. | 200, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_ARCHIVED, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, SERVICE_UNAVAILABLE, TEAM_ARCHIVED, TEAM_NOT_FOUND, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_update_organization_team_member` |
+| PUT | `/api/v2/organizations/{id}/teams/{teamId}/messaging-channel` | account session | Create or resync a team's Messaging channel (gap audit G7). | 200, 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, TEAM_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_team_messaging_channel` |
 
 ### Participants
 
@@ -957,7 +960,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.26.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.18.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.19.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
@@ -995,6 +998,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.18.0**;
 | POST | `/v1/conversations/{conversationId}/invitation/accept` | customer credential (server-side only); Messaging client token | accept Invitation | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#acceptInvitation` |
 | POST | `/v1/conversations/{conversationId}/invitation/decline` | customer credential (server-side only); Messaging client token | decline Invitation | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#declineInvitation` |
 | GET | `/v1/messaging/invitations` | customer credential (server-side only); Messaging client token | list Invitations | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listInvitations` |
+| POST | `/v1/messaging/invite-links/join` | customer credential (server-side only); Messaging client token | join Invite Link | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#joinInviteLink` |
 
 ### Conversation Messages
 
@@ -1005,6 +1009,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.18.0**;
 | DELETE | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token | delete Message | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#deleteMessage` |
 | GET | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token | resolve Message | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#resolveMessage` |
 | PATCH | `/v1/conversations/{conversationId}/messages/{messageId}` | customer credential (server-side only); Messaging client token | edit Managed Message | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#editManagedMessage` |
+| POST | `/v1/conversations/{conversationId}/messages/{messageId}/forward` | customer credential (server-side only); Messaging client token | forward Message | 200, 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#forwardMessage` |
 | GET | `/v1/conversations/{conversationId}/messages/{messageId}/revisions` | customer credential (server-side only); Messaging client token | list Message Revisions | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listMessageRevisions` |
 
 ### Conversation Reports
@@ -1070,6 +1075,9 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.18.0**;
 | GET | `/v1/conversations/{conversationId}/bans` | customer credential (server-side only) | list Bans | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listBans` |
 | POST | `/v1/conversations/{conversationId}/bans` | customer credential (server-side only) | ban Member | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#banMember` |
 | DELETE | `/v1/conversations/{conversationId}/bans/{principalId}` | customer credential (server-side only) | unban Member | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#unbanMember` |
+| GET | `/v1/conversations/{conversationId}/invite-links` | customer credential (server-side only) | list Invite Links | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#listInviteLinks` |
+| POST | `/v1/conversations/{conversationId}/invite-links` | customer credential (server-side only) | create Invite Link | 201, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#createInviteLink` |
+| POST | `/v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke` | customer credential (server-side only) | revoke Invite Link | 200, 400, 401, 403, 404, 409, 422, 429, 503 | — | `messaging/http/v1.openapi.json#revokeInviteLink` |
 | GET | `/v1/conversations/{conversationId}/members` | customer credential (server-side only); Messaging client token | list Members | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#listMembers` |
 | POST | `/v1/conversations/{conversationId}/members` | customer credential (server-side only) | add Member | 200, 201, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#addMember` |
 | DELETE | `/v1/conversations/{conversationId}/members/{principalId}` | customer credential (server-side only) | remove Member | 200, 400, 401, 403, 404, 409, 429, 503 | — | `messaging/http/v1.openapi.json#removeMember` |

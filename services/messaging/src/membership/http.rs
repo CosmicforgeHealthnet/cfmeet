@@ -7,6 +7,8 @@
 //! | `DELETE /{id}/members/{principalId}` | leaving (acting = member): `messages.send`; removing another: `conversations.manage` (+ OWNER / ADMIN when a principal acts) |
 //! | `PATCH /{id}/members/{principalId}` (role MEMBER ↔ ADMIN) | `conversations.manage` (+ OWNER / ADMIN when a principal acts) |
 //! | `GET, POST /{id}/bans`, `DELETE /{id}/bans/{principalId}` | `conversations.manage` (+ OWNER / ADMIN when a principal acts) |
+//! | `GET, POST /{id}/invite-links`, `POST /{id}/invite-links/{linkId}/revoke` (S12) | `conversations.manage` (+ OWNER / ADMIN when a principal acts) |
+//! | `POST /v1/messaging/invite-links/join` (S12) | `messages.send` + acting principal |
 
 use axum::{
     extract::{Path, Query, State},
@@ -41,6 +43,14 @@ pub fn routes() -> Router<AppState> {
         .route("/:conversation_id/bans", get(list_bans).post(ban))
         .route("/:conversation_id/bans/:principal_id", delete(unban))
         .route(
+            "/:conversation_id/invite-links",
+            get(list_invite_links).post(create_invite_link),
+        )
+        .route(
+            "/:conversation_id/invite-links/:link_id/revoke",
+            post(revoke_invite_link),
+        )
+        .route(
             "/:conversation_id/invitation/accept",
             post(accept_invitation),
         )
@@ -52,7 +62,62 @@ pub fn routes() -> Router<AppState> {
 
 /// Routes nested under `/v1/messaging`.
 pub fn customer_routes() -> Router<AppState> {
-    Router::new().route("/invitations", get(list_invitations))
+    Router::new()
+        .route("/invitations", get(list_invitations))
+        .route("/invite-links/join", post(join_invite_link))
+}
+
+async fn create_invite_link(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<super::links::CreateLinkRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let admin = administrator(&state, &caller, &headers).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(super::links::create(&state, caller.context(), &admin, id, body).await?),
+    ))
+}
+
+async fn list_invite_links(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let admin = administrator(&state, &caller, &headers).await?;
+    Ok(Json(
+        super::links::list(&state, caller.context(), &admin, id).await?,
+    ))
+}
+
+async fn revoke_invite_link(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, link)): Path<(Uuid, Uuid)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let admin = administrator(&state, &caller, &headers).await?;
+    Ok(Json(
+        super::links::revoke(&state, caller.context(), &admin, id, link).await?,
+    ))
+}
+
+async fn join_invite_link(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Json(body): Json<super::links::JoinRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting =
+        crate::messages::http::acting_with(&state, &caller, &headers, MESSAGES_SEND).await?;
+    let (status, view) = super::links::join(&state, caller.context(), &acting, body).await?;
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::OK),
+        Json(view),
+    ))
 }
 
 async fn accept_invitation(

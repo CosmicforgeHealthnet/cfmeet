@@ -236,6 +236,12 @@ pub enum InternalPermission {
     /// meeting membership / lifecycle changes and import legacy meeting chat.
     #[serde(rename = "messaging-meeting.sync")]
     MessagingMeetingSync,
+    /// Messaging (gap audit G6 / G7): organization governance in an organization's own
+    /// FIRST_PARTY Messaging scope — moderation by organization moderators (reports and
+    /// moderation actions, attributed to the moderator's principal) and team channels
+    /// synchronized from an Organizations team snapshot.
+    #[serde(rename = "messaging-organization.govern")]
+    MessagingOrganizationGovern,
     /// Messaging (Part V H §103): apply a versioned Privacy Relay communication-authority
     /// update (context status / revocation) to the conversations bound to that context.
     #[serde(rename = "messaging-context-authority.apply")]
@@ -809,6 +815,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Resolve meeting conversations, apply version-fenced meeting membership / lifecycle and import legacy meeting chat",
     },
     PermissionDefinition {
+        permission: InternalPermission::MessagingOrganizationGovern,
+        name: "messaging-organization.govern",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Organization moderation (reports, moderation actions by an organization moderator) and team channels synchronized from a team snapshot, in an organization's own scope",
+    },
+    PermissionDefinition {
         permission: InternalPermission::MessagingContextAuthorityApply,
         name: "messaging-context-authority.apply",
         receiver: services::MESSAGING,
@@ -1233,6 +1247,7 @@ impl InternalPermission {
         InternalPermission::PlatformPrincipalEnsure,
         InternalPermission::MessagingApplicationDelegate,
         InternalPermission::MessagingMeetingSync,
+        InternalPermission::MessagingOrganizationGovern,
         InternalPermission::MessagingContextAuthorityApply,
         InternalPermission::MessagingSmsBridgeDeliver,
         InternalPermission::SmsBridgeSubmit,
@@ -1558,6 +1573,10 @@ mod tests {
                     &[services::MEETING_SERVICE][..]
                 ),
                 ("messaging-meeting.sync", &[services::MEETING_SERVICE][..]),
+                (
+                    "messaging-organization.govern",
+                    &[services::MEETING_SERVICE][..]
+                ),
                 (
                     "messaging-context-authority.apply",
                     &[services::PRIVACY_RELAY][..]

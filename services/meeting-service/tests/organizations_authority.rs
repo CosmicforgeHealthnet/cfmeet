@@ -2664,10 +2664,10 @@ struct Peers {
     state: Arc<PeerState>,
 }
 
-fn peer_verifier(jwk: &PublicJwk, receiver: &str, permission: &str) -> ServiceTokenVerifier {
+fn peer_verifier(jwk: &PublicJwk, receiver: &str, permissions: &[&str]) -> ServiceTokenVerifier {
     let bundle = json!({ "bundle_version": 1, "receiver": receiver, "runtime_environment": "test",
         "trusted_issuers": [{ "issuer": "cfmeet.meeting-service", "audience": receiver,
-            "runtime_environment": "test", "keys": [jwk], "permissions": [permission] }]});
+            "runtime_environment": "test", "keys": [jwk], "permissions": permissions }]});
     let policy = TrustPolicy::from_json(
         &bundle.to_string(),
         &ServiceId::parse(receiver).unwrap(),
@@ -2687,6 +2687,9 @@ async fn peer_handler(
     let path = uri.path().to_string();
     let to_platform_access = path.starts_with("/internal/v1/principals/");
     let to_messaging = path.starts_with("/internal/v1/delegated/");
+    // Gap audit G6 / G7: organization moderation and team channels.
+    let to_governance = path.starts_with("/internal/v1/organization-moderation/")
+        || path == "/internal/v1/team-channels";
     let (verifier, permission) = if to_platform_access {
         (
             &state.platform_access,
@@ -2696,6 +2699,11 @@ async fn peer_handler(
         (
             &state.messaging,
             InternalPermission::MessagingApplicationDelegate,
+        )
+    } else if to_governance {
+        (
+            &state.messaging,
+            InternalPermission::MessagingOrganizationGovern,
         )
     } else {
         (
@@ -2794,14 +2802,21 @@ impl Peers {
             calling: peer_verifier(
                 &jwk,
                 "cfmeet.calling",
-                "calling-request.act-for-organization",
+                &["calling-request.act-for-organization"],
             ),
             platform_access: peer_verifier(
                 &jwk,
                 "cfmeet.platform-access",
-                "platform-principal.ensure",
+                &["platform-principal.ensure"],
             ),
-            messaging: peer_verifier(&jwk, "cfmeet.messaging", "messaging-application.delegate"),
+            messaging: peer_verifier(
+                &jwk,
+                "cfmeet.messaging",
+                &[
+                    "messaging-application.delegate",
+                    "messaging-organization.govern",
+                ],
+            ),
             records: Mutex::new(vec![]),
             rejected: Mutex::new(0),
             principal: Uuid::new_v4(),
@@ -3704,6 +3719,177 @@ async fn closure_organization_messaging_runs_in_the_organization_scope_as_the_me
             session.session_id
         ))
     );
+}
+
+/// Gap audit G6 / G7: organization moderation and team channels reach Messaging's
+/// organization-governance surface in the ORGANIZATION's scope, only for members holding
+/// the Organizations capability, with the moderator as the signed initiating principal.
+#[tokio::test]
+async fn organization_moderation_and_team_channels_need_the_organization_capability() {
+    if !require_test_redis() {
+        return;
+    }
+    let w = some!(messaging_world(true).await);
+    let governance = |w: &CallingWorld| {
+        w.peers
+            .records()
+            .into_iter()
+            .filter(|r| {
+                r.path.starts_with("/internal/v1/organization-moderation/")
+                    || r.path == "/internal/v1/team-channels"
+            })
+            .collect::<Vec<_>>()
+    };
+    let moderation = format!("/api/v2/organizations/{}/messaging/moderation", w.org);
+    // A MEMBER does not hold messaging.organization.moderate: refused before Messaging.
+    let (s, v) = w
+        .app
+        .call(
+            Method::GET,
+            &format!("{moderation}/reports"),
+            Auth::Bearer(&w.member.token),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
+    assert!(governance(&w).is_empty());
+    // The OWNER lists reports and applies an action, as their organization principal.
+    let (s, v) = w
+        .app
+        .call(
+            Method::GET,
+            &format!("{moderation}/reports?status=OPEN"),
+            Auth::Bearer(&w.owner.token),
+            None,
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let action = json!({ "kind": "REMOVE_MESSAGE", "conversationId": Uuid::new_v4(),
+                         "messageId": Uuid::new_v4(), "reason": "SPAM" });
+    let (s, v) = w
+        .app
+        .call(
+            Method::POST,
+            &format!("{moderation}/moderation/actions"),
+            Auth::Bearer(&w.owner.token),
+            Some(action.clone()),
+        )
+        .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let calls = governance(&w);
+    assert_eq!(
+        calls
+            .iter()
+            .map(|r| (r.method.as_str(), r.path.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "GET",
+                "/internal/v1/organization-moderation/v1/messaging/reports"
+            ),
+            (
+                "POST",
+                "/internal/v1/organization-moderation/v1/messaging/moderation/actions"
+            )
+        ]
+    );
+    for r in &calls {
+        assert!(!r.authorization);
+        assert_eq!((r.tenant, r.application, r.environment), w.triple);
+        assert_eq!(r.service_account, w.binding.0);
+        assert_eq!(
+            r.principal,
+            Some((w.peers.state.principal, "NATIVE_CF_USER".to_string()))
+        );
+    }
+    assert_eq!(calls[0].query.as_deref(), Some("status=OPEN"));
+    assert_eq!(calls[1].body, action);
+    // Outside the allowlist, or an unknown query parameter: never forwarded.
+    for (path, status) in [
+        ("admin/policies", StatusCode::NOT_FOUND),
+        ("reports/not-a-uuid", StatusCode::NOT_FOUND),
+        ("reports?bogus=1", StatusCode::BAD_REQUEST),
+    ] {
+        let (s, v) = w
+            .app
+            .call(
+                Method::GET,
+                &format!("{moderation}/{path}"),
+                Auth::Bearer(&w.owner.token),
+                None,
+            )
+            .await;
+        assert_eq!(s, status, "{path}: {v}");
+    }
+    assert_eq!(governance(&w).len(), 2);
+
+    // Team channel: the team snapshot read from Organizations, mapped to principals.
+    let team = Uuid::new_v4();
+    w.fake.script(
+        "GET",
+        &format!("/internal/v1/organizations/{}/teams/{team}/members", w.org),
+        200,
+        json!({ "items": [
+            { "id": Uuid::new_v4(), "teamId": team, "userId": w.owner.id, "role": "MEMBER", "status": "ACTIVE", "version": 1 },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": w.member.id, "role": "MEMBER", "status": "ACTIVE", "version": 1 }
+        ], "nextCursor": null }),
+    );
+    let channel = format!(
+        "/api/v2/organizations/{}/teams/{team}/messaging-channel",
+        w.org
+    );
+    let (s, v) = w
+        .app
+        .call(
+            Method::PUT,
+            &channel,
+            Auth::Bearer(&w.member.token),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "a MEMBER cannot manage teams: {v}"
+    );
+    let (s, v) = w
+        .app
+        .call(
+            Method::PUT,
+            &channel,
+            Auth::Bearer(&w.owner.token),
+            Some(json!({ "title": "Ward 7 team" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let sync = governance(&w).pop().unwrap();
+    assert_eq!(
+        (sync.method.as_str(), sync.path.as_str()),
+        ("PUT", "/internal/v1/team-channels")
+    );
+    assert_eq!(sync.environment, w.triple.2);
+    assert_eq!(sync.principal, None, "the snapshot is the authority");
+    assert_eq!(
+        sync.body["teamRef"],
+        json!(format!("organization:{}:team:{team}", w.org))
+    );
+    assert_eq!(
+        sync.body["ownerPrincipalId"],
+        json!(w.peers.state.principal)
+    );
+    assert_eq!(sync.body["title"], "Ward 7 team");
+    assert_eq!(sync.body["memberPrincipalIds"].as_array().unwrap().len(), 2);
+    assert!(sync.body["sourceVersion"].as_i64().unwrap() > 0);
+    let (s, _) = w
+        .app
+        .call(
+            Method::PUT,
+            &channel,
+            Auth::Bearer(&w.owner.token),
+            Some(json!({ "members": [] })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

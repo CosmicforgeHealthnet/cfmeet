@@ -153,6 +153,21 @@ pub struct MessageFeatures {
     pub threads: bool,
     pub reactions: bool,
     pub pins: bool,
+    /// S11: server-side forwarding of MANAGED messages (default on). Serialized only when
+    /// changed, so existing policy digests stay the same.
+    #[serde(skip_serializing_if = "is_true")]
+    pub forwarding: bool,
+    /// S11: a forwarded copy shows its original sender (default off: provenance only).
+    #[serde(skip_serializing_if = "is_false")]
+    pub forward_shows_original_sender: bool,
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Opt-in secure backups (Appendix I.3): client-encrypted objects the server stores but
@@ -243,6 +258,8 @@ pub fn platform_defaults() -> EffectivePolicy {
             threads: true,
             reactions: true,
             pins: true,
+            forwarding: true,
+            forward_shows_original_sender: false,
         },
         // Attachments exist but are OFF until an application enables them; no commercial
         // storage budget is invented here (deployment limits apply).
@@ -382,6 +399,8 @@ overrides!(MessageFeaturesOverride {
     threads: bool,
     reactions: bool,
     pins: bool,
+    forwarding: bool,
+    forward_shows_original_sender: bool,
 });
 overrides!(AbuseOverride {
     messages_per_minute: i64,
@@ -776,6 +795,12 @@ pub fn resolve(
         }
         if let Some(v) = o.pins {
             t.pins = v;
+        }
+        if let Some(v) = o.forwarding {
+            t.forwarding = v;
+        }
+        if let Some(v) = o.forward_shows_original_sender {
+            t.forward_shows_original_sender = v;
         }
     }
     if let Some(o) = &overrides.abuse {
@@ -1223,9 +1248,14 @@ mod tests {
                 replies: true,
                 threads: true,
                 reactions: true,
-                pins: true
+                pins: true,
+                forwarding: true,
+                forward_shows_original_sender: false,
             }
         );
+        // S11: the defaults are not serialized, so existing policy digests are unchanged.
+        let v = serde_json::to_value(&p.messages).unwrap();
+        assert!(v.get("forwarding").is_none() && v.get("forwardShowsOriginalSender").is_none());
         assert!(
             !p.editing.revision_history_visible,
             "revisions are kept, not shown, by default"
