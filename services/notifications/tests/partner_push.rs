@@ -1038,3 +1038,123 @@ async fn a_deleted_or_moved_credential_never_sends_and_refused_handles_are_disab
         1
     );
 }
+
+/// The Developer Console's multi-part form (`services/developer-platform/src/push_providers.rs`
+/// `seal_secret`): base64url of the secret in ≤ 512-character `token` parts, each sealed
+/// with `seal` for (`cfmeet.developer-platform`, `<t>/<a>/<e>/<provider>`,
+/// `push-provider.secret.<i>-of-<n>`).
+fn console_parts(h: &Harness, s: S, provider: &str, secret: &str) -> String {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
+    let encoded = B64.encode(secret.as_bytes());
+    let count = encoded.len().div_ceil(512);
+    let size = encoded.len().div_ceil(count);
+    let event_id = format!("{}/{}/{}/{provider}", s.t, s.a, s.e);
+    let parts: Vec<_> = encoded
+        .as_bytes()
+        .chunks(size)
+        .enumerate()
+        .map(|(i, chunk)| {
+            cf_notification_client::seal::seal(
+                &h.sealing,
+                "cfmeet.developer-platform",
+                &event_id,
+                &format!("push-provider.secret.{i}-of-{count}"),
+                &cf_notification_client::SealedPlaintext::default()
+                    .with_token(std::str::from_utf8(chunk).unwrap()),
+            )
+            .unwrap()
+        })
+        .collect();
+    json!({ "v": 1, "parts": parts }).to_string()
+}
+
+#[tokio::test]
+async fn the_vault_opens_the_consoles_multi_part_seals_for_their_own_slot_only() {
+    let Some(h) = Harness::with_partner_push().await else {
+        return;
+    };
+    let (a, b) = (scope(1), scope(2));
+    let dev_peer = h.peers.developer.clone();
+    // A service account (real ones are about 2.3 KB) spans several parts.
+    let mut account: Value = serde_json::from_str(&service_account("demo-multi")).unwrap();
+    account["client_x509_cert_url"] = json!(format!(
+        "https://www.googleapis.com/robot/v1/metadata/x509/{}",
+        "p".repeat(1500)
+    ));
+    let account = account.to_string();
+    let sealed = console_parts(&h, a, "FCM", &account);
+    assert!(
+        serde_json::from_str::<Value>(&sealed).unwrap()["parts"]
+            .as_array()
+            .unwrap()
+            .len()
+            > 1
+    );
+    let body = json!({ "sealed": sealed, "metadata": { "projectId": "demo-multi" },
+                       "fingerprint": push_credential_fingerprint(&account) });
+    let r = h
+        .signed(
+            &dev_peer,
+            Method::PUT,
+            &format!("{}/FCM", base(a)),
+            Some(body),
+            &[],
+        )
+        .await;
+    assert_eq!(r.expect(200)["status"], "UNVERIFIED");
+    // A p8 sealed for the APNS_VOIP slot opens there, not in the APNS slot or another scope.
+    let key = p8();
+    let sealed = console_parts(&h, a, "APNS_VOIP", &key);
+    let body = |sealed: &str| {
+        json!({ "sealed": sealed, "metadata": apns_meta("com.example.a"),
+                "fingerprint": push_credential_fingerprint(&key) })
+    };
+    for (s, slot) in [(a, "APNS"), (b, "APNS_VOIP")] {
+        h.signed(
+            &dev_peer,
+            Method::PUT,
+            &format!("{}/{slot}", base(s)),
+            Some(body(&sealed)),
+            &[],
+        )
+        .await
+        .expect_error(400, "VALIDATION_ERROR");
+    }
+    h.signed(
+        &dev_peer,
+        Method::PUT,
+        &format!("{}/APNS_VOIP", base(a)),
+        Some(body(&sealed)),
+        &[],
+    )
+    .await
+    .expect(200);
+    // Parts out of order do not open.
+    let mut v: Value = serde_json::from_str(&console_parts(&h, a, "FCM", &account)).unwrap();
+    v["parts"].as_array_mut().unwrap().reverse();
+    let r = h
+        .signed(
+            &dev_peer,
+            Method::PUT,
+            &format!("{}/FCM", base(a)),
+            Some(json!({ "sealed": v.to_string(), "metadata": {}, "fingerprint": push_credential_fingerprint(&account) })),
+            &[],
+        )
+        .await;
+    r.expect_error(400, "VALIDATION_ERROR");
+    // The stored credentials send.
+    let p = Uuid::new_v4();
+    sync(
+        &h,
+        vec![registration(
+            a,
+            p,
+            "inst-a-multi-1",
+            "APNS_VOIP",
+            Some(&apns_handle(0x5a)),
+        )],
+    )
+    .await
+    .expect(200);
+    assert_eq!(ring(&h, a, p).await.expect(200)["recipientStatus"], "SENT");
+}

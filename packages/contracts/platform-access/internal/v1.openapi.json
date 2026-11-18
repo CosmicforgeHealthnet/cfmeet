@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.10.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED."
+    "version": "1.11.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED. 1.11.0 (ADR 0062): console test user tokens POST /internal/v1/delegation/environments/{environmentId}/test-user-tokens (platform-identity.delegate + X-CF-Delegated-Actor; ACTIVE SANDBOX environments of EXTERNAL tenants only; no credential: the token's credentialId / serviceAccountId are the environment's synthetic console-test markers; TTL at most 3600 s; grants bounded by the application's current SANDBOX scope grants; audited USER_TOKEN_TEST_ISSUED); POST /internal/v1/user-tokens/verify accepts them."
   },
   "components": {
     "securitySchemes": {
@@ -1100,6 +1100,49 @@
             ]
           }
         }
+      },
+      "ConsoleTestUserTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "externalId"
+        ],
+        "properties": {
+          "externalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "1-128 printable ASCII characters without spaces; telephone numbers, tel: / sip: URIs and the reserved tombstoned: prefix are refused."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "1-64 characters, no control characters; null clears it."
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512,
+            "pattern": "^https://",
+            "description": "An https:// URL of at most 512 characters; null clears it."
+          },
+          "grants": {
+            "$ref": "#/components/schemas/UserTokenGrants"
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 3600,
+            "default": 3600
+          }
+        },
+        "description": "A console test token request: as UpsertEndUserAndMintRequest, with ttlSeconds at most 3600."
       }
     },
     "responses": {
@@ -7482,6 +7525,82 @@
             "$ref": "#/components/responses/Error"
           },
           "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/test-user-tokens": {
+      "post": {
+        "operationId": "delegateMintConsoleTestUserToken",
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Upsert a partner user and mint a test user token (console)",
+        "description": "ADR 0062: a Developer Console member mints a short-lived CF Meet user token for testing, without an API credential. Only for an ACTIVE SANDBOX environment of an EXTERNAL tenant (FIRST_PARTY tenant, TEST / PRODUCTION environment, or a suspended environment / application / tenant: POLICY_VIOLATION; unknown environment: NOT_FOUND). Creates or returns (applying given profile fields) the partner user `externalId` (the SANDBOX cap applies: 409 LIMIT_EXCEEDED), then mints a token: ttlSeconds 60-3600 (default 3600); each grant needs the application's CURRENT scope grant applying to SANDBOX (messages.read / messages.send / calls.write / meetings.write; SCOPE_REQUIRED); ACTIVE user (INVALID_STATE); at most 120 mints per user per clock hour (429 RATE_LIMITED). The token carries no real credential: its `crd` / `sva` (verify: credentialId / serviceAccountId) are the environment's synthetic console-test markers (UUIDv8 derived from the environment id; never a real credential). Verification accepts it while the environment is SANDBOX, its chain ACTIVE (else USER_TOKEN_REVOKED) and the user ACTIVE and not session-revoked; effective grants = claimed grants ∩ the application's current SANDBOX scope grants. Audited (PRINCIPAL_REGISTERED / PRINCIPAL_PROFILE_SET, and USER_TOKEN_TEST_ISSUED per token). The response is `Cache-Control: no-store`. Developer Platform delegation: permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`; missing: OPERATOR_REQUIRED). Behind PLATFORM_ACCESS_END_USERS_ENABLED and PLATFORM_ACCESS_USER_TOKENS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The environment."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleTestUserTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpsertEndUserAndMintResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

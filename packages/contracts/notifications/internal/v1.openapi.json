@@ -1254,7 +1254,7 @@
                 ],
                 "properties": {
                   "sealed": {
-                    "description": "The secret (the APNs .p8 PEM, or the FCM service-account JSON) sealed to the service with packages/notification-client seal::seal_push_credential(key, tenantId, applicationId, environmentId, secret): HPKE base mode, info cfmeet.notifications.push-provider.v1, AAD cfmeet.push-provider|<tenantId>|<applicationId>|<environmentId>, so it opens for this scope only. The compact form <kid>.<enc>.<ct> (Sealed::to_compact); the object {kid, enc, ct} (or that object JSON-encoded in a string) is also accepted.",
+                    "description": "The secret (the APNs .p8 PEM, or the FCM service-account JSON) sealed to the service with packages/notification-client, in one of two forms. (1) Whole: seal::seal_push_credential(key, tenantId, applicationId, environmentId, secret) — HPKE base mode, info cfmeet.notifications.push-provider.v1, AAD cfmeet.push-provider|<tenantId>|<applicationId>|<environmentId> — sent as the compact string <kid>.<enc>.<ct> (Sealed::to_compact), the object {kid, enc, ct}, or that object JSON-encoded. (2) Parts (what the Developer Console sends): {\"v\":1,\"parts\":[{kid,enc,ct},…]} (object or JSON-encoded string, 1–64 parts): the secret's base64url (no padding) split into ≤ 512-character token parts, each sealed with seal::seal for producer cfmeet.developer-platform, event id <tenantId>/<applicationId>/<environmentId>/<provider> and event type push-provider.secret.<index>-of-<count>. Either form opens only for this scope (and, for parts, this provider slot and part order); anything else is 400 VALIDATION_ERROR.",
                     "anyOf": [
                       {
                         "type": "string",
@@ -1278,6 +1278,45 @@
                           },
                           "ct": {
                             "type": "string"
+                          }
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "v",
+                          "parts"
+                        ],
+                        "properties": {
+                          "v": {
+                            "type": "integer",
+                            "const": 1
+                          },
+                          "parts": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 64,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "kid",
+                                "enc",
+                                "ct"
+                              ],
+                              "properties": {
+                                "kid": {
+                                  "type": "string"
+                                },
+                                "enc": {
+                                  "type": "string"
+                                },
+                                "ct": {
+                                  "type": "string"
+                                }
+                              }
+                            }
                           }
                         }
                       }

@@ -11,7 +11,10 @@ use common::*;
 use platform_access::{
     config::platform_build::{EndUserCaps, PlatformBuildConfig},
     domain::EnvironmentKind,
-    identity::user_tokens::{Grants, UserTokenClaims, UserTokenKeys},
+    identity::user_tokens::{
+        console_test_credential_id, console_test_service_account_id, Grants, UserTokenClaims,
+        UserTokenKeys,
+    },
 };
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
 use serde_json::{json, Value};
@@ -218,6 +221,12 @@ async fn with_the_flags_off_every_new_route_answers_like_an_unknown_route() {
             Method::PUT,
             format!("/internal/v1/delegation/environments/{env}/allowed-origins"),
             Some(json!({ "origins": [] })),
+        ),
+        (
+            &h.peers.developer_platform,
+            Method::POST,
+            format!("/internal/v1/delegation/environments/{env}/test-user-tokens"),
+            Some(json!({ "externalId": "u1" })),
         ),
         (
             &h.peers.messaging,
@@ -1623,4 +1632,308 @@ async fn meeting_platform_principals_allow_exactly_two_combinations() {
         )
         .await;
     assert_eq!(r.code(), "INTERNAL_PERMISSION_DENIED");
+}
+
+// ---------------------------------------------------------------------------
+// Console test tokens
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn console_test_tokens_are_sandbox_only_and_die_with_their_environment() {
+    let Some((h, keys)) = harness().await else {
+        return;
+    };
+    let (c, credential) = partner(&h, "acme", PARTNER_SCOPES).await;
+    let sandbox = c.env("SANDBOX");
+    let path = |env: Uuid| format!("/internal/v1/delegation/environments/{env}/test-user-tokens");
+    let test_token = |env: Uuid, body: Value| {
+        let h = &h;
+        let path = path(env);
+        async move { console(h, Method::POST, &path, Some(body)).await }
+    };
+    let grants = json!({ "msg": ["read", "send"], "call": ["receive"] });
+
+    // SANDBOX: user upserted, token minted, verified.
+    let r = test_token(
+        sandbox,
+        json!({ "externalId": "tester-1", "displayName": "Tess", "grants": grants, "ttlSeconds": 600 }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
+    assert_eq!(r.headers["cache-control"], "no-store");
+    assert_eq!(r.body["user"]["externalId"], "tester-1");
+    assert_eq!(r.body["user"]["displayName"], "Tess");
+    let user_id = r.body["user"]["id"].as_str().unwrap().to_string();
+    let token = r.body["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("cfut_sbx_"), "{token}");
+    let v = verify(&h, &token).await;
+    assert_eq!(v.status, StatusCode::OK, "{}", v.body);
+    assert_eq!(v.body["tokenId"], r.body["tokenId"]);
+    assert_eq!(v.body["expiresAt"], r.body["expiresAt"]);
+    assert_eq!(v.body["environmentId"], sandbox.to_string());
+    assert_eq!(v.body["environmentKind"], "SANDBOX");
+    assert_eq!(v.body["tenantId"], c.tenant_id.to_string());
+    assert_eq!(v.body["applicationId"], c.application_id.to_string());
+    assert_eq!(
+        v.body["credentialId"],
+        console_test_credential_id(sandbox).to_string()
+    );
+    assert_eq!(
+        v.body["serviceAccountId"],
+        console_test_service_account_id(sandbox).to_string()
+    );
+    assert_eq!(v.body["user"]["id"], user_id.as_str());
+    assert_eq!(
+        v.body["grants"],
+        json!({ "msg": ["read", "send"], "call": ["receive"], "mtg": [] })
+    );
+    let issued =
+        chrono::DateTime::parse_from_rfc3339(v.body["issuedAt"].as_str().unwrap()).unwrap();
+    let expires =
+        chrono::DateTime::parse_from_rfc3339(v.body["expiresAt"].as_str().unwrap()).unwrap();
+    assert_eq!((expires - issued).num_seconds(), 600);
+
+    // The same user again (upsert), default TTL 3600; the partner API sees the user.
+    let again = test_token(sandbox, json!({ "externalId": "tester-1" })).await;
+    assert_eq!(again.status, StatusCode::CREATED, "{}", again.body);
+    assert_eq!(again.body["user"]["id"], user_id.as_str());
+    let v2 = verify(&h, again.body["token"].as_str().unwrap()).await;
+    let issued =
+        chrono::DateTime::parse_from_rfc3339(v2.body["issuedAt"].as_str().unwrap()).unwrap();
+    let expires =
+        chrono::DateTime::parse_from_rfc3339(v2.body["expiresAt"].as_str().unwrap()).unwrap();
+    assert_eq!((expires - issued).num_seconds(), 3600);
+    assert_eq!(
+        dp(
+            &h,
+            Method::GET,
+            &format!("/internal/v1/end-users/{user_id}"),
+            None,
+            credential
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+    // Audited under the human actor: one registration, two mints.
+    let actor = format!("devplat.u-{}", "a".repeat(32));
+    for (action, n) in [("PRINCIPAL_REGISTERED", 1), ("USER_TOKEN_TEST_ISSUED", 2)] {
+        assert_eq!(
+            count(&h, &format!(
+                "SELECT count(*) FROM platform_access_audit WHERE actor = '{actor}' AND action = '{action}'"
+            ))
+            .await,
+            n,
+            "{action}"
+        );
+    }
+
+    // Validation, environments and callers.
+    for ttl in [59, 3601] {
+        let r = test_token(
+            sandbox,
+            json!({ "externalId": "tester-1", "ttlSeconds": ttl }),
+        )
+        .await;
+        assert_eq!(r.code(), "VALIDATION_ERROR", "{ttl}: {}", r.body);
+    }
+    for env in [c.env("TEST"), c.env("PRODUCTION")] {
+        let r = test_token(env, json!({ "externalId": "tester-1" })).await;
+        assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.body);
+        assert_eq!(r.code(), "POLICY_VIOLATION");
+    }
+    let fp = h.consumer("firstparty", "FIRST_PARTY", &[]).await;
+    assert_eq!(
+        test_token(fp.env("SANDBOX"), json!({ "externalId": "u" }))
+            .await
+            .code(),
+        "POLICY_VIOLATION"
+    );
+    assert_eq!(
+        test_token(Uuid::new_v4(), json!({ "externalId": "u" }))
+            .await
+            .status,
+        StatusCode::NOT_FOUND
+    );
+    let no_actor = h
+        .call(
+            &h.peers.developer_platform,
+            Method::POST,
+            &path(sandbox),
+            Some(json!({ "externalId": "u" })),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(no_actor.code(), "OPERATOR_REQUIRED");
+    let other_peer = h
+        .call_with_headers(
+            &h.peers.calling,
+            Method::POST,
+            &path(sandbox),
+            Some(json!({ "externalId": "u" })),
+            None,
+            None,
+            &[("x-cf-delegated-actor", format!("u-{}", "a".repeat(32)))],
+        )
+        .await;
+    assert_eq!(other_peer.code(), "INTERNAL_PERMISSION_DENIED");
+    // Nothing was minted for the refused requests.
+    assert_eq!(
+        count(
+            &h,
+            "SELECT count(*) FROM platform_access_audit WHERE action = 'USER_TOKEN_TEST_ISSUED'"
+        )
+        .await,
+        2
+    );
+
+    // Grants are bounded by the application's current SANDBOX scope grants.
+    h.admin_ok(
+        Method::DELETE,
+        &format!(
+            "/internal/v1/admin/applications/{}/scopes/messages.send",
+            c.application_id
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(
+        verify(&h, &token).await.body["grants"]["msg"],
+        json!(["read"])
+    );
+    let r = test_token(
+        sandbox,
+        json!({ "externalId": "tester-1", "grants": { "msg": ["send"] } }),
+    )
+    .await;
+    assert_eq!(r.code(), "SCOPE_REQUIRED", "{}", r.body);
+
+    // Forged console-marker chains, correctly signed, are invalid.
+    let now = h.clock_now().timestamp();
+    let base = UserTokenClaims {
+        principal_id: Uuid::parse_str(&user_id).unwrap(),
+        tenant_id: c.tenant_id,
+        application_id: c.application_id,
+        environment_id: sandbox,
+        environment_kind: EnvironmentKind::Sandbox,
+        service_account_id: console_test_service_account_id(sandbox),
+        credential_id: console_test_credential_id(sandbox),
+        token_id: Uuid::new_v4(),
+        issued_at: now,
+        not_before: now,
+        expires_at: now + 3600,
+        grants: Grants::default(),
+    };
+    assert_eq!(verify(&h, &keys.sign(&base)).await.status, StatusCode::OK);
+    let test_env = c.env("TEST");
+    for claims in [
+        // Longer than the console TTL bound.
+        UserTokenClaims {
+            expires_at: now + 3601,
+            ..base.clone()
+        },
+        // Another environment's marker.
+        UserTokenClaims {
+            credential_id: console_test_credential_id(test_env),
+            ..base.clone()
+        },
+        UserTokenClaims {
+            service_account_id: console_test_service_account_id(test_env),
+            ..base.clone()
+        },
+        // A non-SANDBOX environment with its own marker.
+        UserTokenClaims {
+            environment_id: test_env,
+            environment_kind: EnvironmentKind::Test,
+            credential_id: console_test_credential_id(test_env),
+            service_account_id: console_test_service_account_id(test_env),
+            ..base.clone()
+        },
+        // Another tenant.
+        UserTokenClaims {
+            tenant_id: Uuid::new_v4(),
+            ..base.clone()
+        },
+    ] {
+        let r = verify(&h, &keys.sign(&claims)).await;
+        assert_eq!(r.code(), "USER_TOKEN_INVALID", "{claims:?}: {}", r.body);
+    }
+
+    // The user: suspended → revoked; reactivated → valid; revoke-sessions → revoked.
+    let patch = |status: &'static str| {
+        let h = &h;
+        let path = format!("/internal/v1/end-users/{user_id}");
+        async move {
+            dp(
+                h,
+                Method::PATCH,
+                &path,
+                Some(json!({ "status": status })),
+                credential,
+            )
+            .await
+        }
+    };
+    assert_eq!(patch("SUSPENDED").await.status, StatusCode::OK);
+    assert_eq!(verify(&h, &token).await.code(), "USER_TOKEN_REVOKED");
+    assert_eq!(
+        test_token(sandbox, json!({ "externalId": "tester-1" }))
+            .await
+            .code(),
+        "INVALID_STATE"
+    );
+    assert_eq!(patch("ACTIVE").await.status, StatusCode::OK);
+    assert_eq!(verify(&h, &token).await.status, StatusCode::OK);
+
+    // The environment: suspended → revoked, and no new test tokens; resumed → valid.
+    h.admin_ok(
+        Method::POST,
+        &format!("/internal/v1/admin/environments/{sandbox}/status"),
+        Some(json!({ "status": "SUSPENDED" })),
+    )
+    .await;
+    assert_eq!(verify(&h, &token).await.code(), "USER_TOKEN_REVOKED");
+    assert_eq!(
+        test_token(sandbox, json!({ "externalId": "tester-1" }))
+            .await
+            .code(),
+        "POLICY_VIOLATION"
+    );
+    h.admin_ok(
+        Method::POST,
+        &format!("/internal/v1/admin/environments/{sandbox}/status"),
+        Some(json!({ "status": "ACTIVE" })),
+    )
+    .await;
+    assert_eq!(verify(&h, &token).await.status, StatusCode::OK);
+
+    // Revoking the partner's credentials does not affect console tokens.
+    h.admin_ok(
+        Method::POST,
+        &format!("/internal/v1/admin/credentials/{credential}/revoke"),
+        None,
+    )
+    .await;
+    assert_eq!(verify(&h, &token).await.status, StatusCode::OK);
+
+    // Expiry (600 s + 60 s skew).
+    h.clock.advance(chrono::Duration::seconds(600 + 61));
+    assert_eq!(verify(&h, &token).await.code(), "USER_TOKEN_EXPIRED");
+
+    // revoke-sessions (through a fresh partner credential).
+    let fresh = test_token(sandbox, json!({ "externalId": "tester-1" })).await;
+    let fresh = fresh.body["token"].as_str().unwrap().to_string();
+    assert_eq!(verify(&h, &fresh).await.status, StatusCode::OK);
+    let (other, _) = h.issue(c.sa("SANDBOX"), &["principals.write"]).await;
+    let r = dp(
+        &h,
+        Method::POST,
+        &format!("/internal/v1/end-users/{user_id}/revoke-sessions"),
+        None,
+        uuid(&other["id"]),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert_eq!(verify(&h, &fresh).await.code(), "USER_TOKEN_REVOKED");
 }

@@ -681,14 +681,104 @@ impl fmt::Debug for PutProviderRequest {
     }
 }
 
+/// The AAD producer of the multi-part form (the Developer Console).
+pub const PARTS_PRODUCER: &str = "cfmeet.developer-platform";
+/// Most parts of a multi-part seal (16 KiB of base64url in 512-character tokens).
+const MAX_PARTS: usize = 64;
+
+/// A sealed credential as the Developer Console sends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SealedCredential {
+    /// One [`cf_notification_client::seal::seal_push_credential`] seal (compact
+    /// `<kid>.<enc>.<ct>`, or the `{kid, enc, ct}` object, or that object as a string).
+    Whole(Sealed),
+    /// `{"v": 1, "parts": [Sealed, …]}` (as an object or a JSON string): the secret's
+    /// base64url (no padding) split into `token` parts, each sealed with
+    /// `cf_notification_client::seal::seal` for producer [`PARTS_PRODUCER`], event id
+    /// `<tenantId>/<applicationId>/<environmentId>/<provider>` and event type
+    /// `push-provider.secret.<index>-of-<count>`; a part opens only at its place, for that
+    /// scope and provider slot.
+    Parts(Vec<Sealed>),
+}
+
 /// Reads the `sealed` field in any of its accepted forms.
-pub fn parse_sealed(v: &Value) -> Option<Sealed> {
+pub fn parse_sealed(v: &Value) -> Option<SealedCredential> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Multi {
+        v: u8,
+        parts: Vec<Sealed>,
+    }
+    let multi = |m: Multi| {
+        (m.v == 1 && (1..=MAX_PARTS).contains(&m.parts.len()))
+            .then_some(SealedCredential::Parts(m.parts))
+    };
     match v {
         Value::String(s) => Sealed::parse_compact(s)
             .ok()
-            .or_else(|| serde_json::from_str::<Sealed>(s).ok()),
-        Value::Object(_) => serde_json::from_value::<Sealed>(v.clone()).ok(),
+            .or_else(|| serde_json::from_str::<Sealed>(s).ok())
+            .map(SealedCredential::Whole)
+            .or_else(|| serde_json::from_str::<Multi>(s).ok().and_then(multi)),
+        Value::Object(_) => serde_json::from_value::<Sealed>(v.clone())
+            .ok()
+            .map(SealedCredential::Whole)
+            .or_else(|| {
+                serde_json::from_value::<Multi>(v.clone())
+                    .ok()
+                    .and_then(multi)
+            }),
         _ => None,
+    }
+}
+
+/// Opens a sealed credential for exactly (scope, provider); anything sealed for another
+/// scope (or, multi-part, another slot or order) fails closed.
+pub fn open_credential(
+    opening: &OpeningKey,
+    scope: &Scope,
+    provider: &str,
+    sealed: &SealedCredential,
+) -> Option<zeroize::Zeroizing<String>> {
+    match sealed {
+        SealedCredential::Whole(s) => open_push_credential(
+            opening,
+            scope.tenant_id,
+            scope.application_id,
+            scope.environment_id,
+            s,
+        )
+        .ok(),
+        SealedCredential::Parts(parts) => {
+            use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+            let event_id = format!(
+                "{}/{}/{}/{provider}",
+                scope.tenant_id, scope.application_id, scope.environment_id
+            );
+            let mut encoded = zeroize::Zeroizing::new(String::new());
+            for (index, part) in parts.iter().enumerate() {
+                let opened = cf_notification_client::seal::open(
+                    opening,
+                    PARTS_PRODUCER,
+                    &event_id,
+                    &format!("push-provider.secret.{index}-of-{}", parts.len()),
+                    part,
+                )
+                .ok()?;
+                let token = opened.token.as_deref()?;
+                if opened.fields().len() != 1 {
+                    return None;
+                }
+                encoded.push_str(token);
+            }
+            let bytes = zeroize::Zeroizing::new(URL_SAFE_NO_PAD.decode(encoded.as_bytes()).ok()?);
+            if bytes.is_empty()
+                || bytes.len() > cf_notification_client::seal::MAX_PUSH_CREDENTIAL_BYTES
+            {
+                return None;
+            }
+            let text = std::str::from_utf8(&bytes).ok()?;
+            Some(zeroize::Zeroizing::new(text.to_string()))
+        }
     }
 }
 
@@ -740,14 +830,9 @@ pub async fn put_provider(
         "sealed is not a notification-client seal",
     ))?;
     let opening = opening.ok_or(VaultError::Unavailable)?;
-    let secret = open_push_credential(
-        opening,
-        scope.tenant_id,
-        scope.application_id,
-        scope.environment_id,
-        &sealed,
-    )
-    .map_err(|_| VaultError::Invalid("sealed does not open for this scope"))?;
+    let secret = open_credential(opening, &scope, provider, &sealed).ok_or(VaultError::Invalid(
+        "sealed does not open for this scope and provider",
+    ))?;
     if fingerprint_of(&secret) != fingerprint && fingerprint_of(secret.trim()) != fingerprint {
         return Err(VaultError::Invalid(
             "fingerprint does not match the sealed credential",
@@ -1830,15 +1915,19 @@ mod tests {
             enc: "abc".into(),
             ct: "def".into(),
         };
-        assert_eq!(parse_sealed(&json!(s.to_compact())), Some(s.clone()));
-        assert_eq!(
-            parse_sealed(&serde_json::to_value(&s).unwrap()),
-            Some(s.clone())
-        );
+        let whole = Some(SealedCredential::Whole(s.clone()));
+        assert_eq!(parse_sealed(&json!(s.to_compact())), whole);
+        assert_eq!(parse_sealed(&serde_json::to_value(&s).unwrap()), whole);
         assert_eq!(
             parse_sealed(&json!(serde_json::to_string(&s).unwrap())),
-            Some(s.clone())
+            whole
         );
+        let multi = json!({ "v": 1, "parts": [s.clone(), s.clone()] });
+        let parts = Some(SealedCredential::Parts(vec![s.clone(), s.clone()]));
+        assert_eq!(parse_sealed(&multi), parts);
+        assert_eq!(parse_sealed(&json!(multi.to_string())), parts);
+        assert_eq!(parse_sealed(&json!({ "v": 2, "parts": [s.clone()] })), None);
+        assert_eq!(parse_sealed(&json!({ "v": 1, "parts": [] })), None);
         assert_eq!(parse_sealed(&json!(42)), None);
         assert_eq!(parse_sealed(&json!("plain text secret")), None);
     }
