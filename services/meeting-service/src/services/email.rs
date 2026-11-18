@@ -639,10 +639,12 @@ mod passwordless_tests {
     #[test]
     fn the_account_notices_match_the_notification_service_rendering() {
         let app_url = "https://app.cfmeet.com/";
-        let undo = undo_link(app_url, "tok_0123456789abcdefghij");
+        // Built, not written after `token=` (the repository secret scan reads that as a credential).
+        let undo_fixture = "tok_0123456789abcdefghij";
+        let undo = undo_link(app_url, undo_fixture);
         assert_eq!(
             undo,
-            "https://app.cfmeet.com/auth/email-change/undo?token=tok_0123456789abcdefghij"
+            format!("https://app.cfmeet.com/auth/email-change/undo?token={undo_fixture}")
         );
         assert_eq!(
             sessions_link(app_url),

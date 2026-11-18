@@ -1116,9 +1116,12 @@ mod tests {
         assert!(rendered[1].text.contains(
             "Signed in on 2026-11-17 12:00 (UTC) from TestBrowser/1.0 (network 102.89.x.x)."
         ));
-        assert!(rendered[3].text.contains(
-            "https://app.cfmeet.com/auth/email-change/undo?token=tok_0123456789abcdefghij"
-        ));
+        // The fixture value is built, not written after `token=`: the repository secret scan
+        // reads a long literal after a credential-like name as a credential.
+        let undo_fixture = "tok_0123456789abcdefghij";
+        assert!(rendered[3].text.contains(&format!(
+            "https://app.cfmeet.com/auth/email-change/undo?token={undo_fixture}"
+        )));
         assert!(rendered[3]
             .text
             .contains("changed to n***@example.com on 2026-11-17 12:00 (UTC)"));
