@@ -1171,7 +1171,11 @@ def template_env(name):
     env = {'CF_RUNTIME_ENVIRONMENT': 'production', 'LOG_FORMAT': 'json',
            'CF_SERVICE_AUTH_KEY_ID': identity + '-production-1',
            'CF_SERVICE_AUTH_PRIVATE_KEY_FILE': '/run/secrets/service-auth.pem',
-           'CF_PLATFORM_ACCESS_BASE_URL': private_url(SERVICES['platform-access']['tls'])}
+           'CF_PLATFORM_ACCESS_BASE_URL': private_url(SERVICES['platform-access']['tls']),
+           # SEC-012 / P8: signers bind tokens to the request; receivers verify bound tokens
+           # and still accept unbound ones (require is a per-receiver decision).
+           'SERVICE_AUTH_REQUEST_BINDING': 'emit',
+           'SERVICE_AUTH_REQUEST_BINDING_MODE': 'accept'}
     if name != 'api-gateway':
         env['CF_SERVICE_TRUST_BUNDLE_FILE'] = '/run/secrets/trust.json'
     if s['db']:
