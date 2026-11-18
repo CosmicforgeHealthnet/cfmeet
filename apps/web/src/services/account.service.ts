@@ -17,7 +17,7 @@ import type {
  * operation in the served contract; the type is kept here until the web sign-in screens move
  * to the one-time-code flow, so the existing screens keep compiling unchanged.
  */
-export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL";
+export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT" | "DISABLE_MFA";
 
 export const accountService = {
   getProfile: async () => (await apiV2.get<AccountProfile>("/me/profile")).data,
@@ -41,6 +41,24 @@ export const accountService = {
     (await apiV2.post<{ message: string; expiresInSecs: number }>("/me/step-up/request", { purpose })).data,
   verifyStepUp: async (purpose: StepUpPurpose, code: string) =>
     (await apiV2.post<{ stepUpToken: string; expiresInSecs: number }>("/me/step-up/verify", { purpose, code })).data,
+
+  /** Upload a profile photo (PNG, JPEG or WebP, at most 512 KiB); returns the updated profile. */
+  uploadAvatar: async (file: File) =>
+    (await apiV2.put<AccountProfile>("/me/avatar", file, { headers: { "Content-Type": file.type } })).data,
+
+  /** Sign out every other device (this one stays signed in). */
+  revokeOtherSessions: async () => (await apiV2.post<AccountSessionRevokeResponse>("/me/sessions/revoke-others")).data,
+
+  /** Two-step sign-in with an authenticator app. */
+  mfaStatus: async () => (await apiV2.get<{ totpEnabled: boolean; recoveryCodesRemaining: number }>("/me/mfa")).data,
+  mfaSetup: async () => (await apiV2.post<{ otpauthUri: string; secret: string }>("/me/mfa/totp/setup", {})).data,
+  mfaConfirm: async (code: string) => (await apiV2.post<{ recoveryCodes: string[] }>("/me/mfa/totp/confirm", { code })).data,
+  mfaDisable: async (stepUpToken: string) => (await apiV2.post("/me/mfa/disable", { stepUpToken })).data,
+
+  /** Everything CF Meet keeps about you, as one JSON document. */
+  dataExport: async () => (await apiV2.get<unknown>("/me/data-export")).data,
+  /** Delete the account for good, with a DELETE_ACCOUNT step-up token. */
+  deleteAccount: async (stepUpToken: string) => (await apiV2.post("/me/account/delete", { stepUpToken })).data,
 
   /** Deactivate the account with a DEACTIVATE_ACCOUNT step-up token. */
   deactivate: async (stepUpToken: string) =>

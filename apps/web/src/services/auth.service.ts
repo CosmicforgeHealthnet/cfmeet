@@ -46,6 +46,16 @@ async function declareThisBrowser(accessToken: string): Promise<void> {
   }
 }
 
+/** Thrown when the account needs its authenticator code to finish signing in. */
+export class MfaRequired extends Error {
+  constructor(readonly ticket: string) { super("MFA_REQUIRED"); }
+}
+function mfaOrThrow(e: unknown): never {
+  const err = (e as { response?: { data?: { error?: { code?: string; mfaTicket?: string } } } }).response?.data?.error;
+  if (err?.code === "MFA_REQUIRED" && err.mfaTicket) throw new MfaRequired(err.mfaTicket);
+  throw e;
+}
+
 export const authService = {
   /**
    * Passwordless sign-in and sign-up (one flow). Step 1: email a 6-digit code and a one-click
@@ -56,16 +66,26 @@ export const authService = {
     return response.data;
   },
 
-  /** Step 2 (code): the first correct code creates the account (`is_new_account`). */
+  /**
+   * Step 2 (code): the first correct code creates the account (`is_new_account`). An account
+   * with an authenticator app answers MFA_REQUIRED: the caller then asks for that code.
+   */
   verifyCode: async (email: string, code: string, rememberMe = true) => {
-    const response = await publicApi.post<OtpVerifyResponse>("/auth/otp/verify", { email, code });
+    const response = await publicApi.post<OtpVerifyResponse>("/auth/otp/verify", { email, code }).catch(mfaOrThrow);
+    await establish(response.data as unknown as LoginResponse, rememberMe);
+    return response.data;
+  },
+
+  /** Step 3 (two-step accounts): the authenticator code, or a recovery code. */
+  verifyMfa: async (mfaTicket: string, code: string, rememberMe = true) => {
+    const response = await publicApi.post<OtpVerifyResponse>("/auth/mfa/verify", { mfaTicket, code });
     await establish(response.data as unknown as LoginResponse, rememberMe);
     return response.data;
   },
 
   /** Step 2 (email link): POSTed from /auth/magic after a click, never on page load. */
   verifyLink: async (email: string, token: string) => {
-    const response = await publicApi.post<OtpVerifyResponse>("/auth/otp/verify-link", { email, token });
+    const response = await publicApi.post<OtpVerifyResponse>("/auth/otp/verify-link", { email, token }).catch(mfaOrThrow);
     await establish(response.data as unknown as LoginResponse, true);
     return response.data;
   },

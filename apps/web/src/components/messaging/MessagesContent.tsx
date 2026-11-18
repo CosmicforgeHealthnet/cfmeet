@@ -9,6 +9,7 @@
  * Layout: one full-height surface (WhatsApp Web / Teams): chat list on the left, the open
  * chat on the right; on phones the list and the chat are separate screens.
  */
+import { ForwardDialog, GroupAdminTools, ReportDialog } from "./ChatActions";
 import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -16,7 +17,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BellOff, Check, Star, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
+  ArrowLeft, BellOff, Check, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
   MoreHorizontal, Paperclip, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X,
   UserPlus,
@@ -494,6 +495,9 @@ type BubbleActions = {
   /** Star / unstar (saved messages, WhatsApp). */
   star: () => void;
   starred: boolean;
+  /** S11 / S2: forward to another chat, report a message. */
+  forward: () => void;
+  report: () => void;
   retry: () => void;
   discard: () => void;
 };
@@ -581,6 +585,8 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
                       {QUICK_REACTIONS.map((r) => <button key={r} type="button" aria-label={`React ${r}`} onClick={() => { actions.react(r, !(m.reactions ?? []).some((x) => x.reaction === r && x.reactedByMe)); setMenu(false); }} className="flex size-7 items-center justify-center rounded-full text-base hover:bg-muted">{r}</button>)}
                     </div>
                     <button type="button" className={item} data-testid="reply" onClick={() => { actions.reply(); setMenu(false); }}><CornerUpLeft className="size-4 text-muted-foreground" />Reply</button>
+                    <button type="button" className={item} data-testid="forward" onClick={() => { actions.forward(); setMenu(false); }}><Forward className="size-4 text-muted-foreground" />Forward</button>
+                    {!mine ? <button type="button" className={item} data-testid="report" onClick={() => { actions.report(); setMenu(false); }}><Flag className="size-4 text-muted-foreground" />Report</button> : null}
                     <button type="button" className={item} data-testid="star" onClick={() => { actions.star(); setMenu(false); }}><Star className={cn("size-4", actions.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />{actions.starred ? "Unstar" : "Star"}</button>
                     <button type="button" className={item} data-testid="pin" onClick={() => { actions.pin(!m.pinned); setMenu(false); }}>{m.pinned ? <PinOff className="size-4 text-muted-foreground" /> : <Pin className="size-4 text-muted-foreground" />}{m.pinned ? "Unpin" : "Pin"}</button>
                     {mine && m.text !== null ? <button type="button" className={item} data-testid="edit" onClick={() => { setEditing(m.text ?? ""); setMenu(false); }}><Pencil className="size-4 text-muted-foreground" />Edit</button> : null}
@@ -712,6 +718,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
             </form>
           ) : null}
         </section>
+        {isGroup && manager ? <GroupAdminTools engine={engine} conversation={conversation} names={s.names} me={me ?? null} /> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
         {isGroup ? (
           <button type="button" data-testid="leave-conversation" onClick={() => run(engine.leaveConversation(conversation.id))} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-destructive hover:bg-destructive/10"><LogOut className="size-4" />Leave group</button>
@@ -808,7 +815,9 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   const managed = conversation.securityProfile === "MANAGED";
   // Private chats: you can type as soon as this browser is set up; until the chat's encryption
   // is ready here, messages wait on this device and go out automatically.
-  const canSend = !!s.identity && (!e2ee || s.phase === "ready");
+  // S13: in an admins-only group, members read but can't send.
+  const adminsOnly = conversation.announcementOnly && conversation.myRole !== "OWNER" && conversation.myRole !== "ADMIN";
+  const canSend = !!s.identity && !adminsOnly && (!e2ee || s.phase === "ready");
   // Files follow Messaging's effective attachment policy (Hub capabilities): the attach
   // control is disabled when the server would refuse every file.
   const hubCapabilities = useHubCapabilities();
@@ -862,10 +871,14 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     [engine, conversation.id],
   );
   const fail = (cause: unknown) => setError(messagingErrorMessage(cause));
+  const [forwarding, setForwarding] = useState<{ messageId: string | null; text: string | null } | null>(null);
+  const [reporting, setReporting] = useState<{ messageId: string; text: string | null } | null>(null);
   const queryClient = useQueryClient();
   const saved = useQuery({ queryKey: SAVED_KEY, queryFn: () => hub.savedMessages(), retry: false, staleTime: 30_000 });
   const savedIds = useMemo(() => new Map((saved.data?.data ?? []).map((x) => [x.messageId, x.savedId])), [saved.data]);
   const bubbleActions = (m: MessageView): BubbleActions => ({
+    forward: () => setForwarding({ messageId: m.messageId ?? null, text: m.text }),
+    report: () => { if (m.messageId) setReporting({ messageId: m.messageId, text: m.text }); },
     reply: () => { setReplyTo(m); composer.current?.focus(); },
     react: (reaction, add) => { if (m.messageId) void engine.react(conversation.id, m.messageId, reaction, add).catch(fail); },
     edit: async (t) => { if (m.messageId && t.trim()) await engine.editMessage(conversation.id, m.messageId, t).catch(fail); },
@@ -914,6 +927,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
 
   return (
     <div className="relative flex h-full min-w-0">
+      {forwarding ? <ForwardDialog engine={engine} conversations={s.conversations} sourceId={conversation.id} message={forwarding} onClose={() => setForwarding(null)} /> : null}
+      {reporting ? <ReportDialog engine={engine} conversationId={conversation.id} message={reporting} privateChat={e2ee} onClose={() => setReporting(null)} /> : null}
       <section className="flex min-w-0 flex-1 flex-col" data-testid="conversation" data-conversation-id={conversation.id} data-profile={conversation.securityProfile}>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-2 sm:px-4">
           {onBack ? (
@@ -1026,7 +1041,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 value={text}
                 maxLength={16384}
                 disabled={!canSend}
-                placeholder={canSend ? (e2ee ? "Message" : "Message (CF Meet can read this chat)") : "You can't send messages from this browser"}
+                placeholder={canSend ? (e2ee ? "Message" : "Message (CF Meet can read this chat)") : adminsOnly ? "Only admins can send messages" : "You can't send messages from this browser"}
                 onChange={(e) => { setText(e.target.value); if (managed) engine.typing(conversation.id, e.target.value.length > 0); }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
                 className="max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"

@@ -50,6 +50,9 @@ export type MemberRole = "OWNER" | "ADMIN" | "MODERATOR" | "MEMBER" | "READ_ONLY
 export type AttachmentMeta = { name: string; mediaType: string; size: number | null; state: string; kind: string };
 export type SearchHit = { messageId: string; sequence: number; senderPrincipalId: string; createdAt: string; text: string | null };
 
+/** S12: a group invite link (the token is only returned when it's created). */
+export type InviteLink = { inviteLinkId: string; expiresAt: string | null; maxUses: number | null; useCount: number; revokedAt: string | null; status: string; role: string };
+
 export type ConversationView = {
   id: string;
   contextClass: string;
@@ -74,6 +77,8 @@ export type ConversationView = {
   lastMessage: { sequence: number; senderPrincipalId: string; previewText: string | null; attachmentCount: number; lifecycle: string; createdAt: string } | null;
   memberRoles: Record<string, MemberRole>;
   myRole: MemberRole | null;
+  /** Only owners and admins can send (S13). */
+  announcementOnly: boolean;
 };
 
 export type MessageView = {
@@ -154,6 +159,7 @@ type ServerConversation = {
   encryption: { mlsGroupId: string | null; serverCanReadContent: boolean };
   members?: { principalId: string; role?: string; state?: string }[];
   version?: number;
+  announcementOnly?: boolean;
   ownerPrincipalId?: string;
   title?: string | null;
   avatarRef?: string | null;
@@ -963,6 +969,7 @@ export class MessagingEngine {
           : (previous?.lastMessage ?? null),
         memberRoles: roles,
         myRole: (me && roles[me]) || null,
+        announcementOnly: !!c.announcementOnly,
       });
     }
     if (needNames.size) {
@@ -1203,6 +1210,59 @@ export class MessagingEngine {
   }
 
   /** Renames a MANAGED group (compare-and-swap on the conversation version). */
+  /** S13: only owners and admins can send in this group. */
+  async setAnnouncementOnly(conversationId: string, on: boolean): Promise<void> {
+    const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
+    await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? 0, announcementOnly: on });
+    await this.refreshConversations();
+  }
+
+  /**
+   * S11: forward a message. MANAGED → MANAGED goes through the server (it copies the message);
+   * anything private is re-sent from this device as a new message (the server can't read it).
+   */
+  async forwardMessage(sourceId: string, messageId: string | null, text: string | null, targetId: string): Promise<void> {
+    const source = this.server.get(sourceId);
+    const target = this.server.get(targetId);
+    if (!source || !target) throw new MessagingApiError(0, "NOT_FOUND", "That chat isn't available.");
+    if (source.securityProfile === "MANAGED" && target.securityProfile === "MANAGED" && messageId) {
+      await relay("POST", `v1/conversations/${sourceId}/messages/${messageId}/forward`, { targetConversationId: targetId, clientMessageId: uuid() });
+      this.scheduleSync(targetId);
+      return;
+    }
+    if (!text?.trim()) throw new MessagingApiError(0, "CONTENT_REJECTED", "Only text messages can be forwarded.");
+    await this.send(targetId, text);
+  }
+
+  /** S12: invite links for a group (admins). */
+  inviteLinks(conversationId: string) {
+    return relay<{ inviteLinks: InviteLink[] }>("GET", `v1/conversations/${conversationId}/invite-links`).then((r) => r.inviteLinks ?? []);
+  }
+  createInviteLink(conversationId: string, opts: { expiresInSeconds?: number; maxUses?: number } = {}) {
+    return relay<InviteLink & { token: string }>("POST", `v1/conversations/${conversationId}/invite-links`, opts);
+  }
+  revokeInviteLink(conversationId: string, linkId: string) {
+    return relay("POST", `v1/conversations/${conversationId}/invite-links/${linkId}/revoke`, {});
+  }
+  async joinByInviteLink(token: string): Promise<string | null> {
+    const r = await relay<{ conversationId?: string; conversation?: { conversationId?: string } }>("POST", "v1/messaging/invite-links/join", { token });
+    await this.refreshConversations().catch(() => {});
+    return r.conversationId ?? r.conversation?.conversationId ?? null;
+  }
+
+  /** S3: hand the group to another member (owner only). */
+  async transferOwnership(conversationId: string, principalId: string): Promise<void> {
+    await relay("POST", `v1/conversations/${conversationId}/owner`, { principalId });
+    await this.refreshConversations();
+  }
+
+  /** S2: report messages. Private chats disclose the reported text from this device. */
+  async reportMessages(conversationId: string, messages: { messageId: string; text: string | null }[], category: string, note?: string): Promise<void> {
+    const conv = this.server.get(conversationId);
+    const disclosure = conv?.securityProfile === "PRIVATE_E2EE" ? messages.filter((m) => m.text).map((m) => ({ messageId: m.messageId, text: m.text! })) : [];
+    await relay("POST", `v1/conversations/${conversationId}/reports`, { category, messageIds: messages.map((m) => m.messageId), ...(note ? { note } : {}), ...(disclosure.length ? { disclosure } : {}) });
+  }
+
   async renameConversation(conversationId: string, title: string | null): Promise<void> {
     const conv = this.server.get(conversationId);
     if (!conv) return;

@@ -441,6 +441,28 @@ async function authorizeCallRoute(
     }
     return { body: { invitingParticipantId: active.participantId, targetPrincipalIds: targets, expectedVersion: body.expectedVersion } };
   }
+  // ---- C4 group host: hand over the role, mute or remove someone (the server checks the host) ----
+  if (path.length === 4 && op === "host" && body) {
+    if (method !== "POST" || !active || typeof body.hostParticipantId !== "string" || !uuid.test(body.hostParticipantId)) return false;
+    return { body: { actingParticipantId: active.participantId, hostParticipantId: body.hostParticipantId } };
+  }
+  if (path.length === 6 && op === "participants" && uuid.test(path[4]) && ["remove", "mute"].includes(path[5])) {
+    if (method !== "POST" || !active) return false;
+    return { body: path[5] === "mute" ? { actingParticipantId: active.participantId, muted: body?.muted === true } : { actingParticipantId: active.participantId } };
+  }
+  // ---- C6: come back into an ongoing call you left (your own participant, your own endpoint) ----
+  if (path.length === 6 && op === "participants" && path[4] === mine.participantId && path[5] === "rejoin" && body) {
+    if (method !== "POST") return false;
+    await requireOwnEndpoint(body.endpointId);
+    return { body: { endpointId: body.endpointId } };
+  }
+  // ---- C13: hide a call from your own history ----
+  if (path.length === 4 && op === "history" && method === "DELETE") {
+    url.search = `?principalId=${encodeURIComponent(principalId)}`;
+    return true;
+  }
+  // ---- C8: call quality (per-participant aggregates) ----
+  if (path.length === 4 && op === "quality") return method === "GET";
   if (path.length === 4 && ["accept", "decline"].includes(op) && body) {
     if (method !== "POST") return false;
     await requireOwnEndpoint(body.endpointId);

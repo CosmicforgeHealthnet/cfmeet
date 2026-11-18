@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { BarChart3, Captions, CheckCircle2, ClipboardList, Download, FileText, Languages, ListChecks, Loader2, MessageSquare, Search, ShieldCheck, Sparkles, Square, Users } from "lucide-react";
 import { NiceSelect } from "@/components/ui/nice-select";
+import apiV2 from "@/services/v2/api";
 import { ActionDialog, RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { useCurrentParticipant } from "@/hooks/v2/useParticipants";
 import { useParticipantsV2 } from "@/hooks/v2";
@@ -65,6 +66,15 @@ function withdrawalText(result: WithdrawalResponse) {
 
 const clock = (ms: number) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 const btn = "inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-colors disabled:opacity-50";
+
+/** Download a report straight away as a file (no stored copy). */
+async function downloadReport(conferenceId: string, type: string, label: string) {
+  const data = (await apiV2.get<unknown>(`/conferences/${encodeURIComponent(conferenceId)}/exports/${type}`)).data;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `${label.toLowerCase().replace(/\s+/g, "-")}-${conferenceId.slice(0, 8)}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 export default function ConferenceArtifactsPanel({ conferenceId, spaceRole, rolePolicy, live }: {
   conferenceId: string;
@@ -290,7 +300,8 @@ function ReportsTab({ conferenceId, canList, canExport, canRead, canDelete }: { 
   const [notice, setNotice] = useState("");
   // Recordings live in their own panel; here: reports, transcripts files and AI notes.
   const items = (artifacts.data?.artifacts ?? []).filter((a) => a.artifactType !== "RECORDING" && a.status !== "DELETED");
-  const failure = [generate, access, remove].find((m) => m.isError)?.error;
+  const [downloadError, setFailure] = useState<Error | null>(null);
+  const failure = [generate, access, remove].find((m) => m.isError)?.error ?? downloadError;
 
   const open = async (id: string) => {
     setNotice("");
@@ -304,6 +315,16 @@ function ReportsTab({ conferenceId, canList, canExport, canRead, canDelete }: { 
     <div className="space-y-4">
       {failure && <RequestError error={failure} />}
       {notice && <p role="status" className="flex items-center gap-2 rounded-xl bg-primary/5 px-4 py-3 text-sm text-foreground"><CheckCircle2 className="size-4 text-primary" />{notice}</p>}
+      {canExport && (
+        <div className="flex flex-wrap gap-2">
+          {REPORTS.map(({ value, label }) => (
+            <button key={value} type="button" onClick={() => void downloadReport(conferenceId, value, label).catch(setFailure)}
+              className="inline-flex h-9 items-center gap-2 rounded-full border border-border px-3 text-xs font-semibold text-foreground hover:bg-muted">
+              <Download className="size-3.5" />Download {label.toLowerCase()}
+            </button>
+          ))}
+        </div>
+      )}
       {canExport && (
         <div className="grid gap-2 sm:grid-cols-3">
           {REPORTS.map(({ value, label, hint, icon: Icon }) => (

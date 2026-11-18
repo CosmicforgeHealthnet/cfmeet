@@ -109,6 +109,10 @@ export interface Call extends CallCore {
   durationsAsOf: string;
   participants: CallParticipant[];
   sessions: CallSession[];
+  /** C4: the group call's host participant. */
+  hostParticipantId?: string | null;
+  /** C4: participants the host muted. */
+  mutedParticipantIds?: string[];
   invitations: CallInvitation[];
   transfers: CallTransfer[];
   /** C6: who is presenting a screen now (null when nobody is). */

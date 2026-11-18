@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Pencil, Plus, UserMinus, Users } from "lucide-react";
+import { Archive, MessageSquare, Pencil, Plus, UserMinus, Users } from "lucide-react";
 import apiV2 from "@/services/v2/api";
 import { NiceSelect } from "@/components/ui/nice-select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -119,6 +119,8 @@ function TeamPage({ org, team, canManage, onClose }: { org: BusinessOrganization
   const [archiving, setArchiving] = useState(false);
   const refresh = () => { void client.invalidateQueries({ queryKey: keys.members(org.id, team.id) }); void client.invalidateQueries({ queryKey: keys.teams(org.id) }); };
   const add = useMutation({ mutationFn: async (membershipId: string) => (await apiV2.post(`${base(org.id)}/${team.id}/members`, { membershipId, role: "TEAM_MEMBER" })).data, onSuccess: () => { setAdding(""); refresh(); } });
+  const [chatNote, setChatNote] = useState<string | null>(null);
+  const channel = useMutation({ mutationFn: () => apiV2.put(`${base(org.id)}/${team.id}/messaging-channel`, { title: team.name }), onSuccess: (r) => setChatNote(r.status === 201 ? "Team chat created. You'll find it in Chats." : "Team chat updated with the current members.") });
   const setRole = useMutation({ mutationFn: async ({ m, role }: { m: OrganizationTeamMember; role: string }) => (await apiV2.patch(`${base(org.id)}/${team.id}/members/${m.id}`, { role, expectedVersion: m.version })).data, onSuccess: refresh });
   const remove = useMutation({ mutationFn: async (m: OrganizationTeamMember) => (await apiV2.delete(`${base(org.id)}/${team.id}/members/${m.id}`)).data, onSuccess: refresh });
   const archive = useMutation({ mutationFn: async () => (await apiV2.post(`${base(org.id)}/${team.id}/archive`, { expectedVersion: team.version })).data, onSuccess: () => { refresh(); onClose(); } });
@@ -169,6 +171,7 @@ function TeamPage({ org, team, canManage, onClose }: { org: BusinessOrganization
       {canManage ? (
         <div className="pb-8">
           <SideSection>
+            <SideRow icon={<MessageSquare />} label="Team chat" hint={chatNote ?? (channel.isError ? "Couldn't set up the team chat. Try again." : "Create it, or bring its members up to date")} disabled={channel.isPending} onClick={() => channel.mutate()} />
             <SideRow icon={<Pencil />} label="Edit name and description" onClick={() => setEditing(true)} />
             <SideRow icon={<Archive />} label="Archive team" hint="Hides the team; members stay in the organization" danger onClick={() => setArchiving(true)} />
           </SideSection>

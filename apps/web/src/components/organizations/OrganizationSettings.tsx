@@ -26,11 +26,14 @@ import {
 import type { BusinessOrganization } from "@/types/generated/meeting-service";
 import { OrgError, Section, TextField } from "./shared";
 
+import { MeetingRules } from "./OrganizationModeration";
+
 export default function OrganizationSettings({ org }: { org: BusinessOrganization }) {
   return (
     <div className="space-y-4">
       {/* Remount the form when the authoritative version changes (save, conflict reload). */}
       {orgCan(org, ORG_CAPABILITIES.profileWrite) && <ProfileForm key={`${org.id}:${org.version}`} org={org} />}
+      <MeetingRules org={org} />
       {orgCan(org, ORG_CAPABILITIES.ownershipTransfer) && <OwnershipTransfer org={org} />}
       {orgCan(org, ORG_CAPABILITIES.lifecycleManage) && <Lifecycle org={org} />}
     </div>

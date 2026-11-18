@@ -11,15 +11,16 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, Check, Delete, ExternalLink, Settings2, Star, UserPlus, Voicemail, Flag, Grid3x3, MoreHorizontal, Pause, Phone, PhoneCall, PhoneIncoming, PhoneMissed, PhoneOff, PhoneOutgoing,
+  ArrowLeft, Check, Delete, Trash2, MicOff, ExternalLink, Settings2, Star, UserPlus, Voicemail, Flag, Grid3x3, MoreHorizontal, Pause, Phone, PhoneCall, PhoneIncoming, PhoneMissed, PhoneOff, PhoneOutgoing,
   Play, RefreshCw, Search, Users, Video, X,
 } from "lucide-react";
 import { Popover } from "radix-ui";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { callsService } from "@/services/calling/calls.service";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useCalling } from "@/context/CallingContext";
-import { useCall, useCallActions, useCallHistory, useCallingIdentity, useCallingMutation } from "@/hooks/calling";
+import { callingKeys, useCall, useCallActions, useCallHistory, useCallingIdentity, useCallingMutation } from "@/hooks/calling";
 import { usePrincipalNames } from "@/hooks/calling/usePrincipalNames";
 import { identityApi } from "@/lib/messaging/api";
 import { callingErrorMessage } from "@/lib/calling/errors";
@@ -466,10 +467,36 @@ function CallOrigin({ callId }: { callId: string }) {
   );
 }
 
+/** C8: how the call sounded for each person (estimated MOS: 4+ good, 3–4 fair, below 3 poor). */
+function CallQuality({ callId, names }: { callId: string; names: (participantId: string) => string }) {
+  const q = useQuery({ queryKey: ["call-quality", callId], queryFn: () => callsService.quality(callId), retry: false, staleTime: 60_000 });
+  const rows = (q.data?.participants ?? []).filter((p) => p.sampleCount > 0);
+  if (!rows.length) return null;
+  const label = (mos: number) => mos >= 4 ? ["Good", "text-emerald-600"] : mos >= 3 ? ["Fair", "text-amber-600"] : ["Poor", "text-destructive"];
+  return (
+    <section className="mt-6 w-full max-w-sm text-left">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Call quality</p>
+      <ul className="divide-y divide-border rounded-2xl border border-border">
+        {rows.map((p) => {
+          const [text, tone] = label(p.mosEstimate.avg);
+          return (
+            <li key={p.participantId} className="flex items-center gap-3 px-3 py-2.5 text-sm">
+              <span className="min-w-0 flex-1 truncate">{names(p.participantId)}</span>
+              <span className={cn("font-semibold", tone)}>{text}</span>
+              <span className="text-xs text-muted-foreground">{Math.round(p.packetLossPercent.avg * 10) / 10}% loss</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function CallDetails({ callId, principalId, busy, run, onBack }: { callId: string; principalId: string; busy: boolean; run: Runner; onBack: () => void }) {
   const calling = useCalling()!;
   const call = useCall(callId);
   const actions = useCallActions(callId);
+  const queryClient = useQueryClient();
   const mutation = useCallingMutation();
   const [now, setNow] = useState(() => Date.now());
   const [reporting, setReporting] = useState(false);
@@ -511,6 +538,7 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
   const sendDigit = (digit: string) => endpointId && run(() => mutation.mutateAsync({ operation: "ivrInput", callId, body: { endpointId, digit: digit as IvrInputRequest["digit"] } }));
   const keypadAllowed = !!endpointId && live && !!mine && data.initiatorPrincipalId === principalId;
   const menu = "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted";
+  const iAmHost = !!mine && data.hostParticipantId === mine.participantId;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -523,6 +551,7 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
               <Popover.Content align="end" sideOffset={4} className="z-50 w-56 rounded-xl border border-border bg-popover p-1.5 shadow-xl">
                 <Link href={`/calling/${encodeURIComponent(callId)}`} className={menu}><ExternalLink className="size-4 text-muted-foreground" />Full call details</Link>
                 {everMine ? <Popover.Close asChild><button type="button" className={cn(menu, "text-destructive")} onClick={() => setReporting(true)}><Flag className="size-4" />Report this call</button></Popover.Close> : null}
+                {ended ? <Popover.Close asChild><button type="button" className={cn(menu, "text-destructive")} onClick={() => void run(async () => { await callsService.hideFromHistory(callId); await queryClient.invalidateQueries({ queryKey: callingKeys.all }); onBack(); })}><Trash2 className="size-4" />Remove from call history</button></Popover.Close> : null}
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -549,6 +578,10 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
           <p className="mt-8 flex items-center gap-2 rounded-full bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-700 dark:text-emerald-300"><span className="size-2 animate-pulse rounded-full bg-emerald-500" />You&apos;re on this call. Use the call bar to mute or hang up.</p>
         ) : live ? (
           <div className="mt-8 flex flex-wrap justify-center gap-x-2 gap-y-4">
+            {!mine && everMine && calling.device.endpoint ? <RoundControl label="Rejoin" tone="go" disabled={pending || !!calling.media} onClick={() => void run(async () => {
+              const r = await callsService.rejoin(callId, everMine.participantId, calling.device.endpoint!.endpointId);
+              await calling.joinMedia(callId, r.sessionId, data.kind);
+            })}>{data.kind === "VIDEO" ? <Video /> : <Phone />}</RoundControl> : null}
             {joinable ? <RoundControl label="Join here" tone="go" disabled={pending || !!calling.media} onClick={() => void run(() => calling.joinMedia(callId, session!.sessionId, data.kind))}>{data.kind === "VIDEO" ? <Video /> : <Phone />}</RoundControl> : null}
             {controls?.hold ? <RoundControl label="Hold" disabled={pending} onClick={() => void command("hold")}><Pause /></RoundControl> : null}
             {controls?.resume ? <RoundControl label="Resume" disabled={pending} onClick={() => void command("resume")}><Play /></RoundControl> : null}
@@ -584,6 +617,8 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
 
         <CallOrigin callId={callId} />
 
+        {ended ? <CallQuality callId={callId} names={(id) => { const p = data.participants.find((x) => x.participantId === id); return !p ? "Someone" : p.principalId === principalId ? "You" : otherName(p); }} /> : null}
+
         {/* People in the call */}
         <section className="mt-8 w-full max-w-sm text-left">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">People · {data.participants.length}</p>
@@ -594,7 +629,21 @@ function CallDetails({ callId, principalId, busy, run, onBack }: { callId: strin
                 <li key={p.participantId} className="flex items-center gap-3 px-3 py-2.5">
                   <Avatar name={label} seed={p.principalId} size="size-8" className="text-xs" />
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
+                  {data.hostParticipantId === p.participantId ? <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">Host</span> : null}
+                  {data.mutedParticipantIds?.includes(p.participantId) ? <MicOff className="size-3.5 text-destructive" aria-label="Muted by the host" /> : null}
                   <span className="text-xs text-muted-foreground">{p.endedAt ? "Left" : p.role === "INITIATOR" ? "Caller" : "Invited"}</span>
+                  {iAmHost && live && !p.endedAt && p.principalId !== principalId ? (
+                    <Popover.Root>
+                      <Popover.Trigger asChild><button type="button" aria-label={`Options for ${label}`} className="flex size-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><MoreHorizontal className="size-4" /></button></Popover.Trigger>
+                      <Popover.Portal>
+                        <Popover.Content align="end" sideOffset={4} className="z-50 w-48 rounded-xl border border-border bg-popover p-1.5 shadow-xl">
+                          <Popover.Close asChild><button type="button" className={menu} onClick={() => void run(() => callsService.transferHost(callId, p.participantId, newIdempotencyKey()))}>Make host</button></Popover.Close>
+                          <Popover.Close asChild><button type="button" className={menu} onClick={() => void run(() => callsService.muteParticipant(callId, p.participantId, !data.mutedParticipantIds?.includes(p.participantId), newIdempotencyKey()))}>{data.mutedParticipantIds?.includes(p.participantId) ? "Unmute" : "Mute"}</button></Popover.Close>
+                          <Popover.Close asChild><button type="button" className={cn(menu, "text-destructive")} onClick={() => void run(() => callsService.removeParticipant(callId, p.participantId, newIdempotencyKey()))}>Remove from call</button></Popover.Close>
+                        </Popover.Content>
+                      </Popover.Portal>
+                    </Popover.Root>
+                  ) : null}
                 </li>
               );
             })}

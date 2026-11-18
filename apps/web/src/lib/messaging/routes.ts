@@ -9,6 +9,9 @@ const c = `conversations/${id}`;
 const routes: [MessagingMethod, string, readonly string[]][] = [
   ["GET", "conversations", conversations], ["POST", "conversations", []],
   ["GET", c, []], ["PATCH", c, []],
+  ["POST", `${c}/messages/${id}/forward`, []],
+  ["GET", `${c}/invite-links`, []], ["POST", `${c}/invite-links`, []], ["POST", `${c}/invite-links/${id}/revoke`, []],
+  ["POST", "messaging/invite-links/join", []],
   ["GET", `${c}/members`, page], ["POST", `${c}/members`, []],
   ["DELETE", `${c}/members/${id}`, ["reason"]], ["PATCH", `${c}/members/${id}`, []],
   ["GET", `${c}/messages`, messages], ["POST", `${c}/messages`, []],

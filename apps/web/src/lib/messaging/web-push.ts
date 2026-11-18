@@ -1,4 +1,5 @@
 import { relay } from "@/services/v2/messaging.service";
+import { notificationsService } from "@/services/v2/notifications.service";
 
 /**
  * Browser notifications for chats (Web Push). The server sends metadata only (which chat);
@@ -57,7 +58,17 @@ export async function enableWebPush(deviceId: string): Promise<void> {
   await navigator.serviceWorker.ready;
   const sub = (await reg.pushManager.getSubscription())
     ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(config.webPush.applicationServerKey) }));
-  await relay("PUT", `v1/messaging/devices/${deviceId}/push-registration`, { platform: "WEB_PUSH", handle: JSON.stringify(sub.toJSON()), enabled: true });
+  const handle = JSON.stringify(sub.toJSON());
+  // Register with both senders during the push cutover (Notification Service N9 takes over from
+  // Messaging with the same VAPID key): whichever sends, this browser gets the alert.
+  const results = await Promise.allSettled([
+    relay("PUT", `v1/messaging/devices/${deviceId}/push-registration`, { platform: "WEB_PUSH", handle, enabled: true }),
+    (async () => {
+      const accountDeviceId = await notificationsService.currentDeviceId();
+      if (accountDeviceId) await notificationsService.registerPush(accountDeviceId, handle);
+    })(),
+  ]);
+  if (results.every((r) => r.status === "rejected")) throw new Error("This browser couldn't be signed up for notifications. Try again.");
 }
 
 /** Stop notifications on this browser. */
@@ -65,4 +76,6 @@ export async function disableWebPush(deviceId: string | null): Promise<void> {
   const reg = webPushSupported() ? await navigator.serviceWorker.getRegistration(SW_URL).catch(() => undefined) : undefined;
   await (await reg?.pushManager.getSubscription().catch(() => null))?.unsubscribe().catch(() => false);
   if (deviceId) await relay("DELETE", `v1/messaging/devices/${deviceId}/push-registration`).catch(() => undefined);
+  const accountDeviceId = await notificationsService.currentDeviceId().catch(() => null);
+  if (accountDeviceId) await notificationsService.unregisterPush(accountDeviceId).catch(() => undefined);
 }
