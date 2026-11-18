@@ -9,6 +9,7 @@
 //! | `PATCH /{id}/messages/{messageId}` (MANAGED edit) | `messages.send` |
 //! | `GET /{id}/messages/{messageId}/revisions` (MANAGED, when policy shows history) | `messages.read` |
 //! | `DELETE /{id}/messages/{messageId}?scope=EVERYONE\|ME` | `messages.send` |
+//! | `POST /{id}/messages/{messageId}/forward` (S11, MANAGED → MANAGED) | `messages.send` |
 //! | `PUT /{id}/read-cursor` | `messages.read` |
 //! | `GET /{id}/events?after=` (durable event replay) | `messages.read` |
 
@@ -43,6 +44,10 @@ pub fn routes() -> Router<AppState> {
             "/:conversation_id/messages/:message_id/revisions",
             get(revisions),
         )
+        .route(
+            "/:conversation_id/messages/:message_id/forward",
+            axum::routing::post(forward),
+        )
         .route("/:conversation_id/read-cursor", put(read_cursor))
         .route("/:conversation_id/events", get(events))
 }
@@ -70,6 +75,22 @@ async fn send(
     // writes); a customer credential or an end-user client token cannot silence pushes.
     let body = body.with_notify_authority(delegated.is_some());
     let (status, view) = super::send(&state, caller.context(), &acting, id, body).await?;
+    Ok((
+        StatusCode::from_u16(status).unwrap_or(StatusCode::OK),
+        Json(view),
+    ))
+}
+
+async fn forward(
+    State(state): State<AppState>,
+    caller: CustomerCaller,
+    headers: HeaderMap,
+    Path((id, message)): Path<(Uuid, Uuid)>,
+    Json(body): Json<super::forward::ForwardRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let acting = acting_with(&state, &caller, &headers, MESSAGES_SEND).await?;
+    let (status, view) =
+        super::forward::forward(&state, caller.context(), &acting, id, message, body).await?;
     Ok((
         StatusCode::from_u16(status).unwrap_or(StatusCode::OK),
         Json(view),

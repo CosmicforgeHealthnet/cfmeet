@@ -235,6 +235,11 @@ pub async fn send(
     }
     let notify = request.notify.unwrap_or(true);
     let reply_to = request.reply_to_message_id;
+    let franking = request
+        .franking_commitment
+        .as_deref()
+        .map(super::franking::parse_commitment)
+        .transpose()?;
     let (Some(device_id), Some(epoch), Some(ciphertext)) = (
         request.device_id,
         request.epoch,
@@ -354,6 +359,15 @@ pub async fn send(
                 .await?;
                 let row = crate::engagement::set_reply(txn, &conversation, row, reply_to, threads)
                     .await?;
+                let row = match &franking {
+                    Some(c) => {
+                        super::franking::store(txn, row.id, conversation.id, c, now).await?;
+                        super::load_message(txn, conversation.id, row.id, false)
+                            .await?
+                            .ok_or(Error::code(ErrorCode::InternalError))?
+                    }
+                    None => row,
+                };
                 super::record_created_notify(txn, &ctx, &row, &request_ctx, now, notify).await?;
                 Ok((201, row))
             })

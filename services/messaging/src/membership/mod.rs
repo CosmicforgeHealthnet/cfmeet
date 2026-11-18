@@ -20,6 +20,7 @@
 //!   exclusion.
 
 pub mod http;
+pub mod links;
 
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, TransactionTrait};

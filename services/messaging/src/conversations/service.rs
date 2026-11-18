@@ -88,6 +88,8 @@ pub struct ConversationRow {
     pub title: Option<String>,
     /// Section 13 (MSG-007): opaque avatar reference of a MANAGED conversation.
     pub avatar_ref: Option<String>,
+    /// S13: only OWNER / ADMIN members may send (send, edit and forward check it).
+    pub announcement_only: bool,
 }
 
 impl ConversationRow {
@@ -103,7 +105,7 @@ const COLUMNS: &str = "c.id, c.context_class, c.context_namespace, c.context_ref
      c.lifecycle_state, c.lifecycle_reason, c.policy_snapshot_id, c.policy_version, s.digest AS policy_digest, \
      c.version, c.created_by_principal_id, c.owner_principal_id, c.created_at, c.updated_at, \
      c.state_changed_at, c.expires_at, c.retention_seconds, c.expiry_grace_seconds, \
-     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts, c.title, c.avatar_ref";
+     c.predecessor_conversation_id, c.successor_conversation_id, c.read_receipts, c.title, c.avatar_ref, c.announcement_only";
 
 const FROM: &str =
     "messaging_conversations c JOIN messaging_policy_snapshots s ON s.id = c.policy_snapshot_id";
@@ -165,6 +167,7 @@ fn view(c: &ConversationRow, members: &[MemberRow], member_count: i64) -> Value 
         "readReceipts": c.read_receipts,
         "title": c.title,
         "avatarRef": c.avatar_ref,
+        "announcementOnly": c.announcement_only,
     })
 }
 
@@ -1241,6 +1244,9 @@ pub struct PatchRequest {
     /// Section 13 (MSG-007): a new avatar reference (`null` clears it). MANAGED only.
     #[serde(default, deserialize_with = "present")]
     pub avatar_ref: Option<Option<String>>,
+    /// S13: announcement-only (only OWNER / ADMIN members send). GROUP / CHANNEL only.
+    #[serde(default)]
+    pub announcement_only: Option<bool>,
 }
 
 /// A field that is present (possibly `null`) versus absent.
@@ -1280,9 +1286,10 @@ pub async fn patch(
         && request.retention_seconds.is_none()
         && request.title.is_none()
         && request.avatar_ref.is_none()
+        && request.announcement_only.is_none()
     {
         return Err(Error::validation(
-            "nothing to change: lifecycleState, expiresAt, retentionSeconds, title or avatarRef is required",
+            "nothing to change: lifecycleState, expiresAt, retentionSeconds, title, avatarRef or announcementOnly is required",
         ));
     }
 
@@ -1399,6 +1406,14 @@ pub async fn patch(
                     )?;
                     display.title = request.title.as_ref().map(|_| title);
                     display.avatar_ref = request.avatar_ref.as_ref().map(|_| avatar_ref);
+                }
+                if let Some(on) = request.announcement_only {
+                    if on && row.context_class == "DIRECT" {
+                        return Err(Error::validation(
+                            "announcementOnly applies to GROUP and CHANNEL conversations",
+                        ));
+                    }
+                    display.announcement_only = Some(on);
                 }
                 let changed = transition_with(
                     txn,
@@ -1663,6 +1678,8 @@ pub(crate) async fn transition<C: ConnectionTrait>(
 pub(crate) struct DisplayChange {
     pub title: Option<Option<String>>,
     pub avatar_ref: Option<Option<String>>,
+    /// S13: a new announcement-only setting.
+    pub announcement_only: Option<bool>,
 }
 
 /// [`transition`] that may also change the display metadata in the same version step.
@@ -1687,6 +1704,7 @@ pub(crate) async fn transition_with<C: ConnectionTrait>(
            expires_at = COALESCE($5, expires_at), retention_seconds = COALESCE($8, retention_seconds), \
            title = CASE WHEN $9 THEN $10 ELSE title END, \
            avatar_ref = CASE WHEN $11 THEN $12 ELSE avatar_ref END, \
+           announcement_only = COALESCE($13, announcement_only), \
            version = version + 1, updated_at = $7, \
            state_changed_at = CASE WHEN $6 THEN $7 ELSE state_changed_at END \
          WHERE id = $1 AND version = $2",
@@ -1703,6 +1721,7 @@ pub(crate) async fn transition_with<C: ConnectionTrait>(
             display.title.flatten().into(),
             display.avatar_ref.is_some().into(),
             display.avatar_ref.flatten().into(),
+            display.announcement_only.into(),
         ],
     )
     .await

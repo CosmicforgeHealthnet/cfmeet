@@ -65,10 +65,38 @@ never cached) and continues exactly as for a bearer credential. A token together
 | Realtime (device-direct): `POST /v1/realtime/tickets` (client token), `GET /v1/realtime` (WebSocket, single-use ticket) | — |
 | Attachments: `POST …/attachments`, `POST …/{attachmentId}/finalize`, `GET …/{attachmentId}`, `POST …/download-grants`, `GET …/content` | `attachments.write` / `attachments.read` |
 | Search (MANAGED only): `GET /v1/conversations/{id}/search`, `GET /v1/messaging/search` | `messages.read` |
+| Forwarding (S11, MANAGED → MANAGED): `POST …/messages/{messageId}/forward` | `messages.send` |
+| Invite links (S12): `GET` / `POST /v1/conversations/{id}/invite-links`, `POST …/invite-links/{linkId}/revoke`; join: `POST /v1/messaging/invite-links/join` | `conversations.manage` / `messages.send` |
 | Reports: `POST /v1/conversations/{id}/reports` | `messages.send` |
 | Moderation (administration): `GET /v1/messaging/reports[/{id}]`, `GET` / `POST /v1/messaging/moderation/actions` | `moderation.manage` |
 | Compliance (administration): legal holds, deletion requests, `GET /v1/messaging/audit` | `conversations.manage` |
 | Exports (administration, MANAGED only): `POST /v1/messaging/exports`, `GET …/{id}`, `POST …/{id}/download-grants` | `messaging.export` |
+
+Gap closure (migration `m20261206_000034`, gap-closure history):
+
+* **Forwarding (S11).** A member forwards a MANAGED message it can read into another
+  MANAGED conversation it may send to: a NEW message of the forwarder, marked `forwarded`,
+  under every send rule of the target (and `messages.forwarding` of the policy). The source
+  conversation / message are recorded server-side only; the original sender is shown only
+  with `messages.forwardShowsOriginalSender`. **PRIVATE_E2EE messages are forwarded
+  client-side** (decrypt on the device, send new ciphertext to the target group); the server
+  refuses them (`E2EE_FORWARD_CLIENT_SIDE`).
+* **Invite links (S12).** OWNER / ADMIN create expiring (≤ 30 days), optionally use-capped
+  links of GROUP / CHANNEL conversations; the token (`mil_…`) is shown once and stored as
+  SHA-256; joining needs an authenticated acting principal and applies bans, the personal
+  policy (group invitation from the link's creator) and the member limit.
+* **Announcement-only (S13).** `PATCH /v1/conversations/{id}` `announcementOnly` (owner):
+  only OWNER / ADMIN send, edit and forward into it; others read and react as policy allows.
+* **Thumbnails (S14).** PNG, JPEG, WebP and GIF (first frame). No video poster frames: no
+  video decoder exists in the codebase and none is added (it would need ffmpeg or similar).
+* **Franking (S2).** A PRIVATE_E2EE send may carry `frankingCommitment` =
+  hex(HMAC-SHA256(key, `cfmeet-messaging-franking:v1` ‖ 0x00 ‖ conversationId ‖
+  clientMessageId ‖ senderPrincipalId ‖ plaintext)) with a fresh 32-byte key carried INSIDE
+  the MLS plaintext; it is stored immutable and returned with the message. A report that
+  discloses the plaintext with its `frankingKey` is shown as `FRANKING_VERIFIED` or
+  `FRANKING_MISMATCH`. **Client work required:** generate the key per message, embed it in
+  the encrypted payload, send the commitment, check it after decryption, and include the
+  key when reporting. Without it, E2EE reports stay `REPORTER_ATTESTED_UNVERIFIABLE`.
 
 `/internal/v1/**` is service-authenticated per operation (receiver trust bundle): the
 delegated first-party surface `/internal/v1/delegated/**` and Meeting conversation sync

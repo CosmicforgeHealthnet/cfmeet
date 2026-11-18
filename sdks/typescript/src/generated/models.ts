@@ -6951,6 +6951,10 @@ export namespace Messaging {
       threads?: boolean;
       reactions?: boolean;
       pins?: boolean;
+      /** S11: server-side forwarding of MANAGED messages (default true). */
+      forwarding?: boolean;
+      /** S11: forwarded copies show their original sender (default false). */
+      forwardShowsOriginalSender?: boolean;
     };
     backups?: {
       enabled?: boolean;
@@ -7262,6 +7266,8 @@ export namespace Messaging {
     /** Section 13: opaque avatar reference of a MANAGED conversation (for example an attachment id the client resolves); never a URL the server fetches. */
     avatarRef?: string | null;
     inbox?: ConversationInbox;
+    /** S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows. */
+    announcementOnly?: boolean;
   };
   /** A durable conversation event (derived from committed state, replayable by its per-conversation eventSequence). Every durable event names its tenant, application and environment (§117). */
   export type ConversationEvent = {
@@ -7329,6 +7335,12 @@ export namespace Messaging {
     title?: string;
     /** Section 13: opaque avatar reference (MANAGED only). */
     avatarRef?: string;
+  };
+  export type CreateInviteLinkRequest = {
+    /** Default 604800 (7 days). */
+    expiresInSeconds?: number;
+    maxUses?: number;
+    role?: "MEMBER" | "READ_ONLY";
   };
   /** Bridge a MANAGED conversation to one external party by SMS. The number is passed to the SMS Gateway once and never stored by Messaging. A PRIVATE_E2EE conversation is never bridged (E2EE_CONVERSATION_NOT_BRIDGEABLE). */
   export type CreateSmsBridgeRequest = {
@@ -7421,6 +7433,10 @@ export namespace Messaging {
       threads: boolean;
       reactions: boolean;
       pins: boolean;
+      /** S11: server-side forwarding of MANAGED messages (default true). */
+      forwarding?: boolean;
+      /** S11: forwarded copies show their original sender (default false). */
+      forwardShowsOriginalSender?: boolean;
     };
     attachments?: {
       enabled: boolean;
@@ -7513,6 +7529,10 @@ export namespace Messaging {
   export type ExportRequest = {
     conversationId: Uuid;
   };
+  export type ForwardMessageRequest = {
+    targetConversationId: Uuid;
+    clientMessageId: Uuid;
+  };
   /** A device-to-device history transfer. Messaging relays an opaque sealed history between two ACTIVE devices of one principal; it holds no key that opens it (no recovery key, no escrow) and deletes the sealed bytes on completion, cancellation, revocation or expiry. */
   export type HistoryTransfer = {
     transferId: Uuid;
@@ -7559,6 +7579,39 @@ export namespace Messaging {
         contextClass: ContextClass;
         securityProfile: SecurityProfile;
       }>;
+  };
+  /** S12: a group join link (never its token). */
+  export type InviteLink = {
+    inviteLinkId: Uuid;
+    conversationId: Uuid;
+    role: "MEMBER" | "READ_ONLY";
+    maxUses: number | null;
+    useCount: number;
+    expiresAt: string;
+    createdByPrincipalId: Uuid | null;
+    createdAt: string;
+    revokedAt: string | null;
+    status: "ACTIVE" | "EXPIRED" | "EXHAUSTED" | "REVOKED";
+  };
+  /** S12: a new join link with its token, returned only here (stored as SHA-256). */
+  export type InviteLinkCreated = {
+    inviteLinkId: Uuid;
+    conversationId: Uuid;
+    role: "MEMBER" | "READ_ONLY";
+    maxUses: number | null;
+    useCount: number;
+    expiresAt: string;
+    createdByPrincipalId: Uuid | null;
+    createdAt: string;
+    revokedAt: string | null;
+    status: "ACTIVE" | "EXPIRED" | "EXHAUSTED" | "REVOKED";
+    token: string;
+  };
+  export type InviteLinkList = {
+    inviteLinks: Array<InviteLink>;
+  };
+  export type JoinInviteLinkRequest = {
+    token: string;
   };
   export type KeyPackageClaim = {
     reservationId: Uuid;
@@ -7627,7 +7680,7 @@ export namespace Messaging {
     sendRestrictedUntil: string | null;
     version: number;
     /** How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration. */
-    authoritySource: "API" | "INVITATION" | "MEETING";
+    authoritySource: "API" | "INVITATION" | "MEETING" | "INVITE_LINK";
     invitedByPrincipalId: Uuid | null;
     invitationExpiresAt: string | null;
   };
@@ -7675,6 +7728,8 @@ export namespace Messaging {
       tenantId: Uuid;
       applicationId: Uuid;
       environmentId: Uuid;
+      /** S2: the sender's franking commitment (HMAC-SHA256, see SendMessageRequest.frankingCommitment). */
+      frankingCommitment?: string | null;
     };
     managed?: {
       text: string | null;
@@ -7690,6 +7745,10 @@ export namespace Messaging {
     replyToMessageId?: Uuid | null;
     /** The root of the reply thread (the first message replied to). */
     threadRootId?: Uuid | null;
+    /** S11: a server-side forward (the source conversation and message are never disclosed). */
+    forwarded?: boolean;
+    /** S11: the original sender, only when the policy shows it (messages.forwardShowsOriginalSender). */
+    forwardedFromPrincipalId?: Uuid | null;
   };
   export type MessageDeletion = {
     messageId: Uuid;
@@ -7944,7 +8003,8 @@ export namespace Messaging {
           ciphertextSha256: string | null;
           acceptanceDigest: string | null;
           reporterDisclosure: string | null;
-          verification: "REPORTER_ATTESTED_UNVERIFIABLE" | "NO_PLAINTEXT_AVAILABLE";
+          verification: "FRANKING_VERIFIED" | "FRANKING_MISMATCH" | "REPORTER_ATTESTED_UNVERIFIABLE" | "NO_PLAINTEXT_AVAILABLE";
+          frankingCommitment?: string | null;
         };
         managed?: {
           text: string | null;
@@ -7969,10 +8029,12 @@ export namespace Messaging {
     messageIds?: Array<Uuid>;
     reportedPrincipalId?: Uuid;
     note?: string;
-    /** PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest; presented as unverifiable). */
+    /** PRIVATE_E2EE only and optional: what the reporter's own device decrypted, disclosed voluntarily (sealed at rest). Unverifiable unless the message was franked and the disclosure carries its frankingKey (S2). */
     disclosure?: Array<{
         messageId: Uuid;
         text: string;
+        /** S2: the message's franking key the reporter's device decrypted (unpadded base64url, 32 bytes); with it the disclosure is verified against the sender's commitment. */
+        frankingKey?: string;
       }>;
   };
   export type ReportSummary = {
@@ -8042,6 +8104,8 @@ export namespace Messaging {
     replyToMessageId?: Uuid;
     /** Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate … */
     mentionedPrincipalIds?: Array<Uuid>;
+    /** S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY). */
+    frankingCommitment?: string;
   };
   export type SmsBridge = {
     bridgeId: Uuid;
@@ -8177,6 +8241,8 @@ export namespace Messaging {
     title?: string | null;
     /** Section 13: a new avatar reference; null clears it (MANAGED only, owner). */
     avatarRef?: string | null;
+    /** S13 (owner): announcement-only on / off; GROUP and CHANNEL only. */
+    announcementOnly?: boolean;
   };
   /** Usage facts of the caller's application environment (Part V I §129): quantities only, no price, rate or cost. */
   export type UsageSummary = {
@@ -8308,6 +8374,11 @@ export namespace Messaging {
       params: { headers: { "cf-acting-principal": Uuid }; body: HistoryTransferRequest };
       response: HistoryTransfer;
     };
+    /** POST /v1/conversations/{conversationId}/invite-links — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    createInviteLink: {
+      params: { path: { conversationId: Uuid }; headers?: { "cf-acting-principal"?: Uuid }; body: CreateInviteLinkRequest };
+      response: InviteLinkCreated;
+    };
     /** POST /v1/messaging/legal-holds — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     createLegalHold: {
       params: { body: LegalHoldRequest };
@@ -8357,6 +8428,11 @@ export namespace Messaging {
     finalizeBackup: {
       params: { path: { backupId: Uuid }; headers: { "cf-acting-principal": Uuid } };
       response: Backup;
+    };
+    /** POST /v1/conversations/{conversationId}/messages/{messageId}/forward — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
+    forwardMessage: {
+      params: { path: { conversationId: Uuid; messageId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: ForwardMessageRequest };
+      response: Message;
     };
     /** GET /v1/conversations/{conversationId}/attachments/{attachmentId} — scope attachments.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry SAFE */
     getAttachment: {
@@ -8473,6 +8549,11 @@ export namespace Messaging {
       params: {};
       response: RealtimeTicket;
     };
+    /** POST /v1/messaging/invite-links/join — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry NO_RETRY */
+    joinInviteLink: {
+      params: { headers: { "cf-acting-principal": Uuid }; body: JoinInviteLinkRequest };
+      response: Member;
+    };
     /** GET /v1/messaging/audit — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry SAFE */
     listAudit: {
       params: { query?: { action?: string; targetKind?: string; targetId?: Uuid; before?: string; limit?: number } };
@@ -8503,6 +8584,11 @@ export namespace Messaging {
     listInvitations: {
       params: { headers: { "cf-acting-principal": Uuid } };
       response: InvitationList;
+    };
+    /** GET /v1/conversations/{conversationId}/invite-links — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry SAFE */
+    listInviteLinks: {
+      params: { path: { conversationId: Uuid }; headers?: { "cf-acting-principal"?: Uuid } };
+      response: InviteLinkList;
     };
     /** GET /v1/messaging/legal-holds — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry SAFE */
     listLegalHolds: {
@@ -8644,6 +8730,11 @@ export namespace Messaging {
     revokeDevice: {
       params: { path: { deviceId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: RevokeDeviceRequest };
       response: Device;
+    };
+    /** POST /v1/conversations/{conversationId}/invite-links/{inviteLinkId}/revoke — scope conversations.manage; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    revokeInviteLink: {
+      params: { path: { conversationId: Uuid; inviteLinkId: Uuid }; headers?: { "cf-acting-principal"?: Uuid } };
+      response: InviteLink;
     };
     /** PUT /v1/messaging/history-transfers/{transferId}/sealed-history — scope messages.send; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN; retry IDEMPOTENT */
     sealHistoryTransfer: {

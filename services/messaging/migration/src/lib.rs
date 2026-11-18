@@ -43,6 +43,7 @@ mod m20261202_000030_session_devices_inbox;
 mod m20261203_000031_receipt_coalescing_timeline;
 mod m20261204_000032_application_baselines;
 mod m20261205_000033_client_session_binding;
+mod m20261206_000034_forwarding_links_announcements_franking;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -160,7 +161,10 @@ pub struct GapClosureMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for GapClosureMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261205_000033_client_session_binding::Migration)]
+        vec![
+            Box::new(m20261205_000033_client_session_binding::Migration),
+            Box::new(m20261206_000034_forwarding_links_announcements_franking::Migration),
+        ]
     }
     fn migration_table_name() -> DynIden {
         Alias::new(GAP_CLOSURE_MIGRATION_TABLE).into_iden()

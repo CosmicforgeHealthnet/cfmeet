@@ -883,6 +883,10 @@
           },
           "inbox": {
             "$ref": "#/components/schemas/messaging.common.v1.ConversationInbox"
+          },
+          "announcementOnly": {
+            "type": "boolean",
+            "description": "S13: only OWNER / ADMIN members may send (send, edit and forward); others read and react as policy allows."
           }
         },
         "description": "The canonical Conversation aggregate. PRIVATE_E2EE: MLS 1.0 with the server-assigned 32-byte MLS group id; serverCanReadContent is false. MANAGED: no MLS binding; serverCanReadContent is true.",
