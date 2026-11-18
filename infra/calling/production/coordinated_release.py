@@ -779,8 +779,10 @@ def migrate(name, image_id):
     try:
         for binary in s['migrations']:
             emit('migrate', {'service': name, 'binary': binary})
-            p.run('docker', 'run', '--rm', '--network', network, '--memory', '256m', '--env-file', str(path),
-                  '--entrypoint', '/app/' + binary, image_id, 'up')
+            # run_binary: a failed migration reports a scrubbed, value-masked stderr tail (the
+            # reason), never the raw output (production 2026-11-18: only "subprocess failed").
+            run_binary(['docker', 'run', '--rm', '--network', network, '--memory', '256m', '--env-file', str(path),
+                        '--entrypoint', '/app/' + binary, image_id, 'up'], step=binary)
     finally:
         path.unlink(missing_ok=True)
 
