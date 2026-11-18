@@ -30,11 +30,12 @@ workspaces A and B, the phase's milestone and the cross-tenant refusals, always 
   Calling partner recipients; needs the first-party push and call-push activations.
 * ``activate-platform-meetings`` (B6): Meeting Service platform access, user-token join and
   partner meeting chat; Platform Access ``ensure-meeting-platform``; Messaging platform meeting
-  chat sync; the gateway's Meeting Service upstream. The machine meeting family (``/api/v2/...``)
-  is NOT routed at the edge: the edge machinery routes path prefixes on the one api.cfmeet.com
-  server block and cannot separate partner machine traffic from the first-party ``/api/v2``
-  traffic on the same paths (owner edge-topology decision). The acceptance reaches the gateway
-  for those calls through its loopback relay.
+  chat sync; the gateway's Meeting Service upstream; and the partner meetings family
+  ``/v1/meetings`` at the api.cfmeet.com edge (gateway snippet; restored on any failed check).
+  The gateway rewrites ``/v1/meetings/<rest>`` (platform credential only) to the Meeting
+  Service's machine operation ``/api/v2/<rest>``. First-party ``/api/v2`` stays on its direct
+  route: the edge routes path prefixes on one server block and cannot separate partner machine
+  traffic from the CF Meet apps' traffic on the same paths (owner edge-topology decision).
 
 Rollback: containers (and with them the previous trust bundles and flags) come back through the
 journal; the edge prefixes of an operation leave the gateway snippet first (``undo_edge``).
@@ -103,13 +104,19 @@ FLAGS = tuple(dict.fromkeys([flag for _, flag, _ in PLATFORM_FLAGS] + sorted(END
 
 # Gateway edge prefixes owned by an operation (gateway snippet on api.cfmeet.com).
 USERS_EDGE = ('/v1/users',)
+# The partner meetings family (the gateway rewrites it to the Meeting Service's /api/v2 machine
+# operations; first-party /api/v2 is never moved).
+MEETINGS_EDGE = ('/v1/meetings',)
+# Anonymous probes: one real partner route (gateway) and its first-party twin (direct).
+MEETINGS_EDGE_PROBE = ('GET', '/v1/meetings/meeting-spaces')
+MEETINGS_DIRECT_PROBE = ('GET', '/api/v2/meeting-spaces')
 # Every REST route of /v1/calls and /v1/calling, never the /v1/calling/signaling WebSocket
 # (an exact `location = /v1/calling/signaling-credentials` does not match /v1/calling/signaling).
 CALLING_EDGE_PREFIXES = ('/v1/calls', '/v1/calling/endpoints', '/v1/calling/history', '/v1/calling/invitations',
                          '/v1/calling/limits', '/v1/calling/sessions', '/v1/calling/signaling-credentials',
                          '/v1/calling/usage', '/v1/calling/user-sessions')
 CALLING_WEBSOCKETS = ('/v1/calling/signaling',)
-EDGE = {USERS: USERS_EDGE, CALLING_EDGE: CALLING_EDGE_PREFIXES}
+EDGE = {USERS: USERS_EDGE, CALLING_EDGE: CALLING_EDGE_PREFIXES, MEETINGS: MEETINGS_EDGE}
 CALLING_EDGE_CONFIRM = 'owner-approved-calling-edge'
 # Anonymous probes of the moved calling routes (one real REST route per prefix).
 CALLING_EDGE_PROBES = (('GET', '/v1/calls'), ('GET', '/v1/calling/endpoints'), ('GET', '/v1/calling/history'),
@@ -157,7 +164,7 @@ def safe_default_rules(done):
 
 def edge_prefixes(done):
     """The edge prefixes recorded platform operations route to the gateway, in a fixed order."""
-    return tuple(p for op in (USERS, CALLING_EDGE) if done(op) for p in EDGE[op])
+    return tuple(p for op in (USERS, CALLING_EDGE, MEETINGS) if done(op) for p in EDGE[op])
 
 
 def enabled_stages(cr, current=None):
@@ -425,6 +432,22 @@ def activate_push(cr, sha, run_id, confirm):
 
 # --- B6: meetings ----------------------------------------------------------------------------------
 
+def meetings_edge_checks(cr):
+    """The partner family answers anonymously from the gateway (401/403 + its stamp); the
+    first-party /api/v2 twin still answers from the Meeting Service directly; smoke unchanged."""
+    checks = {}
+    method, path = MEETINGS_EDGE_PROBE
+    status, gateway = served_by_gateway(cr, method, path)
+    checks['anonymous %s %s answered by the gateway' % (method, path)] = \
+        'PASS' if status in (401, 403) and gateway else 'FAIL %d' % status
+    method, path = MEETINGS_DIRECT_PROBE
+    status, gateway = served_by_gateway(cr, method, path)
+    checks['first-party %s %s still direct' % (method, path)] = \
+        'PASS' if status in (401, 403) and not gateway else 'FAIL %d%s' % (status, ' (gateway)' if gateway else '')
+    checks.update(cr.public_smoke())
+    return checks
+
+
 def activate_meetings(cr, sha, run_id, confirm):
     meeting = cr.env_of('meeting-service')
     if not meeting.get('CF_SERVICE_TRUST_BUNDLE_FILE'):
@@ -434,15 +457,30 @@ def activate_meetings(cr, sha, run_id, confirm):
     gateway = cr.env_of('api-gateway')
     if 'meetings' in (gateway.get('API_GATEWAY_DISABLED_DOMAINS') or '').split(','):
         raise RuntimeError('The meetings domain is disabled on the gateway')
+    require_gateway_edge(cr)
     flags = flags_for(MEETINGS)
     meeting_overrides = dict(flags['meeting-service'], **base_urls(cr, 'meeting-service', (
         ('CF_PLATFORM_ACCESS_BASE_URL', 'platform-access'), ('CF_MESSAGING_BASE_URL', 'messaging'))))
     gateway_overrides = base_urls(cr, 'api-gateway', (('CF_MEETING_SERVICE_BASE_URL', 'meeting-service'),))
-    cr.emit('platformMeetingsEdge', {'routed': False, 'reason': 'the machine meeting operations share /api/v2 paths '
-                                     'with first-party traffic on api.cfmeet.com; edge routing is an owner decision'})
+    refuse_collisions(cr, MEETINGS_EDGE)
+
+    def post():
+        old = write_edge(cr, MEETINGS_EDGE)
+        try:
+            cr.p.reload_host_nginx()  # nginx -t first
+            checks = meetings_edge_checks(cr)
+            cr.emit('platformMeetingsEdge', checks)
+            if any(v != 'PASS' for v in checks.values()):
+                raise RuntimeError('The /v1/meetings edge checks failed')
+            run_acceptance(cr, run_id, MEETINGS)
+        except Exception:
+            cr.GATEWAY_SNIPPET.write_text(old)
+            cr.p.reload_host_nginx()
+            raise
+
     cr.apply_activation(MEETINGS, sha, run_id, [
         ('platform-access', flags['platform-access']), ('meeting-service', meeting_overrides),
-        ('api-gateway', gateway_overrides)], post=lambda: run_acceptance(cr, run_id, MEETINGS))
+        ('api-gateway', gateway_overrides)], post=post)
 
 
 # --- read-only acceptance operation ----------------------------------------------------------------

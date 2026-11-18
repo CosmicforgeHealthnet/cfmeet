@@ -1583,7 +1583,7 @@ def rollback(sha, run_id):
         GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES, docs=done('activate-gateway-docs')))
         p.reload_host_nginx()
     if entry['operation'] in platform_ops.EDGE:
-        # Platform prefixes (/v1/users, the calling edge) leave the edge before their containers.
+        # Platform prefixes (/v1/users, the calling edge, /v1/meetings) leave the edge before their containers.
         platform_ops.undo_edge(sys.modules[__name__], entry)
     if entry.get('edge'):
         undo_gateway_docs(entry['edge'])
