@@ -361,6 +361,16 @@ S3-compatible store; it certifies internal enterprise SIP only. Results:
   recording artifacts); filters `from`, `to`, `usageType`, `resourceClass`; keyset paging.
   Not a bill ([`platform/usage`](../../packages/contracts/platform/usage/v1.schema.json)).
 * **Limits** — see *Limits*; `GET /v1/limits` (`usage.read`).
+* **Source of truth** — the Developer Platform's unified usage ledger is the single source
+  of truth for platform usage and API limits; `/v1/usage` and `/v1/limits` here are the
+  legacy compatibility views until the gateway switch, Calling's own detail stays at
+  `/v1/calling/usage` / `/v1/calling/limits`
+  ([usage-and-limits-source-of-truth](../../docs/operations/usage-and-limits-source-of-truth.md)).
+* **Direct-route API request accounting (P6)** — requests authenticated DIRECTLY at Calling
+  (not gateway-forwarded) are counted into the Developer Platform's API request accounting
+  (`src/usage/direct.rs`; daily totals and API_OPERATION counts, flushed every 30 s in
+  idempotent batches; `developer-usage.record`). On when `CF_DEVELOPER_PLATFORM_BASE_URL` is
+  set; `CALLING_DIRECT_USAGE_ACCOUNTING=off` disables it.
 * **Configuration** — `CALLING_WEBHOOK_SECRET_KEY` (32 bytes, base64, from the secret
   manager; without it webhook creation is refused) and
   `CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` (honoured only when `CF_RUNTIME_ENVIRONMENT=local`).

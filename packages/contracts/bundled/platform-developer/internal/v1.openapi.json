@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.9.0",
+    "version": "1.10.0",
     "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited."
   },
   "tags": [
@@ -971,7 +971,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Durable accounting of accepted public API requests and normalized API_OPERATION counts (API Gateway quota flush). The batch is applied exactly once: a replay of an already applied batchId is acknowledged as ALREADY_RECORDED without counting again. Counts only; no request content or caller identity. Permission `developer-usage.record`. A batch carries at least one entry or operation.",
+        "description": "Durable accounting of accepted public API requests and normalized API_OPERATION counts (the API Gateway's quota flush for forwarded requests and, since 1.10.0 (P6), Calling's flush for requests on its direct routes — disjoint sets, never both). The batch is applied exactly once: a replay of an already applied batchId is acknowledged as ALREADY_RECORDED without counting again. Counts only; no request content or caller identity. Permission `developer-usage.record`. A batch carries at least one entry or operation.",
         "requestBody": {
           "required": true,
           "content": {

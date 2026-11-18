@@ -590,7 +590,9 @@ GRANTS = (
      ('developer-platform.administer',)),
     # Customer webhooks: every first-party producer publishes to the central ingestion.
     ('activate-developer-webhooks', 'developer-platform', 'meeting-service', ('developer-event.publish',)),
-    ('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish',)),
+    # P6: Calling also counts the API requests of its direct routes (the gateway counts the
+    # forwarded ones) as soon as it has the Developer Platform target set below.
+    ('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish', 'developer-usage.record')),
     ('activate-developer-webhooks', 'developer-platform', 'messaging', ('developer-event.publish',)),
     # Customer API families through the gateway (receivers authorize the gateway's forwards).
     ('activate-gateway-families', 'calling', 'api-gateway', ('calling-request.forward',)),

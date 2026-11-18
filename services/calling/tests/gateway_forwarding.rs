@@ -372,3 +372,79 @@ async fn a_replayed_forwarded_mutation_is_refused() {
     assert_eq!(whoami(&h, &headers).await.status, StatusCode::OK);
     assert_eq!(whoami(&h, &headers).await.status, StatusCode::OK);
 }
+
+/// P6: requests on Calling's DIRECT routes are counted as platform API usage (daily total
+/// and API_OPERATION count); gateway-forwarded requests are not (the gateway counted them).
+#[tokio::test]
+async fn only_direct_requests_are_counted_as_platform_api_usage() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let accountant = std::sync::Arc::new(calling::usage::direct::DirectUsageAccounting::new(None));
+    h.state.direct_usage = Some(accountant.clone());
+    let c = h.consumer("acme", TenantClassification::External).await;
+    let issued = h
+        .issue(c.sa(EnvironmentKind::Production), &[names::CALLS_READ])
+        .await;
+    // Two direct requests (one refused by the route's scope check: still an accepted
+    // platform request, counted with its 4xx class).
+    let r = h
+        .request(
+            Method::GET,
+            "/v1/calls",
+            Some(issued.secret.expose_once()),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let r = h
+        .request(
+            Method::GET,
+            "/v1/usage",
+            Some(issued.secret.expose_once()),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.text);
+    // A refused credential is not counted.
+    let r = h
+        .request(Method::GET, "/v1/calls", Some("cfk_not_a_credential"), None)
+        .await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text);
+    // Gateway-forwarded: not counted here.
+    let (headers, _) = signed(
+        &h.peers.api_gateway,
+        Some(delegated(&c, Some(credential_id(&issued)))),
+    );
+    let r = forward(&h, Method::GET, "/v1/calls", &headers, None).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+
+    assert_eq!(accountant.pending_totals(), (2, 2));
+    let (_, batch) = accountant.take_batch().unwrap();
+    let env = c.env(EnvironmentKind::Production).id.to_string();
+    assert_eq!(batch["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(batch["entries"][0]["environmentId"], env);
+    assert_eq!(batch["entries"][0]["count"], 2);
+    let mut ops: Vec<(String, String)> = batch["operations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| {
+            assert_eq!(o["domain"], "calling");
+            assert_eq!(o["environmentKind"], "PRODUCTION");
+            assert_eq!(o["credentialId"], json!(issued.credential.id));
+            (
+                o["operationId"].as_str().unwrap().to_string(),
+                o["statusClass"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    ops.sort();
+    assert_eq!(
+        ops,
+        [
+            ("listCalls".to_string(), "2xx".to_string()),
+            ("listUsage".to_string(), "4xx".to_string()),
+        ]
+    );
+}

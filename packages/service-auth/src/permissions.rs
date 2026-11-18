@@ -895,9 +895,11 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::DeveloperUsageRecord,
         name: "developer-usage.record",
         receiver: services::DEVELOPER_PLATFORM,
-        grantable_to: &[services::API_GATEWAY],
+        // P6: Calling counts the requests of its DIRECT routes (the gateway's are counted
+        // by the gateway; never both).
+        grantable_to: &[services::API_GATEWAY, services::CALLING],
         sensitive: false,
-        description: "Record durable daily API request accounting of application environments",
+        description: "Record durable daily API request accounting of application environments (the API Gateway for forwarded requests, Calling for its direct routes)",
     },
     PermissionDefinition {
         permission: InternalPermission::DeveloperEventPublish,
@@ -1977,6 +1979,11 @@ mod tests {
             assert_eq!(d.grantable_to, &[services::OPERATOR_CONSOLE], "{}", d.name);
             assert_eq!(d.sensitive, sensitive, "{}", d.name);
         }
+        // P6: API request accounting by the gateway and by Calling (direct routes) only.
+        assert_eq!(
+            DeveloperUsageRecord.definition().grantable_to,
+            &[services::API_GATEWAY, services::CALLING]
+        );
         // Calling abuse-report review: received by Calling, operator tooling only.
         let review = CallingAbuseReportsReview.definition();
         assert_eq!(review.receiver, services::CALLING);
