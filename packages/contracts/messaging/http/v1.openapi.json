@@ -6657,7 +6657,7 @@
           }
         ],
         "x-cfmeet-required-scope": "attachments.read",
-        "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED image (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
+        "description": "Scope attachments.read, a member who may read the original: a short-lived read of the server thumbnail of a MANAGED PNG, JPEG, WebP or GIF image (S14; an animated image's first frame; videos have no poster frame) (409 ATTACHMENT_NOT_READY / THUMBNAIL_NOT_READY until it exists). PRIVATE_E2EE attachments have no server thumbnail.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",

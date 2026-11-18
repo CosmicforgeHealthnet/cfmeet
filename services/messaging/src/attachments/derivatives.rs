@@ -1,5 +1,5 @@
 //! Server-side derivatives of MANAGED attachments (§80): a THUMBNAIL of every READY
-//! MANAGED PNG / JPEG image, and an INSPECTION (measured container, duration and
+//! MANAGED PNG / JPEG / WebP / GIF image (S14; a GIF's first frame), and an INSPECTION (measured container, duration and
 //! dimensions, [`super::media_inspect`]) of every READY MANAGED image, voice note and
 //! video of an inspectable type.
 //!
@@ -11,8 +11,11 @@
 //! * Untrusted input is decoded defensively: the stored object is re-checked against its
 //!   verified SHA-256, dimensions are read from the header and refused above
 //!   [`MAX_PIXELS`] before any pixel is decoded, the decoder runs with explicit
-//!   allocation / dimension limits on a blocking thread under a timeout, and only PNG /
-//!   JPEG decoders are compiled in.
+//!   allocation / dimension limits on a blocking thread under a timeout, and only the PNG,
+//!   JPEG, WebP and GIF decoders (pure Rust, `image` crate) are compiled in. An animated
+//!   GIF or WebP is thumbnailed from its FIRST frame. Video poster frames are not made:
+//!   no video decoder exists in the codebase and none is added (it would need an external
+//!   tool such as ffmpeg); videos keep their inspection derivative only.
 //! * The thumbnail is a re-encoded PNG of at most [`THUMBNAIL_MAX_EDGE`] pixels per edge:
 //!   no metadata (EXIF location, comments) of the original survives.
 //! * A derivative lives and dies with its attachment: deleting the attachment queues the
@@ -53,7 +56,7 @@ const MAX_EDGE: u32 = 16_384;
 const MAX_ALLOC: u64 = 512 * 1024 * 1024;
 const DECODE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ATTEMPTS: i32 = 3;
-const PROCESSABLE: &[&str] = &["image/png", "image/jpeg"];
+const PROCESSABLE: &[&str] = &["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 /// A rendered thumbnail.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +84,9 @@ pub fn render_thumbnail(
     let format = match media_type {
         "image/png" => image::ImageFormat::Png,
         "image/jpeg" => image::ImageFormat::Jpeg,
+        "image/webp" => image::ImageFormat::WebP,
+        // `decode` of a GIF yields its first frame (animation is never rendered).
+        "image/gif" => image::ImageFormat::Gif,
         _ => return Err("UNSUPPORTED_FORMAT"),
     };
     let reader = |b: &[u8]| {
@@ -991,4 +997,69 @@ pub async fn referenced_keys<C: sea_orm::ConnectionTrait>(
     )
     .await?;
     Ok(rows.into_iter().map(|r| r.k).collect())
+}
+
+#[cfg(test)]
+mod s14_tests {
+    use super::*;
+    use image::{codecs::gif::GifEncoder, Delay, Frame, ImageEncoder, Rgba, RgbaImage};
+
+    fn solid(w: u32, h: u32, c: [u8; 4]) -> RgbaImage {
+        RgbaImage::from_pixel(w, h, Rgba(c))
+    }
+
+    fn first_pixel(t: &Thumbnail) -> [u8; 4] {
+        let img = image::load_from_memory_with_format(&t.png, image::ImageFormat::Png)
+            .unwrap()
+            .to_rgba8();
+        img.get_pixel(0, 0).0
+    }
+
+    #[test]
+    fn webp_images_are_thumbnailed_as_png() {
+        let mut bytes = Vec::new();
+        image::codecs::webp::WebPEncoder::new_lossless(&mut bytes)
+            .write_image(
+                solid(640, 480, [10, 200, 30, 255]).as_raw(),
+                640,
+                480,
+                image::ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let t = render_thumbnail(&bytes, "image/webp").unwrap();
+        assert_eq!((t.source_width, t.source_height), (640, 480));
+        assert_eq!((t.width, t.height), (320, 240));
+        assert_eq!(&t.png[1..4], b"PNG");
+        assert_eq!(first_pixel(&t), [10, 200, 30, 255]);
+    }
+
+    #[test]
+    fn an_animated_gif_is_thumbnailed_from_its_first_frame() {
+        let mut bytes = Vec::new();
+        {
+            let mut enc = GifEncoder::new(&mut bytes);
+            for c in [[255, 0, 0, 255], [0, 0, 255, 255]] {
+                enc.encode_frame(Frame::from_parts(
+                    solid(400, 200, c),
+                    0,
+                    0,
+                    Delay::from_numer_denom_ms(100, 1),
+                ))
+                .unwrap();
+            }
+        }
+        let t = render_thumbnail(&bytes, "image/gif").unwrap();
+        assert_eq!((t.width, t.height), (320, 160));
+        assert_eq!(first_pixel(&t), [255, 0, 0, 255]);
+        // Still refused: undecodable bytes and types without a decoder.
+        assert_eq!(
+            render_thumbnail(b"GIF89a-not-really", "image/gif"),
+            Err("UNDECODABLE")
+        );
+        assert_eq!(
+            render_thumbnail(&bytes, "video/mp4"),
+            Err("UNSUPPORTED_FORMAT")
+        );
+        assert!(PROCESSABLE.contains(&"image/webp") && PROCESSABLE.contains(&"image/gif"));
+    }
 }
