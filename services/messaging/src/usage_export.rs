@@ -178,7 +178,13 @@ impl cf_usage_facts::exporter::EventSource for MessageSent {
         after: Option<&cf_usage_facts::exporter::Position>,
         until: DateTime<Utc>,
         limit: usize,
-    ) -> Result<Vec<(cf_usage_facts::exporter::Position, cf_usage_facts::UsageFact)>, String> {
+    ) -> Result<
+        Vec<(
+            cf_usage_facts::exporter::Position,
+            cf_usage_facts::UsageFact,
+        )>,
+        String,
+    > {
         let (at, key) = match after {
             Some(p) => (Some(p.at), Some(p.key.clone())),
             None => (None, None),

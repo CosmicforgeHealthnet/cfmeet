@@ -231,7 +231,10 @@ pub fn build_routes(build: crate::config::BuildFeatures) -> Router<AppState> {
                 "/users/:user_id",
                 get(get_user).patch(update_user).delete(delete_user),
             )
-            .route("/users/:user_id/revoke-sessions", post(revoke_user_sessions))
+            .route(
+                "/users/:user_id/revoke-sessions",
+                post(revoke_user_sessions),
+            )
             .route("/users/:user_id/tokens", post(issue_user_token))
             .route("/environments/:environment_id/users", get(console_users));
     }
@@ -1400,9 +1403,7 @@ async fn put_allowed_origins(
     Path(id): Path<Uuid>,
     Json(body): Json<control::allowed_origins::PutAllowedOrigins>,
 ) -> ApiResult<Json<Value>> {
-    Ok(Json(
-        control::allowed_origins::put(&s, &c, id, body).await?,
-    ))
+    Ok(Json(control::allowed_origins::put(&s, &c, id, body).await?))
 }
 
 async fn list_push_credentials(

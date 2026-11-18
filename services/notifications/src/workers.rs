@@ -6,6 +6,7 @@
 //! | W1 ingest processor | all (CRITICAL claimed first) | 100 ms wake + poll |
 //! | W2 critical dispatcher: email CRITICAL lane (X6 lease, X7 completion) | CRITICAL | 100 ms |
 //! | W3 standard dispatcher: email STANDARD lane + push | HIGH / STANDARD | 500 ms |
+//! | W3p partner push dispatcher (ADR 0063; only with `NOTIFICATIONS_PARTNER_PUSH_ENABLED`) | HIGH | 500 ms |
 //! | W4 scheduler: reminders after the takeover, expiry of overdue deliveries | — | 5 s |
 //! | W5 retention and erasure | — | hourly |
 //! | W6 shadow comparator | — | on read (I7 aggregates the observations recorded by W1) |
@@ -64,6 +65,18 @@ pub fn spawn(state: &AppState) -> Workers {
                 w.run(Duration::from_millis(poll), hb, rx).await
             }));
         }
+    }
+    if let Some(partner) = &state.partner {
+        let w = crate::partner::PartnerPushWorker::new(
+            state.db.clone(),
+            state.keys.clone(),
+            partner.clone(),
+            state.metrics.clone(),
+        );
+        let (hb, rx) = (hb.clone(), rx.clone());
+        handles.push(tokio::spawn(async move {
+            w.run(Duration::from_millis(500), hb, rx).await
+        }));
     }
     if let Some(push) = &state.push {
         let w = PushWorker::new(

@@ -364,9 +364,8 @@ async fn main() -> anyhow::Result<()> {
     );
     // ADR 0062 / 0063 (CF Meet Platform "Build"): partner session devices, partner push
     // and MESSAGE_SENT facts, each behind its own default-off flag.
-    let partner_settings =
-        messaging::partner::PartnerSettings::from_env(|k| std::env::var(k).ok())
-            .map_err(|e| anyhow!("partner configuration: {e}"))?;
+    let partner_settings = messaging::partner::PartnerSettings::from_env(|k| std::env::var(k).ok())
+        .map_err(|e| anyhow!("partner configuration: {e}"))?;
     messaging::partner::install_process_flags(&partner_settings);
     {
         let mut partner = messaging::partner::Partner::new(
@@ -377,7 +376,9 @@ async fn main() -> anyhow::Result<()> {
         );
         if partner_settings.push_enabled {
             if !has_target(cf_service_auth::services::NOTIFICATIONS) {
-                anyhow::bail!("MESSAGING_PARTNER_PUSH_ENABLED=true needs CF_NOTIFICATIONS_BASE_URL");
+                anyhow::bail!(
+                    "MESSAGING_PARTNER_PUSH_ENABLED=true needs CF_NOTIFICATIONS_BASE_URL"
+                );
             }
             partner = partner.with_push(
                 Arc::new(
@@ -398,7 +399,9 @@ async fn main() -> anyhow::Result<()> {
                 state.clone(),
                 Duration::from_secs(15),
             ));
-            tracing::info!("partner session devices are enabled (MESSAGING_PARTNER_SESSION_DEVICES_ENABLED)");
+            tracing::info!(
+                "partner session devices are enabled (MESSAGING_PARTNER_SESSION_DEVICES_ENABLED)"
+            );
         }
         if partner_settings.push_enabled {
             tokio::spawn(messaging::partner::push::run(
@@ -426,7 +429,9 @@ async fn main() -> anyhow::Result<()> {
                     exporter = exporter.with_events(Arc::new(
                         messaging::usage_export::MessageSent::new(state.db.clone()),
                     ));
-                    tracing::info!("MESSAGE_SENT usage facts are exported to the Developer Platform");
+                    tracing::info!(
+                        "MESSAGE_SENT usage facts are exported to the Developer Platform"
+                    );
                 } else {
                     tracing::warn!("MESSAGING_MESSAGE_SENT_EXPORT_ENABLED is set but the usage catalogue does not know MESSAGE_SENT: not exported");
                 }

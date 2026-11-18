@@ -134,7 +134,11 @@ struct DeviceRow {
 }
 
 /// `POST /v1/messaging/user-sessions`.
-pub async fn exchange(state: &AppState, presented: &str, request: ExchangeRequest) -> Result<Value> {
+pub async fn exchange(
+    state: &AppState,
+    presented: &str,
+    request: ExchangeRequest,
+) -> Result<Value> {
     if !state.partner.settings.session_devices_enabled {
         return Err(Error::reason(
             ErrorCode::FeatureDisabled,
@@ -153,7 +157,10 @@ pub async fn exchange(state: &AppState, presented: &str, request: ExchangeReques
     let caller = authenticate(state, presented).await?;
     let scopes = caller.token.messaging_scopes();
     if scopes.is_empty() {
-        return Err(Error::reason(ErrorCode::InsufficientScope, "MSG_GRANT_REQUIRED"));
+        return Err(Error::reason(
+            ErrorCode::InsufficientScope,
+            "MSG_GRANT_REQUIRED",
+        ));
     }
     let now = state.now();
     let principal = caller.token.user.id;

@@ -48,11 +48,14 @@ fn code(r: &Response) -> &str {
     r.json["error"]["code"].as_str().unwrap_or_default()
 }
 
+/// One vault call: (method, scope, provider, body).
+type VaultCall = (String, PushScope, String, Option<Value>);
+
 /// The Notification Service's N-P1 vault (in memory).
 #[derive(Default)]
 struct FakeVault {
     /// (method, scope, provider, body).
-    calls: StdMutex<Vec<(String, PushScope, String, Option<Value>)>>,
+    calls: StdMutex<Vec<VaultCall>>,
     /// The next verify answer.
     verify: StdMutex<Option<Value>>,
 }
@@ -112,8 +115,7 @@ impl PushProviderPort for FakeVault {
 }
 
 fn sealing_key() -> cf_notification_client::SealingKey {
-    let (public, _) =
-        cf_notification_client::seal::generate_keypair("notif-hpke-2026-11").unwrap();
+    let (public, _) = cf_notification_client::seal::generate_keypair("notif-hpke-2026-11").unwrap();
     cf_notification_client::SealingKey::parse(&public).unwrap()
 }
 
@@ -215,22 +217,85 @@ async fn every_build_route_is_absent_while_its_flag_is_off() {
     let (_, _, env) = workspace(&c, &owner).await;
     let machine = c.pa.machine(
         env,
-        &["principals.read", "principals.write", "user_tokens.issue", "credentials.manage"],
+        &[
+            "principals.read",
+            "principals.write",
+            "user_tokens.issue",
+            "credentials.manage",
+        ],
     );
     for (who, method, path, body) in [
-        (As::Machine(&machine), Method::POST, "/v1/users".to_string(), Some(json!({ "externalId": "r-1" }))),
-        (As::Machine(&machine), Method::GET, "/v1/users".to_string(), None),
-        (As::Machine(&machine), Method::POST, "/v1/users/tokens".to_string(), Some(json!({}))),
-        (As::Machine(&machine), Method::GET, format!("/v1/users/{}", Uuid::new_v4()), None),
-        (As::User(&owner), Method::GET, format!("/v1/environments/{env}/users"), None),
-        (As::User(&owner), Method::GET, format!("/v1/environments/{env}/allowed-origins"), None),
-        (As::User(&owner), Method::PUT, format!("/v1/environments/{env}/allowed-origins"), Some(json!({ "origins": [] }))),
-        (As::User(&owner), Method::POST, format!("/v1/environments/{env}/test-user-tokens"), Some(json!({}))),
-        (As::User(&owner), Method::GET, format!("/v1/environments/{env}/push-credentials"), None),
-        (As::User(&owner), Method::POST, format!("/v1/environments/{env}/push-credentials/{}/verify", Uuid::new_v4()), None),
+        (
+            As::Machine(&machine),
+            Method::POST,
+            "/v1/users".to_string(),
+            Some(json!({ "externalId": "r-1" })),
+        ),
+        (
+            As::Machine(&machine),
+            Method::GET,
+            "/v1/users".to_string(),
+            None,
+        ),
+        (
+            As::Machine(&machine),
+            Method::POST,
+            "/v1/users/tokens".to_string(),
+            Some(json!({})),
+        ),
+        (
+            As::Machine(&machine),
+            Method::GET,
+            format!("/v1/users/{}", Uuid::new_v4()),
+            None,
+        ),
+        (
+            As::User(&owner),
+            Method::GET,
+            format!("/v1/environments/{env}/users"),
+            None,
+        ),
+        (
+            As::User(&owner),
+            Method::GET,
+            format!("/v1/environments/{env}/allowed-origins"),
+            None,
+        ),
+        (
+            As::User(&owner),
+            Method::PUT,
+            format!("/v1/environments/{env}/allowed-origins"),
+            Some(json!({ "origins": [] })),
+        ),
+        (
+            As::User(&owner),
+            Method::POST,
+            format!("/v1/environments/{env}/test-user-tokens"),
+            Some(json!({})),
+        ),
+        (
+            As::User(&owner),
+            Method::GET,
+            format!("/v1/environments/{env}/push-credentials"),
+            None,
+        ),
+        (
+            As::User(&owner),
+            Method::POST,
+            format!(
+                "/v1/environments/{env}/push-credentials/{}/verify",
+                Uuid::new_v4()
+            ),
+            None,
+        ),
     ] {
         let r = c.req(who, method.clone(), &path, body).await;
-        assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}: {}", r.json);
+        assert_eq!(
+            r.status,
+            StatusCode::NOT_FOUND,
+            "{method} {path}: {}",
+            r.json
+        );
         assert_eq!(code(&r), "NOT_FOUND");
         conforms(ERR, &r.json);
     }
@@ -259,14 +324,21 @@ async fn the_users_api_delegates_on_behalf_of_the_forwarded_credential() {
     let (_, project, env) = workspace(&c, &owner).await;
     let machine = c.pa.machine(
         env,
-        &["principals.read", "principals.write", "user_tokens.issue", "messages.send"],
+        &[
+            "principals.read",
+            "principals.write",
+            "user_tokens.issue",
+            "messages.send",
+        ],
     );
     let credential = machine.initiating_credential_id().unwrap();
     let m = || As::Machine(&machine);
     // Create: 201 new, 200 existing (idempotent on externalId).
     let body = json!({ "externalId": "rider-42", "displayName": "Rider 42",
         "imageUrl": "https://cdn.rider.example/42.png" });
-    let r = c.req(m(), Method::POST, "/v1/users", Some(body.clone())).await;
+    let r = c
+        .req(m(), Method::POST, "/v1/users", Some(body.clone()))
+        .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
     conforms(&format!("{CTRL}EndUser"), &r.json);
     let user = id(&r.json);
@@ -285,41 +357,82 @@ async fn the_users_api_delegates_on_behalf_of_the_forwarded_credential() {
     let calls = c.pa.end_user_calls.lock().unwrap().len();
     let k = [("idempotency-key", "create-rider-7")];
     let first = c
-        .req_with(m(), Method::POST, "/v1/users", Some(json!({ "externalId": "rider-7" })), &k)
+        .req_with(
+            m(),
+            Method::POST,
+            "/v1/users",
+            Some(json!({ "externalId": "rider-7" })),
+            &k,
+        )
         .await;
     assert_eq!(first.status, StatusCode::CREATED, "{}", first.json);
     let replay = c
-        .req_with(m(), Method::POST, "/v1/users", Some(json!({ "externalId": "rider-7" })), &k)
+        .req_with(
+            m(),
+            Method::POST,
+            "/v1/users",
+            Some(json!({ "externalId": "rider-7" })),
+            &k,
+        )
         .await;
     assert_eq!(replay.status, StatusCode::CREATED);
     assert_eq!(replay.headers["idempotent-replayed"], "true");
     assert_eq!(c.pa.end_user_calls.lock().unwrap().len(), calls + 1);
     let reused = c
-        .req_with(m(), Method::POST, "/v1/users", Some(json!({ "externalId": "rider-8" })), &k)
+        .req_with(
+            m(),
+            Method::POST,
+            "/v1/users",
+            Some(json!({ "externalId": "rider-8" })),
+            &k,
+        )
         .await;
     assert_eq!(reused.status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(code(&reused), "IDEMPOTENCY_KEY_REUSED");
     // Reads.
-    let list = c.req(m(), Method::GET, "/v1/users?externalId=rider-42&limit=10", None).await;
+    let list = c
+        .req(
+            m(),
+            Method::GET,
+            "/v1/users?externalId=rider-42&limit=10",
+            None,
+        )
+        .await;
     assert_eq!(list.status, StatusCode::OK, "{}", list.json);
     conforms(&format!("{CTRL}EndUserList"), &list.json);
     assert_eq!(list.json["items"].as_array().unwrap().len(), 1);
-    let got = c.req(m(), Method::GET, &format!("/v1/users/{user}"), None).await;
+    let got = c
+        .req(m(), Method::GET, &format!("/v1/users/{user}"), None)
+        .await;
     assert_eq!(got.json["externalId"], "rider-42", "{}", got.json);
     // Update, revoke sessions.
     let up = c
-        .req(m(), Method::PATCH, &format!("/v1/users/{user}"),
-            Some(json!({ "displayName": null, "status": "SUSPENDED" })))
+        .req(
+            m(),
+            Method::PATCH,
+            &format!("/v1/users/{user}"),
+            Some(json!({ "displayName": null, "status": "SUSPENDED" })),
+        )
         .await;
     assert_eq!(up.status, StatusCode::OK, "{}", up.json);
     assert_eq!(up.json["status"], "SUSPENDED");
     assert!(up.json["displayName"].is_null());
     let bad = c
-        .req(m(), Method::PATCH, &format!("/v1/users/{user}"), Some(json!({ "externalId": "x" })))
+        .req(
+            m(),
+            Method::PATCH,
+            &format!("/v1/users/{user}"),
+            Some(json!({ "externalId": "x" })),
+        )
         .await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
     let rv = c
-        .req(m(), Method::POST, &format!("/v1/users/{user}/revoke-sessions"), None)
+        .req(
+            m(),
+            Method::POST,
+            &format!("/v1/users/{user}/revoke-sessions"),
+            None,
+        )
         .await;
     assert_eq!(rv.status, StatusCode::OK, "{}", rv.json);
     conforms(&format!("{CTRL}RevokeSessionsResult"), &rv.json);
@@ -327,8 +440,13 @@ async fn the_users_api_delegates_on_behalf_of_the_forwarded_credential() {
     let grants = json!({ "msg": ["read", "send"], "mtg": [{ "conferenceId": Uuid::new_v4(), "role": "PARTICIPANT" }] });
     let k = [("idempotency-key", "token-1")];
     let t = c
-        .req_with(m(), Method::POST, &format!("/v1/users/{user}/tokens"),
-            Some(json!({ "grants": grants, "ttlSeconds": 600 })), &k)
+        .req_with(
+            m(),
+            Method::POST,
+            &format!("/v1/users/{user}/tokens"),
+            Some(json!({ "grants": grants, "ttlSeconds": 600 })),
+            &k,
+        )
         .await;
     assert_eq!(t.status, StatusCode::CREATED, "{}", t.json);
     conforms(&format!("{CTRL}UserToken"), &t.json);
@@ -336,41 +454,70 @@ async fn the_users_api_delegates_on_behalf_of_the_forwarded_credential() {
     assert_eq!(t.headers["cache-control"], "no-store");
     let token = t.json["token"].as_str().unwrap().to_string();
     let replay = c
-        .req_with(m(), Method::POST, &format!("/v1/users/{user}/tokens"),
-            Some(json!({ "grants": grants, "ttlSeconds": 600 })), &k)
+        .req_with(
+            m(),
+            Method::POST,
+            &format!("/v1/users/{user}/tokens"),
+            Some(json!({ "grants": grants, "ttlSeconds": 600 })),
+            &k,
+        )
         .await;
     assert_eq!(replay.headers["idempotent-replayed"], "true");
     assert!(replay.json.get("token").is_none(), "{}", replay.json);
     assert_eq!(replay.json["tokenRedacted"], true);
     conforms(&format!("{CTRL}UserToken"), &replay.json);
-    assert!(!dump(&c, "devplat_idempotency_records").await.contains(&token));
-    assert!(!dump(&c, "devplat_idempotency_records").await.contains("cfut_"));
+    assert!(!dump(&c, "devplat_idempotency_records")
+        .await
+        .contains(&token));
+    assert!(!dump(&c, "devplat_idempotency_records")
+        .await
+        .contains("cfut_"));
     for bad in [
         json!({ "grants": { "msg": ["write"] } }),
         json!({ "grants": {}, "ttlSeconds": 30 }),
         json!({ "grants": { "mtg": [{ "conferenceId": "x", "role": "HOST" }] } }),
     ] {
-        let r = c.req(m(), Method::POST, &format!("/v1/users/{user}/tokens"), Some(bad.clone())).await;
+        let r = c
+            .req(
+                m(),
+                Method::POST,
+                &format!("/v1/users/{user}/tokens"),
+                Some(bad.clone()),
+            )
+            .await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
     }
     // Upsert + mint.
     let up = c
-        .req(m(), Method::POST, "/v1/users/tokens",
-            Some(json!({ "externalId": "rider-99", "grants": { "call": ["receive"] } })))
+        .req(
+            m(),
+            Method::POST,
+            "/v1/users/tokens",
+            Some(json!({ "externalId": "rider-99", "grants": { "call": ["receive"] } })),
+        )
         .await;
     assert_eq!(up.status, StatusCode::CREATED, "{}", up.json);
     conforms(&format!("{CTRL}UserWithToken"), &up.json);
     assert_eq!(up.json["user"]["externalId"], "rider-99");
     // Delete: 204, a tombstone.
-    let del = c.req(m(), Method::DELETE, &format!("/v1/users/{user}"), None).await;
+    let del = c
+        .req(m(), Method::DELETE, &format!("/v1/users/{user}"), None)
+        .await;
     assert_eq!(del.status, StatusCode::NO_CONTENT, "{}", del.json);
-    let gone = c.req(m(), Method::GET, &format!("/v1/users/{user}"), None).await;
+    let gone = c
+        .req(m(), Method::GET, &format!("/v1/users/{user}"), None)
+        .await;
     assert_eq!(gone.json["status"], "DEACTIVATED");
     // Phone numbers and SIP addresses are never ids: refused before Platform Access.
     let calls = c.pa.end_user_calls.lock().unwrap().len();
     for ext in ["+15551234567", "sip:alice@example.com", "has space", ""] {
         let r = c
-            .req(m(), Method::POST, "/v1/users", Some(json!({ "externalId": ext })))
+            .req(
+                m(),
+                Method::POST,
+                "/v1/users",
+                Some(json!({ "externalId": ext })),
+            )
             .await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{ext}");
     }
@@ -380,7 +527,12 @@ async fn the_users_api_delegates_on_behalf_of_the_forwarded_credential() {
     let test_env = environment(&c, &owner, project, "TEST").await;
     let other = c.pa.machine(test_env, &["principals.read"]);
     let r = c
-        .req(As::Machine(&other), Method::GET, &format!("/v1/users/{}", id(&again.json)), None)
+        .req(
+            As::Machine(&other),
+            Method::GET,
+            &format!("/v1/users/{}", id(&again.json)),
+            None,
+        )
         .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.json);
 }
@@ -395,44 +547,98 @@ async fn the_users_api_checks_scopes_callers_and_maps_platform_access_errors() {
     // Scope refusals (checked here first: Platform Access is not called).
     let reader = c.pa.machine(env, &["principals.read"]);
     let r = c
-        .req(As::Machine(&reader), Method::POST, "/v1/users", Some(json!({ "externalId": "r-1" })))
+        .req(
+            As::Machine(&reader),
+            Method::POST,
+            "/v1/users",
+            Some(json!({ "externalId": "r-1" })),
+        )
         .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     assert_eq!(code(&r), "INSUFFICIENT_SCOPE");
     let r = c
-        .req(As::Machine(&reader), Method::POST, &format!("/v1/users/{}/tokens", Uuid::new_v4()),
-            Some(json!({ "grants": {} })))
+        .req(
+            As::Machine(&reader),
+            Method::POST,
+            &format!("/v1/users/{}/tokens", Uuid::new_v4()),
+            Some(json!({ "grants": {} })),
+        )
         .await;
     assert_eq!(code(&r), "INSUFFICIENT_SCOPE");
     let minter = c.pa.machine(env, &["user_tokens.issue"]);
     let r = c
-        .req(As::Machine(&minter), Method::POST, "/v1/users/tokens",
-            Some(json!({ "externalId": "r-1", "grants": {} })))
+        .req(
+            As::Machine(&minter),
+            Method::POST,
+            "/v1/users/tokens",
+            Some(json!({ "externalId": "r-1", "grants": {} })),
+        )
         .await;
-    assert_eq!(code(&r), "INSUFFICIENT_SCOPE", "the upsert also needs principals.write");
+    assert_eq!(
+        code(&r),
+        "INSUFFICIENT_SCOPE",
+        "the upsert also needs principals.write"
+    );
     let writer = c.pa.machine(env, &["principals.write"]);
-    let r = c.req(As::Machine(&writer), Method::GET, "/v1/users", None).await;
+    let r = c
+        .req(As::Machine(&writer), Method::GET, "/v1/users", None)
+        .await;
     assert_eq!(code(&r), "INSUFFICIENT_SCOPE");
     assert!(c.pa.end_user_calls.lock().unwrap().is_empty());
     // Human sessions never use the machine Users API.
-    let r = c.req(As::User(&owner), Method::GET, "/v1/users", None).await;
+    let r = c
+        .req(As::User(&owner), Method::GET, "/v1/users", None)
+        .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     assert_eq!(code(&r), "PERMISSION_DENIED");
     let r = c.req(As::Nobody, Method::GET, "/v1/users", None).await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
     // Platform Access refusals map to the Developer Platform envelope.
-    let full = c.pa.machine(env, &["principals.read", "principals.write", "user_tokens.issue"]);
+    let full = c.pa.machine(
+        env,
+        &["principals.read", "principals.write", "user_tokens.issue"],
+    );
     for (status, pa_code, want_status, want_code) in [
-        (409, "LIMIT_EXCEEDED", StatusCode::CONFLICT, "LIMIT_EXCEEDED"),
-        (422, "VALIDATION_ERROR", StatusCode::BAD_REQUEST, "VALIDATION_ERROR"),
-        (403, "SCOPE_REQUIRED", StatusCode::FORBIDDEN, "INSUFFICIENT_SCOPE"),
-        (403, "POLICY_VIOLATION", StatusCode::UNPROCESSABLE_ENTITY, "POLICY_VIOLATION"),
-        (429, "RATE_LIMITED", StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED"),
+        (
+            409,
+            "LIMIT_EXCEEDED",
+            StatusCode::CONFLICT,
+            "LIMIT_EXCEEDED",
+        ),
+        (
+            422,
+            "VALIDATION_ERROR",
+            StatusCode::BAD_REQUEST,
+            "VALIDATION_ERROR",
+        ),
+        (
+            403,
+            "SCOPE_REQUIRED",
+            StatusCode::FORBIDDEN,
+            "INSUFFICIENT_SCOPE",
+        ),
+        (
+            403,
+            "POLICY_VIOLATION",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "POLICY_VIOLATION",
+        ),
+        (
+            429,
+            "RATE_LIMITED",
+            StatusCode::TOO_MANY_REQUESTS,
+            "RATE_LIMITED",
+        ),
         (404, "NOT_FOUND", StatusCode::NOT_FOUND, "NOT_FOUND"),
     ] {
         *c.pa.end_users_refusal.lock().unwrap() = Some((status, pa_code.into()));
         let r = c
-            .req(As::Machine(&full), Method::POST, "/v1/users", Some(json!({ "externalId": "r-2" })))
+            .req(
+                As::Machine(&full),
+                Method::POST,
+                "/v1/users",
+                Some(json!({ "externalId": "r-2" })),
+            )
             .await;
         assert_eq!((r.status, code(&r)), (want_status, want_code), "{pa_code}");
         conforms(ERR, &r.json);
@@ -446,7 +652,9 @@ async fn the_users_api_checks_scopes_callers_and_maps_platform_access_errors() {
     c.pa.down.store(false, std::sync::atomic::Ordering::SeqCst);
     // A revoked credential no longer authenticates.
     c.pa.revoke(&full);
-    let r = c.req(As::Machine(&full), Method::GET, "/v1/users", None).await;
+    let r = c
+        .req(As::Machine(&full), Method::GET, "/v1/users", None)
+        .await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
     // Only well-formed calls reached Platform Access.
     assert!(c
@@ -473,22 +681,45 @@ async fn console_users_websites_and_test_tokens_follow_the_role_matrix() {
     let body = json!({ "externalId": "tester-1", "displayName": "Tester",
         "grants": { "msg": ["read", "send"] }, "ttlSeconds": 3600 });
     let path = format!("/v1/environments/{env}/test-user-tokens");
-    let t = c.req(As::User(&dev), Method::POST, &path, Some(body.clone())).await;
+    let t = c
+        .req(As::User(&dev), Method::POST, &path, Some(body.clone()))
+        .await;
     assert_eq!(t.status, StatusCode::CREATED, "{}", t.json);
     conforms(&format!("{CTRL}UserWithToken"), &t.json);
     assert_eq!(t.headers["cache-control"], "no-store");
     for who in [&analyst, &billing] {
-        let r = c.req(As::User(who), Method::POST, &path, Some(body.clone())).await;
-        assert_eq!((r.status, code(&r)), (StatusCode::FORBIDDEN, "PERMISSION_DENIED"));
+        let r = c
+            .req(As::User(who), Method::POST, &path, Some(body.clone()))
+            .await;
+        assert_eq!(
+            (r.status, code(&r)),
+            (StatusCode::FORBIDDEN, "PERMISSION_DENIED")
+        );
     }
-    let machine = c.pa.machine(env, &["user_tokens.issue", "principals.write"]);
-    let r = c.req(As::Machine(&machine), Method::POST, &path, Some(body.clone())).await;
+    let machine =
+        c.pa.machine(env, &["user_tokens.issue", "principals.write"]);
+    let r = c
+        .req(
+            As::Machine(&machine),
+            Method::POST,
+            &path,
+            Some(body.clone()),
+        )
+        .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     let test_env = environment(&c, &owner, project, "TEST").await;
     let r = c
-        .req(As::User(&owner), Method::POST, &format!("/v1/environments/{test_env}/test-user-tokens"), Some(body.clone()))
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/environments/{test_env}/test-user-tokens"),
+            Some(body.clone()),
+        )
         .await;
-    assert_eq!((r.status, code(&r)), (StatusCode::UNPROCESSABLE_ENTITY, "POLICY_VIOLATION"));
+    assert_eq!(
+        (r.status, code(&r)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "POLICY_VIOLATION")
+    );
     assert!(!dump(&c, "devplat_activity_events").await.contains("cfut_"));
     // The console user list: OWNER / ADMIN / DEVELOPER.
     let users = format!("/v1/environments/{env}/users");
@@ -500,9 +731,14 @@ async fn console_users_websites_and_test_tokens_follow_the_role_matrix() {
     }
     for who in [&analyst, &billing] {
         let r = c.req(As::User(who), Method::GET, &users, None).await;
-        assert_eq!((r.status, code(&r)), (StatusCode::FORBIDDEN, "PERMISSION_DENIED"));
+        assert_eq!(
+            (r.status, code(&r)),
+            (StatusCode::FORBIDDEN, "PERMISSION_DENIED")
+        );
     }
-    let r = c.req(As::Machine(&machine), Method::GET, &users, None).await;
+    let r = c
+        .req(As::Machine(&machine), Method::GET, &users, None)
+        .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     // Allowed websites: every member reads, OWNER / ADMIN replace.
     let origins = format!("/v1/environments/{env}/allowed-origins");
@@ -513,10 +749,17 @@ async fn console_users_websites_and_test_tokens_follow_the_role_matrix() {
     }
     let list = json!({ "origins": ["https://app.rider.example", "http://localhost:3000"] });
     for who in [&dev, &analyst, &billing] {
-        let r = c.req(As::User(who), Method::PUT, &origins, Some(list.clone())).await;
-        assert_eq!((r.status, code(&r)), (StatusCode::FORBIDDEN, "PERMISSION_DENIED"));
+        let r = c
+            .req(As::User(who), Method::PUT, &origins, Some(list.clone()))
+            .await;
+        assert_eq!(
+            (r.status, code(&r)),
+            (StatusCode::FORBIDDEN, "PERMISSION_DENIED")
+        );
     }
-    let r = c.req(As::User(&admin), Method::PUT, &origins, Some(list.clone())).await;
+    let r = c
+        .req(As::User(&admin), Method::PUT, &origins, Some(list.clone()))
+        .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
     conforms(&format!("{CTRL}AllowedOrigins"), &r.json);
     assert_eq!(r.json["origins"], list["origins"]);
@@ -527,33 +770,60 @@ async fn console_users_websites_and_test_tokens_follow_the_role_matrix() {
         json!({ "origins": ["http://app.rider.example"] }),
         json!({ "origins": (0..21).map(|i| format!("https://a{i}.example")).collect::<Vec<_>>() }),
     ] {
-        let r = c.req(As::User(&owner), Method::PUT, &origins, Some(bad.clone())).await;
+        let r = c
+            .req(As::User(&owner), Method::PUT, &origins, Some(bad.clone()))
+            .await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{bad}");
     }
     // localhost is for SANDBOX / TEST only (the PRODUCTION rule is unit-tested).
     let r = c
-        .req(As::User(&owner), Method::PUT, &format!("/v1/environments/{test_env}/allowed-origins"),
-            Some(json!({ "origins": ["http://127.0.0.1:5173"] })))
+        .req(
+            As::User(&owner),
+            Method::PUT,
+            &format!("/v1/environments/{test_env}/allowed-origins"),
+            Some(json!({ "origins": ["http://127.0.0.1:5173"] })),
+        )
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
     // Machines: `credentials.manage` replaces, `projects.read` reads.
     let reader = c.pa.machine(env, &["projects.read"]);
-    let r = c.req(As::Machine(&reader), Method::GET, &origins, None).await;
+    let r = c
+        .req(As::Machine(&reader), Method::GET, &origins, None)
+        .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
-    let r = c.req(As::Machine(&reader), Method::PUT, &origins, Some(list.clone())).await;
+    let r = c
+        .req(
+            As::Machine(&reader),
+            Method::PUT,
+            &origins,
+            Some(list.clone()),
+        )
+        .await;
     assert_eq!(code(&r), "INSUFFICIENT_SCOPE");
     let manager = c.pa.machine(env, &["credentials.manage"]);
     let r = c
-        .req(As::Machine(&manager), Method::PUT, &origins, Some(json!({ "origins": [] })))
+        .req(
+            As::Machine(&manager),
+            Method::PUT,
+            &origins,
+            Some(json!({ "origins": [] })),
+        )
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
     assert!(c.pa.origins.lock().unwrap()[&env].is_empty());
     // A non-member never learns the environment exists.
     let (stranger, _) = c.sessions.sign_in("stranger@other.example");
-    let r = c.req(As::User(&stranger), Method::GET, &origins, None).await;
+    let r = c
+        .req(As::User(&stranger), Method::GET, &origins, None)
+        .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
     let acts = c
-        .req(As::User(&owner), Method::GET, &format!("/v1/organizations/{org}/activity?limit=100"), None)
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("/v1/organizations/{org}/activity?limit=100"),
+            None,
+        )
         .await;
     let actions: Vec<&str> = acts.json["items"]
         .as_array()
@@ -583,33 +853,70 @@ async fn push_credentials_are_sealed_forwarded_and_never_persisted() {
     };
     // OWNER / ADMIN only; never machines.
     for who in [&dev, &analyst] {
-        let r = c.req(As::User(who), Method::POST, &path, Some(apns("SANDBOX"))).await;
-        assert_eq!((r.status, code(&r)), (StatusCode::FORBIDDEN, "PERMISSION_DENIED"));
+        let r = c
+            .req(As::User(who), Method::POST, &path, Some(apns("SANDBOX")))
+            .await;
+        assert_eq!(
+            (r.status, code(&r)),
+            (StatusCode::FORBIDDEN, "PERMISSION_DENIED")
+        );
         let r = c.req(As::User(who), Method::GET, &path, None).await;
         assert_eq!(r.status, StatusCode::FORBIDDEN);
     }
-    let machine = c.pa.machine(env, &["credentials.manage", "projects.manage"]);
+    let machine =
+        c.pa.machine(env, &["credentials.manage", "projects.manage"]);
     let r = c.req(As::Machine(&machine), Method::GET, &path, None).await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
     // SANDBOX / TEST may only use the APNs sandbox host.
-    let r = c.req(As::User(&owner), Method::POST, &path, Some(apns("PRODUCTION"))).await;
-    assert_eq!((r.status, code(&r)), (StatusCode::UNPROCESSABLE_ENTITY, "POLICY_VIOLATION"));
-    assert!(vault.calls.lock().unwrap().is_empty(), "refused before sealing");
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &path,
+            Some(apns("PRODUCTION")),
+        )
+        .await;
+    assert_eq!(
+        (r.status, code(&r)),
+        (StatusCode::UNPROCESSABLE_ENTITY, "POLICY_VIOLATION")
+    );
+    assert!(
+        vault.calls.lock().unwrap().is_empty(),
+        "refused before sealing"
+    );
     // Upload: sealed, forwarded, metadata only.
     let k = [("idempotency-key", "apns-voip-1")];
     let r = c
-        .req_with(As::User(&admin), Method::POST, &path, Some(apns("SANDBOX")), &k)
+        .req_with(
+            As::User(&admin),
+            Method::POST,
+            &path,
+            Some(apns("SANDBOX")),
+            &k,
+        )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
     conforms(&format!("{CTRL}PushCredential"), &r.json);
     assert_eq!(r.headers["cache-control"], "no-store");
-    assert_eq!((r.json["provider"].as_str(), r.json["voip"].as_bool()), (Some("APNS"), Some(true)));
+    assert_eq!(
+        (r.json["provider"].as_str(), r.json["voip"].as_bool()),
+        (Some("APNS"), Some(true))
+    );
     assert_eq!(r.json["status"], "UNVERIFIED");
-    assert_eq!(r.json["fingerprint"], hex::encode(Sha256::digest(p8().as_bytes())));
+    assert_eq!(
+        r.json["fingerprint"],
+        hex::encode(Sha256::digest(p8().as_bytes()))
+    );
     assert!(!r.json.to_string().contains(SECRET_MARKER));
     let first_ref = r.json["credentialRef"].as_str().unwrap().to_string();
     let replay = c
-        .req_with(As::User(&admin), Method::POST, &path, Some(apns("SANDBOX")), &k)
+        .req_with(
+            As::User(&admin),
+            Method::POST,
+            &path,
+            Some(apns("SANDBOX")),
+            &k,
+        )
         .await;
     assert_eq!(replay.headers["idempotent-replayed"], "true");
     {
@@ -621,13 +928,19 @@ async fn push_credentials_are_sealed_forwarded_and_never_persisted() {
         assert_eq!(scope.application_id, project);
         assert_eq!(scope.tenant_id, org);
         let body = body.as_ref().unwrap();
-        assert!(!body.to_string().contains(SECRET_MARKER), "only the sealed secret leaves");
+        assert!(
+            !body.to_string().contains(SECRET_MARKER),
+            "only the sealed secret leaves"
+        );
         assert!(!body.to_string().contains("BEGIN PRIVATE KEY"));
         let sealed: Value = serde_json::from_str(body["sealed"].as_str().unwrap()).unwrap();
         assert_eq!(sealed["v"], 1);
         assert_eq!(sealed["parts"][0]["kid"], "notif-hpke-2026-11");
-        assert_eq!(body["metadata"], json!({ "teamId": "ABCDE12345", "keyId": "KEY1234567",
-            "bundleId": "com.rider.app", "apnsHost": "SANDBOX" }));
+        assert_eq!(
+            body["metadata"],
+            json!({ "teamId": "ABCDE12345", "keyId": "KEY1234567",
+            "bundleId": "com.rider.app", "apnsHost": "SANDBOX" })
+        );
         assert_eq!(body["fingerprint"], r.json["fingerprint"]);
     }
     // FCM.
@@ -636,8 +949,14 @@ async fn push_credentials_are_sealed_forwarded_and_never_persisted() {
         "client_email": "push@rider-app-1.iam.gserviceaccount.com" })
     .to_string();
     let r = c
-        .req(As::User(&owner), Method::POST, &path,
-            Some(json!({ "provider": "FCM", "projectId": "rider-app-1", "serviceAccountJson": sa })))
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &path,
+            Some(
+                json!({ "provider": "FCM", "projectId": "rider-app-1", "serviceAccountJson": sa }),
+            ),
+        )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
     assert_eq!(r.json["provider"], "FCM");
@@ -646,11 +965,16 @@ async fn push_credentials_are_sealed_forwarded_and_never_persisted() {
         let calls = vault.calls.lock().unwrap();
         let body = calls[1].3.as_ref().unwrap();
         let sealed: Value = serde_json::from_str(body["sealed"].as_str().unwrap()).unwrap();
-        assert!(sealed["parts"].as_array().unwrap().len() > 1, "a long secret is split");
+        assert!(
+            sealed["parts"].as_array().unwrap().len() > 1,
+            "a long secret is split"
+        );
         assert!(!body.to_string().contains(SECRET_MARKER));
     }
     // Re-uploading a provider replaces it.
-    let r = c.req(As::User(&owner), Method::POST, &path, Some(apns("SANDBOX"))).await;
+    let r = c
+        .req(As::User(&owner), Method::POST, &path, Some(apns("SANDBOX")))
+        .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
     let apns_ref = r.json["credentialRef"].as_str().unwrap().to_string();
     assert_ne!(apns_ref, first_ref);
@@ -660,19 +984,37 @@ async fn push_credentials_are_sealed_forwarded_and_never_persisted() {
     assert_eq!(list.json["items"].as_array().unwrap().len(), 2);
     // Verify: the outcome is recorded (bounded error codes only).
     let r = c
-        .req(As::User(&owner), Method::POST, &format!("{path}/{apns_ref}/verify"), None)
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{path}/{apns_ref}/verify"),
+            None,
+        )
         .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
     conforms(&format!("{CTRL}PushCredential"), &r.json);
     assert_eq!(r.json["status"], "VERIFIED");
     assert!(r.json["lastVerifiedAt"].is_string());
-    *vault.verify.lock().unwrap() = Some(json!({ "status": "FAILED", "lastError": "FCM_UNAUTHORIZED" }));
+    *vault.verify.lock().unwrap() =
+        Some(json!({ "status": "FAILED", "lastError": "FCM_UNAUTHORIZED" }));
     let r = c
-        .req(As::User(&owner), Method::POST, &format!("{path}/{fcm_ref}/verify"), None)
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("{path}/{fcm_ref}/verify"),
+            None,
+        )
         .await;
-    assert_eq!((r.json["status"].as_str(), r.json["lastError"].as_str()), (Some("FAILED"), Some("FCM_UNAUTHORIZED")));
+    assert_eq!(
+        (r.json["status"].as_str(), r.json["lastError"].as_str()),
+        (Some("FAILED"), Some("FCM_UNAUTHORIZED"))
+    );
     // The secret is nowhere: not in metadata, idempotency records or activity.
-    for table in ["devplat_push_providers", "devplat_idempotency_records", "devplat_activity_events"] {
+    for table in [
+        "devplat_push_providers",
+        "devplat_idempotency_records",
+        "devplat_activity_events",
+    ] {
         let all = dump(&c, table).await;
         assert!(!all.contains(SECRET_MARKER), "{table}");
         assert!(!all.contains("BEGIN PRIVATE KEY"), "{table}");
@@ -680,10 +1022,22 @@ async fn push_credentials_are_sealed_forwarded_and_never_persisted() {
     // Another environment's reference is NOT_FOUND; delete removes it at the vault too.
     let other = environment(&c, &owner, project, "TEST").await;
     let r = c
-        .req(As::User(&owner), Method::DELETE, &format!("/v1/environments/{other}/push-credentials/{apns_ref}"), None)
+        .req(
+            As::User(&owner),
+            Method::DELETE,
+            &format!("/v1/environments/{other}/push-credentials/{apns_ref}"),
+            None,
+        )
         .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
-    let r = c.req(As::User(&owner), Method::DELETE, &format!("{path}/{apns_ref}"), None).await;
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::DELETE,
+            &format!("{path}/{apns_ref}"),
+            None,
+        )
+        .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT, "{}", r.json);
     assert!(vault
         .calls
@@ -693,7 +1047,10 @@ async fn push_credentials_are_sealed_forwarded_and_never_persisted() {
         .any(|(m, _, p, _)| m == "DELETE" && p == "APNS_VOIP"));
     let list = c.req(As::User(&owner), Method::GET, &path, None).await;
     assert_eq!(list.json["items"].as_array().unwrap().len(), 1);
-    assert_eq!(c.count("SELECT count(*) FROM devplat_push_providers").await, 1);
+    assert_eq!(
+        c.count("SELECT count(*) FROM devplat_push_providers").await,
+        1
+    );
 }
 
 #[tokio::test]
@@ -706,10 +1063,21 @@ async fn push_credentials_fail_closed_without_the_vault_and_need_push_in_product
     let body = json!({ "provider": "APNS", "teamId": "ABCDE12345", "keyId": "KEY1234567",
         "bundleId": "com.rider.app", "voip": false, "apnsHost": "SANDBOX", "p8": p8() });
     let r = c
-        .req(As::User(&owner), Method::POST, &format!("/v1/environments/{env}/push-credentials"), Some(body.clone()))
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/environments/{env}/push-credentials"),
+            Some(body.clone()),
+        )
         .await;
-    assert_eq!((r.status, code(&r)), (StatusCode::SERVICE_UNAVAILABLE, "CAPABILITY_UNAVAILABLE"));
-    assert_eq!(c.count("SELECT count(*) FROM devplat_push_providers").await, 0);
+    assert_eq!(
+        (r.status, code(&r)),
+        (StatusCode::SERVICE_UNAVAILABLE, "CAPABILITY_UNAVAILABLE")
+    );
+    assert_eq!(
+        c.count("SELECT count(*) FROM devplat_push_providers").await,
+        0
+    );
 
     // PRODUCTION: only with the PUSH capability approved and LIVE.
     let vault = Arc::new(FakeVault::default());
@@ -723,18 +1091,31 @@ async fn push_credentials_fail_closed_without_the_vault_and_need_push_in_product
         let owner = owner.clone();
         async move {
             let req = c
-                .req(As::User(&owner), Method::POST, &format!("/v1/projects/{project}/production-access-requests"),
-                    Some(json!({ "capabilities": caps, "useCaseSummary": "Rider calls" })))
+                .req(
+                    As::User(&owner),
+                    Method::POST,
+                    &format!("/v1/projects/{project}/production-access-requests"),
+                    Some(json!({ "capabilities": caps, "useCaseSummary": "Rider calls" })),
+                )
                 .await;
             assert_eq!(req.status, StatusCode::CREATED, "{}", req.json);
             let rid = id(&req.json);
             let ok = c
-                .operator_as(Method::POST, &format!("/internal/v1/operator/production-access-requests/{rid}/approve"),
-                    None, Some(Uuid::new_v4()))
+                .operator_as(
+                    Method::POST,
+                    &format!("/internal/v1/operator/production-access-requests/{rid}/approve"),
+                    None,
+                    Some(Uuid::new_v4()),
+                )
                 .await;
             assert_eq!(ok.json["state"], "APPROVED", "{}", ok.json);
             let act = c
-                .req(As::User(&owner), Method::POST, &format!("/v1/production-access-requests/{rid}/activate"), None)
+                .req(
+                    As::User(&owner),
+                    Method::POST,
+                    &format!("/v1/production-access-requests/{rid}/activate"),
+                    None,
+                )
                 .await;
             assert_eq!(act.json["state"], "LIVE", "{}", act.json);
             Uuid::parse_str(act.json["productionEnvironmentId"].as_str().unwrap()).unwrap()
@@ -744,26 +1125,47 @@ async fn push_credentials_fail_closed_without_the_vault_and_need_push_in_product
     let mut prod_body = body.clone();
     prod_body["apnsHost"] = json!("PRODUCTION");
     let r = c
-        .req(As::User(&owner), Method::POST, &format!("/v1/environments/{prod_a}/push-credentials"), Some(prod_body.clone()))
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/environments/{prod_a}/push-credentials"),
+            Some(prod_body.clone()),
+        )
         .await;
-    assert_eq!((r.status, code(&r)), (StatusCode::FORBIDDEN, "PRODUCTION_ACCESS_REQUIRED"));
+    assert_eq!(
+        (r.status, code(&r)),
+        (StatusCode::FORBIDDEN, "PRODUCTION_ACCESS_REQUIRED")
+    );
     let p = c
-        .req(As::User(&owner), Method::POST, &format!("/v1/organizations/{org_a}/projects"),
-            Some(json!({ "displayName": "Second app" })))
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/organizations/{org_a}/projects"),
+            Some(json!({ "displayName": "Second app" })),
+        )
         .await;
     let project_b = id(&p.json);
+    environment(&c, &owner, project_b, "SANDBOX").await;
     let prod_b = live(&["PUSH", "END_USERS"], project_b).await;
     let r = c
-        .req(As::User(&owner), Method::POST, &format!("/v1/environments/{prod_b}/push-credentials"), Some(prod_body))
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/environments/{prod_b}/push-credentials"),
+            Some(prod_body),
+        )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
     assert_eq!(r.json["apnsHost"], "PRODUCTION");
     // END_USERS unlocked the Users API scopes for PRODUCTION.
     let grants = c.pa.app_scopes.lock().unwrap().clone();
     for s in ["principals.read", "principals.write", "user_tokens.issue"] {
-        assert!(grants
-            .get(&(project_b, s.to_string()))
-            .is_some_and(|k| k.contains(&"PRODUCTION".to_string())), "{s}");
+        assert!(
+            grants
+                .get(&(project_b, s.to_string()))
+                .is_some_and(|k| k.contains(&"PRODUCTION".to_string())),
+            "{s}"
+        );
     }
     let _ = project;
 }
@@ -784,9 +1186,13 @@ async fn creation_caps_apply_only_when_enabled() {
         let c = &c;
         let owner = owner.clone();
         async move {
-            c.req(As::User(&owner), Method::POST, "/v1/organizations",
-                Some(json!({ "displayName": format!("Workspace {n}") })))
-                .await
+            c.req(
+                As::User(&owner),
+                Method::POST,
+                "/v1/organizations",
+                Some(json!({ "displayName": format!("Workspace {n}") })),
+            )
+            .await
         }
     };
     let first = create_org(1).await;
@@ -794,42 +1200,72 @@ async fn creation_caps_apply_only_when_enabled() {
     let org = id(&first.json);
     assert_eq!(create_org(2).await.status, StatusCode::CREATED);
     let third = create_org(3).await;
-    assert_eq!((third.status, code(&third)), (StatusCode::CONFLICT, "LIMIT_EXCEEDED"));
+    assert_eq!(
+        (third.status, code(&third)),
+        (StatusCode::CONFLICT, "LIMIT_EXCEEDED")
+    );
     conforms(ERR, &third.json);
     // Another account has its own allowance; membership alone does not count.
     let (other, _) = c.sessions.sign_in("other@rider.example");
     let r = c
-        .req(As::User(&other), Method::POST, "/v1/organizations", Some(json!({ "displayName": "Other" })))
+        .req(
+            As::User(&other),
+            Method::POST,
+            "/v1/organizations",
+            Some(json!({ "displayName": "Other" })),
+        )
         .await;
     assert_eq!(r.status, StatusCode::CREATED);
     let other_org = id(&r.json);
     // Closing a workspace frees its place.
     let close = c
-        .req(As::User(&owner), Method::POST, &format!("/v1/organizations/{org}/close"), None)
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/organizations/{org}/close"),
+            None,
+        )
         .await;
     assert_eq!(close.status, StatusCode::OK, "{}", close.json);
     assert_eq!(create_org(4).await.status, StatusCode::CREATED);
     // Projects per workspace (ARCHIVED ones do not count).
     let ws = c
-        .req(As::User(&owner), Method::POST, "/v1/organizations", Some(json!({ "displayName": "W" })))
+        .req(
+            As::User(&owner),
+            Method::POST,
+            "/v1/organizations",
+            Some(json!({ "displayName": "W" })),
+        )
         .await;
     assert_eq!(ws.status, StatusCode::CONFLICT, "still two owned");
     let project = |n: u32| {
         let c = &c;
         let other = other.clone();
         async move {
-            c.req(As::User(&other), Method::POST, &format!("/v1/organizations/{other_org}/projects"),
-                Some(json!({ "displayName": format!("P{n}") })))
-                .await
+            c.req(
+                As::User(&other),
+                Method::POST,
+                &format!("/v1/organizations/{other_org}/projects"),
+                Some(json!({ "displayName": format!("P{n}") })),
+            )
+            .await
         }
     };
     let p1 = project(1).await;
     assert_eq!(p1.status, StatusCode::CREATED);
     assert_eq!(project(2).await.status, StatusCode::CREATED);
     let p3 = project(3).await;
-    assert_eq!((p3.status, code(&p3)), (StatusCode::CONFLICT, "LIMIT_EXCEEDED"));
+    assert_eq!(
+        (p3.status, code(&p3)),
+        (StatusCode::CONFLICT, "LIMIT_EXCEEDED")
+    );
     let archived = c
-        .req(As::User(&other), Method::POST, &format!("/v1/projects/{}/archive", id(&p1.json)), None)
+        .req(
+            As::User(&other),
+            Method::POST,
+            &format!("/v1/projects/{}/archive", id(&p1.json)),
+            None,
+        )
         .await;
     assert_eq!(archived.status, StatusCode::OK, "{}", archived.json);
     assert_eq!(project(4).await.status, StatusCode::CREATED);
@@ -871,35 +1307,62 @@ async fn message_sent_usage_is_accepted_from_messaging_only_and_shown_everywhere
         .normalized()
         .sealed()
     };
-    let post = |signer: Arc<cf_service_auth::ServiceTokenSigner>, facts: Vec<cf_usage_facts::UsageFact>| {
+    let post = |signer: Arc<cf_service_auth::ServiceTokenSigner>,
+                facts: Vec<cf_usage_facts::UsageFact>| {
         let c = &c;
         async move {
-            c.internal(&signer, Method::POST, "/internal/v1/usage/facts",
+            c.internal(
+                &signer,
+                Method::POST,
+                "/internal/v1/usage/facts",
                 Some(json!({ "stream": "messaging.messages", "facts": facts,
-                    "advanceTo": { "at": chrono::Utc::now(), "key": "k1" } })))
-                .await
+                    "advanceTo": { "at": chrono::Utc::now(), "key": "k1" } })),
+            )
+            .await
         }
     };
     let a = Uuid::new_v4().to_string();
     let r = post(producers.calling.clone(), vec![fact(&a)]).await;
-    assert_eq!(r.json["results"][0]["reasonCode"], "PRODUCER_NOT_ALLOWED", "{}", r.json);
-    let r = post(producers.messaging.clone(), vec![fact(&a), fact(&Uuid::new_v4().to_string())]).await;
+    assert_eq!(
+        r.json["results"][0]["reasonCode"], "PRODUCER_NOT_ALLOWED",
+        "{}",
+        r.json
+    );
+    let r = post(
+        producers.messaging.clone(),
+        vec![fact(&a), fact(&Uuid::new_v4().to_string())],
+    )
+    .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.json);
     assert_eq!(r.json["recorded"], 2, "{}", r.json);
     conforms(&format!("{CTRL}IngestUsageFactsResponse"), &r.json);
     // Rollups, fact views and exports carry the new type.
     let s = c
-        .req(As::User(&owner), Method::GET, &format!("/v1/environments/{env}/usage"), None)
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("/v1/environments/{env}/usage"),
+            None,
+        )
         .await;
     assert_eq!(s.status, StatusCode::OK, "{}", s.json);
     conforms(&format!("{CTRL}UsageSummary"), &s.json);
-    assert!(s.json["totals"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|t| t["usageType"] == "MESSAGE_SENT" && t["quantity"] == 2), "{}", s.json);
+    assert!(
+        s.json["totals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["usageType"] == "MESSAGE_SENT" && t["quantity"] == 2),
+        "{}",
+        s.json
+    );
     let f = c
-        .req(As::User(&owner), Method::GET, &format!("/v1/environments/{env}/usage/facts?usageType=MESSAGE_SENT"), None)
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("/v1/environments/{env}/usage/facts?usageType=MESSAGE_SENT"),
+            None,
+        )
         .await;
     assert_eq!(f.status, StatusCode::OK, "{}", f.json);
     conforms(&format!("{CTRL}UsageFactList"), &f.json);
@@ -910,11 +1373,18 @@ async fn message_sent_usage_is_accepted_from_messaging_only_and_shown_everywhere
                 &format!("/v1/environments/{env}/usage/export?format=json&granularity={granularity}&usageType=MESSAGE_SENT"), None)
             .await;
         assert_eq!(e.status, StatusCode::OK, "{}", e.json);
-        assert!(e.json["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|i| i["usageType"] == "MESSAGE_SENT"), "{}", e.json);
-        assert!(!e.json["items"].as_array().unwrap().is_empty(), "{granularity}");
+        assert!(
+            e.json["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|i| i["usageType"] == "MESSAGE_SENT"),
+            "{}",
+            e.json
+        );
+        assert!(
+            !e.json["items"].as_array().unwrap().is_empty(),
+            "{granularity}"
+        );
     }
 }

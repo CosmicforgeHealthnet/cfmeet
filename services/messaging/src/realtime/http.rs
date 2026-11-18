@@ -126,7 +126,11 @@ fn partner_origin_candidate(state: &AppState, headers: &HeaderMap) -> Option<Str
 
 /// Whether `origin` is an allowed website of the environment of `session`, a partner
 /// session device (contract §2.3; static allow-list ∪ environment origins).
-async fn partner_origin_allowed(state: &AppState, session: &sessions::SessionRow, origin: &str) -> bool {
+async fn partner_origin_allowed(
+    state: &AppState,
+    session: &sessions::SessionRow,
+    origin: &str,
+) -> bool {
     if !session.is_session_device() {
         return false;
     }
@@ -141,7 +145,11 @@ async fn partner_origin_allowed(state: &AppState, session: &sessions::SessionRow
     .ok()
     .flatten()
     .is_some_and(|d| d.is_partner());
-    partner && state.partner.origin_allowed(session.environment_id, origin).await
+    partner
+        && state
+            .partner
+            .origin_allowed(session.environment_id, origin)
+            .await
 }
 
 fn allow_ticket_cors(response: &mut Response, origin: HeaderValue) {

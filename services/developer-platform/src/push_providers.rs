@@ -274,7 +274,8 @@ mod tests {
         let k = key();
         let s = scope();
         let p8 = b"-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg\n-----END PRIVATE KEY-----\n";
-        let sealed: Value = serde_json::from_str(&seal_secret(&k, &s, "APNS", p8).unwrap()).unwrap();
+        let sealed: Value =
+            serde_json::from_str(&seal_secret(&k, &s, "APNS", p8).unwrap()).unwrap();
         assert_eq!(sealed["v"], 1);
         assert_eq!(sealed["parts"].as_array().unwrap().len(), 1);
         assert_eq!(sealed["parts"][0]["kid"], "notif-hpke-2026-11");

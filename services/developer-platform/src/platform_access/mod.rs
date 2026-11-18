@@ -424,7 +424,9 @@ pub enum DelegationCall {
         limit: Option<u32>,
     },
     /// ADR 0062 (build contract §2.3): the environment's allowed websites.
-    GetAllowedOrigins { environment_id: Uuid },
+    GetAllowedOrigins {
+        environment_id: Uuid,
+    },
     /// ADR 0062 (build contract §2.3): replaces the environment's allowed websites.
     PutAllowedOrigins {
         actor: DelegationActor,
@@ -1101,16 +1103,28 @@ mod tests {
         }
         .request();
         assert_eq!((m, p.as_str()), (Method::GET, "/internal/v1/end-users"));
-        assert_eq!(q, vec![("externalId", "rider-1".to_string()), ("limit", "20".to_string())]);
+        assert_eq!(
+            q,
+            vec![
+                ("externalId", "rider-1".to_string()),
+                ("limit", "20".to_string())
+            ]
+        );
         assert!(b.is_none());
         let (m, p, _, _) = EndUserCall::RevokeSessions { user_id: id }.request();
         assert_eq!(m, Method::POST);
         assert_eq!(p, format!("/internal/v1/end-users/{id}/revoke-sessions"));
         let (m, p, _, b) = EndUserCall::UpsertToken { body: json!({}) }.request();
-        assert_eq!((m, p.as_str()), (Method::POST, "/internal/v1/end-users/tokens"));
+        assert_eq!(
+            (m, p.as_str()),
+            (Method::POST, "/internal/v1/end-users/tokens")
+        );
         assert_eq!(b, Some(json!({})));
         let (m, p, _, _) = EndUserCall::Delete { user_id: id }.request();
-        assert_eq!((m, p), (Method::DELETE, format!("/internal/v1/end-users/{id}")));
+        assert_eq!(
+            (m, p),
+            (Method::DELETE, format!("/internal/v1/end-users/{id}"))
+        );
         // Console delegations (platform-identity.delegate).
         let env = Uuid::new_v4();
         let list = DelegationCall::ListEnvironmentEndUsers {

@@ -110,6 +110,8 @@ enum Prepared {
         env: Box<Envelope>,
         lane: Lane,
         digest: String,
+        /// Addressed to partner end users (ADR 0063 N-P4).
+        partner: bool,
     },
 }
 
@@ -138,6 +140,20 @@ pub async fn ingest(
     metrics: &Metrics,
     issuer: &str,
     request: IngestRequest,
+) -> Result<Vec<IngestResult>, IngestError> {
+    ingest_with(db_conn, metrics, issuer, request, false).await
+}
+
+/// [`ingest`] with partner push (ADR 0063 N-P4) on or off. Off, an envelope addressed to
+/// `platform-principal:<env>:<principal>` is refused exactly as before the recipient kind
+/// existed (`INVALID_FIELD`). On, such an event is never HELD by the first-party routing
+/// modes (no legacy partner path exists to cut over from).
+pub async fn ingest_with(
+    db_conn: &DatabaseConnection,
+    metrics: &Metrics,
+    issuer: &str,
+    request: IngestRequest,
+    partner_push: bool,
 ) -> Result<Vec<IngestResult>, IngestError> {
     if request.events.is_empty() || request.events.len() > 100 {
         return Err(IngestError::BatchSize);
@@ -169,13 +185,25 @@ pub async fn ingest(
         if !SUPPORTED_PROTOCOLS.contains(&env.route.protocol) {
             return Err(IngestError::ProtocolUnsupported);
         }
+        let partner = env.recipients.iter().any(|r| {
+            cf_notification_client::parse_platform_principal(&r.reference).is_some()
+        });
         match validate(&env, Some(issuer)) {
+            Ok(_) if partner && !partner_push => {
+                let ident = identity();
+                prepared.push(Prepared::Rejected {
+                    event_id,
+                    reason: reason_of(&EnvelopeError::Invalid("recipients")).into(),
+                    identity: ident,
+                })
+            }
             Ok(spec) => {
                 let d = digest(&env);
                 prepared.push(Prepared::Valid {
                     lane: spec.lane(),
                     env: Box::new(env),
                     digest: d,
+                    partner,
                 });
             }
             Err(e) => {
@@ -263,10 +291,17 @@ pub async fn ingest(
                     reason: Some(reason),
                 });
             }
-            Prepared::Valid { env, lane, digest } => {
+            Prepared::Valid {
+                env,
+                lane,
+                digest,
+                partner,
+            } => {
                 let category = catalogue::route_category(&env.event_type);
-                let state =
-                    if request.shadow || env.event_type == cf_notification_client::CONTROL_EVENT {
+                let state = if request.shadow
+                    || partner
+                    || env.event_type == cf_notification_client::CONTROL_EVENT
+                {
                         "PENDING"
                     } else {
                         let modes = routing::category(&txn, category).await?;

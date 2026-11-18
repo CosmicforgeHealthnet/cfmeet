@@ -66,6 +66,8 @@ pub struct Job {
     pub subject: Option<(String, Uuid)>,
     pub sealed: Option<cf_notification_client::Sealed>,
     pub shadow: bool,
+    /// The envelope's (tenant, application, environment), when it names one.
+    pub scope: Option<(Uuid, Uuid, Uuid)>,
 }
 
 fn parse_time(s: Option<&str>) -> Option<DateTime<Utc>> {
@@ -95,6 +97,10 @@ impl Job {
             subject: env.subject.as_ref().map(|s| (s.kind.clone(), s.id)),
             sealed: env.sealed.clone(),
             shadow,
+            scope: env
+                .scope
+                .as_ref()
+                .map(|s| (s.tenant_id, s.application_id, s.environment_id)),
         })
     }
 
@@ -126,6 +132,9 @@ pub struct Processor {
     pub email: Arc<EmailConfig>,
     pub metrics: Arc<Metrics>,
     pub operator_emails: Vec<String>,
+    /// ADR 0063: `platform-principal:<env>:<principal>` recipients are delivered (only
+    /// while `NOTIFICATIONS_PARTNER_PUSH_ENABLED` is on).
+    pub partner_push: bool,
 }
 
 #[derive(Debug, FromQueryResult)]
@@ -285,6 +294,15 @@ impl Processor {
                 format!("category=\"{}\"", job.route.route_category),
             );
             return Ok(Processed::Done);
+        }
+        // ADR 0063 N-P4: partner end users never reach the first-party pipeline (no owner
+        // lookups, preferences or CF Meet credentials).
+        if job
+            .recipients
+            .iter()
+            .any(|r| cf_notification_client::parse_platform_principal(r).is_some())
+        {
+            return self.process_partner(job, now).await;
         }
         let modes = routing::category(&self.db, job.route.route_category).await?;
         let mode_of = |c: Channel| -> (Mode, i32) {
@@ -1025,6 +1043,143 @@ impl Processor {
         Ok(Processed::Done)
     }
 
+    /// ADR 0063 N-P4: a metadata-only partner event (`messaging.message.created` to
+    /// `platform-principal:<env>:<principal>` recipients). One notification per recipient
+    /// (`UNIQUE (recipient_ref, dedupe_key)`), one `partner:<endpoint>` PUSH delivery per
+    /// enabled APNS / FCM installation, dispatched by the partner dispatcher with that
+    /// environment's own credential. Ids only; a newer message of the same conversation
+    /// cancels older undelivered ones (and the provider collapses per conversation). Gated
+    /// by the flag alone, not by the first-party routing modes (there is no legacy partner
+    /// path to cut over from); never sent for producer shadow copies.
+    async fn process_partner(&self, job: &Job, now: DateTime<Utc>) -> Result<Processed, DbErr> {
+        if !self.partner_push || job.shadow {
+            self.metrics.inc(
+                "notif_partner_events_skipped_total",
+                if job.shadow {
+                    "reason=\"SHADOW\""
+                } else {
+                    "reason=\"DISABLED\""
+                },
+            );
+            return Ok(Processed::Done);
+        }
+        let mut params = serde_json::Map::new();
+        for key in ["conversationId", "eventSequence", "sequence"] {
+            if let Some(v) = job.data.get(key) {
+                params.insert(key.into(), v.clone());
+            }
+        }
+        let params = Value::Object(params);
+        let coalesce = job
+            .data_uuid("conversationId")
+            .map(|c| format!("partner-conversation:{c}"));
+        let expires = job.expires_at.unwrap_or_else(|| push::default_expiry(now));
+        let category = job.route.spec().category.unwrap_or("OTHER");
+        for recipient in &job.recipients {
+            let Some((environment, principal)) =
+                cf_notification_client::parse_platform_principal(recipient)
+            else {
+                continue;
+            };
+            let endpoints =
+                crate::partner::message_endpoints(&self.db, environment, principal, job.scope)
+                    .await?;
+            let txn = self.db.begin().await?;
+            let notification_id = Uuid::new_v4();
+            let inserted = db::exec(
+                &txn,
+                "INSERT INTO notif_notifications (id, recipient_ref, category, route_category, lane, dedupe_key, coalesce_key,
+                     cancel_key, source_producer, source_event_id, subject_kind, subject_id, template_key, params,
+                     policy_snapshot, state, deliver_after, expires_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                 ON CONFLICT (recipient_ref, dedupe_key) DO NOTHING",
+                vec![
+                    notification_id.into(),
+                    recipient.clone().into(),
+                    category.into(),
+                    job.route.route_category.into(),
+                    job.lane.as_str().into(),
+                    job.dedupe_key.clone().into(),
+                    coalesce.clone().into(),
+                    job.cancel_key.clone().into(),
+                    job.producer.clone().into(),
+                    job.event_id.clone().into(),
+                    job.subject.as_ref().map(|s| s.0.clone()).into(),
+                    job.subject.as_ref().map(|s| s.1).into(),
+                    job.template.into(),
+                    params.clone().into(),
+                    json!({ "partner": true }).into(),
+                    if endpoints.is_empty() { "SUPPRESSED" } else { "ROUTED" }.into(),
+                    job.deliver_after.into(),
+                    Some(expires).into(),
+                ],
+            )
+            .await?;
+            if inserted == 0 {
+                txn.rollback().await?;
+                self.metrics
+                    .inc("notif_notifications_deduplicated_total", "");
+                continue;
+            }
+            if let Some(key) = &coalesce {
+                db::exec(
+                    &txn,
+                    "UPDATE notif_deliveries SET status = 'CANCELLED', last_error_class = 'COLLAPSED', completed_at = now()
+                      WHERE status IN ('PENDING', 'DEFERRED') AND channel = 'PUSH' AND target_ref LIKE 'partner:%'
+                        AND notification_id IN (SELECT id FROM notif_notifications
+                                                 WHERE recipient_ref = $1 AND coalesce_key = $2 AND id <> $3)",
+                    vec![recipient.clone().into(), key.clone().into(), notification_id.into()],
+                )
+                .await?;
+            }
+            if endpoints.is_empty() {
+                delivery(
+                    &txn,
+                    notification_id,
+                    Channel::Push,
+                    job.lane,
+                    "none",
+                    "SUPPRESSED",
+                    Some("NO_REGISTRATION"),
+                    1,
+                    None,
+                )
+                .await?;
+                self.metrics.inc(
+                    "notif_partner_push_failed_total",
+                    format!(
+                        "environment=\"{environment}\",lane=\"message\",platform=\"NONE\",class=\"NO_REGISTRATION\""
+                    ),
+                );
+            }
+            let defer = job.deliver_after.filter(|d| *d > now);
+            for ep in &endpoints {
+                delivery(
+                    &txn,
+                    notification_id,
+                    Channel::Push,
+                    job.lane,
+                    &format!("{}{}", crate::partner::TARGET_PREFIX, ep.id),
+                    if defer.is_some() { "DEFERRED" } else { "PENDING" },
+                    None,
+                    1,
+                    defer,
+                )
+                .await?;
+            }
+            txn.commit().await?;
+            self.metrics.inc(
+                "notif_notifications_total",
+                format!(
+                    "category=\"{}\",state=\"{}\"",
+                    job.route.route_category,
+                    if endpoints.is_empty() { "SUPPRESSED" } else { "ROUTED" }
+                ),
+            );
+        }
+        Ok(Processed::Done)
+    }
+
     /// Reminder arming / cancellation. `Some(_)`: the job is fully handled here.
     async fn meeting_schedule(
         &self,
@@ -1141,6 +1296,7 @@ impl Processor {
                 subject: None,
                 sealed: None,
                 shadow: false,
+                scope: None,
             };
             match self.process(&job, now).await? {
                 Processed::Done => {

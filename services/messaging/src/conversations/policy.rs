@@ -997,7 +997,9 @@ pub async fn load_baseline<C: ConnectionTrait>(
     Ok(row
         .and_then(|r| ApplicationBaseline::parse(&r.baseline))
         // The partner baseline applies only while the partner flag is on.
-        .filter(|b| *b != ApplicationBaseline::PlatformPartner || crate::partner::baseline_enabled()))
+        .filter(|b| {
+            *b != ApplicationBaseline::PlatformPartner || crate::partner::baseline_enabled()
+        }))
 }
 
 /// Registers the `CFMEET_PLATFORM_PARTNER` baseline for an EXTERNAL environment unless
@@ -1488,7 +1490,10 @@ mod tests {
         assert_eq!(ApplicationBaseline::parse(b.as_str()), Some(b));
         let r = resolve(&b.under(&ApplicationPolicy::default()), 0).unwrap();
         assert!(r.attachments.enabled);
-        assert!(!r.backups.enabled, "no secure backups for MANAGED-only partner devices");
+        assert!(
+            !r.backups.enabled,
+            "no secure backups for MANAGED-only partner devices"
+        );
         for c in r.contexts.values() {
             assert_eq!(
                 c.allowed_profiles,
@@ -1506,17 +1511,42 @@ mod tests {
         }))
         .unwrap();
         let r = resolve(&b.under(&own), 2).unwrap();
-        assert!(!r.attachments.enabled, "an explicit application setting wins");
+        assert!(
+            !r.attachments.enabled,
+            "an explicit application setting wins"
+        );
         let ctx = |c: ContextClass| r.contexts.get(&c).unwrap();
-        assert_eq!(ctx(ContextClass::Direct).allowed_profiles, vec![SecurityProfile::PrivateE2ee]);
-        assert_eq!(ctx(ContextClass::Direct).default_profile, Some(SecurityProfile::PrivateE2ee));
-        assert_eq!(ctx(ContextClass::Group).default_profile, Some(SecurityProfile::PrivateE2ee));
-        assert_eq!(ctx(ContextClass::Support).default_profile, Some(SecurityProfile::Managed));
-        assert_eq!(ctx(ContextClass::Meeting).default_profile, Some(SecurityProfile::Managed));
-        // The first-party baseline leaves contexts alone.
-        let r = resolve(&ApplicationBaseline::CfMeetFirstParty.under(&ApplicationPolicy::default()), 0).unwrap();
         assert_eq!(
-            r.contexts.get(&ContextClass::Direct).unwrap().default_profile,
+            ctx(ContextClass::Direct).allowed_profiles,
+            vec![SecurityProfile::PrivateE2ee]
+        );
+        assert_eq!(
+            ctx(ContextClass::Direct).default_profile,
+            Some(SecurityProfile::PrivateE2ee)
+        );
+        assert_eq!(
+            ctx(ContextClass::Group).default_profile,
+            Some(SecurityProfile::PrivateE2ee)
+        );
+        assert_eq!(
+            ctx(ContextClass::Support).default_profile,
+            Some(SecurityProfile::Managed)
+        );
+        assert_eq!(
+            ctx(ContextClass::Meeting).default_profile,
+            Some(SecurityProfile::Managed)
+        );
+        // The first-party baseline leaves contexts alone.
+        let r = resolve(
+            &ApplicationBaseline::CfMeetFirstParty.under(&ApplicationPolicy::default()),
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            r.contexts
+                .get(&ContextClass::Direct)
+                .unwrap()
+                .default_profile,
             Some(SecurityProfile::PrivateE2ee)
         );
     }

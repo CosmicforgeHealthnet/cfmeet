@@ -8,10 +8,12 @@
 //! * `POST /api/v1/notifications/provider-events/resend` — the Resend callback (Svix
 //!   signature; 404 until a secret is configured; 256 KiB cap). Reached publicly only
 //!   through the Meeting-hosted ingress route added at activation.
-//! * `/internal/v1/**` — service-authenticated (I1–I11); I12 uses its own bearer.
+//! * `/internal/v1/**` — service-authenticated (I1–I11, I13 and the ADR 0063 partner
+//!   push provider vault); I12 uses its own bearer.
 
 pub mod internal;
 pub mod middleware;
+pub mod partner;
 pub mod provider;
 pub mod user;
 
@@ -21,7 +23,7 @@ use axum::{
     http::{header, StatusCode},
     middleware::{from_fn, from_fn_with_state},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use chrono::Utc;
@@ -58,6 +60,19 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/push/registrations/sync",
             post(internal::push_registrations_sync),
+        )
+        // ADR 0063 N-P1 (404 while NOTIFICATIONS_PARTNER_PUSH_ENABLED is off).
+        .route(
+            "/push/providers/:tenant/:application/:environment",
+            get(partner::list_providers),
+        )
+        .route(
+            "/push/providers/:tenant/:application/:environment/:provider",
+            put(partner::put_provider).delete(partner::delete_provider),
+        )
+        .route(
+            "/push/providers/:tenant/:application/:environment/:provider/verify",
+            post(partner::verify_provider),
         )
         .route("/admin/deliveries", get(internal::deliveries))
         .route("/admin/dead-letters", get(internal::dead_letters))

@@ -39,7 +39,34 @@ signaling credentials, realtime tickets). A request over the ceiling gets
 `429 RATE_LIMITED` with `x-cf-quota-level: GATEWAY_TOKEN`. The ceiling is off by default.
 Anonymous requests carry no token and are rate-limited by the services and the nginx
 edge. Flags default off:
-`API_GATEWAY_PUBLIC_ROUTING_ENABLED`, `API_GATEWAY_WEBSOCKETS_ENABLED`.
+`API_GATEWAY_PUBLIC_ROUTING_ENABLED`, `API_GATEWAY_WEBSOCKETS_ENABLED`,
+`API_GATEWAY_USER_TOKENS_ENABLED`, `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED`.
+
+Partner devices and websites ([ADR 0062](../../docs/decisions/0062-cf-meet-platform-build-users-tokens-devices.md),
+[build contract §9](../../docs/platform/build-internal-contracts.md)):
+
+* **CF Meet user tokens** (`API_GATEWAY_USER_TOKENS_ENABLED`, `src/user_tokens.rs`). On routes whose
+  manifest auth includes `USER_TOKEN` (contract security scheme `userToken`), a device sends
+  `Authorization: Bearer cfut_<sbx|test|live>_<JWS>`. The gateway checks the format, the
+  `EdDSA` / `cfmeet-user+jwt` header, the Ed25519 signature, `iss` / `aud` / `nbf` / `exp` (60 s
+  skew) and the tag-to-environment-kind match, with the ACTIVE keys of Platform Access
+  (`GET /internal/v1/user-tokens/keys`, permission `platform-user-token.verify`; refreshed every
+  5 minutes, on an unknown `kid` at most every 30 s, unusable after 15 minutes without a refresh).
+  A failing token is `401 AUTHENTICATION_FAILED` and is not forwarded; without usable keys the
+  answer is `503` (fail closed). A passing token is forwarded with `Authorization` unchanged and
+  no gateway service token: the owning service verifies it live (revocation, grants).
+* **Partner websites** (`API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED`, `src/origins.rs`). The gateway
+  indexes the allowed origins of ACTIVE environments from Platform Access's change feed
+  (`GET /internal/v1/environment-origins?after=&limit=500`, permission
+  `platform-environment-origins.read`, polled every 30 s). The static
+  `API_GATEWAY_CORS_ALLOWED_ORIGINS` list is checked first and is unchanged. A partner origin
+  gets a preflight answer only on paths whose route accepts a device mode (`USER_TOKEN`,
+  `CLIENT_TOKEN`, `REALTIME_TICKET`, `SIGNALING_CREDENTIAL`, `PARTICIPANT_TOKEN`), never on
+  `PLATFORM_CREDENTIAL`-only routes, and an `Access-Control-Allow-Origin` on the actual response
+  only when the origin belongs to the environment of the request's device token (`eid` of the
+  verified user token; the unverified `eid` / `env` claim of a client token / signaling
+  credential, which the owning service then verifies). WebSocket upgrades forward the browser's
+  `Origin` to the owning service.
 
 Documentation (`src/docs.rs`): `GET /openapi.json` and `GET /openapi/{domain}.json` serve the
 generated public bundles REDUCED to the operations this deployment routes (P11): families in

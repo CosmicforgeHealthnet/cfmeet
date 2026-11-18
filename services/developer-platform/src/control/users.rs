@@ -33,7 +33,7 @@ use super::{
 use crate::{
     domain::rbac::Action,
     http::error::{ApiError, ErrorCode},
-    platform_access::{DelegationCall, Delegated, EndUserCall, EndUsersReply, ForwardedCredential},
+    platform_access::{Delegated, DelegationCall, EndUserCall, EndUsersReply, ForwardedCredential},
     state::AppState,
 };
 
@@ -162,7 +162,9 @@ pub fn grants(value: &Value) -> Result<(), ApiError> {
 fn cursor(value: Option<String>) -> Result<Option<String>, ApiError> {
     match value {
         None => Ok(None),
-        Some(c) if (1..=256).contains(&c.len()) && c.bytes().all(|b| (0x21..=0x7e).contains(&b)) => {
+        Some(c)
+            if (1..=256).contains(&c.len()) && c.bytes().all(|b| (0x21..=0x7e).contains(&b)) =>
+        {
             Ok(Some(c))
         }
         Some(_) => Err(ApiError(ErrorCode::ValidationError)),
@@ -374,7 +376,10 @@ fn token_view(pa: &Value, with_user: bool) -> Result<Value, ApiError> {
     };
     let mut out = json!({ "token": token, "tokenId": token_id, "expiresAt": expires });
     if with_user {
-        out["user"] = user_view(pa.get("user").ok_or(ApiError(ErrorCode::ServiceUnavailable))?)?;
+        out["user"] = user_view(
+            pa.get("user")
+                .ok_or(ApiError(ErrorCode::ServiceUnavailable))?,
+        )?;
     }
     Ok(out)
 }
@@ -480,11 +485,7 @@ pub async fn create(
 }
 
 /// `GET /v1/users`.
-pub async fn list(
-    state: &AppState,
-    caller: &Caller,
-    q: ListUsersQuery,
-) -> Result<Value, ApiError> {
+pub async fn list(state: &AppState, caller: &Caller, q: ListUsersQuery) -> Result<Value, ApiError> {
     let m = machine_access(state, caller, Action::EndUsersRead).await?;
     let external = q.external_id.as_deref().map(external_id).transpose()?;
     let (_, pa) = call(
@@ -722,9 +723,11 @@ mod tests {
         assert!(image_url(&format!("https://{}", "x".repeat(510))).is_err());
         let c = Uuid::new_v4();
         assert!(grants(&json!({})).is_ok());
-        assert!(grants(&json!({ "msg": ["read", "send"], "call": ["receive"],
+        assert!(
+            grants(&json!({ "msg": ["read", "send"], "call": ["receive"],
             "mtg": [{ "conferenceId": c, "role": "PARTICIPANT" }, { "c": c, "r": "HOST" }] }))
-        .is_ok());
+            .is_ok()
+        );
         for bad in [
             json!([]),
             json!({ "msg": ["write"] }),
@@ -780,10 +783,19 @@ mod tests {
     fn refusals_map_to_stable_errors() {
         assert_eq!(refusal(404, "NOT_FOUND").0, ErrorCode::NotFound);
         assert_eq!(refusal(409, "LIMIT_EXCEEDED").0, ErrorCode::LimitExceeded);
-        assert_eq!(refusal(422, "VALIDATION_ERROR").0, ErrorCode::ValidationError);
-        assert_eq!(refusal(403, "SCOPE_REQUIRED").0, ErrorCode::InsufficientScope);
+        assert_eq!(
+            refusal(422, "VALIDATION_ERROR").0,
+            ErrorCode::ValidationError
+        );
+        assert_eq!(
+            refusal(403, "SCOPE_REQUIRED").0,
+            ErrorCode::InsufficientScope
+        );
         assert_eq!(refusal(429, "RATE_LIMITED").0, ErrorCode::RateLimited);
-        assert_eq!(refusal(403, "POLICY_VIOLATION").0, ErrorCode::PolicyViolation);
+        assert_eq!(
+            refusal(403, "POLICY_VIOLATION").0,
+            ErrorCode::PolicyViolation
+        );
         assert_eq!(refusal(500, "BOOM").0, ErrorCode::ServiceUnavailable);
     }
 }

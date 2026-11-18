@@ -6370,7 +6370,7 @@
           "Conferences (v2)"
         ],
         "summary": "Join (or reconnect to) a conference.",
-        "description": "Identity, role and admission are resolved server-side. A WAITING participant never receives\nan RTC credential.",
+        "description": "Identity, role and admission are resolved server-side. A WAITING participant never receives\nan RTC credential.\n\nPartner users (CF Meet Platform, `userToken`) present their CF Meet user token as\n`Authorization: Bearer cfut_…` (accepted only here, while the deployment enables it). They join\nonly conferences of meetings owned by the token's application environment (any other conference\nis CONFERENCE_NOT_FOUND) whose id the token's effective meeting grants name\n(MEETING_ACCESS_DENIED otherwise). The role comes from the grant, limited to what the meeting's\nowner may grant; the display name comes from the user profile (a `displayName` in the body is\nignored); invitation tokens and passcodes do not apply. A re-join keeps the same participant and\nreturns a fresh `participantToken`, which the device uses for every other participant\noperation. A refused, expired or revoked user token is AUTHENTICATION_REQUIRED.",
         "operationId": "v2_join_conference",
         "parameters": [
           {
@@ -6425,6 +6425,16 @@
               }
             }
           },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "409": {
             "description": "CONFERENCE_NOT_LIVE / MEETING_CAPACITY_REACHED",
             "content": {
@@ -6446,7 +6456,7 @@
             }
           },
           "503": {
-            "description": "RTC_PROVIDER_UNAVAILABLE",
+            "description": "RTC_PROVIDER_UNAVAILABLE / SERVICE_UNAVAILABLE",
             "content": {
               "application/json": {
                 "schema": {
@@ -6463,6 +6473,9 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "userToken": []
           }
         ]
       }
@@ -34285,6 +34298,12 @@
         "scheme": "bearer",
         "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
         "description": "Customer platform API credential issued to an application environment's service account, sent to the CF Meet public API Gateway as `Authorization: Bearer <credential>`. The roles listed in an operation's security requirement are the platform scopes the credential must hold (meetings.read / meetings.write). The gateway forwards the request without the credential; the Meeting Service has Platform Access re-verify it and acts as the environment's machine caller, which manages only meetings owned by its own application environment (any other meeting is 404). Never accepted on internal routes."
+      },
+      "userToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfut",
+        "description": "CF Meet user token of a partner user (`cfut_<sbx|test|live>_<JWS>`), minted by the partner's server for one user of its application environment and sent by the device as `Authorization: Bearer cfut_…`. Platform Access verifies it live on every use (a successful answer is cached for at most 30 seconds): the user must be ACTIVE and the minting credential, environment, application and tenant active. Only the conference join accepts it; the join returns the participant token the device uses afterwards."
       }
     }
   },

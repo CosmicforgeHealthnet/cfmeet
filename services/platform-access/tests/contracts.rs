@@ -82,6 +82,10 @@ fn implemented_routes() -> BTreeSet<(String, String)> {
         ("admin.rs", "/internal/v1"),
         ("delegation.rs", "/internal/v1"),
         ("organization_scopes.rs", "/internal/v1"),
+        ("end_users.rs", "/internal/v1"),
+        ("user_tokens.rs", "/internal/v1"),
+        ("environment_origins.rs", "/internal/v1"),
+        ("meeting_platform.rs", "/internal/v1"),
     ] {
         let code = std::fs::read_to_string(src.join(file)).unwrap();
         let code: String = code.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -93,7 +97,7 @@ fn implemented_routes() -> BTreeSet<(String, String)> {
                 continue; // the nest itself
             }
             let handlers = chunk.split(')').take(4).collect::<Vec<_>>().join(")");
-            for method in ["get", "post", "put", "delete"] {
+            for method in ["get", "post", "put", "patch", "delete"] {
                 if handlers.contains(&format!("{method}(")) {
                     let openapi_path = path
                         .split('/')

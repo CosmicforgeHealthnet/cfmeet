@@ -173,7 +173,10 @@ fn application_environment_kind(kind: EnvironmentKind) -> ApplicationEnvironment
     }
 }
 
-async fn exchange(State(state): State<AppState>, request: Request) -> Result<Response, CallingError> {
+async fn exchange(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Response, CallingError> {
     let Some(verifier) = state.user_sessions.clone() else {
         return Err(CallingError::NotFound);
     };
@@ -385,7 +388,13 @@ mod tests {
         assert!(key.as_str().starts_with("inst:h:") && key.as_str().len() <= 128);
         assert_eq!(installation_key(&long), installation_key(&long));
         assert_ne!(installation_key(&long), installation_key(&"b".repeat(128)));
-        for bad in ["short", "has space1", "with:colon", "slash/1234", &"a".repeat(129)] {
+        for bad in [
+            "short",
+            "has space1",
+            "with:colon",
+            "slash/1234",
+            &"a".repeat(129),
+        ] {
             assert!(installation_key(bad).is_none(), "{bad}");
         }
         // Leading punctuation is allowed (the key starts with `inst:`).
@@ -395,11 +404,17 @@ mod tests {
     #[test]
     fn only_bearer_user_tokens_are_read() {
         let mut h = HeaderMap::new();
-        h.insert(header::AUTHORIZATION, "Bearer cfut_live_a.b.c".parse().unwrap());
+        h.insert(
+            header::AUTHORIZATION,
+            "Bearer cfut_live_a.b.c".parse().unwrap(),
+        );
         assert_eq!(user_token(&h).as_deref(), Some("cfut_live_a.b.c"));
         h.insert(header::AUTHORIZATION, "Bearer cfsig_a.b.c".parse().unwrap());
         assert!(user_token(&h).is_none());
-        h.insert(header::AUTHORIZATION, "Basic cfut_live_a.b.c".parse().unwrap());
+        h.insert(
+            header::AUTHORIZATION,
+            "Basic cfut_live_a.b.c".parse().unwrap(),
+        );
         assert!(user_token(&h).is_none());
     }
 }

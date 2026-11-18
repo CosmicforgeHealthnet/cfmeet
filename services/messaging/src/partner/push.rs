@@ -177,10 +177,9 @@ pub fn subject(
 
 fn sync_error(f: SyncFailure) -> Error {
     match f {
-        SyncFailure::NotConfigured => Error::reason(
-            ErrorCode::FeatureDisabled,
-            "NOTIFICATIONS_NOT_CONFIGURED",
-        ),
+        SyncFailure::NotConfigured => {
+            Error::reason(ErrorCode::FeatureDisabled, "NOTIFICATIONS_NOT_CONFIGURED")
+        }
         SyncFailure::Unavailable => Error::code(ErrorCode::ServiceUnavailable),
         SyncFailure::Rejected => {
             Error::reason(ErrorCode::ValidationError, "PUSH_REGISTRATION_REFUSED")
@@ -195,7 +194,10 @@ fn valid_platform(p: &str) -> bool {
 async fn caller(state: &AppState, token: &str) -> Result<sessions::PartnerCaller> {
     let caller = sessions::authenticate(state, token).await?;
     if caller.token.grants.msg.is_empty() {
-        return Err(Error::reason(ErrorCode::InsufficientScope, "MSG_GRANT_REQUIRED"));
+        return Err(Error::reason(
+            ErrorCode::InsufficientScope,
+            "MSG_GRANT_REQUIRED",
+        ));
     }
     Ok(caller)
 }
@@ -219,7 +221,9 @@ pub async fn register(
         || request.handle.len() > MAX_HANDLE
         || request.handle.chars().any(char::is_control)
     {
-        return Err(Error::validation("handle must be 1-4096 printable characters"));
+        return Err(Error::validation(
+            "handle must be 1-4096 printable characters",
+        ));
     }
     let caller = caller(state, token).await?;
     let principal = caller.token.user.id;
@@ -229,7 +233,9 @@ pub async fn register(
         caller.scope.environment_id.simple(),
         principal.simple()
     );
-    if let Some(retry) = crate::limits::hit(&state.db, &key, crate::limits::Window::Hour, 60, now).await? {
+    if let Some(retry) =
+        crate::limits::hit(&state.db, &key, crate::limits::Window::Hour, 60, now).await?
+    {
         return Err(Error::RateLimited {
             retry_after_seconds: retry,
         });
@@ -250,7 +256,14 @@ pub async fn register(
     let outcome = results.first().map(|r| r.outcome.as_str()).unwrap_or("");
     crate::metrics::inc(
         "messaging_partner_push_registrations_total",
-        &[("outcome", if matches!(outcome, "CREATED" | "UPDATED" | "UNCHANGED") { "accepted" } else { "refused" })],
+        &[(
+            "outcome",
+            if matches!(outcome, "CREATED" | "UPDATED" | "UNCHANGED") {
+                "accepted"
+            } else {
+                "refused"
+            },
+        )],
     );
     if !matches!(outcome, "CREATED" | "UPDATED" | "UNCHANGED") {
         return Err(Error::reason(

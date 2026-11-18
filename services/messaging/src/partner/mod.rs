@@ -337,7 +337,10 @@ impl PartnerDirectory for PlatformAccessPartners {
             .with_delegated_context(scope.delegated());
         let response = self
             .client
-            .get(&request, &format!("/internal/v1/credentials/{credential_id}"))
+            .get(
+                &request,
+                &format!("/internal/v1/credentials/{credential_id}"),
+            )
             .await
             .map_err(unavailable)?;
         match response.status() {
@@ -346,8 +349,8 @@ impl PartnerDirectory for PlatformAccessPartners {
                     .json()
                     .map_err(|_| AuthorityUnavailable("malformed credential status".into()))?;
                 // Defence in depth: the answer is about this credential.
-                let same = body["credential"]["id"].as_str()
-                    == Some(credential_id.to_string().as_str());
+                let same =
+                    body["credential"]["id"].as_str() == Some(credential_id.to_string().as_str());
                 Ok(same && body["authenticates"].as_bool() == Some(true))
             }
             404 => Ok(false),
@@ -439,16 +442,28 @@ pub struct UnconfiguredPartners;
 #[async_trait::async_trait]
 impl PartnerDirectory for UnconfiguredPartners {
     async fn verify_user_token(&self, _: &str) -> Result<Verification, AuthorityUnavailable> {
-        Err(AuthorityUnavailable("no partner directory is configured".into()))
+        Err(AuthorityUnavailable(
+            "no partner directory is configured".into(),
+        ))
     }
-    async fn credential_active(&self, _: &OwnerScope, _: Uuid) -> Result<bool, AuthorityUnavailable> {
-        Err(AuthorityUnavailable("no partner directory is configured".into()))
+    async fn credential_active(
+        &self,
+        _: &OwnerScope,
+        _: Uuid,
+    ) -> Result<bool, AuthorityUnavailable> {
+        Err(AuthorityUnavailable(
+            "no partner directory is configured".into(),
+        ))
     }
     async fn environment_origins(&self, _: Uuid) -> Result<Vec<String>, AuthorityUnavailable> {
-        Err(AuthorityUnavailable("no partner directory is configured".into()))
+        Err(AuthorityUnavailable(
+            "no partner directory is configured".into(),
+        ))
     }
     async fn identity_changes(&self, _: i64) -> Result<ChangePage, AuthorityUnavailable> {
-        Err(AuthorityUnavailable("no partner directory is configured".into()))
+        Err(AuthorityUnavailable(
+            "no partner directory is configured".into(),
+        ))
     }
 }
 
@@ -461,9 +476,9 @@ pub fn valid_origin(origin: &str) -> bool {
     };
     if rest.is_empty()
         || rest.len() > 253
-        || rest
-            .bytes()
-            .any(|b| !(b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-' | b':')))
+        || rest.bytes().any(|b| {
+            !(b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-' | b':'))
+        })
     {
         return false;
     }
@@ -546,7 +561,10 @@ impl Partner {
         if let Some(jti) = jti {
             if let Some((d, v, at)) = lock(&self.verified).get(&jti).cloned() {
                 if d == digest && at.elapsed() < VERIFY_CACHE_TTL && v.expires_at > now {
-                    crate::metrics::inc("messaging_user_token_verify_total", &[("outcome", "cached")]);
+                    crate::metrics::inc(
+                        "messaging_user_token_verify_total",
+                        &[("outcome", "cached")],
+                    );
                     return Ok(Verification::Valid(Box::new(v)));
                 }
             }
@@ -557,7 +575,10 @@ impl Partner {
                 // Defence in depth: the answer is about this token and its environment
                 // kind matches the token's tag.
                 if jti.is_some_and(|j| j != v.token_id) || v.environment_kind != kind {
-                    crate::metrics::inc("messaging_user_token_verify_total", &[("outcome", "inconsistent")]);
+                    crate::metrics::inc(
+                        "messaging_user_token_verify_total",
+                        &[("outcome", "inconsistent")],
+                    );
                     return Err(AuthorityUnavailable(
                         "inconsistent user-token verification".into(),
                     ));
@@ -576,7 +597,10 @@ impl Partner {
                 }
             }
             Err(_) => {
-                crate::metrics::inc("messaging_user_token_verify_total", &[("outcome", "unavailable")]);
+                crate::metrics::inc(
+                    "messaging_user_token_verify_total",
+                    &[("outcome", "unavailable")],
+                );
             }
         }
         outcome
@@ -594,7 +618,10 @@ impl Partner {
                 return Ok(true);
             }
         }
-        let active = self.directory.credential_active(scope, credential_id).await?;
+        let active = self
+            .directory
+            .credential_active(scope, credential_id)
+            .await?;
         let mut cache = lock(&self.credentials);
         if active {
             if cache.len() >= MAX_CACHE_ENTRIES {
@@ -661,14 +688,20 @@ impl Partner {
                 }
                 set.insert(scope.environment_id);
             }
-            Err(e) => tracing::warn!(error = %e, "partner policy baseline not registered (retried)"),
+            Err(e) => {
+                tracing::warn!(error = %e, "partner policy baseline not registered (retried)")
+            }
         }
     }
 }
 
 /// The opaque binding of a partner session device:
 /// SHA-256("cfmeet-user-binding:v1|env|principal|installationId"), lower hex.
-pub fn binding_reference(environment_id: Uuid, principal_id: Uuid, installation_id: &str) -> String {
+pub fn binding_reference(
+    environment_id: Uuid,
+    principal_id: Uuid,
+    installation_id: &str,
+) -> String {
     hex::encode(Sha256::digest(
         format!(
             "cfmeet-user-binding:v1|{}|{}|{installation_id}",
@@ -692,7 +725,8 @@ mod tests {
     use super::*;
 
     fn token(tag: &str, claims: Value) -> String {
-        let h = URL_SAFE_NO_PAD.encode(br#"{"alg":"EdDSA","typ":"cfmeet-user+jwt","kid":"0011223344556677"}"#);
+        let h = URL_SAFE_NO_PAD
+            .encode(br#"{"alg":"EdDSA","typ":"cfmeet-user+jwt","kid":"0011223344556677"}"#);
         let c = URL_SAFE_NO_PAD.encode(claims.to_string());
         format!("cfut_{tag}_{h}.{c}.c2ln")
     }
@@ -711,7 +745,10 @@ mod tests {
         assert_eq!(token_shape(&token("prod", json!({}))), None);
         assert_eq!(token_shape("cfmk_test_abc"), None);
         assert_eq!(token_shape("cfut_test_a.b"), None);
-        assert_eq!(token_shape(&format!("cfut_test_{}", "a.".repeat(1100))), None);
+        assert_eq!(
+            token_shape(&format!("cfut_test_{}", "a.".repeat(1100))),
+            None
+        );
     }
 
     #[test]

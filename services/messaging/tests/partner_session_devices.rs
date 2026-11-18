@@ -22,8 +22,8 @@ use messaging::{
     notification_publications::{IngestResult, NotificationEventSink, PublishFailure},
     partner::{
         push::{PartnerRegistrationSink, RegistrationResult},
-        ChangePage, Grants, Partner, PartnerDirectory, PartnerSettings, Verification,
-        VerifiedUser, VerifiedUserToken,
+        ChangePage, Grants, Partner, PartnerDirectory, PartnerSettings, Verification, VerifiedUser,
+        VerifiedUserToken,
     },
     push_mirror::SyncFailure,
 };
@@ -132,7 +132,11 @@ struct FakeWakeups {
 
 #[async_trait::async_trait]
 impl NotificationEventSink for FakeWakeups {
-    async fn ingest(&self, events: &[Value], shadow: bool) -> Result<Vec<IngestResult>, PublishFailure> {
+    async fn ingest(
+        &self,
+        events: &[Value],
+        shadow: bool,
+    ) -> Result<Vec<IngestResult>, PublishFailure> {
         assert!(!shadow, "partner wake-ups are never shadow copies");
         self.events.lock().unwrap().extend(events.iter().cloned());
         Ok(events
@@ -194,7 +198,12 @@ fn environment(h: &Harness, first_party: bool) -> Customer {
 }
 
 /// A CF Meet user token for `principal`, scripted as Platform Access verifies it.
-fn user_token(peers: &Peers, c: &Customer, principal: Uuid, msg: &[&str]) -> (String, VerifiedUserToken) {
+fn user_token(
+    peers: &Peers,
+    c: &Customer,
+    principal: Uuid,
+    msg: &[&str],
+) -> (String, VerifiedUserToken) {
     let jti = Uuid::new_v4();
     let header = URL_SAFE_NO_PAD
         .encode(br#"{"alg":"EdDSA","typ":"cfmeet-user+jwt","kid":"0011223344556677"}"#);
@@ -251,7 +260,13 @@ async fn session(h: &Harness, peers: &Peers, c: &Customer, principal: Uuid) -> (
     (r.json["clientToken"].as_str().unwrap().to_string(), r)
 }
 
-async fn with_client(h: &Harness, token: &str, method: Method, path: &str, body: Option<Value>) -> Response {
+async fn with_client(
+    h: &Harness,
+    token: &str,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+) -> Response {
     h.send(
         method,
         None,
@@ -291,13 +306,20 @@ async fn partner_users_chat_in_managed_conversations_over_rest_and_realtime() {
     let (token, verified) = user_token(&peers, &c, alice, &["read", "send"]);
     let r = exchange(h, &token, json!({ "installationId": "web-installation-1" })).await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
-    conforms("messaging/common/v1.schema.json#/$defs/UserSession", &r.json);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/UserSession",
+        &r.json,
+    );
     assert_eq!(uuid(&r.json["principalId"]), alice);
     let device = uuid(&r.json["sessionDeviceId"]);
     let client = r.json["clientToken"].as_str().unwrap().to_string();
     let expires =
-        chrono::DateTime::parse_from_rfc3339(r.json["clientTokenExpiresAt"].as_str().unwrap()).unwrap();
-    assert!(expires <= Utc::now() + chrono::Duration::minutes(5), "short-lived");
+        chrono::DateTime::parse_from_rfc3339(r.json["clientTokenExpiresAt"].as_str().unwrap())
+            .unwrap();
+    assert!(
+        expires <= Utc::now() + chrono::Duration::minutes(5),
+        "short-lived"
+    );
     // Bound to the binding digest, the installation and the minting credential; never an
     // E2EE device.
     let binding = messaging::partner::binding_reference(
@@ -316,24 +338,56 @@ async fn partner_users_chat_in_managed_conversations_over_rest_and_realtime() {
         1
     );
     assert_eq!(
-        h.scalar(&format!("SELECT count(*) FROM messaging_devices WHERE principal_id = '{alice}'")).await,
+        h.scalar(&format!(
+            "SELECT count(*) FROM messaging_devices WHERE principal_id = '{alice}'"
+        ))
+        .await,
         0
     );
     // A second exchange within 30 s reuses the verification (keyed by the token id).
     let calls = *peers.directory.verifications.lock().unwrap();
-    let r = exchange(h, &token, json!({ "installationId": "web-installation-1", "sessionDeviceId": device })).await;
+    let r = exchange(
+        h,
+        &token,
+        json!({ "installationId": "web-installation-1", "sessionDeviceId": device }),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
-    assert_eq!(uuid(&r.json["sessionDeviceId"]), device, "renewed, same device");
-    assert_eq!(*peers.directory.verifications.lock().unwrap(), calls, "cached verification");
+    assert_eq!(
+        uuid(&r.json["sessionDeviceId"]),
+        device,
+        "renewed, same device"
+    );
+    assert_eq!(
+        *peers.directory.verifications.lock().unwrap(),
+        calls,
+        "cached verification"
+    );
     // Another installation cannot renew it.
-    let r = exchange(h, &token, json!({ "installationId": "other-installation", "sessionDeviceId": device })).await;
+    let r = exchange(
+        h,
+        &token,
+        json!({ "installationId": "other-installation", "sessionDeviceId": device }),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
 
     // REST: the MANAGED conversation, its members and messages; send.
     let r = with_client(h, &client, Method::GET, "/v1/conversations", None).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
-    assert!(r.json["items"].as_array().unwrap().iter().any(|i| uuid(&i["conversationId"]) == cid));
-    let r = with_client(h, &client, Method::GET, &format!("/v1/conversations/{cid}/members"), None).await;
+    assert!(r.json["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| uuid(&i["conversationId"]) == cid));
+    let r = with_client(
+        h,
+        &client,
+        Method::GET,
+        &format!("/v1/conversations/{cid}/members"),
+        None,
+    )
+    .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     let r = with_client(
         h,
@@ -345,15 +399,28 @@ async fn partner_users_chat_in_managed_conversations_over_rest_and_realtime() {
     .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
     assert_eq!(uuid(&r.json["senderPrincipalId"]), alice);
-    let r = with_client(h, &client, Method::GET, &format!("/v1/conversations/{cid}/messages"), None).await;
+    let r = with_client(
+        h,
+        &client,
+        Method::GET,
+        &format!("/v1/conversations/{cid}/messages"),
+        None,
+    )
+    .await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     assert!(r.text.contains("on my way"));
 
     // The closed allowlist: nothing outside it (pins, E2EE / device routes, backups).
     for (m, path) in [
         (Method::GET, format!("/v1/conversations/{cid}/pins")),
-        (Method::POST, format!("/v1/messaging/devices/{device}/key-packages")),
-        (Method::GET, format!("/v1/messaging/devices/{device}/welcomes")),
+        (
+            Method::POST,
+            format!("/v1/messaging/devices/{device}/key-packages"),
+        ),
+        (
+            Method::GET,
+            format!("/v1/messaging/devices/{device}/welcomes"),
+        ),
         (Method::POST, format!("/v1/conversations/{cid}/mls/commits")),
         (Method::GET, "/v1/messaging/backups/latest".to_string()),
         (Method::GET, "/v1/messaging/search?q=way".to_string()),
@@ -367,7 +434,16 @@ async fn partner_users_chat_in_managed_conversations_over_rest_and_realtime() {
         );
     }
     // A customer route is never reached with a user token.
-    let r = h.get(&Customer { token: token.clone(), context: c.context.clone() }, None, "/v1/conversations").await;
+    let r = h
+        .get(
+            &Customer {
+                token: token.clone(),
+                context: c.context.clone(),
+            },
+            None,
+            "/v1/conversations",
+        )
+        .await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text);
 
     // Realtime: ticket, subscription and live delivery.
@@ -379,17 +455,35 @@ async fn partner_users_chat_in_managed_conversations_over_rest_and_realtime() {
         .expect("connected");
     let sub = ws.subscribe(&conv, None).await;
     assert_eq!(sub["type"], "subscribed", "{sub}");
-    h.send_managed(&c, &conv, bob, "delivered to the partner app").await;
+    h.send_managed(&c, &conv, bob, "delivered to the partner app")
+        .await;
     let events = ws.events(1).await;
-    assert!(events.iter().any(|e| e["data"]["message"]["managed"]["text"] == "delivered to the partner app"), "{events:?}");
+    assert!(
+        events
+            .iter()
+            .any(|e| e["data"]["message"]["managed"]["text"] == "delivered to the partner app"),
+        "{events:?}"
+    );
 
     // The partner baseline applies to the EXTERNAL environment: MANAGED is the default
     // of every context the application did not set itself.
     let r = h.get(&c, None, "/v1/messaging/policy").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
-    assert_eq!(r.json["applicationBaseline"], "CFMEET_PLATFORM_PARTNER", "{}", r.text);
-    assert_eq!(r.json["effective"]["contexts"]["DIRECT"]["defaultProfile"], "MANAGED", "{}", r.text);
-    assert_eq!(r.json["effective"]["attachments"]["enabled"], true, "{}", r.text);
+    assert_eq!(
+        r.json["applicationBaseline"], "CFMEET_PLATFORM_PARTNER",
+        "{}",
+        r.text
+    );
+    assert_eq!(
+        r.json["effective"]["contexts"]["DIRECT"]["defaultProfile"], "MANAGED",
+        "{}",
+        r.text
+    );
+    assert_eq!(
+        r.json["effective"]["attachments"]["enabled"], true,
+        "{}",
+        r.text
+    );
 
     // MESSAGE_SENT facts of the EXTERNAL environment (ids, class, profile only).
     let env = c.context.scope.environment_id;
@@ -407,20 +501,31 @@ async fn partner_users_chat_in_managed_conversations_over_rest_and_realtime() {
         .facts_after(None, Utc::now() + chrono::Duration::minutes(1), 100)
         .await
         .unwrap();
-    let mine: Vec<_> = facts.iter().filter(|(_, f)| f.environment_id == env).collect();
+    let mine: Vec<_> = facts
+        .iter()
+        .filter(|(_, f)| f.environment_id == env)
+        .collect();
     assert_eq!(mine.len(), 2);
     for (_, f) in &mine {
-        assert_eq!((f.usage_type.as_str(), f.unit.as_str(), f.quantity), ("MESSAGE_SENT", "OPERATION", 1));
+        assert_eq!(
+            (f.usage_type.as_str(), f.unit.as_str(), f.quantity),
+            ("MESSAGE_SENT", "OPERATION", 1)
+        );
         assert_eq!(f.dimensions["contextClass"], "GROUP");
         assert_eq!(f.dimensions["securityProfile"], "MANAGED");
         assert_eq!(f.digest, f.compute_digest());
         if messaging::usage_export::MessageSent::catalogued() {
-            f.validate(cf_usage_facts::producers::MESSAGING).expect("a valid MESSAGE_SENT fact");
+            f.validate(cf_usage_facts::producers::MESSAGING)
+                .expect("a valid MESSAGE_SENT fact");
         }
     }
     // Resuming after the first fact returns only the second.
     let after = source
-        .facts_after(Some(&facts[0].0), Utc::now() + chrono::Duration::minutes(1), 100)
+        .facts_after(
+            Some(&facts[0].0),
+            Utc::now() + chrono::Duration::minutes(1),
+            100,
+        )
         .await
         .unwrap();
     assert_eq!(after.len(), facts.len() - 1);
@@ -452,7 +557,11 @@ async fn partner_features_are_off_by_default_and_first_party_paths_are_unchanged
     let r = exchange(h, &token, json!({ "installationId": "web-installation-1" })).await;
     assert_eq!(
         (r.status, r.code(), r.reason()),
-        (StatusCode::SERVICE_UNAVAILABLE, "FEATURE_DISABLED", "PARTNER_SESSION_DEVICES_DISABLED"),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "FEATURE_DISABLED",
+            "PARTNER_SESSION_DEVICES_DISABLED"
+        ),
         "{}",
         r.text
     );
@@ -525,7 +634,14 @@ async fn only_active_external_users_with_a_msg_grant_get_partner_devices() {
         )
         .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
-    let r = with_client(h, r.json["token"].as_str().unwrap(), Method::GET, "/v1/conversations", None).await;
+    let r = with_client(
+        h,
+        r.json["token"].as_str().unwrap(),
+        Method::GET,
+        "/v1/conversations",
+        None,
+    )
+    .await;
     assert_eq!(r.reason(), "SESSION_DEVICE_REALTIME_ONLY", "{}", r.text);
 
     let c = environment(h, false);
@@ -533,7 +649,12 @@ async fn only_active_external_users_with_a_msg_grant_get_partner_devices() {
     // No msg grant.
     let (token, _) = user_token(&peers, &c, alice, &[]);
     let r = exchange(h, &token, json!({ "installationId": "web-installation-1" })).await;
-    assert_eq!((r.code(), r.reason()), ("INSUFFICIENT_SCOPE", "MSG_GRANT_REQUIRED"), "{}", r.text);
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("INSUFFICIENT_SCOPE", "MSG_GRANT_REQUIRED"),
+        "{}",
+        r.text
+    );
     // Read only: realtime works, sending does not.
     let (token, _) = user_token(&peers, &c, alice, &["read"]);
     let r = exchange(h, &token, json!({ "installationId": "web-installation-1" })).await;
@@ -541,15 +662,39 @@ async fn only_active_external_users_with_a_msg_grant_get_partner_devices() {
     let client = r.json["clientToken"].as_str().unwrap().to_string();
     assert_eq!(rt.ticket_with(&client).await.status, StatusCode::CREATED);
     // Refused tokens (Platform Access's codes), malformed tokens and installations.
-    for code in ["USER_TOKEN_EXPIRED", "USER_TOKEN_REVOKED", "USER_TOKEN_INVALID"] {
+    for code in [
+        "USER_TOKEN_EXPIRED",
+        "USER_TOKEN_REVOKED",
+        "USER_TOKEN_INVALID",
+    ] {
         let (token, _) = user_token(&peers, &c, alice, &["read"]);
-        peers.directory.tokens.lock().unwrap().insert(token.clone(), Err(code));
+        peers
+            .directory
+            .tokens
+            .lock()
+            .unwrap()
+            .insert(token.clone(), Err(code));
         let r = exchange(h, &token, json!({ "installationId": "web-installation-1" })).await;
-        assert_eq!((r.status, r.reason()), (StatusCode::UNAUTHORIZED, code), "{}", r.text);
+        assert_eq!(
+            (r.status, r.reason()),
+            (StatusCode::UNAUTHORIZED, code),
+            "{}",
+            r.text
+        );
     }
-    let r = exchange(h, &c.token, json!({ "installationId": "web-installation-1" })).await;
+    let r = exchange(
+        h,
+        &c.token,
+        json!({ "installationId": "web-installation-1" }),
+    )
+    .await;
     assert_eq!(r.reason(), "USER_TOKEN_REQUIRED", "{}", r.text);
-    let r = exchange(h, "cfut_sbx_not-a-jws", json!({ "installationId": "web-installation-1" })).await;
+    let r = exchange(
+        h,
+        "cfut_sbx_not-a-jws",
+        json!({ "installationId": "web-installation-1" }),
+    )
+    .await;
     assert_eq!(r.reason(), "USER_TOKEN_INVALID", "{}", r.text);
     let (token, _) = user_token(&peers, &c, alice, &["read"]);
     let r = exchange(h, &token, json!({ "installationId": "bad id!" })).await;
@@ -559,7 +704,12 @@ async fn only_active_external_users_with_a_msg_grant_get_partner_devices() {
     h.set_principal(&c, bob, PrincipalStatus::Inactive);
     let (token, _) = user_token(&peers, &c, bob, &["read"]);
     let r = exchange(h, &token, json!({ "installationId": "web-installation-1" })).await;
-    assert_eq!((r.code(), r.reason()), ("PRINCIPAL_NOT_AUTHORIZED", "PRINCIPAL_INACTIVE"), "{}", r.text);
+    assert_eq!(
+        (r.code(), r.reason()),
+        ("PRINCIPAL_NOT_AUTHORIZED", "PRINCIPAL_INACTIVE"),
+        "{}",
+        r.text
+    );
 }
 
 /// PRIVATE_E2EE stays out of reach of partner devices (404 on REST, absent from lists,
@@ -589,8 +739,16 @@ async fn partner_devices_never_reach_e2ee_or_another_tenant() {
     let (client, _) = session(h, &peers, &c, a.principal).await;
     for (m, path, body) in [
         (Method::GET, format!("/v1/conversations/{eid}"), None),
-        (Method::GET, format!("/v1/conversations/{eid}/messages"), None),
-        (Method::GET, format!("/v1/conversations/{eid}/members"), None),
+        (
+            Method::GET,
+            format!("/v1/conversations/{eid}/messages"),
+            None,
+        ),
+        (
+            Method::GET,
+            format!("/v1/conversations/{eid}/members"),
+            None,
+        ),
         (
             Method::POST,
             format!("/v1/conversations/{eid}/messages"),
@@ -602,12 +760,23 @@ async fn partner_devices_never_reach_e2ee_or_another_tenant() {
     }
     let r = with_client(h, &client, Method::GET, "/v1/conversations", None).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
-    assert!(r.json["items"].as_array().unwrap().iter().all(|i| uuid(&i["conversationId"]) != eid));
+    assert!(r.json["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|i| uuid(&i["conversationId"]) != eid));
     // The backend still sees it (the filter is the partner device's only).
     let r = h.get(&c, Some(a.principal), "/v1/conversations").await;
-    assert!(r.json["items"].as_array().unwrap().iter().any(|i| uuid(&i["conversationId"]) == eid));
+    assert!(r.json["conversations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| uuid(&i["conversationId"]) == eid));
     let ticket = rt.ticket_with(&client).await;
-    let mut ws = rt.open(ticket.json["ticket"].as_str().unwrap(), None).await.expect("connected");
+    let mut ws = rt
+        .open(ticket.json["ticket"].as_str().unwrap(), None)
+        .await
+        .expect("connected");
     let refused = ws.subscribe(&e2ee, None).await;
     assert_eq!(refused["code"], "E2EE_DEVICE_REQUIRED", "{refused}");
 
@@ -617,7 +786,11 @@ async fn partner_devices_never_reach_e2ee_or_another_tenant() {
     let bid = cid(&bconv);
     for (m, path, body) in [
         (Method::GET, format!("/v1/conversations/{bid}"), None),
-        (Method::GET, format!("/v1/conversations/{bid}/messages"), None),
+        (
+            Method::GET,
+            format!("/v1/conversations/{bid}/messages"),
+            None,
+        ),
         (
             Method::POST,
             format!("/v1/conversations/{bid}/messages"),
@@ -658,23 +831,41 @@ async fn revocation_ends_partner_devices_and_closes_their_connections() {
     let other_credential = h.credential(&c, ALL_SCOPES);
     let (token, mut v) = user_token(&peers, &c, carol, &["read", "send"]);
     v.credential_id = other_credential.context.credential_id;
-    peers.directory.tokens.lock().unwrap().insert(token.clone(), Ok(v.clone()));
+    peers
+        .directory
+        .tokens
+        .lock()
+        .unwrap()
+        .insert(token.clone(), Ok(v.clone()));
     let r = exchange(h, &token, json!({ "installationId": "carol-installation" })).await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
     let carol_client = r.json["clientToken"].as_str().unwrap().to_string();
-    peers.directory.revoked_credentials.lock().unwrap().insert(v.credential_id);
+    peers
+        .directory
+        .revoked_credentials
+        .lock()
+        .unwrap()
+        .insert(v.credential_id);
     let r = with_client(h, &carol_client, Method::GET, "/v1/conversations", None).await;
-    assert_eq!((r.status, r.reason()), (StatusCode::UNAUTHORIZED, "SESSION_REVOKED"), "{}", r.text);
+    assert_eq!(
+        (r.status, r.reason()),
+        (StatusCode::UNAUTHORIZED, "SESSION_REVOKED"),
+        "{}",
+        r.text
+    );
 
     // The feed: a CREDENTIAL change revokes the devices it minted and closes sockets.
     let (alice_client, r) = session(h, &peers, &c, alice).await;
     let alice_device = uuid(&r.json["sessionDeviceId"]);
     let ticket = rt.ticket_with(&alice_client).await;
-    let mut ws = rt.open(ticket.json["ticket"].as_str().unwrap(), None).await.expect("connected");
+    let mut ws = rt
+        .open(ticket.json["ticket"].as_str().unwrap(), None)
+        .await
+        .expect("connected");
     assert_eq!(ws.subscribe(&conv, None).await["type"], "subscribed");
     peers.directory.changes.lock().unwrap().push(json!({
         "sequence": 1, "entityKind": "CREDENTIAL", "operation": "UPDATE", "entityKey": "c",
-        "revision": 2, "occurredAt": Utc::now().to_rfc3339(),
+        "revision": 2, "occurredAt": h.now().to_rfc3339(),
         "snapshot": { "id": c.context.credential_id, "status": "REVOKED" },
     }));
     let after = messaging::partner::revocation::poll(&h.state, 0).await;
@@ -697,13 +888,23 @@ async fn revocation_ends_partner_devices_and_closes_their_connections() {
     // and the feed revokes the device.
     let (bob_client, r) = session(h, &peers, &c, bob).await;
     let bob_device = uuid(&r.json["sessionDeviceId"]);
-    assert_eq!(with_client(h, &bob_client, Method::GET, "/v1/conversations", None).await.status, StatusCode::OK);
+    assert_eq!(
+        with_client(h, &bob_client, Method::GET, "/v1/conversations", None)
+            .await
+            .status,
+        StatusCode::OK
+    );
     h.set_principal(&c, bob, PrincipalStatus::Inactive);
     let r = with_client(h, &bob_client, Method::GET, "/v1/conversations", None).await;
-    assert_eq!((r.status, r.reason()), (StatusCode::UNAUTHORIZED, "PRINCIPAL_INACTIVE"), "{}", r.text);
+    assert_eq!(
+        (r.status, r.reason()),
+        (StatusCode::UNAUTHORIZED, "PRINCIPAL_INACTIVE"),
+        "{}",
+        r.text
+    );
     peers.directory.changes.lock().unwrap().push(json!({
         "sequence": 2, "entityKind": "PRINCIPAL", "operation": "UPDATE", "entityKey": "p",
-        "revision": 3, "occurredAt": Utc::now().to_rfc3339(),
+        "revision": 3, "occurredAt": h.now().to_rfc3339(),
         "snapshot": { "id": bob, "environmentId": c.context.scope.environment_id, "status": "SUSPENDED" },
     }));
     messaging::partner::revocation::poll(&h.state, 1).await;
@@ -713,20 +914,31 @@ async fn revocation_ends_partner_devices_and_closes_their_connections() {
     );
 
     // revoke-sessions (tokensNotBefore): devices created before it end.
-    h.set_principal(&c, bob, PrincipalStatus::Active { kind: "EXTERNAL_APPLICATION_PRINCIPAL".into() });
+    h.set_principal(
+        &c,
+        bob,
+        PrincipalStatus::Active {
+            kind: "EXTERNAL_APPLICATION_PRINCIPAL".into(),
+        },
+    );
     let fresh_credential = h.credential(&c, ALL_SCOPES);
     let (token, mut v) = user_token(&peers, &c, alice, &["read", "send"]);
     v.credential_id = fresh_credential.context.credential_id;
-    peers.directory.tokens.lock().unwrap().insert(token.clone(), Ok(v));
+    peers
+        .directory
+        .tokens
+        .lock()
+        .unwrap()
+        .insert(token.clone(), Ok(v));
     let r = exchange(h, &token, json!({ "installationId": "web-installation-2" })).await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
     let device = uuid(&r.json["sessionDeviceId"]);
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    h.clock.advance(chrono::Duration::seconds(1));
     peers.directory.changes.lock().unwrap().push(json!({
         "sequence": 3, "entityKind": "PRINCIPAL", "operation": "UPDATE", "entityKey": "p",
-        "revision": 4, "occurredAt": Utc::now().to_rfc3339(),
+        "revision": 4, "occurredAt": h.now().to_rfc3339(),
         "snapshot": { "id": alice, "environmentId": c.context.scope.environment_id, "status": "ACTIVE",
-                      "tokensNotBefore": Utc::now().to_rfc3339() },
+                      "tokensNotBefore": h.now().to_rfc3339() },
     }));
     messaging::partner::revocation::poll(&h.state, 2).await;
     assert_eq!(
@@ -737,15 +949,26 @@ async fn revocation_ends_partner_devices_and_closes_their_connections() {
         1
     );
     // Replaying the whole feed never revokes a device created after the changes.
+    h.clock.advance(chrono::Duration::seconds(1));
     let (later, r) = session(h, &peers, &c, bob).await;
     let later_device = uuid(&r.json["sessionDeviceId"]);
-    peers.directory.changes.lock().unwrap().retain(|c| c["entityKind"] == "PRINCIPAL");
+    peers
+        .directory
+        .changes
+        .lock()
+        .unwrap()
+        .retain(|c| c["entityKind"] == "PRINCIPAL");
     messaging::partner::revocation::poll(&h.state, 0).await;
     assert_eq!(
         h.scalar(&format!("SELECT count(*) FROM messaging_session_devices WHERE id = '{later_device}' AND status = 'ACTIVE'")).await,
         1
     );
-    assert_eq!(with_client(h, &later, Method::GET, "/v1/conversations", None).await.status, StatusCode::OK);
+    assert_eq!(
+        with_client(h, &later, Method::GET, "/v1/conversations", None)
+            .await
+            .status,
+        StatusCode::OK
+    );
 }
 
 /// Tickets and WebSocket upgrades of partner devices accept the environment's allowed
@@ -777,25 +1000,44 @@ async fn partner_websites_are_allowed_origins_of_their_own_environment_only() {
                 None,
                 "/v1/realtime/tickets",
                 None,
-                &[("authorization", &format!("CF-Client-Token {client}")), ("origin", origin)],
+                &[
+                    ("authorization", &format!("CF-Client-Token {client}")),
+                    ("origin", origin),
+                ],
             )
             .await
         }
     };
     let r = ticket("https://shop.example.com").await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
-    assert!(r.headers.get("access-control-allow-origin").is_none(), "the gateway answers partner CORS");
+    assert!(
+        r.headers.get("access-control-allow-origin").is_none(),
+        "the gateway answers partner CORS"
+    );
     let ok = r.json["ticket"].as_str().unwrap().to_string();
-    for refused in ["https://other.example.com", "https://evil.example.com", "http://shop.example.com"] {
+    for refused in [
+        "https://other.example.com",
+        "https://evil.example.com",
+        "http://shop.example.com",
+    ] {
         let r = ticket(refused).await;
         assert_eq!(r.reason(), "ORIGIN_NOT_ALLOWED", "{refused}: {}", r.text);
     }
     // The static allow-list keeps working.
-    assert_eq!(ticket("https://app.example.test").await.status, StatusCode::CREATED);
+    assert_eq!(
+        ticket("https://app.example.test").await.status,
+        StatusCode::CREATED
+    );
     // WebSocket upgrades.
     assert!(rt.open(&ok, Some("https://shop.example.com")).await.is_ok());
-    let t = rt.ticket_with(&client).await.json["ticket"].as_str().unwrap().to_string();
-    assert_eq!(rt.open(&t, Some("https://other.example.com")).await.err(), Some(403));
+    let t = rt.ticket_with(&client).await.json["ticket"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        rt.open(&t, Some("https://other.example.com")).await.err(),
+        Some(403)
+    );
     // A non-partner client (an E2EE device's token) never gets partner origins.
     let m = h.member(&c, 1).await;
     let token = rt.token(&c, &m).await;
@@ -806,7 +1048,10 @@ async fn partner_websites_are_allowed_origins_of_their_own_environment_only() {
             None,
             "/v1/realtime/tickets",
             None,
-            &[("authorization", &format!("CF-Client-Token {token}")), ("origin", "https://shop.example.com")],
+            &[
+                ("authorization", &format!("CF-Client-Token {token}")),
+                ("origin", "https://shop.example.com"),
+            ],
         )
         .await;
     assert_eq!(r.reason(), "ORIGIN_NOT_ALLOWED", "{}", r.text);
@@ -842,8 +1087,14 @@ async fn partner_push_registrations_and_wakeups_reach_the_notification_service()
     };
     let r = put("APNS").await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.text);
-    conforms("messaging/common/v1.schema.json#/$defs/UserPushRegistration", &r.json);
-    assert_eq!(r.json, json!({ "installationId": "ios-installation-7", "platform": "APNS", "status": "ACTIVE" }));
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/UserPushRegistration",
+        &r.json,
+    );
+    assert_eq!(
+        r.json,
+        json!({ "installationId": "ios-installation-7", "platform": "APNS", "status": "ACTIVE" })
+    );
     assert_eq!(put("APNS_VOIP").await.status, StatusCode::OK);
     assert_eq!(put("WEB_PUSH").await.code(), "VALIDATION_ERROR");
     {
@@ -870,7 +1121,8 @@ async fn partner_push_registrations_and_wakeups_reach_the_notification_service()
     assert!(!h.dump().await.contains("apns-device-token-0123"));
 
     // Alice's MANAGED message wakes Bob's installation, metadata only.
-    h.send_managed(&c, &conv, alice, "secret text never in a push").await;
+    h.send_managed(&c, &conv, alice, "secret text never in a push")
+        .await;
     wait_for(
         h,
         &format!("SELECT count(*) FROM messaging_partner_push_publications WHERE environment_id = '{env}'"),
@@ -883,7 +1135,10 @@ async fn partner_push_registrations_and_wakeups_reach_the_notification_service()
         assert_eq!(events.len(), 1);
         let e = &events[0];
         assert_eq!(e["eventType"], "messaging.message.created");
-        assert_eq!(e["recipients"], json!([{ "ref": format!("platform-principal:{env}:{bob}") }]));
+        assert_eq!(
+            e["recipients"],
+            json!([{ "ref": format!("platform-principal:{env}:{bob}") }])
+        );
         assert_eq!(e["data"]["securityProfile"], "MANAGED");
         assert_eq!(uuid(&e["data"]["conversationId"]), cid(&conv));
         assert!(!e.to_string().contains("secret text"), "{e}");
@@ -912,7 +1167,9 @@ async fn partner_push_registrations_and_wakeups_reach_the_notification_service()
         let items = peers.registrations.items.lock().unwrap();
         let removals: Vec<&Value> = items.iter().filter(|i| i["enabled"] == false).collect();
         assert_eq!(removals.len(), 3);
-        assert!(removals.iter().all(|i| i.get("handle").is_none() && i["subject"]["kind"] == "platform-principal"));
+        assert!(removals
+            .iter()
+            .all(|i| i.get("handle").is_none() && i["subject"]["kind"] == "platform-principal"));
     }
     assert_eq!(
         h.scalar(&format!(

@@ -125,7 +125,11 @@ fn view(pa: &Value, environment_id: Uuid) -> Result<Value, ApiError> {
 }
 
 /// `GET /v1/environments/{environmentId}/allowed-origins`.
-pub async fn get(state: &AppState, caller: &Caller, environment_id: Uuid) -> Result<Value, ApiError> {
+pub async fn get(
+    state: &AppState,
+    caller: &Caller,
+    environment_id: Uuid,
+) -> Result<Value, ApiError> {
     enabled(state)?;
     let env = environment(&state.db, environment_id).await?;
     authorize(state, caller, env.tenant_id, Action::AllowedOriginsRead).await?;
@@ -193,7 +197,11 @@ mod tests {
         ] {
             assert!(origin(ok, "PRODUCTION").is_ok(), "{ok}");
         }
-        for ok in ["http://localhost", "http://localhost:3000", "http://127.0.0.1:5173"] {
+        for ok in [
+            "http://localhost",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+        ] {
             assert!(origin(ok, "SANDBOX").is_ok(), "{ok}");
             assert!(origin(ok, "TEST").is_ok(), "{ok}");
             assert!(origin(ok, "PRODUCTION").is_err(), "{ok}");
@@ -218,9 +226,14 @@ mod tests {
         ] {
             assert!(origin(bad, "SANDBOX").is_err(), "{bad}");
         }
-        let many: Vec<String> = (0..21).map(|i| format!("https://a{i}.example.com")).collect();
+        let many: Vec<String> = (0..21)
+            .map(|i| format!("https://a{i}.example.com"))
+            .collect();
         assert!(origins(&many, "TEST").is_err());
-        let dup = vec!["https://a.example".to_string(), "https://a.example".to_string()];
+        let dup = vec![
+            "https://a.example".to_string(),
+            "https://a.example".to_string(),
+        ];
         assert_eq!(origins(&dup, "TEST").unwrap(), ["https://a.example"]);
     }
 }

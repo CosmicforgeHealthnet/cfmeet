@@ -295,7 +295,10 @@ impl fmt::Debug for NotificationsConfig {
             .field("data_key_id", &self.data_key.0)
             .field("hpke", &self.hpke.as_ref().map(|(k, _)| k))
             .field("email", &self.email)
-XX, &self.authorities.enabled())
+            .field("push_provider", &self.push_provider)
+            .field("partner_push_enabled", &self.partner_push_enabled)
+            .field("partner_push_transport", &self.partner_push_transport)
+            .field("authorities", &self.authorities.enabled())
             .finish_non_exhaustive()
     }
 }

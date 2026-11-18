@@ -35,8 +35,7 @@ pub use bus::{InMemorySignalBus, PgNotifySignalBus, RealtimeSignalBus, SignalEnv
 pub use credentials::{SignalingClaims, SignalingCredentialError, SignalingKeys};
 pub use push::{
     CallPushSink, NoPushTransport, NotificationServiceCallPush, NotificationsPushTransport,
-    PartnerPushOffer, PlatformPrincipalRecipient, PushDispatcher, PushOffer,
-    PushTransportSetting,
+    PartnerPushOffer, PlatformPrincipalRecipient, PushDispatcher, PushOffer, PushTransportSetting,
 };
 
 use crate::{

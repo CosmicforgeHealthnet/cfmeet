@@ -325,7 +325,9 @@ mod tests {
         }
     }
 
-    fn verifier(answer: Result<VerifiedUserToken, UserTokenError>) -> (UserTokenVerifier, Arc<Counting>) {
+    fn verifier(
+        answer: Result<VerifiedUserToken, UserTokenError>,
+    ) -> (UserTokenVerifier, Arc<Counting>) {
         let authority = Arc::new(Counting {
             calls: AtomicUsize::new(0),
             answer,
@@ -362,7 +364,10 @@ mod tests {
         assert!(!is_user_token_shaped("cfut_prod_a.b.c"));
         assert!(!is_user_token_shaped("cfut_live_"));
         assert!(!is_user_token_shaped("cfsig_a.b.c"));
-        assert!(!is_user_token_shaped(&format!("cfut_live_{}", "a".repeat(2_100))));
+        assert!(!is_user_token_shaped(&format!(
+            "cfut_live_{}",
+            "a".repeat(2_100)
+        )));
     }
 
     #[tokio::test]

@@ -467,8 +467,7 @@ async fn client_token_request(
         }
     };
     // ADR 0062: a partner session device reaches its closed MANAGED-only allowlist.
-    let partner = if session.is_session_device() && state.partner.settings.session_devices_enabled
-    {
+    let partner = if session.is_session_device() && state.partner.settings.session_devices_enabled {
         match crate::realtime::session_devices::active_device(
             &state.db,
             session.device_id,

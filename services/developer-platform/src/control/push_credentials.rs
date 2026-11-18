@@ -313,7 +313,11 @@ fn error_code(v: Option<&Value>) -> Option<String> {
         && raw
             .bytes()
             .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_');
-    Some(if ok { raw } else { "VERIFICATION_FAILED".into() })
+    Some(if ok {
+        raw
+    } else {
+        "VERIFICATION_FAILED".into()
+    })
 }
 
 fn verification(v: &Value) -> &'static str {
@@ -325,7 +329,11 @@ fn verification(v: &Value) -> &'static str {
 }
 
 /// `GET /v1/environments/{environmentId}/push-credentials` (metadata only).
-pub async fn list(state: &AppState, caller: &Caller, environment_id: Uuid) -> Result<Value, ApiError> {
+pub async fn list(
+    state: &AppState,
+    caller: &Caller,
+    environment_id: Uuid,
+) -> Result<Value, ApiError> {
     enabled(state)?;
     let env = environment(&state.db, environment_id).await?;
     authorize(state, caller, env.tenant_id, Action::PushCredentialsRead).await?;
@@ -377,10 +385,11 @@ pub async fn create(
     let provider = upload.provider();
     let scope = scope(&env, environment_id);
     let fingerprint = upload.fingerprint();
-    let sealed = seal_secret(&push.sealing_key, &scope, provider, upload.secret()).map_err(|_| {
-        tracing::warn!("a push secret could not be sealed");
-        ApiError(ErrorCode::ValidationError)
-    })?;
+    let sealed =
+        seal_secret(&push.sealing_key, &scope, provider, upload.secret()).map_err(|_| {
+            tracing::warn!("a push secret could not be sealed");
+            ApiError(ErrorCode::ValidationError)
+        })?;
     let request = json!({
         "sealed": sealed, "metadata": upload.metadata(), "fingerprint": fingerprint,
     });
@@ -638,9 +647,11 @@ mod tests {
         .unwrap();
         assert_eq!(fcm.provider(), "FCM");
         assert!(!format!("{fcm:?}").contains("PRIVATE"));
-        assert!(Upload::parse(&json!({ "provider": "FCM", "projectId": "other-app-1",
+        assert!(
+            Upload::parse(&json!({ "provider": "FCM", "projectId": "other-app-1",
             "serviceAccountJson": sa }))
-        .is_err());
+            .is_err()
+        );
         assert!(Upload::parse(&json!({ "provider": "WNS" })).is_err());
     }
 

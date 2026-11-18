@@ -72,10 +72,9 @@ pub fn revocations(change: &Value) -> Vec<Revocation> {
             _ => Vec::new(),
         },
         Some("PRINCIPAL") => {
-            let (Some(environment_id), Some(principal_id)) = (
-                uuid_at(snapshot, "environmentId"),
-                uuid_at(snapshot, "id"),
-            ) else {
+            let (Some(environment_id), Some(principal_id)) =
+                (uuid_at(snapshot, "environmentId"), uuid_at(snapshot, "id"))
+            else {
                 return Vec::new();
             };
             let occurred = time_at(change, "occurredAt").unwrap_or_else(Utc::now);
@@ -252,9 +251,14 @@ mod tests {
     fn only_revoking_changes_revoke() {
         let id = Uuid::new_v4();
         let env = Uuid::new_v4();
-        let credential = |status: &str| json!({ "entityKind": "CREDENTIAL", "operation": "UPDATE", "occurredAt": "2026-11-18T10:00:00Z",
-            "snapshot": { "id": id, "status": status } });
-        assert_eq!(revocations(&credential("REVOKED")), vec![Revocation::Credential(id)]);
+        let credential = |status: &str| {
+            json!({ "entityKind": "CREDENTIAL", "operation": "UPDATE", "occurredAt": "2026-11-18T10:00:00Z",
+            "snapshot": { "id": id, "status": status } })
+        };
+        assert_eq!(
+            revocations(&credential("REVOKED")),
+            vec![Revocation::Credential(id)]
+        );
         assert!(revocations(&credential("ACTIVE")).is_empty());
         let principal = |status: &str, extra: Value| {
             let mut s = json!({ "id": id, "environmentId": env, "status": status });
@@ -265,7 +269,10 @@ mod tests {
         };
         assert!(revocations(&principal("ACTIVE", json!({}))).is_empty());
         let r = revocations(&principal("SUSPENDED", json!({})));
-        assert!(matches!(r.as_slice(), [Revocation::Principal { inactive: true, .. }]));
+        assert!(matches!(
+            r.as_slice(),
+            [Revocation::Principal { inactive: true, .. }]
+        ));
         let r = revocations(&principal(
             "ACTIVE",
             json!({ "tokensNotBefore": "2026-11-18T09:00:00Z" }),

@@ -8,6 +8,8 @@
 //! * [`email`] — the email ledger and lane workers (Resend / SMTP / none; X6/X7 leases).
 //! * [`push`] — push endpoints, the push dispatcher and the I3 call fast lane.
 //! * [`inbox`] — the in-app inbox (U1–U5).
+//! * [`partner`] — partner push (ADR 0063, `NOTIFICATIONS_PARTNER_PUSH_ENABLED`): the
+//!   provider vault, `platform-principal` registrations, call fast lane and recipients.
 //! * [`http`] — probes, metrics, the Resend callback and the internal APIs (I1–I12).
 //!
 //! Boundaries: Calling owns ringing and signaling, Account owns codes and their
@@ -26,6 +28,7 @@ pub mod http;
 pub mod inbox;
 pub mod ingest;
 pub mod metrics;
+pub mod partner;
 pub mod policy;
 pub mod preference_copy;
 pub mod preferences;

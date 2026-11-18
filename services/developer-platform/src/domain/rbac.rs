@@ -376,7 +376,11 @@ mod tests {
         for r in Role::ALL {
             assert!(allows(*r, AllowedOriginsRead), "{r:?}");
         }
-        for a in [AllowedOriginsManage, PushCredentialsRead, PushCredentialsManage] {
+        for a in [
+            AllowedOriginsManage,
+            PushCredentialsRead,
+            PushCredentialsManage,
+        ] {
             assert!(allows(Owner, a) && allows(Admin, a), "{a:?}");
             for r in [Developer, Analyst, Billing] {
                 assert!(!allows(r, a), "{r:?} {a:?}");

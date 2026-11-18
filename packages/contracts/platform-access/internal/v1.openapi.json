@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.9.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned."
+    "version": "1.10.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED."
   },
   "components": {
     "securitySchemes": {
@@ -49,6 +49,15 @@
         "schema": {
           "type": "string",
           "pattern": "^[uso]-[0-9a-f]{32}$"
+        }
+      },
+      "CfForwardedCredentialId": {
+        "name": "CF-Forwarded-Credential-Id",
+        "in": "header",
+        "required": true,
+        "description": "ADR 0062: the id of the API credential the API Gateway authenticated (taken by the Developer Console from its signed delegated context). Platform Access re-verifies it LIVE (revocation, expiry, suspension, service account, current scopes); it is the ONLY source of the environment. When the service token also carries a delegated platform context, its credential and scope must match.",
+        "schema": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
         }
       }
     },
@@ -430,6 +439,667 @@
             "format": "date-time"
           }
         }
+      },
+      "EndUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "ADR 0062: a partner user (an EXTERNAL_APPLICATION_PRINCIPAL principal of the credential's environment) and its profile.",
+        "required": [
+          "id",
+          "externalId",
+          "displayName",
+          "imageUrl",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "externalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[\\x21-\\x7e]+$",
+            "description": "The partner's opaque id (never a telephone number or SIP address)."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512,
+            "pattern": "^https://"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "DEACTIVATED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EndUserResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/EndUser"
+          }
+        }
+      },
+      "EndUserPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "description": "A page of visible (not deleted) partner users in creation order.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EndUser"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last page."
+          }
+        }
+      },
+      "CreateEndUserRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "externalId"
+        ],
+        "properties": {
+          "externalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "1-128 printable ASCII characters without spaces; telephone numbers, tel: / sip: URIs and the reserved tombstoned: prefix are refused."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "1-64 characters, no control characters; null clears it."
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512,
+            "pattern": "^https://",
+            "description": "An https:// URL of at most 512 characters; null clears it."
+          }
+        }
+      },
+      "UpdateEndUserRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Only the given fields change.",
+        "properties": {
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "1-64 characters, no control characters; null clears it."
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512,
+            "pattern": "^https://",
+            "description": "An https:// URL of at most 512 characters; null clears it."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          }
+        }
+      },
+      "RevokeSessionsResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tokensNotBefore"
+        ],
+        "properties": {
+          "tokensNotBefore": {
+            "type": "string",
+            "format": "date-time",
+            "description": "User tokens issued before this instant are revoked (the next whole second after the call)."
+          }
+        }
+      },
+      "UserTokenGrants": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Grants of a CF Meet user token. Every part is optional in requests and always present in responses. Required credential scopes: msg:read messages.read, msg:send messages.send, call:receive calls.write, mtg meetings.write.",
+        "properties": {
+          "msg": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "send"
+              ]
+            }
+          },
+          "call": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "receive"
+              ]
+            }
+          },
+          "mtg": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "conferenceId",
+                "role"
+              ],
+              "properties": {
+                "conferenceId": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "HOST",
+                    "CO_HOST",
+                    "PRESENTER",
+                    "PARTICIPANT",
+                    "VIEWER"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "MintUserTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "grants": {
+            "$ref": "#/components/schemas/UserTokenGrants"
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "default": 3600
+          }
+        }
+      },
+      "MintUserTokenResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "tokenId",
+          "expiresAt"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 2048,
+            "pattern": "^cfut_(sbx|test|live)_[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+            "description": "Returned once; never stored or logged by Platform Access."
+          },
+          "tokenId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UpsertEndUserAndMintRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "externalId"
+        ],
+        "properties": {
+          "externalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "1-128 printable ASCII characters without spaces; telephone numbers, tel: / sip: URIs and the reserved tombstoned: prefix are refused."
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "1-64 characters, no control characters; null clears it."
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512,
+            "pattern": "^https://",
+            "description": "An https:// URL of at most 512 characters; null clears it."
+          },
+          "grants": {
+            "$ref": "#/components/schemas/UserTokenGrants"
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "default": 3600
+          }
+        }
+      },
+      "UpsertEndUserAndMintResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user",
+          "token",
+          "tokenId",
+          "expiresAt"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/EndUser"
+          },
+          "token": {
+            "type": "string",
+            "maxLength": 2048,
+            "pattern": "^cfut_(sbx|test|live)_[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+            "description": "Returned once; never stored or logged by Platform Access."
+          },
+          "tokenId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VerifyUserTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        }
+      },
+      "VerifyUserTokenResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A valid user token: its scope, the user and the EFFECTIVE grants (claimed grants intersected with the minting credential's current scopes). Consumers may cache it for at most 30 s, keyed by tokenId.",
+        "required": [
+          "tokenId",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "environmentKind",
+          "credentialId",
+          "serviceAccountId",
+          "user",
+          "grants",
+          "issuedAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "tokenId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "tenantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "applicationId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "environmentId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "environmentKind": {
+            "type": "string",
+            "enum": [
+              "SANDBOX",
+              "TEST",
+              "PRODUCTION"
+            ]
+          },
+          "credentialId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "serviceAccountId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "user": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "externalId",
+              "displayName",
+              "imageUrl",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "externalId": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "imageUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ACTIVE"
+                ]
+              }
+            }
+          },
+          "grants": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UserTokenGrants"
+              }
+            ],
+            "required": [
+              "msg",
+              "call",
+              "mtg"
+            ]
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UserTokenKeys": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kid",
+                "alg",
+                "crv",
+                "x",
+                "status"
+              ],
+              "properties": {
+                "kid": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{16}$"
+                },
+                "alg": {
+                  "type": "string",
+                  "enum": [
+                    "EdDSA"
+                  ]
+                },
+                "crv": {
+                  "type": "string",
+                  "enum": [
+                    "Ed25519"
+                  ]
+                },
+                "x": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "description": "Raw public key, base64url without padding."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ACTIVE",
+                    "RETIRED"
+                  ],
+                  "description": "RETIRED: tokens it signed are USER_TOKEN_REVOKED."
+                }
+              }
+            }
+          }
+        }
+      },
+      "EnvironmentOrigins": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environmentId",
+          "origins"
+        ],
+        "properties": {
+          "environmentId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "origins": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 270,
+              "pattern": "^https?://[a-z0-9.-]+(:[1-9][0-9]{0,4})?$"
+            }
+          }
+        }
+      },
+      "SetEnvironmentOriginsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "origins"
+        ],
+        "description": "At most 20 exact origins scheme://host[:port]: lowercase host, no path / query / fragment / user info / wildcard, no default port; https only, except http://localhost[:port] and http://127.0.0.1[:port] (SANDBOX and TEST environments only; a PRODUCTION environment never lists a loopback host). Duplicates are dropped.",
+        "properties": {
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 270
+            }
+          }
+        }
+      },
+      "EnvironmentOriginFeed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextAfter"
+        ],
+        "description": "The allowed-websites change feed: one item per change (origin list or effective status), carrying the environment's LATEST state.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "environmentId",
+                "origins",
+                "environmentStatus",
+                "seq"
+              ],
+              "properties": {
+                "environmentId": {
+                  "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+                },
+                "origins": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 270,
+                    "pattern": "^https?://[a-z0-9.-]+(:[1-9][0-9]{0,4})?$"
+                  }
+                },
+                "environmentStatus": {
+                  "type": "string",
+                  "enum": [
+                    "ACTIVE",
+                    "SUSPENDED"
+                  ],
+                  "description": "ACTIVE when the environment, its application and its tenant are ACTIVE."
+                },
+                "seq": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          },
+          "nextAfter": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "EnsureMeetingPlatformPrincipalRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environmentId",
+          "kind",
+          "externalReference"
+        ],
+        "description": "Exactly one of two combinations: BOT_OR_SERVICE with `cfmeet:meeting-system`, or TEMPORARY_EXTERNAL_PARTICIPANT with `meeting-participant:<lowercase hyphenated uuid>`.",
+        "properties": {
+          "environmentId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "BOT_OR_SERVICE",
+              "TEMPORARY_EXTERNAL_PARTICIPANT"
+            ]
+          },
+          "externalReference": {
+            "type": "string",
+            "pattern": "^(cfmeet:meeting-system|meeting-participant:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+          }
+        }
+      },
+      "EnsureMeetingPlatformPrincipalResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principalId",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "kind"
+        ],
+        "properties": {
+          "principalId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "tenantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "applicationId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "environmentId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "BOT_OR_SERVICE",
+              "TEMPORARY_EXTERNAL_PARTICIPANT"
+            ]
+          }
+        }
       }
     },
     "responses": {
@@ -526,6 +1196,18 @@
     {
       "name": "Internal — Organization Scopes",
       "description": "Governed FIRST_PARTY organization scopes: the dedicated tenant, first-party application and PRODUCTION environment of one first-party organization (Organizations Service only, audited, ADR 0058). Also the automatic Calling / Messaging service bindings inside the organization's triple (ADR 0058 Amendment A2)."
+    },
+    {
+      "name": "Internal — Partner Users",
+      "description": "ADR 0062: the partner Users API and user-token minting for the Developer Console (platform-end-users.delegate), in the forwarded credential's own EXTERNAL environment. Behind PLATFORM_ACCESS_END_USERS_ENABLED (minting also PLATFORM_ACCESS_USER_TOKENS_ENABLED); off: 404 NOT_FOUND."
+    },
+    {
+      "name": "Internal — User Tokens",
+      "description": "ADR 0062: CF Meet user-token verification and signing keys (platform-user-token.verify: Messaging, Calling, Meeting Service, API Gateway). Behind PLATFORM_ACCESS_USER_TOKENS_ENABLED; off: 404 NOT_FOUND."
+    },
+    {
+      "name": "Internal — Allowed Websites",
+      "description": "ADR 0062: allowed websites (exact origins) of environments and their change feed (platform-environment-origins.read: API Gateway, Messaging, Calling, Meeting Service). Behind PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED; off: 404 NOT_FOUND."
     }
   ],
   "paths": {
@@ -5757,6 +6439,1049 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/end-users": {
+      "post": {
+        "operationId": "createEndUser",
+        "tags": [
+          "Internal — Partner Users"
+        ],
+        "summary": "Create or return a partner user",
+        "description": "Creates the partner user `externalId` of the forwarded credential's environment (201), or returns the existing one (200; idempotent on externalId; given profile fields are applied). Credential scope `principals.write`. New users count against the environment cap of ACTIVE users (PLATFORM_ACCESS_MAX_END_USERS_SANDBOX / _TEST / _PRODUCTION; 409 LIMIT_EXCEEDED). Audited (PRINCIPAL_REGISTERED / PRINCIPAL_PROFILE_SET). Developer Console only: permission `platform-end-users.delegate`; the `CF-Forwarded-Credential-Id` credential is re-verified live and is the only source of the environment (no longer authenticating or not matching the signed delegated context: DELEGATED_CONTEXT_INVALID; header missing: DELEGATED_CONTEXT_REQUIRED); its tenant must be EXTERNAL (POLICY_VIOLATION) and its chain ACTIVE (INVALID_STATE). A user of another environment is NOT_FOUND. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfForwardedCredentialId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEndUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Existing user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listEndUsers",
+        "tags": [
+          "Internal — Partner Users"
+        ],
+        "summary": "List partner users",
+        "description": "The visible (not deleted) partner users of the forwarded credential's environment in creation order, optionally only `externalId`. Credential scope `principals.read`. Developer Console only: permission `platform-end-users.delegate`; the `CF-Forwarded-Credential-Id` credential is re-verified live and is the only source of the environment (no longer authenticating or not matching the signed delegated context: DELEGATED_CONTEXT_INVALID; header missing: DELEGATED_CONTEXT_REQUIRED); its tenant must be EXTERNAL (POLICY_VIOLATION) and its chain ACTIVE (INVALID_STATE). A user of another environment is NOT_FOUND. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfForwardedCredentialId"
+          },
+          {
+            "name": "externalId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Only this partner id."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "`nextCursor` of the previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/end-users/tokens": {
+      "post": {
+        "operationId": "upsertEndUserAndMintToken",
+        "tags": [
+          "Internal — Partner Users"
+        ],
+        "summary": "Upsert a partner user and mint a user token",
+        "description": "Creates or returns (applying given profile fields) the partner user `externalId`, then mints a CF Meet user token for it. Credential scopes `principals.write` and `user_tokens.issue` (+ grant scopes). Minting also needs PLATFORM_ACCESS_USER_TOKENS_ENABLED, the scope `user_tokens.issue` plus each grant's scope (SCOPE_REQUIRED), an ACTIVE user (INVALID_STATE) and at most 120 mints per user per clock hour (429 RATE_LIMITED). The response is `Cache-Control: no-store`. Developer Console only: permission `platform-end-users.delegate`; the `CF-Forwarded-Credential-Id` credential is re-verified live and is the only source of the environment (no longer authenticating or not matching the signed delegated context: DELEGATED_CONTEXT_INVALID; header missing: DELEGATED_CONTEXT_REQUIRED); its tenant must be EXTERNAL (POLICY_VIOLATION) and its chain ACTIVE (INVALID_STATE). A user of another environment is NOT_FOUND. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfForwardedCredentialId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertEndUserAndMintRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpsertEndUserAndMintResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/end-users/{userId}": {
+      "get": {
+        "operationId": "getEndUser",
+        "tags": [
+          "Internal — Partner Users"
+        ],
+        "summary": "Read a partner user",
+        "description": "Credential scope `principals.read`. Developer Console only: permission `platform-end-users.delegate`; the `CF-Forwarded-Credential-Id` credential is re-verified live and is the only source of the environment (no longer authenticating or not matching the signed delegated context: DELEGATED_CONTEXT_INVALID; header missing: DELEGATED_CONTEXT_REQUIRED); its tenant must be EXTERNAL (POLICY_VIOLATION) and its chain ACTIVE (INVALID_STATE). A user of another environment is NOT_FOUND. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfForwardedCredentialId"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The partner user's principal id."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateEndUser",
+        "tags": [
+          "Internal — Partner Users"
+        ],
+        "summary": "Update a partner user",
+        "description": "Changes the given profile fields and / or the status (ACTIVE / SUSPENDED; a suspended user's tokens stop verifying; reactivation counts against the cap: LIMIT_EXCEEDED). Credential scope `principals.write`. Audited (PRINCIPAL_STATUS_SET / PRINCIPAL_PROFILE_SET). Developer Console only: permission `platform-end-users.delegate`; the `CF-Forwarded-Credential-Id` credential is re-verified live and is the only source of the environment (no longer authenticating or not matching the signed delegated context: DELEGATED_CONTEXT_INVALID; header missing: DELEGATED_CONTEXT_REQUIRED); its tenant must be EXTERNAL (POLICY_VIOLATION) and its chain ACTIVE (INVALID_STATE). A user of another environment is NOT_FOUND. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfForwardedCredentialId"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The partner user's principal id."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateEndUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteEndUser",
+        "tags": [
+          "Internal — Partner Users"
+        ],
+        "summary": "Delete a partner user",
+        "description": "Tombstones the user: DEACTIVATED for ever, externalId replaced, profile erased, ids kept; every token of the user stops verifying. A deleted user is NOT_FOUND afterwards. Credential scope `principals.write`. Audited (PRINCIPAL_TOMBSTONED). Developer Console only: permission `platform-end-users.delegate`; the `CF-Forwarded-Credential-Id` credential is re-verified live and is the only source of the environment (no longer authenticating or not matching the signed delegated context: DELEGATED_CONTEXT_INVALID; header missing: DELEGATED_CONTEXT_REQUIRED); its tenant must be EXTERNAL (POLICY_VIOLATION) and its chain ACTIVE (INVALID_STATE). A user of another environment is NOT_FOUND. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfForwardedCredentialId"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The partner user's principal id."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/end-users/{userId}/revoke-sessions": {
+      "post": {
+        "operationId": "revokeEndUserSessions",
+        "tags": [
+          "Internal — Partner Users"
+        ],
+        "summary": "Revoke a partner user's sessions",
+        "description": "Advances the user's session epoch: every user token issued before `tokensNotBefore` is USER_TOKEN_REVOKED (and the device credentials derived from it end). Credential scope `principals.write`. Audited (PRINCIPAL_SESSIONS_REVOKED). Developer Console only: permission `platform-end-users.delegate`; the `CF-Forwarded-Credential-Id` credential is re-verified live and is the only source of the environment (no longer authenticating or not matching the signed delegated context: DELEGATED_CONTEXT_INVALID; header missing: DELEGATED_CONTEXT_REQUIRED); its tenant must be EXTERNAL (POLICY_VIOLATION) and its chain ACTIVE (INVALID_STATE). A user of another environment is NOT_FOUND. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfForwardedCredentialId"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The partner user's principal id."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeSessionsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/end-users/{userId}/tokens": {
+      "post": {
+        "operationId": "mintUserToken",
+        "tags": [
+          "Internal — Partner Users"
+        ],
+        "summary": "Mint a user token",
+        "description": "Mints a CF Meet user token (`cfut_<sbx|test|live>_<JWS>`, Ed25519, default 3600 s, 60-86400 s) for an existing partner user. Credential scope `user_tokens.issue` (+ grant scopes). Minting also needs PLATFORM_ACCESS_USER_TOKENS_ENABLED, the scope `user_tokens.issue` plus each grant's scope (SCOPE_REQUIRED), an ACTIVE user (INVALID_STATE) and at most 120 mints per user per clock hour (429 RATE_LIMITED). The response is `Cache-Control: no-store`. Developer Console only: permission `platform-end-users.delegate`; the `CF-Forwarded-Credential-Id` credential is re-verified live and is the only source of the environment (no longer authenticating or not matching the signed delegated context: DELEGATED_CONTEXT_INVALID; header missing: DELEGATED_CONTEXT_REQUIRED); its tenant must be EXTERNAL (POLICY_VIOLATION) and its chain ACTIVE (INVALID_STATE). A user of another environment is NOT_FOUND. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfForwardedCredentialId"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The partner user's principal id."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MintUserTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintUserTokenResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/end-users": {
+      "get": {
+        "operationId": "delegateListEndUsers",
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "List an environment's partner users (console)",
+        "description": "ADR 0062 console read for human members: the visible partner users of an environment in creation order (an unknown environment is NOT_FOUND). Developer Platform delegation: permission `platform-identity.delegate` (Developer Platform only); read-only. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The environment."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "`nextCursor` of the previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/user-tokens/verify": {
+      "post": {
+        "operationId": "verifyUserToken",
+        "tags": [
+          "Internal — User Tokens"
+        ],
+        "summary": "Verify a user token",
+        "description": "Verifies a CF Meet user token: exact header (`{\"alg\":\"EdDSA\",\"typ\":\"cfmeet-user+jwt\",\"kid\":\"<16 hex>\"}`), Ed25519 signature by a known key, at most 2048 bytes, issuer `cfmeet.platform-access`, audience `cfmeet.platform.client`, environment tag, nbf / exp with 60 s skew; then live: the user is ACTIVE and not deleted, iat >= its session epoch, the minting credential and service account still authenticate, the tenant (EXTERNAL), application and environment are ACTIVE, every id matches, the signing key is not retired. 401 USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED. Returns the EFFECTIVE grants. Permission `platform-user-token.verify`. Behind PLATFORM_ACCESS_USER_TOKENS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyUserTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyUserTokenResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/user-tokens/keys": {
+      "get": {
+        "operationId": "listUserTokenKeys",
+        "tags": [
+          "Internal — User Tokens"
+        ],
+        "summary": "Read the user-token signing keys",
+        "description": "The Ed25519 public keys of user tokens (the signing key and previous keys ACTIVE, retired keys RETIRED) for stateless pre-checks; the owning service always verifies live. Permission `platform-user-token.verify`. Behind PLATFORM_ACCESS_USER_TOKENS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserTokenKeys"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/environment-origins": {
+      "get": {
+        "operationId": "readEnvironmentOriginFeed",
+        "tags": [
+          "Internal — Allowed Websites"
+        ],
+        "summary": "Read the allowed-websites change feed",
+        "description": "Changes after `after` (one item per change of an environment's origins or effective status, carrying the latest state). Permission `platform-environment-origins.read`. Behind PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "The last `seq` applied."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentOriginFeed"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/environments/{environmentId}/origins": {
+      "get": {
+        "operationId": "getEnvironmentOrigins",
+        "tags": [
+          "Internal — Allowed Websites"
+        ],
+        "summary": "Read an environment's allowed websites",
+        "description": "The exact origins of an environment (empty when none; an unknown environment is NOT_FOUND). Permission `platform-environment-origins.read`. Behind PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The environment."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentOrigins"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/delegation/environments/{environmentId}/allowed-origins": {
+      "get": {
+        "operationId": "delegateGetAllowedOrigins",
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Read an environment's allowed websites (console)",
+        "description": "ADR 0062: the exact origins of an environment. Developer Platform delegation: permission `platform-identity.delegate` (Developer Platform only); read-only. Behind PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The environment."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentOrigins"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "delegateSetAllowedOrigins",
+        "tags": [
+          "Internal Delegation — Environments"
+        ],
+        "summary": "Replace an environment's allowed websites (console)",
+        "description": "ADR 0062: replaces the exact origins of an EXTERNAL tenant's environment (FIRST_PARTY: POLICY_VIOLATION; invalid origin or more than 20: VALIDATION_ERROR). A change writes one feed item and one audit row (ENVIRONMENT_ORIGINS_SET); an unchanged list writes nothing. Developer Platform delegation: permission `platform-identity.delegate` (Developer Platform only); mutations name the acting party (`X-CF-Delegated-Actor`). Behind PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/CfDelegatedActor"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The environment."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEnvironmentOriginsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentOrigins"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/principals/ensure-meeting-platform": {
+      "post": {
+        "operationId": "ensureMeetingPlatformPrincipal",
+        "tags": [
+          "Internal — Principal Registry"
+        ],
+        "summary": "Ensure a partner meeting principal",
+        "description": "ADR 0062: idempotently ensures the fixed meeting system principal (BOT_OR_SERVICE `cfmeet:meeting-system`) or a temporary meeting participant (TEMPORARY_EXTERNAL_PARTICIPANT `meeting-participant:<uuid>`) of an ACTIVE environment (application and tenant ACTIVE) of an EXTERNAL tenant. Any other combination: VALIDATION_ERROR; FIRST_PARTY: POLICY_VIOLATION; suspended chain or principal: INVALID_STATE; unknown environment: NOT_FOUND. Permission `platform-principal.ensure-meeting-platform` (Meeting Service only). Behind PLATFORM_ACCESS_MEETING_PLATFORM_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnsureMeetingPlatformPrincipalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnsureMeetingPlatformPrincipalResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

@@ -470,8 +470,7 @@ pub fn conforms(reference: &str, value: &Value) {
 
 use developer_platform::{
     platform_access::{
-        Delegated, DelegationActor, DelegationCall, EndUserCall, EndUsersReply,
-        ForwardedCredential,
+        Delegated, DelegationActor, DelegationCall, EndUserCall, EndUsersReply, ForwardedCredential,
     },
     session::{HumanSessions, HumanUser, SessionAuthorityUnavailable, SessionOutcome},
     webhooks::{WebhookService, WebhookSettings},
@@ -953,7 +952,10 @@ impl PlatformAccessPort for MemoryPlatformAccess {
             EndUserCall::Create { body } => {
                 let (id, created) = self.upsert_end_user(env, &body);
                 let u = own(id).unwrap();
-                ok(if created { 201 } else { 200 }, json!({ "user": u.view(id) }))
+                ok(
+                    if created { 201 } else { 200 },
+                    json!({ "user": u.view(id) }),
+                )
             }
             EndUserCall::List { external_id, .. } => {
                 let users = self.end_users.lock().unwrap();

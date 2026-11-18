@@ -33,6 +33,7 @@ use notifications::{
     email::{EmailWorker, RecordingProvider},
     http,
     metrics::{Heartbeats, Metrics},
+    partner::{PartnerPush, RecordingPartnerTransport},
     processor::Processor,
     state::AppState,
 };
@@ -252,7 +253,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             issuer(s::COMMUNICATIONS, k("communications"), &["notifications-event.publish", "notifications-user.forward"]),
             issuer(s::CALLING, k("calling"), &["notifications-event.publish", "notifications-call-push.dispatch"]),
             issuer(s::MESSAGING, k("messaging"), &["notifications-event.publish", "notifications-push-registration.sync"]),
-            issuer(s::DEVELOPER_PLATFORM, k("developer"), &["notifications-event.publish"]),
+            issuer(s::DEVELOPER_PLATFORM, k("developer"), &["notifications-event.publish", "notifications-push-provider.manage"]),
             issuer(s::OPERATOR_CONSOLE, k("operator"), &["notifications-observability.read", "notifications-operations.replay", "notifications-operations.reroute"]),
         ],
     })
@@ -332,6 +333,9 @@ pub struct Harness {
     pub push: Arc<LocalTestPush>,
     pub owners: Arc<StaticAuthorities>,
     pub sealing: SealingKey,
+    /// ADR 0063: the deterministic partner transport (wired into the state only by
+    /// [`Harness::with_partner_push`]; `NOTIFICATIONS_PARTNER_PUSH_ENABLED` off otherwise).
+    pub partner: Arc<RecordingPartnerTransport>,
 }
 
 pub fn test_keys() -> DataKeys {
@@ -356,7 +360,18 @@ impl Harness {
     }
 
     pub async fn with_email(email: EmailConfig) -> Option<Self> {
+        Self::build(email, false).await
+    }
+
+    /// A harness with partner push on (`NOTIFICATIONS_PARTNER_PUSH_ENABLED=true`) and the
+    /// deterministic recording transport.
+    pub async fn with_partner_push() -> Option<Self> {
+        Self::build(EmailConfig::disabled(), true).await
+    }
+
+    async fn build(email: EmailConfig, partner_push: bool) -> Option<Self> {
         let db = TestDb::new().await?;
+        let partner = Arc::new(RecordingPartnerTransport::default());
         let (verifier, peers) = verifier_and_peers();
         let (public, private) = generate_keypair(HPKE_KID).unwrap();
         let opening = OpeningKey::from_bytes(HPKE_KID, &private).unwrap();
@@ -385,6 +400,11 @@ impl Harness {
             operator_alert_token: None,
             hub_preferences: None,
             first_party_scope: None,
+            partner: partner_push.then(|| {
+                Arc::new(PartnerPush::new(
+                    partner.clone() as Arc<dyn notifications::partner::PartnerTransport>
+                ))
+            }),
         };
         Some(Self {
             router: http::app(state.clone()),
@@ -395,6 +415,7 @@ impl Harness {
             push,
             owners,
             sealing: SealingKey::parse(&public).unwrap(),
+            partner,
         })
     }
 
