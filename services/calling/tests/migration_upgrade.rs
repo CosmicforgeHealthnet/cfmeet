@@ -483,6 +483,10 @@ async fn up_previous(conn: &DatabaseConnection) {
     if gap_closure_newest() {
         let g = GapClosureMigrator::migrations().len();
         Migrator::up(conn, None).await.unwrap();
+        // The notification-publications history sits between the two (see `up_all`).
+        calling_migration::NotificationPublicationsMigrator::up(conn, None)
+            .await
+            .unwrap();
         GapClosureMigrator::up(conn, Some((g - 1) as u32))
             .await
             .unwrap();
