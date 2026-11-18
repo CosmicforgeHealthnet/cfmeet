@@ -7696,8 +7696,8 @@ export namespace Messaging {
     joinedAt: string;
     sendRestrictedUntil: string | null;
     version: number;
-    /** How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration. */
-    authoritySource: "API" | "INVITATION" | "MEETING" | "INVITE_LINK";
+    /** How the membership came to be: an administrator or the application backend (API), an accepted invitation, the meeting integration, an invite link (INVITE_LINK) or an organization team snapshot (ORGANIZATION_TEAM, G7). */
+    authoritySource: "API" | "INVITATION" | "MEETING" | "INVITE_LINK" | "ORGANIZATION_TEAM";
     invitedByPrincipalId: Uuid | null;
     invitationExpiresAt: string | null;
   };
@@ -7814,6 +7814,8 @@ export namespace Messaging {
     reason: string;
     effectiveUntil: string | null;
     createdAt: string;
+    /** G6: the organization moderator (their principal in the organization's scope) an organization moderation request was relayed for; null for an application moderator credential. */
+    moderatorPrincipalId?: Uuid | null;
   };
   export type ModerationActionList = {
     actions: Array<ModerationAction>;

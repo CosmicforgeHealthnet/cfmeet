@@ -17,7 +17,8 @@
 //!
 //! Inbound, every `/internal/v1` route requires a service token whose issuer Messaging's
 //! own trust bundle grants the route's permission. The internal operations (Part V H) are
-//! `messaging-application.delegate` and `messaging-meeting.sync` (Meeting Service only),
+//! `messaging-application.delegate`, `messaging-meeting.sync` and
+//! `messaging-organization.govern` (Meeting Service only),
 //! `messaging-context-authority.apply` (Privacy Relay only) and
 //! `messaging-sms-bridge.deliver` (SMS Gateway only); the service-auth REGISTRY refuses a
 //! bundle granting any of them to another issuer. Outbound, Messaging calls Platform Access

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging internal API",
-    "version": "1.0.0",
-    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1."
+    "version": "1.1.0",
+    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern."
   },
   "tags": [
     {
@@ -21,6 +21,10 @@
     {
       "name": "Internal — Meeting Synchronization",
       "description": "Internal — Meeting Synchronization operations in the Messaging internal API. Review each operation's description for its behavior, access requirements and schemas."
+    },
+    {
+      "name": "Internal — Organization Governance",
+      "description": "Internal — Organization Governance operations in the Messaging internal API. Review each operation's description for its behavior, access requirements and schemas."
     },
     {
       "name": "Internal — SMS Bridge",
@@ -472,6 +476,307 @@
             "$ref": "#/components/responses/Error"
           },
           "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-moderation/v1/messaging/reports": {
+      "get": {
+        "operationId": "listOrganizationReports",
+        "tags": [
+          "Internal — Organization Governance"
+        ],
+        "summary": "list Organization Reports",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "G6: the organization's moderation queue (no evidence in the listing). The SAME moderation handler as the customer route GET /v1/messaging/reports: the signed initiating principal is the organization moderator (required, ACTIVE in the scope; a CF-Acting-Principal header is refused with ADMINISTRATION_ONLY); the Meeting Service relays only for a member whose organization grants messaging.organization.moderate. The scope is the organization's own environment, so only its conversations are visible. Permission messaging-organization.govern (Meeting Service only); signed delegated scope of a FIRST_PARTY organization environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "OPEN",
+                "ACTIONED",
+                "DISMISSED"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ReportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-moderation/v1/messaging/reports/{reportId}": {
+      "get": {
+        "operationId": "getOrganizationReport",
+        "tags": [
+          "Internal — Organization Governance"
+        ],
+        "summary": "get Organization Report",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "G6: one report with its evidence; the view is audited with the moderator's principal. The SAME moderation handler as the customer route GET /v1/messaging/reports/{reportId}: the signed initiating principal is the organization moderator (required, ACTIVE in the scope; a CF-Acting-Principal header is refused with ADMINISTRATION_ONLY); the Meeting Service relays only for a member whose organization grants messaging.organization.moderate. The scope is the organization's own environment, so only its conversations are visible. Permission messaging-organization.govern (Meeting Service only); signed delegated scope of a FIRST_PARTY organization environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ReportDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/organization-moderation/v1/messaging/moderation/actions": {
+      "get": {
+        "operationId": "listOrganizationModerationActions",
+        "tags": [
+          "Internal — Organization Governance"
+        ],
+        "summary": "list Organization Moderation Actions",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "G6: the organization's moderation actions, newest first. The SAME moderation handler as the customer route GET /v1/messaging/moderation/actions: the signed initiating principal is the organization moderator (required, ACTIVE in the scope; a CF-Acting-Principal header is refused with ADMINISTRATION_ONLY); the Meeting Service relays only for a member whose organization grants messaging.organization.moderate. The scope is the organization's own environment, so only its conversations are visible. Permission messaging-organization.govern (Meeting Service only); signed delegated scope of a FIRST_PARTY organization environment, re-validated against Platform Access.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ModerationActionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "applyOrganizationModerationAction",
+        "tags": [
+          "Internal — Organization Governance"
+        ],
+        "summary": "apply Organization Moderation Action",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "G6: remove a message, mute / unmute or remove a member, restrict / un-restrict a principal or dismiss a report; recorded append-only with moderatorPrincipalId and audited. The SAME moderation handler as the customer route POST /v1/messaging/moderation/actions: the signed initiating principal is the organization moderator (required, ACTIVE in the scope; a CF-Acting-Principal header is refused with ADMINISTRATION_ONLY); the Meeting Service relays only for a member whose organization grants messaging.organization.moderate. The scope is the organization's own environment, so only its conversations are visible. Permission messaging-organization.govern (Meeting Service only); signed delegated scope of a FIRST_PARTY organization environment, re-validated against Platform Access.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ModerationActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/ModerationAction"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/team-channels": {
+      "put": {
+        "operationId": "syncTeamChannel",
+        "tags": [
+          "Internal — Organization Governance"
+        ],
+        "summary": "sync Team Channel",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "G7: creates (201) or resynchronizes (200) the MANAGED GROUP channel of an organization team from a snapshot of its ACTIVE members, version-fenced (a stale snapshot answers applied false / STALE_VERSION). Listed principals join with authoritySource ORGANIZATION_TEAM; team-sourced members no longer listed are removed (TEAM_MEMBERSHIP_ENDED); the owner and members added any other way are kept. Bans, the lifecycle and the member limit apply (refused principals are reported as skipped). Customers cannot create a conversation in the reserved context namespace organization-team of a first-party environment. Permission messaging-organization.govern (Meeting Service only); signed delegated scope of a FIRST_PARTY organization environment, re-validated against Platform Access.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/TeamChannelSnapshot"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/TeamChannelSyncResult"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/TeamChannelSyncResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

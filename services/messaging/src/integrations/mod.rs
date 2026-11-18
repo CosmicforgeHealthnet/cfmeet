@@ -6,6 +6,7 @@
 //! | Meeting Service (first-party backend) | `messaging-application.delegate` | `/internal/v1/delegated/**` (the customer surface, [`crate::http::middleware::require_delegated_application`]) |
 //! | Meeting Service | `messaging-meeting.sync` | [`meeting`] |
 //! | Privacy Relay | `messaging-context-authority.apply` | [`context_authority`] |
+//! | Meeting Service (organization governance, gap audit G6 / G7) | `messaging-organization.govern` | [`team_channels`]; organization moderation ([`crate::http::middleware::require_organization_moderation`]) |
 //!
 //! Every operation requires the peer's signed DELEGATED scope, re-validated against
 //! Platform Access ([`crate::http::middleware::delegated_context`]); the scope is never
@@ -16,6 +17,7 @@
 pub mod context_authority;
 pub mod http;
 pub mod meeting;
+pub mod team_channels;
 
 use chrono::{DateTime, Utc};
 use sea_orm::ConnectionTrait;

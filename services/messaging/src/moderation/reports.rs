@@ -404,8 +404,14 @@ pub async fn list(state: &AppState, ctx: &TrustedContext, q: ListQuery) -> Resul
     Ok(json!({ "reports": rows.iter().map(summary).collect::<Vec<_>>() }))
 }
 
-/// `GET /v1/messaging/reports/{id}` — one report with its evidence (audited).
-pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Value> {
+/// `GET /v1/messaging/reports/{id}` — one report with its evidence (audited; an
+/// organization moderator's principal is recorded as the viewer).
+pub async fn get(
+    state: &AppState,
+    ctx: &TrustedContext,
+    id: Uuid,
+    moderator: Option<Uuid>,
+) -> Result<Value> {
     let r = load(&state.db, ctx, id, false)
         .await?
         .ok_or(Error::code(ErrorCode::NotFound))?;
@@ -505,11 +511,12 @@ pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Val
         &state.db,
         AuditEntry {
             ctx,
-            principal_id: None,
+            principal_id: moderator,
             action: "REPORT_VIEWED",
             target_kind: "REPORT",
             target_id: r.id,
-            detail: json!({ "evidence_kind": r.evidence_kind, "managed_shown": show_managed && r.security_profile == "MANAGED" }),
+            detail: json!({ "evidence_kind": r.evidence_kind, "managed_shown": show_managed && r.security_profile == "MANAGED",
+                            "organization_moderator_principal_id": moderator }),
         },
         &request_context(),
         state.now(),

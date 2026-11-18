@@ -2174,7 +2174,7 @@ class Member {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
-  /// How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration.
+  /// How the membership came to be: an administrator or the application backend (API), an accepted invitation, the meeting integration, an invite link (INVITE_LINK) or an organization team snapshot (ORGANIZATION_TEAM, G7).
   String get authoritySource => json['authoritySource']! as String;
 
   String? get invitationExpiresAt => json['invitationExpiresAt'] as String?;
@@ -2472,7 +2472,7 @@ class ModerationAction {
   const ModerationAction.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ModerationAction.create({required Uuid actionId, required Uuid? conversationId, required String createdAt, required String? effectiveUntil, required String kind, required Uuid? messageId, required Uuid? principalId, required String reason, required Uuid? reportId}) =>
+  factory ModerationAction.create({required Uuid actionId, required Uuid? conversationId, required String createdAt, required String? effectiveUntil, required String kind, required Uuid? messageId, Uuid? moderatorPrincipalId, required Uuid? principalId, required String reason, required Uuid? reportId}) =>
       ModerationAction.fromJson(<String, Object?>{
         'actionId': actionId,
         'conversationId': conversationId,
@@ -2480,6 +2480,7 @@ class ModerationAction {
         'effectiveUntil': effectiveUntil,
         'kind': kind,
         'messageId': messageId,
+        if (moderatorPrincipalId != null) 'moderatorPrincipalId': moderatorPrincipalId,
         'principalId': principalId,
         'reason': reason,
         'reportId': reportId,
@@ -2499,6 +2500,9 @@ class ModerationAction {
   String get kind => json['kind']! as String;
 
   Uuid? get messageId => json['messageId'] as String?;
+
+  /// G6: the organization moderator (their principal in the organization's scope) an organization moderation request was relayed for; null for an application moderator credential.
+  Uuid? get moderatorPrincipalId => json['moderatorPrincipalId'] as String?;
 
   Uuid? get principalId => json['principalId'] as String?;
 

@@ -641,6 +641,17 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/organizations/:id/messaging/session-tokens",
             post(crate::handlers::v2::organization_messaging::messaging_session_token),
         )
+        // Gap audit G6 / G7: organization moderation and team channels in the
+        // organization's own Messaging scope.
+        .route(
+            "/organizations/:id/messaging/moderation/*path",
+            get(crate::handlers::v2::organization_messaging::moderation_get)
+                .post(crate::handlers::v2::organization_messaging::moderation_post),
+        )
+        .route(
+            "/organizations/:id/teams/:team_id/messaging-channel",
+            put(crate::handlers::v2::organization_messaging::team_channel),
+        )
         .route(
             "/organizations/:id/messaging/members/resolve",
             post(crate::handlers::v2::organization_messaging::messaging_resolve_members),

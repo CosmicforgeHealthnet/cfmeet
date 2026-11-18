@@ -98,6 +98,27 @@ Gap closure (migration `m20261206_000034`, gap-closure history):
   the encrypted payload, send the commitment, check it after decryption, and include the
   key when reporting. Without it, E2EE reports stay `REPORTER_ATTESTED_UNVERIFIABLE`.
 
+Organization governance (migration `m20261207_000035`, permission
+`messaging-organization.govern`, Meeting Service only). An organization's conversations
+live in the organization's OWN first-party scope (Organizations resolves it), so that scope
+is the organization boundary:
+
+* **Organization moderation (G6).** `/internal/v1/organization-moderation/v1/messaging/`
+  `reports`, `reports/{id}` and `moderation/actions` are served by the ordinary moderation
+  handlers (one moderation path) with only `moderation.manage`. The Meeting Service relays
+  `/api/v2/organizations/{id}/messaging/moderation/{path}` only after Organizations
+  confirms `messaging.organization.moderate` (OWNER / ADMIN). The moderator is the signed
+  initiating principal and must be ACTIVE. It is recorded as `moderatorPrincipalId` on
+  actions and as the audit principal of `MODERATION_ACTION` / `REPORT_VIEWED`. There is no
+  automated content flagging in Messaging: the queue is user reports.
+* **Team channels (G7).** `PUT /internal/v1/team-channels` creates or resyncs a MANAGED
+  GROUP conversation (context namespace `organization-team`, reserved in first-party
+  environments) from a team snapshot, version-fenced. Team members join as
+  `ORGANIZATION_TEAM`, and team-sourced members who are no longer listed are removed. The
+  owner and members added any other way stay. Neither Messaging nor the Meeting Service
+  receives Organizations team events, so the channel resyncs only when
+  `PUT /api/v2/organizations/{id}/teams/{teamId}/messaging-channel` is called.
+
 `/internal/v1/**` is service-authenticated per operation (receiver trust bundle): the
 delegated first-party surface `/internal/v1/delegated/**` and Meeting conversation sync
 (Meeting Service), `/internal/v1/context-authorities` (Privacy Relay) and

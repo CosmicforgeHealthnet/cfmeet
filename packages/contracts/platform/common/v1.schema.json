@@ -132,6 +132,7 @@
         "platform-principal.ensure",
         "messaging-application.delegate",
         "messaging-meeting.sync",
+        "messaging-organization.govern",
         "messaging-context-authority.apply",
         "messaging-sms-bridge.deliver",
         "sms-bridge.submit",

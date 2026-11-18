@@ -12255,9 +12255,10 @@
               "API",
               "INVITATION",
               "MEETING",
-              "INVITE_LINK"
+              "INVITE_LINK",
+              "ORGANIZATION_TEAM"
             ],
-            "description": "How the membership came to be: an administrator or the application backend (API), an accepted invitation, or the meeting integration."
+            "description": "How the membership came to be: an administrator or the application backend (API), an accepted invitation, the meeting integration, an invite link (INVITE_LINK) or an organization team snapshot (ORGANIZATION_TEAM, G7)."
           },
           "invitedByPrincipalId": {
             "oneOf": [
@@ -12913,6 +12914,17 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "moderatorPrincipalId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "G6: the organization moderator (their principal in the organization's scope) an organization moderation request was relayed for; null for an application moderator credential."
           }
         },
         "required": [

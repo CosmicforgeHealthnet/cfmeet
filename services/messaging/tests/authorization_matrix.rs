@@ -1736,6 +1736,7 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
     let cid = Uuid::new_v4();
     let pid = Uuid::new_v4();
     let mid = Uuid::new_v4();
+    let rid = Uuid::new_v4();
     // (method, path, the one peer allowed, a well-formed body)
     let table: Vec<(Method, String, &str, Value)> = vec![
         (
@@ -1780,6 +1781,37 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             "sms_gateway",
             json!({ "bridgeRef": Uuid::new_v4(), "smsMessageId": Uuid::new_v4(), "text": "x", "segmentCount": 1, "receivedAt": "2026-01-01T00:00:00Z" }),
         ),
+        // Gap audit G6 / G7: organization governance (messaging-organization.govern).
+        (
+            Method::GET,
+            "/internal/v1/organization-moderation/v1/messaging/reports".into(),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/organization-moderation/v1/messaging/reports/{rid}"),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::GET,
+            "/internal/v1/organization-moderation/v1/messaging/moderation/actions".into(),
+            "meeting",
+            json!({}),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/organization-moderation/v1/messaging/moderation/actions".into(),
+            "meeting",
+            json!({ "kind": "RESTRICT_PRINCIPAL", "principalId": pid, "reason": "MATRIX", "durationSeconds": 600 }),
+        ),
+        (
+            Method::PUT,
+            "/internal/v1/team-channels".into(),
+            "meeting",
+            json!({ "teamRef": "organization:matrix:team:matrix", "ownerPrincipalId": owner, "memberPrincipalIds": [], "sourceVersion": 1 }),
+        ),
     ];
     // Coverage: every internal operation of the contract is in the table.
     let mut published = BTreeSet::new();
@@ -1796,7 +1828,8 @@ async fn internal_operations_enforce_service_identity_permission_and_delegated_s
             let t = p
                 .replace(&cid.to_string(), "{conversationId}")
                 .replace(&pid.to_string(), "{principalId}")
-                .replace(&mid.to_string(), "{messageId}");
+                .replace(&mid.to_string(), "{messageId}")
+                .replace(&rid.to_string(), "{reportId}");
             (m.to_string(), t)
         })
         .collect();

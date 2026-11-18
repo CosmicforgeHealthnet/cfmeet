@@ -417,6 +417,37 @@ pub async fn add_in<C: ConnectionTrait>(
     .await
 }
 
+/// Gap audit G7: makes `principal_id` an ACTIVE member on a PEER authority (e.g. an
+/// Organizations team snapshot) recorded as `source`. The application administers the
+/// conversation; bans, the lifecycle and the member limit still apply. Personal group-
+/// invitation preferences do not: the organization, not the owner, decides membership.
+#[allow(clippy::too_many_arguments)]
+pub async fn activate_from_authority<C: ConnectionTrait>(
+    txn: &C,
+    st: &AppState,
+    ctx: &TrustedContext,
+    conversation: &ConversationRow,
+    principal_id: Uuid,
+    role: &str,
+    source: &str,
+    request_ctx: &RequestContext,
+    now: DateTime<Utc>,
+) -> Result<(u16, Value)> {
+    activate(
+        txn,
+        st,
+        ctx,
+        &Administrator::Application,
+        conversation,
+        principal_id,
+        role,
+        source,
+        request_ctx,
+        now,
+    )
+    .await
+}
+
 /// Makes `principal_id` an ACTIVE member with a fresh history window (new, re-admitted or
 /// an accepted invitation), inside the caller's transaction holding the conversation lock.
 #[allow(clippy::too_many_arguments)]

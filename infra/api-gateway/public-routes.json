@@ -3075,6 +3075,27 @@
     {
       "domain": "meetings",
       "method": "GET",
+      "path": "/api/v2/organizations/{id}/messaging/moderation/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/messaging/moderation/{path}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
       "path": "/api/v2/organizations/{id}/teams",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_ORGANIZATIONS"
