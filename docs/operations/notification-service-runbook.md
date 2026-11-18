@@ -84,7 +84,13 @@ I5 lists FAILED deliveries, REJECTED events and events parked after 30 attempts.
 
 ## 8. Email provider
 
-The service uses its own provider configuration (`NOTIFICATIONS_EMAIL_PROVIDER`, file-based secrets); the Meeting Service keeps its own as the fallback path. A breaker opens after 5 consecutive temporary failures for 60 s. Check the provider status page, then the ledger: `SELECT status, last_error_class, count(*) FROM notif_email_messages GROUP BY 1, 2`. Never print addresses, subjects or bodies (they are sealed).
+The service uses its own provider configuration (`NOTIFICATIONS_EMAIL_PROVIDER`, file-based secrets); the Meeting Service keeps its own as the fallback path.
+
+**Egress.** The replicas live on `cfmeet-core-private`, which is `--internal`. Their providers (Resend, the browser push services) are reached through `cfmeet-notifications-egress`, a non-internal bridge with inter-container traffic disabled. `activate-notifications-email` and `activate-notifications-push` attach it and refuse to finish unless every replica gets an HTTP answer from its providers.
+
+**Symptom: `last_error_class = NETWORK` on every attempt.** The egress network is missing. Re-run the two activations. A CRITICAL message that was leased is never failed over automatically, so if this happens, move the CRITICAL categories to `LEGACY_ONLY` first (`activate-notification-fence`). `diagnose` (`notificationDiagnostics`) reports, as counts only:
+- the email ledger by status and last error class;
+- the Meeting CRITICAL outbox with lease, acknowledgement and completion flags. A breaker opens after 5 consecutive temporary failures for 60 s. Check the provider status page, then the ledger: `SELECT status, last_error_class, count(*) FROM notif_email_messages GROUP BY 1, 2`. Never print addresses, subjects or bodies (they are sealed).
 
 ## 9. Key rotation
 
