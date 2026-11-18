@@ -339,7 +339,8 @@ impl AdmissionService {
     /// count once; the seat is released when the last live session ends (leave, expiry,
     /// replacement, removal, ban, conference end). ADMITTED itself stays the persistent
     /// admission authorization that lets a participant rejoin without waiting again.
-    /// The dedicated viewer pool keeps its admitted-audience count.
+    /// The dedicated viewer pool counts the same way (gap audit M11): a viewer who leaves
+    /// frees a seat for the next one.
     ///
     /// Every seat-taking path runs under the conference row lock (`lock_conference`),
     /// so two requests can never both take the last seat.
@@ -353,6 +354,21 @@ impl AdmissionService {
         let mut q = conference_participants::Entity::find()
             .filter(conference_participants::Column::ConferenceId.eq(conference_id))
             .filter(conference_participants::Column::AdmissionState.eq(AdmissionState::Admitted));
+        let live = Query::select()
+            .column(participant_sessions::Column::ConferenceParticipantId)
+            .from(participant_sessions::Entity)
+            .and_where(participant_sessions::Column::ConferenceId.eq(conference_id))
+            .and_where(
+                participant_sessions::Column::State
+                    .is_in([SessionState::Pending, SessionState::Connected]),
+            )
+            .and_where(
+                participant_sessions::Column::ExpiresAt
+                    .is_null()
+                    .or(participant_sessions::Column::ExpiresAt.gt(Utc::now())),
+            )
+            .to_owned();
+        q = q.filter(conference_participants::Column::Id.in_subquery(live));
         let limit = if viewer_pool {
             q = q.filter(conference_participants::Column::Role.eq(Role::Viewer));
             space.viewer_capacity
@@ -360,21 +376,6 @@ impl AdmissionService {
             if space.viewer_capacity > 0 {
                 q = q.filter(conference_participants::Column::Role.ne(Role::Viewer));
             }
-            let live = Query::select()
-                .column(participant_sessions::Column::ConferenceParticipantId)
-                .from(participant_sessions::Entity)
-                .and_where(participant_sessions::Column::ConferenceId.eq(conference_id))
-                .and_where(
-                    participant_sessions::Column::State
-                        .is_in([SessionState::Pending, SessionState::Connected]),
-                )
-                .and_where(
-                    participant_sessions::Column::ExpiresAt
-                        .is_null()
-                        .or(participant_sessions::Column::ExpiresAt.gt(Utc::now())),
-                )
-                .to_owned();
-            q = q.filter(conference_participants::Column::Id.in_subquery(live));
             space.interactive_capacity
         };
         if q.count(conn).await? >= limit as u64 {
@@ -389,15 +390,12 @@ impl AdmissionService {
     /// Seat check for an already-ADMITTED participant that is (re)connecting: one that
     /// still holds a seat (another live device, or the session a reconnect replaces)
     /// needs no new seat; one whose sessions have all ended takes a free seat again.
-    /// The dedicated viewer pool counts admitted viewers, so a rejoin needs no new seat.
+    /// Viewers follow the same rule (gap audit M11).
     async fn ensure_seat<C: ConnectionTrait>(
         conn: &C,
         space: &meeting_spaces::Model,
         participant: &conference_participants::Model,
     ) -> ApiResult<()> {
-        if participant.role == Role::Viewer && space.viewer_capacity > 0 {
-            return Ok(());
-        }
         let now = Utc::now();
         let holds_seat = Self::active_sessions(conn, participant.id)
             .await?
