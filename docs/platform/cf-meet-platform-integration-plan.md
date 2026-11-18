@@ -117,7 +117,7 @@ Build track (B) and Integrate track (I) run in parallel. Platform Access migrati
 
 | Phase | What | Milestone / acceptance (2 tenants, cross-tenant 404) |
 |---|---|---|
-| **B0** Foundations | Merge #110 naming; ADRs 0062 (Build), 0063 (push handover), 0064 (Apps), 0065 (review/directory/in-meeting); new service permissions in `packages/service-auth/src/permissions.rs`; `userToken` auth mode in `public_api.py` and the gateway (parse only); scope `user_tokens.issue` | CI green; route table unchanged |
+| **B0** Foundations | Merge #110 naming; ADRs 0062 (Build), 0063 (partner push), 0064 (Apps), 0065 (review/directory/in-meeting). New service permissions, scopes and auth modes land in the phase that first uses them (B1/B2), never as unused registry entries | CI green; route table unchanged |
 | **B1** Users API + caps | Platform Access `end_users.rs`, profiles, caps; Developer Console `control/users.rs`, workspace/project caps; `activate-platform-users` | Create/upsert users; B gets 404 on A's user; phone-number id refused; cap enforced |
 | **B2** User tokens + allowed websites | Platform Access `identity/user_tokens.rs`, `environment_origins.rs`; Developer Console token + origins routes, sandbox token generator; gateway `origins.rs` and CORS; `activate-platform-user-tokens` | Tampered or foreign token refused; key revocation takes effect within 30 s; preflight allowed for partner website only on device routes |
 | **B3** Partner chat | Messaging `session_devices.rs`, `sessions.rs`, `middleware.rs`, new `realtime/user_sessions.rs`, `realtime/http.rs` origins, `policy.rs` partner baseline, `MESSAGE_SENT`; `activate-partner-chat` | User sends and receives live in a MANAGED chat; E2EE refused; revoking the user closes the socket |
