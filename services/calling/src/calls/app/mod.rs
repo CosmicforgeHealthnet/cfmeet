@@ -16,6 +16,7 @@
 //! [`CallMediaProvider`] only.
 
 pub mod abuse_reports;
+pub mod abuse_review;
 mod auto_end;
 pub mod blocks;
 mod control;

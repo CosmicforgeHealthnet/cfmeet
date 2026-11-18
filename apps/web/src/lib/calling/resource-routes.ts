@@ -45,13 +45,19 @@ export const callingResourceRoutes: Record<string, CallingResourceDefinition> = 
   },
   "privacy/contacts": {
     title: "Protected contacts",
+    // Privacy Relay's Contact Vault, not Calling: the same-origin adapter mints a one-scope grant at
+    // Calling (POST /v1/privacy-relay/contact-access-grants) and calls the Contact Vault with
+    // X-CF-Contact-Authorization (src/lib/calling/contact-vault.ts). Paths are Privacy Relay's.
     description: "Register a protected contact or retrieve and manage one by its opaque contact reference. Contact data is masked by the API and sensitive response fields are hidden here.",
     detailPath: "/v1/privacy-relay/contacts/{id}",
     detailHref: "/calling/privacy/contacts",
     idKey: "contactReference",
     createPath: "/v1/privacy-relay/contacts",
     updateMethod: "PATCH",
-    actions: [{ label: "Disable contact", method: "POST", pathSuffix: "/disable", needsBody: true, confirmation: "Disable this protected contact?" }],
+    actions: [
+      { label: "Disable contact", method: "POST", pathSuffix: "/disable", needsBody: true, confirmation: "Disable this protected contact?" },
+      { label: "Record verification", method: "POST", pathSuffix: "/verification", needsBody: true },
+    ],
     relatedLinks: [{ label: "Communication contexts", href: "/calling/privacy/contexts" }],
     docsHref: relayDocs,
   },

@@ -290,6 +290,8 @@ pub struct Peers {
     /// The Communications Hub: `calling-communications.read`, `.apply` and `.launch`
     /// (the private owner interfaces of src/communications.rs).
     pub communications: Arc<ServiceTokenSigner>,
+    /// The operator console: `calling-abuse-reports.review` only (C21).
+    pub operator_console: Arc<ServiceTokenSigner>,
     /// A correctly signing service that Calling does NOT trust.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// A verifier for a privacy-relay identity that trusts Calling (outbound tests).
@@ -342,6 +344,7 @@ pub fn service_auth_fixture_targeting(
     let meeting_service_key = service_key("meeting-service-test-1");
     let developer_platform_key = service_key("developer-platform-test-1");
     let communications_key = service_key("communications-test-1");
+    let operator_console_key = service_key("operator-console-test-1");
     let calling_jwk = calling_key.public_jwk();
 
     let calling_policy = TrustPolicy::from_json(
@@ -403,6 +406,11 @@ pub fn service_auth_fixture_targeting(
                         "calling-communications.apply",
                         "calling-communications.launch",
                     ],
+                ),
+                (
+                    cf_service_auth::services::OPERATOR_CONSOLE,
+                    vec![operator_console_key.public_jwk()],
+                    &["calling-abuse-reports.review"],
                 ),
             ],
         ),
@@ -508,6 +516,13 @@ pub fn service_auth_fixture_targeting(
             ServiceId::communications(),
             env,
             communications_key,
+            TokenTtl::default(),
+            shared.clone(),
+        )),
+        operator_console: Arc::new(ServiceTokenSigner::new(
+            ServiceId::operator_console(),
+            env,
+            operator_console_key,
             TokenTtl::default(),
             shared.clone(),
         )),

@@ -489,6 +489,12 @@ peer service ◄─ X-CF-Service-Authorization: Bearer <EdDSA JWS> ◄───�
   outbound_for_customer, outbound_next_hop}` and `ServiceAuthRuntime::client()` (HTTPS in
   staging / production, no redirects, no proxies, `/internal/v1/` paths only).
 
+* Operator review of abuse reports (C21): `GET /internal/v1/abuse-reports` (queue across
+  scopes, oldest first, keyset cursor) and `POST /internal/v1/abuse-reports/{id}/resolve`
+  require `calling-abuse-reports.review`, grantable to `cfmeet.operator-console` only
+  (`src/calls/app/abuse_review.rs`). Add the operator console to Calling's trust bundle
+  with that permission to enable it.
+
 ADR: [0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md).
 
 ### First-party organization requests (Blueprint Section 12 follow-up, CAL-007)
@@ -760,6 +766,9 @@ $A compliance set --tenant acme --application dispatch --environment production 
 $A compliance show --tenant acme --application dispatch --environment production
 $A compliance revoke --tenant acme --application dispatch --environment production
 $A abuse-report set-status --report <id> --status reviewed
+# The same review over HTTP (C21): the operator console, with the receiver-granted
+# permission calling-abuse-reports.review, uses GET /internal/v1/abuse-reports and
+# POST /internal/v1/abuse-reports/{id}/resolve (same audit row, actor = the service id).
 $A block release --block <id>
 # Retention (Part H §80): holds are audited; list / policies are read-only.
 $A retention policies

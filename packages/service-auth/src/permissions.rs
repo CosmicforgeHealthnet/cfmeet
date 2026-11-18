@@ -413,6 +413,10 @@ pub enum InternalPermission {
     /// Notification Service only.
     #[serde(rename = "account-route-lease.claim")]
     AccountRouteLeaseClaim,
+    /// Calling: operator review of abuse reports (list the open queue, resolve a report
+    /// as REVIEWED / DISMISSED or reopen it; audited). Operator tooling only.
+    #[serde(rename = "calling-abuse-reports.review")]
+    CallingAbuseReportsReview,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -1123,6 +1127,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Claim CRITICAL send leases on, and report completed sends for, Account notification route decisions (fencing tokens; no code or address)",
     },
+    PermissionDefinition {
+        permission: InternalPermission::CallingAbuseReportsReview,
+        name: "calling-abuse-reports.review",
+        receiver: services::CALLING,
+        grantable_to: &[services::OPERATOR_CONSOLE],
+        sensitive: true,
+        description: "List Calling abuse reports across scopes and resolve them (REVIEWED / DISMISSED / reopen), operator-audited; bounded codes and opaque ids only, never free text or contact data; operator tooling only",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -1229,6 +1241,7 @@ impl InternalPermission {
         InternalPermission::CommunicationsRestrictionsRead,
         InternalPermission::OrganizationInvitationsRead,
         InternalPermission::AccountRouteLeaseClaim,
+        InternalPermission::CallingAbuseReportsReview,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1964,6 +1977,11 @@ mod tests {
             assert_eq!(d.grantable_to, &[services::OPERATOR_CONSOLE], "{}", d.name);
             assert_eq!(d.sensitive, sensitive, "{}", d.name);
         }
+        // Calling abuse-report review: received by Calling, operator tooling only.
+        let review = CallingAbuseReportsReview.definition();
+        assert_eq!(review.receiver, services::CALLING);
+        assert_eq!(review.grantable_to, &[services::OPERATOR_CONSOLE]);
+        assert!(review.sensitive);
         // Owner APIs: each received by its authority, grantable to the service ONLY.
         // Addresses (X1, X2) are sensitive; X5 never returns the email (not sensitive).
         for (p, receiver, sensitive) in [

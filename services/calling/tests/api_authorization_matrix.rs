@@ -281,6 +281,10 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ),
     ("POST /internal/v1/platform/events", Probe::Body),
     (
+        "POST /internal/v1/abuse-reports/{abuse_report_id}/resolve",
+        Probe::Body,
+    ),
+    (
         "POST /internal/v1/webhook-migration/rollback/subscriptions",
         Probe::Body,
     ),
@@ -625,6 +629,15 @@ async fn provision() -> Option<Provisioned> {
     )
     .await;
     ids.insert("block_id", id_of(&block, "blockId"));
+    // An abuse report (operator review, C21) on a connected call.
+    let (reported, _, _) = a.connected_call("VOICE").await;
+    let report = send(
+        Method::POST,
+        &format!("/v1/calls/{reported}/abuse-reports"),
+        json!({ "principalId": a.w.initiator.id(), "category": "SPAM" }),
+    )
+    .await;
+    ids.insert("abuse_report_id", id_of(&report, "abuseReportId"));
     // Last (its ring window is fresh): a ringing application call — invitation,
     // sessions, endpoints, signaling credentials.
     let (call, caller_device, callee_device) = a.ringing_call("VOICE").await;
@@ -1037,6 +1050,8 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                     peers.telephony.clone()
                 } else if permission.starts_with("webhook-migration.") {
                     peers.developer_platform.clone()
+                } else if permission == "calling-abuse-reports.review" {
+                    peers.operator_console.clone()
                 } else {
                     peers.privacy_relay.clone()
                 };
