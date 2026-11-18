@@ -465,6 +465,28 @@ pub enum InternalPermission {
     /// scope-locked to that environment. Developer Console only.
     #[serde(rename = "notifications-push-provider.manage")]
     NotificationsPushProviderManage,
+    // ---- CF Meet Apps "Integrate" (ADR 0064 / 0065) ----
+    /// Platform Access: an app's OAuth client profile, client-secret issue / rotation,
+    /// status and grant listing. Developer Console only.
+    #[serde(rename = "platform-oauth.manage")]
+    PlatformOauthManage,
+    /// Platform Access: the OAuth token endpoint backend (authorization-code and refresh
+    /// exchange, revoke, introspect). Developer Console only.
+    #[serde(rename = "platform-oauth.token")]
+    PlatformOauthToken,
+    /// Platform Access: validate an authorization request, create the code and grant for
+    /// the signed-in account, list and revoke an account's or organization's grants.
+    /// Meeting Service (the account authority) only.
+    #[serde(rename = "platform-oauth.authorize")]
+    PlatformOauthAuthorize,
+    /// Organizations: evaluate an organization's app install policy for an account.
+    /// Meeting Service only.
+    #[serde(rename = "organization-apps.evaluate")]
+    OrganizationAppsEvaluate,
+    /// Meeting Service: read an account's profile for the OAuth userinfo endpoint (display
+    /// name, avatar, optionally email). Developer Console only.
+    #[serde(rename = "meeting-oauth-userinfo.read")]
+    MeetingOauthUserinfoRead,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -1267,6 +1289,46 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: false,
         description: "Store (sealed), verify, read the status of and delete a partner environment's own APNs / APNs VoIP / FCM push credentials; scope-locked to that environment; the secret is never returned",
     },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformOauthManage,
+        name: "platform-oauth.manage",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Manage the OAuth client profile of the developer's own application (redirect URIs, requested scopes, distribution, status), issue / rotate its client secret (returned once) and list its grants; never another tenant's application",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformOauthToken,
+        name: "platform-oauth.token",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "OAuth token endpoint backend: exchange authorization codes and refresh tokens after client authentication, revoke and introspect app tokens",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformOauthAuthorize,
+        name: "platform-oauth.authorize",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Validate an OAuth authorization request and create the single-use code and grant for the account the Meeting Service authenticated (user or organization install), list and revoke an account's or organization's app grants",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::OrganizationAppsEvaluate,
+        name: "organization-apps.evaluate",
+        receiver: services::ORGANIZATIONS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Evaluate an organization's app install policy for an account (membership, role tier, allow list); a decision only, no organization data",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MeetingOauthUserinfoRead,
+        name: "meeting-oauth-userinfo.read",
+        receiver: services::MEETING_SERVICE,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Read the display name, avatar and (only with the profile:email grant) email of an account for the OAuth userinfo endpoint",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -1383,6 +1445,11 @@ impl InternalPermission {
         InternalPermission::PlatformPrincipalEnsureMeetingPlatform,
         InternalPermission::MessagingMeetingSyncPlatform,
         InternalPermission::NotificationsPushProviderManage,
+        InternalPermission::PlatformOauthManage,
+        InternalPermission::PlatformOauthToken,
+        InternalPermission::PlatformOauthAuthorize,
+        InternalPermission::OrganizationAppsEvaluate,
+        InternalPermission::MeetingOauthUserinfoRead,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1809,6 +1876,10 @@ mod tests {
                 // ADR 0062 / 0063: the partner Users API and partner push credentials.
                 "platform-end-users.delegate",
                 "notifications-push-provider.manage",
+                // ADR 0064: CF Meet Apps (OAuth client profile, token endpoint, userinfo).
+                "platform-oauth.manage",
+                "platform-oauth.token",
+                "meeting-oauth-userinfo.read",
             ]
         );
         assert_eq!(
@@ -1886,7 +1957,9 @@ mod tests {
                 // cfmeet.notifications only).
                 "account-contacts.read",
                 "meeting-notification-recipients.read",
-                "account-route-lease.claim"
+                "account-route-lease.claim",
+                // ADR 0064: OAuth userinfo for the Developer Console.
+                "meeting-oauth-userinfo.read"
             ]
         );
         // The only sensitive grants the Meeting Service may hold are the Organizations
@@ -1904,7 +1977,8 @@ mod tests {
                 "organization.administer",
                 "organization.migrate",
                 "calling-request.act-for-organization",
-                "platform-principal.ensure-meeting-platform"
+                "platform-principal.ensure-meeting-platform",
+                "platform-oauth.authorize"
             ]
         );
         for d in REGISTRY
@@ -1913,7 +1987,9 @@ mod tests {
         {
             let expected = if d.permission == CallingRequestActForOrganization {
                 services::CALLING
-            } else if d.permission == PlatformPrincipalEnsureMeetingPlatform {
+            } else if d.permission == PlatformPrincipalEnsureMeetingPlatform
+                || d.permission == PlatformOauthAuthorize
+            {
                 // ADR 0062: partner meeting chat's fixed system principal.
                 services::PLATFORM_ACCESS
             } else {
@@ -1974,6 +2050,12 @@ mod tests {
                 (
                     "organization-invitations.read",
                     &[services::NOTIFICATIONS][..],
+                    false
+                ),
+                // ADR 0064: app install policy decision for the Meeting Service.
+                (
+                    "organization-apps.evaluate",
+                    &[services::MEETING_SERVICE][..],
                     false
                 ),
             ]

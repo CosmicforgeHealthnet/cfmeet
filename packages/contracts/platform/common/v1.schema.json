@@ -180,7 +180,12 @@
         "platform-environment-origins.read",
         "platform-principal.ensure-meeting-platform",
         "messaging-meeting.sync-platform",
-        "notifications-push-provider.manage"
+        "notifications-push-provider.manage",
+        "platform-oauth.manage",
+        "platform-oauth.token",
+        "platform-oauth.authorize",
+        "organization-apps.evaluate",
+        "meeting-oauth-userinfo.read"
       ]
     }
   }
