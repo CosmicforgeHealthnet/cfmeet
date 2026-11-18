@@ -993,7 +993,7 @@ impl HttpPlatformAccess {
                 .json::<Value>()
                 .map(Delegated::Ok)
                 .map_err(|_| AuthorityUnavailable("malformed delegation response".into())),
-            status @ (400 | 403 | 404 | 409 | 422) => Ok(Delegated::Refused {
+            status @ 400..=499 => Ok(Delegated::Refused {
                 status,
                 code: response
                     .error_code()
@@ -1050,7 +1050,7 @@ impl HttpPlatformAccess {
                 .json::<Value>()
                 .map(|body| EndUsersReply::Ok { status, body })
                 .map_err(|_| AuthorityUnavailable("malformed end-user response".into())),
-            status @ (400 | 403 | 404 | 409 | 422 | 429) => Ok(EndUsersReply::Refused {
+            status @ 400..=499 => Ok(EndUsersReply::Refused {
                 status,
                 code: response
                     .error_code()

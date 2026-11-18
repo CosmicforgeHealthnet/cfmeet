@@ -11,6 +11,15 @@ The route table is generated (`infra/api-gateway/route-manifest.json`, from the 
 allow-list `infra/api-gateway/public-routes.json` by `scripts/contracts/public_api.py`). In
 production the edge sends only the activated `/v1` families here (`coordinated_release.py`).
 
+**Partner meetings family (`/v1/meetings`).** The Meeting Service's machine operations live on
+`/api/v2/...`, which the edge keeps on the CF Meet apps' direct ingress. The generator therefore
+also emits, for every meetings operation that accepts a platform credential, an alias route
+`meetings.platform.<operationId>`: public `/v1/meetings/<rest>`, upstream `/api/v2/<rest>`,
+`PLATFORM_CREDENTIAL` only, same scope (`aliasOf` names the `/api/v2` route, which is unchanged).
+`src/routing.rs` accepts exactly this rewrite shape (Meeting Service upstream, REST,
+platform credential only, identical segments and parameters, no forbidden segment); the
+edge prefix is added by `activate-platform-meetings`.
+
 Request pipeline (`src/http/ingress.rs`):
 
 1. new server-generated request / correlation ids (returned as `X-Request-Id`,

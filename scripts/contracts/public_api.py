@@ -351,8 +351,8 @@ def build():
     stale = set(entries) - seen
     if stale:
         raise CatalogueError(f"allow-list entries without a contract operation: {sorted(stale)[:5]}")
-    # Aliases are checked against routes collected so far; a later source route with an
-    # alias's (method, pattern) would already have failed the collision check above.
+    # Alias (method, pattern) keys were reserved as they were made, so a source route on
+    # an alias path fails the collision check above. Aliases follow the source routes.
     alias_ids = {a["id"] for a in alias_routes}
     for a in alias_routes:
         # A deprecated machine operation's alias points at the replacement's alias when it has one.

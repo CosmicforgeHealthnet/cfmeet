@@ -1255,13 +1255,12 @@ async fn partner_meeting_chat_is_synchronised_in_the_partner_scope() {
             &meeting,
             Method::POST,
             &format!("/internal/v1/meeting-conversations/{id}/lifecycle"),
-            Some(json!({ "state": "ENDED", "sourceVersion": 2 })),
+            Some(json!({ "lifecycleState": "CLOSED", "sourceVersion": 2 })),
             Some(scope.clone()),
             &[],
         )
         .await;
-    assert_ne!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
-    assert_ne!(r.code(), "DELEGATED_CONTEXT_INVALID", "{}", r.text);
+    assert!(r.status.is_success(), "{}", r.text);
     // Another environment's principal is never admitted; nor a non-partner kind; nor a
     // non-system owner.
     let other = environment(h, false);

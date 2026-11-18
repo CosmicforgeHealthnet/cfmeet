@@ -219,7 +219,7 @@ impl IssueToken {
     fn forwarded(&self) -> Result<Value, ApiError> {
         grants(&self.grants)?;
         let mut body = Map::new();
-        body.insert("grants".into(), self.grants.clone());
+        body.insert("grants".into(), forwarded_grants(&self.grants));
         if let Some(t) = ttl(self.ttl_seconds)? {
             body.insert("ttlSeconds".into(), json!(t));
         }
@@ -397,19 +397,47 @@ pub fn redact_token(v: &mut Value) {
 // Platform Access
 // ---------------------------------------------------------------------------------------
 
-/// Platform Access's Partner Users refusals as Developer Platform errors.
+/// Platform Access's Partner Users refusals as Developer Platform errors, mapped by the
+/// stable `error.code` (PA's statuses differ from the contract doc: VALIDATION_ERROR is
+/// 400, POLICY_VIOLATION 422); the HTTP status is only the fallback for an unknown code.
 pub fn refusal(status: u16, code: &str) -> ApiError {
-    ApiError(match (status, code) {
-        (404, _) => ErrorCode::NotFound,
-        (_, "LIMIT_EXCEEDED") => ErrorCode::LimitExceeded,
-        (_, "SCOPE_REQUIRED" | "INSUFFICIENT_SCOPE") => ErrorCode::InsufficientScope,
-        (429, _) | (_, "RATE_LIMITED") => ErrorCode::RateLimited,
-        (_, "POLICY_VIOLATION") => ErrorCode::PolicyViolation,
-        (_, "VALIDATION_ERROR") | (400 | 422, _) => ErrorCode::ValidationError,
-        (409, _) | (_, "INVALID_STATE") => ErrorCode::InvalidState,
-        (403, _) => ErrorCode::PermissionDenied,
-        _ => ErrorCode::ServiceUnavailable,
+    ApiError(match code {
+        "VALIDATION_ERROR" => ErrorCode::ValidationError,
+        "POLICY_VIOLATION" => ErrorCode::PolicyViolation,
+        "SCOPE_REQUIRED" | "INSUFFICIENT_SCOPE" => ErrorCode::InsufficientScope,
+        "LIMIT_EXCEEDED" => ErrorCode::LimitExceeded,
+        "RATE_LIMITED" => ErrorCode::RateLimited,
+        "NOT_FOUND" => ErrorCode::NotFound,
+        "INVALID_STATE" => ErrorCode::InvalidState,
+        "PERMISSION_DENIED" => ErrorCode::PermissionDenied,
+        // The forwarded credential was missing / did not authenticate at Platform Access.
+        "DELEGATED_CONTEXT_REQUIRED" => ErrorCode::DelegatedContextRequired,
+        "DELEGATED_CONTEXT_INVALID" => ErrorCode::DelegatedContextInvalid,
+        _ => match status {
+            400 | 422 => ErrorCode::ValidationError,
+            403 => ErrorCode::PermissionDenied,
+            404 => ErrorCode::NotFound,
+            409 => ErrorCode::InvalidState,
+            429 => ErrorCode::RateLimited,
+            _ => ErrorCode::ServiceUnavailable,
+        },
     })
+}
+
+/// Validated grants in Platform Access's request shape: `{msg, call, mtg: [{conferenceId,
+/// role}]}` (a compact `{c, r}` meeting entry is expanded).
+fn forwarded_grants(value: &Value) -> Value {
+    let mut out = value.clone();
+    if let Some(entries) = out.get_mut("mtg").and_then(Value::as_array_mut) {
+        for e in entries {
+            let o = e.as_object().cloned().unwrap_or_default();
+            *e = json!({
+                "conferenceId": o.get("conferenceId").or_else(|| o.get("c")).cloned(),
+                "role": o.get("role").or_else(|| o.get("r")).cloned(),
+            });
+        }
+    }
+    out
 }
 
 fn machine(caller: &Caller) -> Result<&MachineCaller, ApiError> {
@@ -743,6 +771,17 @@ mod tests {
         }
         assert!(ttl(Some(59)).is_err() && ttl(Some(86_401)).is_err());
         assert_eq!(ttl(Some(60)).unwrap(), Some(60));
+        // Platform Access takes `{msg, call, mtg: [{conferenceId, role}]}`.
+        let c = "33333333-3333-4333-8333-333333333333";
+        let compact = IssueToken {
+            grants: json!({ "msg": ["read"], "mtg": [{ "c": c, "r": "HOST" }] }),
+            ttl_seconds: None,
+        };
+        assert_eq!(
+            compact.forwarded().unwrap(),
+            json!({ "grants": { "msg": ["read"],
+                    "mtg": [{ "conferenceId": c, "role": "HOST" }] } })
+        );
     }
 
     #[test]
@@ -781,21 +820,32 @@ mod tests {
 
     #[test]
     fn refusals_map_to_stable_errors() {
-        assert_eq!(refusal(404, "NOT_FOUND").0, ErrorCode::NotFound);
-        assert_eq!(refusal(409, "LIMIT_EXCEEDED").0, ErrorCode::LimitExceeded);
-        assert_eq!(
-            refusal(422, "VALIDATION_ERROR").0,
-            ErrorCode::ValidationError
-        );
-        assert_eq!(
-            refusal(403, "SCOPE_REQUIRED").0,
-            ErrorCode::InsufficientScope
-        );
-        assert_eq!(refusal(429, "RATE_LIMITED").0, ErrorCode::RateLimited);
-        assert_eq!(
-            refusal(403, "POLICY_VIOLATION").0,
-            ErrorCode::PolicyViolation
-        );
-        assert_eq!(refusal(500, "BOOM").0, ErrorCode::ServiceUnavailable);
+        // Platform Access's actual statuses: the code decides, never the status.
+        for (status, code, want) in [
+            (400, "VALIDATION_ERROR", ErrorCode::ValidationError),
+            (422, "POLICY_VIOLATION", ErrorCode::PolicyViolation),
+            (403, "SCOPE_REQUIRED", ErrorCode::InsufficientScope),
+            (409, "LIMIT_EXCEEDED", ErrorCode::LimitExceeded),
+            (429, "RATE_LIMITED", ErrorCode::RateLimited),
+            (404, "NOT_FOUND", ErrorCode::NotFound),
+            (
+                401,
+                "DELEGATED_CONTEXT_REQUIRED",
+                ErrorCode::DelegatedContextRequired,
+            ),
+            (
+                403,
+                "DELEGATED_CONTEXT_INVALID",
+                ErrorCode::DelegatedContextInvalid,
+            ),
+            (404, "VALIDATION_ERROR", ErrorCode::ValidationError),
+            // Unknown codes fall back to the status.
+            (422, "REFUSED", ErrorCode::ValidationError),
+            (409, "REFUSED", ErrorCode::InvalidState),
+            (401, "REFUSED", ErrorCode::ServiceUnavailable),
+            (500, "BOOM", ErrorCode::ServiceUnavailable),
+        ] {
+            assert_eq!(refusal(status, code).0, want, "{status} {code}");
+        }
     }
 }

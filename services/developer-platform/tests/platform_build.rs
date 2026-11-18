@@ -606,7 +606,7 @@ async fn the_users_api_checks_scopes_callers_and_maps_platform_access_errors() {
             "LIMIT_EXCEEDED",
         ),
         (
-            422,
+            400,
             "VALIDATION_ERROR",
             StatusCode::BAD_REQUEST,
             "VALIDATION_ERROR",
@@ -618,7 +618,7 @@ async fn the_users_api_checks_scopes_callers_and_maps_platform_access_errors() {
             "INSUFFICIENT_SCOPE",
         ),
         (
-            403,
+            422,
             "POLICY_VIOLATION",
             StatusCode::UNPROCESSABLE_ENTITY,
             "POLICY_VIOLATION",
@@ -630,6 +630,18 @@ async fn the_users_api_checks_scopes_callers_and_maps_platform_access_errors() {
             "RATE_LIMITED",
         ),
         (404, "NOT_FOUND", StatusCode::NOT_FOUND, "NOT_FOUND"),
+        (
+            401,
+            "DELEGATED_CONTEXT_REQUIRED",
+            StatusCode::FORBIDDEN,
+            "DELEGATED_CONTEXT_REQUIRED",
+        ),
+        (
+            403,
+            "DELEGATED_CONTEXT_INVALID",
+            StatusCode::FORBIDDEN,
+            "DELEGATED_CONTEXT_INVALID",
+        ),
     ] {
         *c.pa.end_users_refusal.lock().unwrap() = Some((status, pa_code.into()));
         let r = c
