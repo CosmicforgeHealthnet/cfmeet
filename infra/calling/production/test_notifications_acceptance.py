@@ -21,11 +21,13 @@ class FakeNotifications(FakeApi):
         self.deliver, self.duplicate, self.honour, self.leak = deliver, duplicate, honour_preferences, leak
 
     def notify(self, user_id):
-        if not self.deliver or (self.honour and not self.prefs[user_id]['organizationUpdates']):
+        if not self.deliver:
             return
+        # Document 4 §7.2 rule 7: a category switched off records the in-app item silently.
+        silent = self.honour and not self.prefs[user_id]['organizationUpdates']
         for _ in range(2 if self.duplicate else 1):
             self.inbox[user_id].append({'id': str(uuid.uuid4()), 'category': 'ORGANIZATION_UPDATES',
-                                        'readAt': None, 'dismissedAt': None})
+                                        'readAt': None, 'dismissedAt': None, 'silent': silent})
 
     def __call__(self, method, url, headers, data):
         path = url[len(oa.PUBLIC):]
@@ -41,7 +43,8 @@ class FakeNotifications(FakeApi):
                     items += self.inbox[b['userId']]
                 return 200, {'items': items, 'unreadCount': 0}
             if path == '/api/v2/notifications/unread-count':
-                return 200, {'unreadCount': sum(1 for i in mine if not i['readAt'] and not i['dismissedAt'])}
+                return 200, {'unreadCount': sum(1 for i in mine if not i['readAt'] and not i['dismissedAt']
+                                                and not i['silent'])}
             if path in ('/api/v2/notifications/read', '/api/v2/notifications/dismiss'):
                 field = 'readAt' if path.endswith('read') else 'dismissedAt'
                 for i in mine:
@@ -121,6 +124,28 @@ class Acceptance(unittest.TestCase):
         checks, _ = run(FakeNotifications(accounts(), honour_preferences=False))
         self.assertEqual(checks['preference_off_suppresses_and_on_restores'], 'FAIL')
         self.assertEqual(checks['role_change_reaches_the_member_once'], 'PASS')
+
+    def test_run_asks_app_acceptance_for_accounts_it_accepts(self):
+        """The real argument checks of app_acceptance.accounts (production run 44173524918 failed
+        on them: auth security checks are for the organization namespace only)."""
+        import tempfile
+        from unittest import mock
+        import app_acceptance
+        seen = []
+
+        def accounts(namespace=None, count=3, security_checks=False, keep_sessions=False):
+            with mock.patch.object(app_acceptance.p, 'SECRETS', cr.Path(tempfile.mkdtemp())), \
+                    mock.patch.object(app_acceptance.p, 'write_private', lambda *a: None), \
+                    mock.patch.object(app_acceptance, 'redis_url', lambda: None), \
+                    mock.patch.object(app_acceptance, 'sign_in',
+                                      lambda a, url: {'is_new_account': True, 'user': {'id': str(uuid.uuid4())}}):
+                seen.append(namespace)
+                return real(namespace, count, security_checks, keep_sessions)
+        real = app_acceptance.accounts
+        with mock.patch.object(app_acceptance, 'accounts', accounts), \
+                mock.patch.object(na.Journey, 'run', lambda self: {}):
+            na.run('44173524918-1', lambda *a: None)
+        self.assertEqual(seen, ['notifications-44173524918-1'])
 
     def test_the_operation_is_gated_on_the_producer_and_the_routing_row(self):
         self.assertIn('notifications-acceptance', cr.OPERATIONS)

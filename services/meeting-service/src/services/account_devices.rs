@@ -1586,22 +1586,22 @@ pub async fn send_email_code(
             (l.expires_at - Utc::now()).num_minutes().max(1)
         ),
     );
-    crate::services::email_delivery::enqueue(
+    // CRITICAL lane (N12): LEGACY_ONLY records exactly this ledger row; otherwise the
+    // SECURITY_DEVICE_STEP_UP fence decides old ledger or Notification Service.
+    crate::services::email::device_step_up_code_on(
         &txn,
-        crate::services::email_delivery::NewEmail {
-            category: crate::services::email_delivery::category::SECURITY_DEVICE_STEP_UP,
-            idempotency_key: Some(format!(
-                "device-step-up:{}:{}",
-                l.id,
-                &code_digest(l.id, &code)[..16]
-            )),
-            to: caller.user.email.clone(),
-            to_name: Some(caller.user.username.clone()),
-            subject: "Your CF Meet device verification code".into(),
-            html: template.html,
-            text: template.text,
-            expires_at: Some(l.expires_at),
-        },
+        &caller.user.email,
+        &caller.user.username,
+        caller.user.id,
+        d.id,
+        format!(
+            "device-step-up:{}:{}",
+            l.id,
+            &code_digest(l.id, &code)[..16]
+        ),
+        &code,
+        template,
+        l.expires_at,
     )
     .await?;
     let l = find_link(&txn, caller.user.id, link_id).await?;
@@ -1781,6 +1781,8 @@ pub async fn complete_link(
             &txn,
             &caller.user.email,
             &caller.user.username,
+            caller.user.id,
+            d.id,
             l.id,
             subject,
             message,

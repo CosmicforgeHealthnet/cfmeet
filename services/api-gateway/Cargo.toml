@@ -40,7 +40,7 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 # Realtime forwarding (upstream WebSocket client).
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
 # Shared atomic quota counters (no business data).
-redis = { version = "0.27", default-features = false, features = ["tokio-comp", "aio", "connection-manager", "script"] }
+redis = { version = "0.27", default-features = false, features = ["tokio-comp", "aio", "connection-manager", "script", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 sha2 = "0.10"
 base64 = "0.22"

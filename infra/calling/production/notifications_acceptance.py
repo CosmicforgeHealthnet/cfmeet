@@ -18,8 +18,8 @@ and proves, as named checks:
   - a membership role change reaches the member, exactly once;
   - unread count, read and dismiss work, and are idempotent;
   - another account sees nothing of it and cannot mark it read (isolation);
-  - a preference switched off suppresses the next in-app notification of that category, and
-    switched on again lets it through (preferences are enforced by the service).
+  - a preference switched off silences the next in-app notification of that category (no unread
+    count; no push or email), and switched on again it counts (Document 4 §7.2 rule 7).
 
 (`organizations.invitation.created` is not checked: invitations are addressed by email and
 Organizations knows no invitee account, so the in-app copy has no recipient; the invitee is
@@ -188,21 +188,26 @@ class Journey(oa.Journey):
         self.b.membership = updated if isinstance(updated, dict) and updated.get('version') else m
 
     def preference(self):
+        """Document 4 §7.2 rule 7: a category switched off sends no push and no email, and its
+        in-app item is recorded silently (never counted as unread). Switched on again, the next
+        item counts. Production run 44200593365 showed the silent item; this checks the rule."""
         self.set_category(self.b, False)
         self.pref_changed = True
+        unread = self.unread(self.b)
         before = self.org_ids(self.b)
         self.change_role('MEMBER')
         self.sleep(QUIET_WAIT_SECONDS)
-        self.require(not (self.org_ids(self.b) - before), 'nothing delivered while the category is off')
+        self.require(self.unread(self.b) == unread, 'a category switched off raises no unread count (silent)')
         self.set_category(self.b, True)
         self.pref_changed = False
+        before = self.org_ids(self.b)
         self.change_role('ADMIN')
         self.wait_new(self.b, before)
+        self.require(self.unread(self.b) == unread + 1, 'switched on again, the next notification counts')
         self.ncheck('preference_off_suppresses_and_on_restores')
-
 
 def run(run_id, emit):
     import app_acceptance
-    accounts = app_acceptance.accounts('notifications-' + run_id.replace('_', '-').lower()[:48], count=3,
-                                      security_checks=True)
+    # No auth security checks here (app_acceptance runs them for the organization journey only).
+    accounts = app_acceptance.accounts('notifications-' + run_id.replace('_', '-').lower()[:48], count=3)
     return Journey(accounts, emit).run()

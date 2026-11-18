@@ -370,6 +370,25 @@ pub struct AddMemberRequest {
     pub role: Role,
 }
 
+/// Gap audit G7: add every active member of one of the space's organization teams.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AddTeamMembersRequest {
+    pub team_id: Uuid,
+    /// Meeting role given to each team member (same grant rules as one member).
+    pub role: Role,
+}
+
+/// Result of adding a team (gap audit G7).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTeamMembersResponse {
+    /// Members added now.
+    pub added: Vec<MemberResponse>,
+    /// Team members skipped: already members, the owner, you, or not an active account.
+    pub skipped: usize,
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateMemberRequest {

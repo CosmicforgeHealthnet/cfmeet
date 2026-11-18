@@ -25,6 +25,8 @@ COPY packages/usage-facts/ /app/packages/usage-facts/
 COPY packages/object-storage/ /app/packages/object-storage/
 # Dev-dependency of the end-to-end tests only (Cargo resolves every path manifest).
 COPY packages/messaging-crypto/ /app/packages/messaging-crypto/
+# Notification Service producer client (envelope builder / HPKE sealing; roadmap N7 / N11).
+COPY packages/notification-client/ /app/packages/notification-client/
 
 # Build for release
 # Build the migration binary from the migration package

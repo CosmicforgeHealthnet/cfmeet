@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/notifications/events/v1.schema.json",
   "title": "CF Meet notification event envelope v1 (cfmeet.notifications.event)",
-  "description": "Envelope every producer posts to the Notification Service (I1, ingestNotificationEvents) from its transactional outbox, built with packages/notification-client (Document 4 §5). Aligned with cfmeet.platform.event-envelope. Rules beyond JSON Schema, enforced by notification-client and I1: total size ≤ 4 KiB (≤ 8 KiB with `sealed`); `producer` equals the authenticated service identity; the service accepts the current and previous eventVersion per type. `data` keys are camelCase and never contain secret, private, token, ciphertext, plaintext, content, body, password, email, phone, key or code (any case): such values travel only inside `sealed`, and `sealed` is allowed only for the catalogue types that declare it (#21–#25). CRITICAL priority is allowed only for account.* types from cfmeet.meeting-service. Email categories that exist today carry today's idempotency key formats. Every event carries the producer's routing-fence decision (`route`). The control event notifications.cancel cancels pending items by cancelKey. The catalogue is also published machine-readably under x-cfmeet-catalogue.",
+  "description": "Envelope every producer posts to the Notification Service (I1, ingestNotificationEvents) from its transactional outbox, built with packages/notification-client (Document 4 §5). Aligned with cfmeet.platform.event-envelope. Rules beyond JSON Schema, enforced by notification-client and I1: total size ≤ 4 KiB (≤ 8 KiB with `sealed`); `producer` equals the authenticated service identity; the service accepts the current and previous eventVersion per type. `data` keys are camelCase and never contain secret, private, token, ciphertext, plaintext, content, body, password, email, phone, key or code (any case): such values travel only inside `sealed`, and `sealed` is allowed only for the catalogue types that declare it (#21–#25, #32–#34). CRITICAL priority is allowed only for account.* types from cfmeet.meeting-service. Email categories that exist today carry today's idempotency key formats. Every event carries the producer's routing-fence decision (`route`). The control event notifications.cancel cancels pending items by cancelKey. A catalogue entry naming a `recipient` kind requires exactly one recipient of that kind. The catalogue is also published machine-readably under x-cfmeet-catalogue.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -952,6 +952,11 @@
                   "PRIVATE_E2EE",
                   "MANAGED"
                 ]
+              },
+              "sequence": {
+                "description": "1.1.0 (N9): the message sequence, carried into the 5-key metadata wake-up payload (parity with Messaging's legacy push).",
+                "type": "integer",
+                "minimum": 0
               }
             }
           }
@@ -1962,6 +1967,224 @@
       "if": {
         "properties": {
           "eventType": {
+            "const": "account.sign-in-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^otp:signin:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "requestedAt",
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              },
+              "requestedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "requestClient": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+              },
+              "requestNetwork": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 64,
+                "pattern": "^[0-9A-Fa-f.:]*x[0-9A-Fa-fx.:]*$"
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed"
+        ],
+        "not": {
+          "required": [
+            "subject"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.email-change-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^meeting-email-principal:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^otp:emailchange:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "account.step-up-code.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.meeting-service"
+          },
+          "recipients": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                }
+              }
+            }
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "CRITICAL"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "pattern": "^otp:stepup:[A-Za-z0-9:_.-]{1,140}$"
+              }
+            },
+            "required": [
+              "idempotencyKey"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "purpose",
+              "ttlMinutes"
+            ],
+            "properties": {
+              "ttlMinutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10080
+              },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "DEACTIVATE_ACCOUNT",
+                  "CHANGE_EMAIL"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "sealed",
+          "subject"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
             "const": "notifications.cancel"
           }
         },
@@ -2249,12 +2472,13 @@
       "sealed": null,
       "idempotencyKey": null,
       "optional": false,
-      "note": "ids only; recipients and entitlement via X3 at send and dispatch; category DIRECT_MESSAGES or GROUP_MESSAGES by conversationKind; never content",
+      "note": "ids only; recipients and entitlement via X3 at send and dispatch; category DIRECT_MESSAGES or GROUP_MESSAGES by conversationKind; never content; optional sequence (message sequence, 1.1.0) keeps the 5-key wake-up payload",
       "dataKeys": [
         "conversationId",
         "conversationKind",
         "eventSequence",
-        "securityProfile"
+        "securityProfile",
+        "sequence"
       ]
     },
     {
@@ -2575,6 +2799,70 @@
       ]
     },
     {
+      "number": 32,
+      "eventType": "account.sign-in-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code",
+        "token",
+        "address"
+      ],
+      "idempotencyKey": "otp-signin",
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "passwordless sign-in / sign-up code and magic link (PR #97), to the typed address, which may have no account yet: no subject, one email principal (derived from the normalized address) with the address sealed; requestClient / requestNetwork are the client label and masked network prefix the email shows, never an address",
+      "dataKeys": [
+        "requestClient",
+        "requestNetwork",
+        "requestedAt",
+        "ttlMinutes"
+      ]
+    },
+    {
+      "number": 33,
+      "eventType": "account.email-change-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code",
+        "address"
+      ],
+      "idempotencyKey": "otp-emailchange",
+      "optional": false,
+      "recipient": "meeting-email-principal",
+      "note": "email-change code to the NEW address, which is not (yet) the account's: one email principal with the address sealed; the ACCOUNT subject authorizes the send and names the greeting (X1)",
+      "dataKeys": [
+        "ttlMinutes"
+      ]
+    },
+    {
+      "number": 34,
+      "eventType": "account.step-up-code.requested",
+      "producer": "cfmeet.meeting-service",
+      "priority": "CRITICAL",
+      "lane": "CRITICAL",
+      "category": "SECURITY",
+      "subjectKind": "ACCOUNT",
+      "sealed": [
+        "code"
+      ],
+      "idempotencyKey": "otp-stepup",
+      "optional": false,
+      "recipient": "cfmeet-user",
+      "note": "action step-up code to the account's current address; purpose is the closed StepUpPurpose enum",
+      "dataKeys": [
+        "purpose",
+        "ttlMinutes"
+      ]
+    },
+    {
       "number": 0,
       "eventType": "notifications.cancel",
       "producer": null,
@@ -2606,6 +2894,9 @@
     "meeting-invitation": "^meeting-invitation:[0-9a-f-]{36}$",
     "org-invitation": "^org-invitation:[0-9a-f-]{36}:[0-9]{1,9}$",
     "meeting-notification": "^meeting-notification:[A-Za-z0-9:_.-]{1,140}$",
-    "devplat-access": "^devplat-access:[A-Za-z0-9:_.-]{1,140}$"
+    "devplat-access": "^devplat-access:[A-Za-z0-9:_.-]{1,140}$",
+    "otp-signin": "^otp:signin:[A-Za-z0-9:_.-]{1,140}$",
+    "otp-emailchange": "^otp:emailchange:[A-Za-z0-9:_.-]{1,140}$",
+    "otp-stepup": "^otp:stepup:[A-Za-z0-9:_.-]{1,140}$"
   }
 }

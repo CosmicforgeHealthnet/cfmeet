@@ -75,6 +75,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(members::list_members).post(members::add_member),
         )
         .route(
+            "/meeting-spaces/:id/members/team",
+            post(members::add_team_members),
+        )
+        .route(
             "/meeting-spaces/:id/members/:member_id",
             patch(members::update_member).delete(members::revoke_member),
         )
@@ -565,6 +569,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/organizations/:id/meeting-spaces",
             get(organizations::list_organization_meeting_spaces),
+        )
+        .route(
+            "/organizations/:id/export",
+            get(organizations::export_organization),
         )
         .route(
             "/organizations/:id/meeting-profile-policy",

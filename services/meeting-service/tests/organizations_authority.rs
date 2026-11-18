@@ -4925,3 +4925,110 @@ async fn g17_organization_meeting_profile_policy_is_managed_and_enforced() {
         "{p}"
     );
 }
+
+/// Gap audit G7: a team of the organization is added to an organization meeting space in
+/// one call; team members who cannot be members are skipped, and a team Organizations
+/// does not show the caller is relayed as its refusal.
+#[tokio::test]
+async fn g7_a_team_is_added_to_an_organization_meeting() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("g7-owner").await;
+    let a = app.user("g7-a").await;
+    let b = app.user("g7-b").await;
+    let org = fake.add_org(
+        "g7",
+        &[(owner.id, "OWNER"), (a.id, "MEMBER"), (b.id, "MEMBER")],
+    );
+    let (s, space) = create_org_space(
+        &app,
+        &owner,
+        org,
+        json!({ "title": "Ward round", "accessPolicy": "INVITE_ONLY" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{space}");
+    let sid = space["id"].as_str().unwrap().to_string();
+    let team = Uuid::new_v4();
+    fake.script(
+        "GET",
+        &format!("/internal/v1/organizations/{org}/teams/{team}/members"),
+        200,
+        json!({ "items": [
+            { "id": Uuid::new_v4(), "teamId": team, "userId": a.id, "role": "TEAM_MEMBER", "status": "ACTIVE" },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": b.id, "role": "TEAM_MEMBER", "status": "ACTIVE" },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": owner.id, "role": "TEAM_LEAD", "status": "ACTIVE" },
+            { "id": Uuid::new_v4(), "teamId": team, "userId": Uuid::new_v4(), "role": "TEAM_MEMBER", "status": "ACTIVE" }
+        ], "nextCursor": null }),
+    );
+    let uri = format!("/api/v2/meeting-spaces/{sid}/members/team");
+    let (s, v) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "teamId": team, "role": "PARTICIPANT" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["added"].as_array().unwrap().len(), 2, "{v}");
+    assert_eq!(v["skipped"], 2);
+    let sent = fake.last(
+        "GET",
+        &format!("/internal/v1/organizations/{org}/teams/{team}/members"),
+    );
+    assert_eq!(sent.acting_user, Some(owner.id.to_string()));
+    // Again: everyone is already a member.
+    let (_, v) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "teamId": team, "role": "PARTICIPANT" }),
+        )
+        .await;
+    assert_eq!(v["added"].as_array().unwrap().len(), 0, "{v}");
+    // A team Organizations does not know is relayed as its refusal.
+    let (s, _) = app
+        .post(
+            &uri,
+            Auth::Bearer(&owner.token),
+            json!({ "teamId": Uuid::new_v4(), "role": "PARTICIPANT" }),
+        )
+        .await;
+    assert!(s.is_client_error(), "{s}");
+    // A plain member cannot manage the meeting's members.
+    let (s, _) = app
+        .post(
+            &uri,
+            Auth::Bearer(&a.token),
+            json!({ "teamId": team, "role": "PARTICIPANT" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+/// Gap audit G11: the organization export is relayed for the verified acting user.
+#[tokio::test]
+async fn g11_the_organization_export_is_relayed_for_the_owner() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("g11-owner").await;
+    let org = fake.add_org("g11", &[(owner.id, "OWNER")]);
+    fake.script(
+        "GET",
+        &format!("/internal/v1/organizations/{org}/export"),
+        200,
+        json!({ "schemaVersion": 1, "organization": { "id": org }, "memberships": [] }),
+    );
+    let (s, v) = app
+        .get(
+            format!("/api/v2/organizations/{org}/export"),
+            Auth::Bearer(&owner.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["schemaVersion"], 1);
+    let sent = fake.last("GET", &format!("/internal/v1/organizations/{org}/export"));
+    assert_eq!(sent.acting_user, Some(owner.id.to_string()));
+}

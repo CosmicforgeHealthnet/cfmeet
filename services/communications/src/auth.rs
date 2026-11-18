@@ -77,6 +77,11 @@ pub async fn middleware(
         "/internal/v1/communications/notification-preferences/resolve" => {
             InternalPermission::CommunicationsPreferencesRead
         }
+        // Roadmap N10: the Notification Service's preference copy and catch-up.
+        "/internal/v1/communications/notification-preferences/export"
+        | "/internal/v1/communications/notification-preferences/changes" => {
+            InternalPermission::CommunicationsPreferencesExport
+        }
         // Document 4 X4: the Notification Service's batch restriction check.
         "/internal/v1/communications/restrictions/check" => {
             InternalPermission::CommunicationsRestrictionsRead

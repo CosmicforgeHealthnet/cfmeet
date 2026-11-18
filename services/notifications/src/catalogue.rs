@@ -1,5 +1,5 @@
 //! Service-side routing of the closed event catalogue (Document 4 §5.2, §7): for each of
-//! the 31 inbound types, the routing category (the unit of the cutover: one row per
+//! the 34 inbound types, the routing category (the unit of the cutover: one row per
 //! channel in `notif_routing`, and the producer-side `notification_routing_state`
 //! category), the user preference category, the channels, the template, the inbox action
 //! and the email ledger category.
@@ -484,6 +484,45 @@ pub const ROUTES: &[TypeRoute] = &[
             None,
         )
     },
+    // Passwordless account codes (contract 1.2.0, PR #97): the same routing categories and
+    // ledger categories as their Meeting enqueue points, so the fence category that routes
+    // them on the Meeting side is the one that routes them here.
+    TypeRoute {
+        email_category: Some("AUTH_VERIFICATION"),
+        ..r(
+            "account.sign-in-code.requested",
+            "AUTH_VERIFICATION",
+            C::Security,
+            &[E],
+            "account.sign_in_code",
+            "NONE",
+            None,
+        )
+    },
+    TypeRoute {
+        email_category: Some("AUTH_VERIFICATION"),
+        ..r(
+            "account.email-change-code.requested",
+            "AUTH_VERIFICATION",
+            C::Security,
+            &[E],
+            "account.email_change_code",
+            "NONE",
+            None,
+        )
+    },
+    TypeRoute {
+        email_category: Some("SECURITY_DEVICE_STEP_UP"),
+        ..r(
+            "account.step-up-code.requested",
+            "SECURITY_DEVICE_STEP_UP",
+            C::Security,
+            &[E],
+            "account.step_up_code",
+            "NONE",
+            None,
+        )
+    },
     // Today's Meeting ledger records device notices under NOTIFICATION.
     TypeRoute {
         email_category: Some("NOTIFICATION"),
@@ -594,7 +633,7 @@ mod tests {
             .filter(|s| !s.is_control())
             .map(|s| s.event_type)
             .collect();
-        assert_eq!(inbound.len(), 31);
+        assert_eq!(inbound.len(), 34);
         for t in &inbound {
             assert_eq!(
                 ROUTES.iter().filter(|r| r.event_type == *t).count(),
@@ -602,7 +641,7 @@ mod tests {
                 "{t}"
             );
         }
-        assert_eq!(ROUTES.len(), 31);
+        assert_eq!(ROUTES.len(), 34);
     }
 
     #[test]

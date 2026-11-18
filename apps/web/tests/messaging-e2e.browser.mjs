@@ -7,8 +7,8 @@
 // seeds the accounts and passes them here:
 //
 //   E2E_WEB_PORT    the port `next start` listens on (the build baked the service URLs)
-//   E2E_USERS       {"alice":{"id","email","password","name"},"bob":{...},"mallory":{...}}
-//   E2E_API_URL     the account API (`/api/v1`) the build targets, for the password login
+//   E2E_USERS       {"alice":{"id","email","code","name"},"bob":{...},"mallory":{...}}
+//   E2E_API_URL     the account API (`/api/v1`) the build targets, for the one-time-code sign-in
 //   E2E_SECRET      a unique phrase: it must never appear outside the devices
 //   E2E_EVIDENCE    where to write the step log (JSON)
 //
@@ -63,20 +63,21 @@ after(async () => {
 });
 
 /**
- * Signs a browser context in as the web app's login page does (ACC-019): a password login
- * with the account authority, then the app's own `POST /api/session` stores the refresh
+ * Signs a browser context in as the passwordless sign-in does (ACC-019, PR #97): a one-time
+ * code verified with the account authority (the journey users are fixed-code test accounts,
+ * AUTH_TEST_ACCOUNTS), then the app's own `POST /api/session` stores the refresh
  * token in its httpOnly cookie. The access token stays out of the browser: the app mints
  * its in-memory token through `/api/session/refresh` on load. One login per context, so
  * no two contexts share a single-use refresh token.
  */
 async function signIn(ctx, who) {
-  const login = await fetch(`${API}/auth/login`, {
+  const login = await fetch(`${API}/auth/otp/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ email: USERS[who].email, password: USERS[who].password }),
+    body: JSON.stringify({ email: USERS[who].email, code: USERS[who].code }),
   });
   const body = await login.json().catch(() => null);
-  assert.equal(login.status, 200, `password login for ${who}: ${JSON.stringify(body)}`);
+  assert.equal(login.status, 200, `one-time-code sign-in for ${who}: ${JSON.stringify(body)}`);
   assert.ok(body?.refresh_token, `the login for ${who} returned a refresh token`);
   const session = await ctx.request.post(`${BASE}/api/session`, {
     headers: { "X-CF-Session": "1", Origin: BASE },

@@ -41,6 +41,16 @@ pub fn app(state: State) -> Router {
             "/internal/v1/communications/notification-preferences/resolve",
             post(crate::preferences::resolve),
         )
+        // N10 copy + catch-up (contract `communications/notification-owner/v1`, Notification
+        // Service only).
+        .route(
+            "/internal/v1/communications/notification-preferences/export",
+            post(crate::preference_authority::export),
+        )
+        .route(
+            "/internal/v1/communications/notification-preferences/changes",
+            post(crate::preference_authority::changes),
+        )
         // X4 (contract `communications/notification-owner/v1`, Notification Service only).
         .route(
             "/internal/v1/communications/restrictions/check",

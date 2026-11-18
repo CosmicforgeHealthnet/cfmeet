@@ -65,12 +65,18 @@ pub struct CallServiceConfig {
     /// Minimum time a Call must have been ENDING before the reconciliation-timeout
     /// disposition may end it without completion evidence.
     pub ending_reconciliation_timeout: Duration,
+    /// Roadmap N7: write `calling.*` notification publications (missed call, voicemail /
+    /// recording ready) to `calling_notification_publications` in the transaction of the
+    /// state change. On only while `CF_NOTIFICATIONS_BASE_URL` is configured; off (the
+    /// default), nothing is written.
+    pub notification_publications: bool,
 }
 
 impl Default for CallServiceConfig {
     fn default() -> Self {
         Self {
             ending_reconciliation_timeout: Duration::minutes(5),
+            notification_publications: false,
         }
     }
 }

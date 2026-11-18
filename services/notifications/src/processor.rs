@@ -162,6 +162,7 @@ impl Processor {
                 Secrets {
                     code: p.code.clone(),
                     token: p.token.clone(),
+                    address: p.address.clone(),
                 },
                 p.address.clone(),
             ),
@@ -435,12 +436,32 @@ impl Processor {
             return Ok(Processed::Done);
         }
 
+        // A CRITICAL code to an address that is not (yet) the account's (the email-change
+        // code: one email principal, ACCOUNT subject): the subject account authorizes the
+        // send and names the greeting; the address stays the sealed one.
+        let subject_account = match &job.subject {
+            Some((kind, id))
+                if kind == "ACCOUNT"
+                    && job.lane == Lane::Critical
+                    && recipients
+                        .iter()
+                        .any(|r| r.starts_with("meeting-email-principal:")) =>
+            {
+                Some(format!("cfmeet-user:{id}"))
+            }
+            _ => None,
+        };
         // X1 for account recipients (authorization, address, name, time zone).
-        let accounts: Vec<String> = recipients
+        let mut accounts: Vec<String> = recipients
             .iter()
             .filter(|r| r.starts_with("cfmeet-user:"))
             .cloned()
             .collect();
+        if let Some(a) = &subject_account {
+            if !accounts.contains(a) {
+                accounts.push(a.clone());
+            }
+        }
         let needs_email = job.route.has(Channel::Email) && mode_of(Channel::Email).0 != Mode::Off;
         let mut contacts: HashMap<String, AccountContact> = HashMap::new();
         let mut contacts_known = false;
@@ -505,8 +526,14 @@ impl Processor {
         let params = templates::params_of(&job.data);
         let many = recipients.len() > 1;
         for recipient in &recipients {
-            let contact = contacts.get(recipient);
-            let authorized = match (recipient.starts_with("cfmeet-user:"), contact) {
+            let on_behalf =
+                recipient.starts_with("meeting-email-principal:") && subject_account.is_some();
+            let contact = if on_behalf {
+                subject_account.as_ref().and_then(|a| contacts.get(a))
+            } else {
+                contacts.get(recipient)
+            };
+            let authorized = match (recipient.starts_with("cfmeet-user:") || on_behalf, contact) {
                 (true, Some(c)) => c.active(),
                 // Unknown to Account: not authorized; unknown because X1 is not consulted
                 // (shadow without owners): evaluated as authorized and recorded as such.

@@ -356,8 +356,17 @@ impl State {
         {
             return Err(Error::Validation);
         }
-        let (old, pair, _) = self.contact(p, id).await?;
+        let (old, pair, other) = self.contact(p, id).await?;
         let txn = self.store.begin().await?;
+        // Roadmap N10: the contact notification level moves to the Notification Service.
+        let authority = if update.notifications.is_some() {
+            self.preference_authority(&txn, true).await?
+        } else {
+            crate::preference_authority::Authority::Hub
+        };
+        if authority == crate::preference_authority::Authority::Freeze {
+            return Err(Error::PreferencesFrozen);
+        }
         let binding = json!({"contactId":id,"body":body});
         if let Some(v) = self
             .store
@@ -379,6 +388,16 @@ impl State {
         let changed=execute(&txn,"UPDATE communication_contact_aliases SET alias=$4,favorite=$5,notifications=$6,version=version+1,updated_at=now() WHERE id=$1 AND owner_profile_id=$2 AND version=$3",vec![id.into(),p.id.into(),update.expected_version.into(),alias.clone().into(),favorite.into(),notifications.clone().into()]).await?;
         if changed != 1 {
             return Err(Error::Version);
+        }
+        if authority == crate::preference_authority::Authority::Service {
+            // Forwarded to the single preference writer; the Hub row (alias, favorite and
+            // the mirrored level) commits only once the service accepted the level.
+            self.service_update_entry(
+                p,
+                json!({"contacts":{other.account_reference.clone():{"notifications":notifications}}}),
+                key,
+            )
+            .await?;
         }
         self.store
             .audit(

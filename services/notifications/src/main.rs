@@ -11,6 +11,7 @@ use notifications::{
     crypto::DataKeys,
     email, http,
     metrics::{Heartbeats, Metrics},
+    preference_copy::HubPreferenceSource,
     state::AppState,
     workers,
 };
@@ -63,12 +64,19 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     };
-    let authorities: Arc<dyn Authorities> =
-        match HttpAuthorities::from_config(&config, clock.clone()) {
-            Ok(Some(a)) => Arc::new(a),
-            Ok(None) => Arc::new(NoAuthorities),
-            Err(e) => fatal("owner API configuration error", e),
-        };
+    let http_authorities = match HttpAuthorities::from_config(&config, clock.clone()) {
+        Ok(a) => a.map(Arc::new),
+        Err(e) => fatal("owner API configuration error", e),
+    };
+    // Roadmap N10: the preference copy reads the Hub through the same signed client.
+    let hub_preferences: Option<Arc<dyn HubPreferenceSource>> = http_authorities
+        .as_ref()
+        .filter(|a| a.hub_configured())
+        .map(|a| a.clone() as Arc<dyn HubPreferenceSource>);
+    let authorities: Arc<dyn Authorities> = match http_authorities {
+        Some(a) => a,
+        None => Arc::new(NoAuthorities),
+    };
     if check_only {
         println!(
             "{}",
@@ -80,6 +88,9 @@ async fn main() -> anyhow::Result<()> {
                 "emailProvider": config.email.provider.as_str(),
                 "emailFrom": config.email.from,
                 "pushPlatforms": push.as_ref().map(|p| ["APNS", "FCM", "WEB_PUSH"].iter().filter(|x| p.supports(x)).count()).unwrap_or(0),
+                // Public by nature: must equal Messaging's `GET /v1/messaging/push/configuration`
+                // key, or copied browser subscriptions cannot be delivered (N9, D-1b).
+                "webPushApplicationServerKey": push.as_ref().and_then(|p| p.web_push_application_server_key()),
                 "authorities": authorities.configured(),
                 "sealedOpening": opening.is_some(),
                 "workers": config.workers_enabled,
@@ -115,6 +126,11 @@ async fn main() -> anyhow::Result<()> {
             .operator_alert_token
             .clone()
             .map(|t: SecretString| Arc::new(t)),
+        hub_preferences,
+        first_party_scope: config
+            .authorities
+            .first_party_scope
+            .map(|s| (s.tenant_id, s.application_id, s.environment_id)),
     };
     let running = config.workers_enabled.then(|| workers::spawn(&state));
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;

@@ -51,6 +51,29 @@ Recovery: restore the containers with `rollback` (previous images) or release ag
 2. If Account leases are refused (`notif_email_messages.last_error_class = LEASE_UNAVAILABLE`), the Account owner API (X6) is unreachable: nothing is sent, which is safe; Account's AUTO failover takes over after 60 s.
 3. Any `notif_critical_send_without_lease_total` increase is a protocol violation: set the category to `FENCED_OLD` on the producer and `OFF` on the service, then investigate.
 
+### Account CRITICAL lane
+
+The Meeting Service (Account) side of codes and security notices (roadmap N12, `services/meeting-service/src/services/critical_notifications.rs`). In `LEGACY_ONLY` the five CRITICAL categories use the old ledger exactly as before. Outside it, each message gets one sticky decision. Every CRITICAL enqueue point has a catalogue event (contract `cfmeet.notifications.event` 1.1.0): the device step-up code (`device-step-up:`), the device-linked notice, and the passwordless codes of PR #97 — the sign-in code (`otp:signin:`, `account.sign-in-code.requested`), the email-change code (`otp:emailchange:`, `account.email-change-code.requested`) and the step-up action code (`otp:stepup:`, `account.step-up-code.requested`). The sign-in code may be for an address with no account yet: it names one email principal (no account subject) and seals the code, the magic-link token and the address; the email-change code names the email principal of the new address (sealed) on behalf of the account, which X1 must report active; the step-up code goes to the account with `purpose` `DEACTIVATE_ACCOUNT` / `CHANGE_EMAIL`. They are routed by `AUTH_VERIFICATION` (sign-in, email change) and `SECURITY_DEVICE_STEP_UP` (step-up) like the other codes, and fail over exactly like them. A sign-in code whose magic link or request facts the catalogue cannot carry exactly (no link token, unparsable request time, a client label over 80 characters, an unmasked network) is decided `OLD` (`UNPUBLISHABLE`). A `NEW` decision is one `account_notification_outbox` row holding the envelope (code sealed to the service key) and `fallback_sealed` (the legacy email sealed to the Account fallback key, `CF_ACCOUNT_FALLBACK_KEY_FILE`).
+
+| Signal | Meaning | First action |
+|---|---|---|
+| `MeetingCriticalAutoFailover` (warning) | a never-leased code was rerouted to the old path (no `ACCEPTED` / no X6 lease within 60 s, or a refusal) | delivery continues; investigate the service (§4) |
+| `MeetingCriticalCodeStuck` (critical) | an open decision is older than 120 s: leased without X7, `OFF`, or the relay stopped | `GET /internal/operations/notifications/critical` (loopback, `X-Internal-Token`) |
+| `MeetingCriticalFallbackUnavailable` (critical) | a failover could not open `fallback_sealed` | set `critical_fallback = FORCED`, restore the key file, check `/health` `criticalFallbackKey: true` on both replicas |
+| `MeetingCriticalDeadLetters` (critical) | the service refused an event while `critical_fallback = OFF` | restore `AUTO`; the user requests a new code |
+| `MeetingCriticalPossibleDuplicate` (warning) | a break-glass reroute of a leased decision, or an X7 after a reroute | recorded (`REROUTED_POSSIBLE_DUPLICATE`); at most one extra email with the same code |
+
+The service builds the sign-in magic link from `NOTIFICATIONS_APP_URL` exactly as Meeting builds it from `APP_URL` (`<url>/auth/magic?email=…&token=…`): before `AUTH_VERIFICATION` leaves `LEGACY_ONLY` / `SHADOW`, both must name the same web app origin, or the link in a service-sent email points elsewhere than the legacy one. While `AUTH_VERIFICATION` is `FENCED_NEW`, a sign-in code delivered by the service has no row in the Meeting ledger (`email_deliveries`): acceptance checks that look for `otp:signin:` rows there (the OTP journey of `email_operations.py`) find one only after a failover — check `notif_email_messages` (key `otp:signin:…`) on the service instead.
+
+Rules the relay enforces (Document 4 §9.8, §10.4):
+- **AUTO** (default): a `NEW` decision that was never leased fails over after 60 s, in one row-locked transaction that writes the legacy email (same code, same key). The service can never send it afterwards (X6 answers `REVOKED`).
+- **FORCED** (break-glass, no restart): new CRITICAL messages are decided `OLD`; in-flight never-leased ones fail over at once.
+- **OFF**: no automatic failover (refused events become dead letters and page).
+- A **leased** decision is never failed over automatically. If the lease lapsed without X7 (the service crashed mid-send), first set `critical_fallback = FORCED`, then `POST /internal/operations/notifications/critical/reroute` with `{"decisionIds": [...]}` from the status list; each is recorded `REROUTED_POSSIBLE_DUPLICATE`. A live lease answers `WAIT_FOR_LEASE`, a completed decision `REFUSED`.
+- Codes that expired are sent by neither path.
+
+Fallback drill (readiness invariants 1, 2, 4): `POST /internal/operations/email/fallback-drill` with `{"to": "<acceptance inbox>", "reference": "<run id>"}` queues one `OPERATIONS_ACCEPTANCE` email through the exact failover path (sealed to and opened with the fallback key, sent by the legacy worker with its own credentials); poll `GET /internal/operations/email/deliveries/{id}` for `ACCEPTED`, and `DELIVERED` with the Resend webhook. 503 `FALLBACK_KEY_UNAVAILABLE` means no key is loaded.
+
 ## 6. HELD events
 
 HELD means a producer routed `NEW` while the service mode is `OFF` (operator error or an activation in progress). Fix the mode with the activation operation, then replay the HELD events with I6 (`POST /internal/v1/admin/dead-letters/replay`, ids `event:<producer>:<eventId>`). CRITICAL items are never replayed (a code is re-requested by the user).
@@ -106,3 +129,21 @@ The Hub (`services/communications`) publishes `communications.connection.request
 | `CF_NOTIFICATIONS_BASE_URL` | set: publications are written in the relationship transaction and relayed to I1, signed as `cfmeet.communications` for audience `cfmeet.notifications`. Unset (default): nothing is written or sent; the Hub behaves exactly as before |
 
 Activation needs the grant on both Notification Service replicas: receiver `cfmeet.notifications`, issuer `cfmeet.communications`, permission `notifications-event.publish`, then `CF_NOTIFICATIONS_BASE_URL` on the Hub. No coordinated-release operation does this yet. Rows: `PENDING` → `ACKED` (ACCEPTED / DUPLICATE / HELD), `DEAD` (REJECTED or a contract 4xx), `SKIPPED` (no CF Meet account, a block, a request or connection that no longer holds), `EXPIRED` (not posted within 24 h); settled rows are purged after 30 days. Retries back off from 2 s to at most 5 min.
+
+### Calling publications (`MISSED_CALLS`, `VOICEMAIL`)
+
+Calling (`services/calling`) publishes catalogue #15-#17 through its own outbox `calling_notification_publications` (migration history `calling_notification_publications_seaql_migrations`, applied by `calling-migration up` after the main history; the previous image's readiness is unchanged). Before this Calling notified no user of these facts (missed calls were derived for the call history only; voicemail / recording facts reach only customer webhooks and the Developer Platform), so there is no legacy path and no routing fence (`routingVersion` 1).
+
+| Event | Written in the transaction of | Recipients |
+|---|---|---|
+| `calling.call.participant-missed` (`callId`, `callKind`) | the Call's terminal transition | each RECIPIENT participant whose outcome is MISSED (the call-history derivation; never answered, declined or answered elsewhere) |
+| `calling.voicemail.ready` (`callId`, `voiceMessageId`) | the message becoming READY | the mailbox owners (principal, extension member, queue agents, ring-group principal members) |
+| `calling.recording.ready` (`callId`, `recordingId`) | the recording becoming READY | the principals who took part (initiator, recipients who answered or connected) |
+
+Recipients are CF Meet accounts only: `NATIVE_CF_USER` principals of a FIRST_PARTY tenant whose reference is `cfmeet-user:<uuid>`. Nothing is written for an EXTERNAL tenant; inside a FIRST_PARTY tenant a principal without an account or an inactive one is `SKIPPED` (`RECIPIENT_NOT_CF_MEET_ACCOUNT`, `RECIPIENT_INACTIVE`). Envelopes are ids only (no name, number, label, object key or media); missed calls carry a coalesce key per caller and 10-minute window.
+
+| Calling variable | Effect |
+|---|---|
+| `CF_NOTIFICATIONS_BASE_URL` | set: publications are written and relayed to I1 every second, signed as `cfmeet.calling` for audience `cfmeet.notifications`; the service refuses to start unless the notification-publications history is applied. Unset (default): nothing is written or sent; Calling behaves exactly as before |
+
+Activation needs the grant on both Notification Service replicas: receiver `cfmeet.notifications`, issuer `cfmeet.calling`, permission `notifications-event.publish`, then `CF_NOTIFICATIONS_BASE_URL` on Calling (after a Calling release that ran `calling-migration up`). The release tooling has no Calling publication activation yet. Rows: `PENDING` → `ACKED` (ACCEPTED / DUPLICATE / HELD), `DEAD` (REJECTED or a contract 4xx), `SKIPPED` (no CF Meet account, an inactive recipient, a message / recording no longer READY), `EXPIRED` (not posted within 24 h for missed calls, 72 h for voicemail / recordings); settled rows are purged after 30 days. Retries back off from 2 s to at most 5 min. Calling's incoming-call push is not wired to I3 (`NoPushTransport`; ringing reaches devices through Calling's signaling and the recovery API).

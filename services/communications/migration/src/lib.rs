@@ -170,8 +170,43 @@ impl MigrationTrait for NotificationPublications {
         ))
     }
 }
+/// Notification Service roadmap N10 (Phase 4.2): the explicit preference-authority switch
+/// (`communication_preference_authority`, default `HUB`). A SIXTH separate history for the
+/// same rollback-safety reason as the others: the previous image checks exactly the
+/// foundation, unified, device-session, timeline-realtime and notification-publications histories.
+pub struct PreferenceAuthorityMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for PreferenceAuthorityMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(PreferenceAuthority)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_preference_authority_seaql_migrations").into_iden()
+    }
+}
+struct PreferenceAuthority;
+impl MigrationName for PreferenceAuthority {
+    fn name(&self) -> &str {
+        "m20261117_000001_preference_authority"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PreferenceAuthority {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/006_preference_authority.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
 /// Backend gap closure: S9 (separate group-invitation privacy setting) and S4 (operator
-/// review of profile reports). A SIXTH separate history for the same rollback-safety
+/// review of profile reports). A SEVENTH separate history for the same rollback-safety
 /// reason as the others. Never merge them.
 pub struct GroupInvitationPolicyMigrator;
 #[async_trait::async_trait]
@@ -283,19 +318,48 @@ pub async fn group_invitation_ready<C: ConnectionTrait>(db: &C) -> Result<bool, 
         && applied.contains(&Reactivation.name().to_owned()))
 }
 /// Apply the foundation history, then the unified, device-session, timeline-realtime,
-/// notification-publications and group-invitation ones.
+/// notification-publications, preference-authority and group-invitation ones.
 pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     Migrator::up(db, None).await?;
     UnifiedMigrator::up(db, None).await?;
     DeviceSessionMigrator::up(db, None).await?;
     TimelineRealtimeMigrator::up(db, None).await?;
     NotificationPublicationsMigrator::up(db, None).await?;
+    PreferenceAuthorityMigrator::up(db, None).await?;
     GroupInvitationPolicyMigrator::up(db, None).await
 }
-/// Everything this image needs: the Sections 9-23 histories, the Section 14 one, the
-/// MSG-009 timeline-realtime one and the N7 notification-publications one.
+/// Everything this image needs: every earlier history and the N10 preference-authority
+/// one.
 pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
-    if !timeline_ready(db).await? || !group_invitation_ready(db).await? {
+    if !notification_publications_ready(db).await? || !group_invitation_ready(db).await? {
+        return Ok(false);
+    }
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_preference_authority_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_preference_authority_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == PreferenceAuthority.name())
+}
+/// Readiness the previous (N7) image checks: every history up to the notification-publications
+/// one exactly.
+pub async fn notification_publications_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    if !timeline_ready(db).await? {
         return Ok(false);
     }
     let row = db
@@ -322,7 +386,7 @@ pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     Ok(rows.len() == 1
         && rows[0].try_get::<String>("", "version")? == NotificationPublications.name())
 }
-/// Readiness the previous (MSG-009) image checks: foundation, unified, device-session and
+/// Readiness the MSG-009 image checks: foundation, unified, device-session and
 /// timeline-realtime histories exactly.
 pub async fn timeline_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
     if !device_session_ready(db).await? {

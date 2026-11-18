@@ -50,6 +50,39 @@ pub async fn add_member(
     Ok((StatusCode::CREATED, Json(views::member(&m))))
 }
 
+/// Add a team of the organization.
+///
+/// Gap audit G7: for a meeting space of an organization, adds every active member of one of
+/// the organization's teams with the given role, under the same rules as adding one member
+/// (managers only; a role you may grant). The Organizations Service decides whether you may see
+/// the team. Team members who already belong, the owner, you and inactive accounts are skipped.
+/// At most 500 team members.
+#[utoipa::path(
+    post, path = "/api/v2/meeting-spaces/{id}/members/team", tag = "Members (v2)", operation_id = "v2_add_team_members",
+    params(("id" = Uuid, Path, description = "Meeting space id")),
+    request_body = AddTeamMembersRequest,
+    responses(
+        (status = 200, description = "Added", body = AddTeamMembersResponse),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "MEETING_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn add_team_members(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+    V2Json(req): V2Json<AddTeamMembersRequest>,
+) -> ApiResult<Json<AddTeamMembersResponse>> {
+    let (added, skipped) = state.meeting.members.add_team(&actor, id, req).await?;
+    Ok(Json(AddTeamMembersResponse {
+        added: added.iter().map(views::member).collect(),
+        skipped,
+    }))
+}
+
 /// Change a member's role.
 ///
 /// Changes the role of an active membership. Send the member's current `version`; a stale version

@@ -1307,6 +1307,12 @@ impl AppCallService {
                 now,
             )
             .await?;
+        // Roadmap N7: `calling.recording.ready` to the principals who took part in the
+        // Call (CF Meet accounts only), atomic with READY.
+        if self.calls.config().notification_publications {
+            crate::notification_publications::enqueue_recording_ready(&txn, &call, recording_id)
+                .await?;
+        }
         self.calls
             .record_artifact_usage_in(
                 &txn,

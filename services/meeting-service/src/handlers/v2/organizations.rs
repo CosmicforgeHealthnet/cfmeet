@@ -1304,6 +1304,9 @@ pub async fn create_organization_invitation(
                     &inviter,
                     &to,
                     id,
+                    reply.body["id"]
+                        .as_str()
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok()),
                     reply.body["role"].as_str().unwrap_or("MEMBER"),
                     &token,
                     expires_at,
@@ -2628,4 +2631,45 @@ pub async fn put_organization_meeting_profile_policy(
     )
     .await?;
     Ok(Json(profile_policy_view(v)?))
+}
+
+/// Export the organization's data.
+///
+/// Gap audit G11: everything the Organizations Service holds about the organization as one JSON
+/// document: the organization and its profile, policies, memberships and their history, teams and
+/// team memberships, invitations (never their token) and the newest 10000 audit events. People
+/// appear by user id only. Requires the OWNER (`organization.lifecycle.manage`); each export is
+/// recorded in the organization's audit history. Returns FEATURE_DISABLED until the
+/// Organizations Service is authoritative.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/export", tag = "Organizations (v2)", operation_id = "v2_export_organization",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    responses(
+        (status = 200, description = "The organization's data", body = Object),
+        (status = 401, description = "AUTHENTICATION_REQUIRED", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND / FEATURE_DISABLED", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn export_organization(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    headers: HeaderMap,
+    V2Path(id): V2Path<Uuid>,
+) -> ApiResult<Response> {
+    relay(
+        &state,
+        &actor,
+        Relay {
+            method: Method::GET,
+            path: format!("/internal/v1/organizations/{id}/export"),
+            headers: &headers,
+            body: None,
+            raw_query: None,
+            allowed_query: &[],
+        },
+    )
+    .await
 }

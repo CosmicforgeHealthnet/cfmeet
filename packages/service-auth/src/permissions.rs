@@ -369,13 +369,20 @@ pub enum InternalPermission {
     #[serde(rename = "notifications-event.publish")]
     NotificationsEventPublish,
     /// Notifications I2: forward an account-authenticated U1–U9 request (Meeting relay,
-    /// server-resolved account).
+    /// server-resolved account). The Communications Hub holds it for its preference
+    /// facade (roadmap N10): the service accepts only U6 / U7 from the Hub.
     #[serde(rename = "notifications-user.forward")]
     NotificationsUserForward,
     /// Notifications I3: the synchronous call-push fast lane (≤ 1 s, post-commit,
     /// best-effort). Calling only; ringing stays in Calling.
     #[serde(rename = "notifications-call-push.dispatch")]
     NotificationsCallPushDispatch,
+    /// Notifications I13 (roadmap N9, D-1b copy path): mirror Messaging's push
+    /// registrations of CF Meet first-party accounts into the service's push endpoints
+    /// (the one-off copy and the registration facade). Carries push handles in transit
+    /// (sealed at rest by the receiver, never echoed). Messaging only.
+    #[serde(rename = "notifications-push-registration.sync")]
+    NotificationsPushRegistrationSync,
     /// Notifications I4, I5, I7, I8: PII-free delivery search, dead letters, shadow report
     /// and routing / route audit. Operator tooling only.
     #[serde(rename = "notifications-observability.read")]
@@ -417,6 +424,12 @@ pub enum InternalPermission {
     /// as REVIEWED / DISMISSED or reopen it; audited). Operator tooling only.
     #[serde(rename = "calling-abuse-reports.review")]
     CallingAbuseReportsReview,
+    /// Communications Hub (roadmap N10, Phase 4.2): export the Hub's notification
+    /// preferences (account switches, conversation and contact notification levels, with
+    /// their row versions) and the matching change-feed entries for the one-off copy and
+    /// catch-up into the Notification Service. Notification Service only.
+    #[serde(rename = "communications-preferences.export")]
+    CommunicationsPreferencesExport,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -1045,9 +1058,9 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         permission: InternalPermission::NotificationsUserForward,
         name: "notifications-user.forward",
         receiver: services::NOTIFICATIONS,
-        grantable_to: &[services::MEETING_SERVICE],
+        grantable_to: &[services::MEETING_SERVICE, services::COMMUNICATIONS],
         sensitive: false,
-        description: "Forward an account-authenticated inbox, preference or push-endpoint request with the server-resolved account",
+        description: "Forward an account-authenticated inbox, preference or push-endpoint request with the server-resolved account (the Communications Hub forwards only its preference facade requests, U6 / U7)",
     },
     PermissionDefinition {
         permission: InternalPermission::NotificationsCallPushDispatch,
@@ -1056,6 +1069,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         grantable_to: &[services::CALLING],
         sensitive: false,
         description: "Dispatch a post-commit, best-effort call-invitation push to registered push targets (no queue, no retry; ringing stays in Calling)",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsPushRegistrationSync,
+        name: "notifications-push-registration.sync",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::MESSAGING],
+        sensitive: false,
+        description: "Mirror Messaging push registrations of CF Meet first-party accounts into the Notification Service push endpoints (copy and registration facade; handles sealed at rest, never echoed)",
     },
     PermissionDefinition {
         permission: InternalPermission::NotificationsObservabilityRead,
@@ -1136,6 +1157,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         grantable_to: &[services::OPERATOR_CONSOLE],
         sensitive: true,
         description: "List Calling abuse reports across scopes and resolve them (REVIEWED / DISMISSED / reopen), operator-audited; bounded codes and opaque ids only, never free text or contact data; operator tooling only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CommunicationsPreferencesExport,
+        name: "communications-preferences.export",
+        receiver: services::COMMUNICATIONS,
+        grantable_to: &[services::NOTIFICATIONS],
+        sensitive: true,
+        description: "Export the Hub's notification preferences (account switches, conversation and contact notification levels with their versions) and their change-feed entries for the copy and catch-up into the Notification Service; account references, conversation ids and levels only, never profile data",
     },
 ];
 
@@ -1234,6 +1263,7 @@ impl InternalPermission {
         InternalPermission::NotificationsEventPublish,
         InternalPermission::NotificationsUserForward,
         InternalPermission::NotificationsCallPushDispatch,
+        InternalPermission::NotificationsPushRegistrationSync,
         InternalPermission::NotificationsObservabilityRead,
         InternalPermission::NotificationsOperationsReplay,
         InternalPermission::NotificationsOperationsReroute,
@@ -1244,6 +1274,7 @@ impl InternalPermission {
         InternalPermission::OrganizationInvitationsRead,
         InternalPermission::AccountRouteLeaseClaim,
         InternalPermission::CallingAbuseReportsReview,
+        InternalPermission::CommunicationsPreferencesExport,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1582,6 +1613,8 @@ mod tests {
         "organization.read",
         // Notification Service I1: message wake-up and member-invited publications.
         "notifications-event.publish",
+        // Notification Service I13 (N9): the push-registration facade and D-1b copy.
+        "notifications-push-registration.sync",
     ];
 
     #[test]
@@ -1931,6 +1964,7 @@ mod tests {
                 "notifications-event.publish",
                 "notifications-user.forward",
                 "notifications-call-push.dispatch",
+                "notifications-push-registration.sync",
                 "notifications-observability.read",
                 "notifications-operations.replay",
                 "notifications-operations.reroute",
@@ -1946,6 +1980,7 @@ mod tests {
                 "communications-restrictions.read",
                 "organization-invitations.read",
                 "account-route-lease.claim",
+                "communications-preferences.export",
             ]
         );
         // Producers that publish events: exactly the six producer services, never the
@@ -1961,14 +1996,21 @@ mod tests {
                 services::DEVELOPER_PLATFORM,
             ]
         );
+        // The Meeting relay (U1–U9) and the Hub preference facade (U6 / U7 only, enforced
+        // by the receiver; roadmap N10).
         assert_eq!(
             NotificationsUserForward.definition().grantable_to,
-            &[services::MEETING_SERVICE]
+            &[services::MEETING_SERVICE, services::COMMUNICATIONS]
         );
         assert_eq!(
             NotificationsCallPushDispatch.definition().grantable_to,
             &[services::CALLING]
         );
+        // The push-registration facade (N9, D-1b): Messaging only. Not "sensitive" (no
+        // sensitive permission is grantable to Messaging); handles are sealed at rest.
+        let sync = NotificationsPushRegistrationSync.definition();
+        assert_eq!(sync.grantable_to, &[services::MESSAGING]);
+        assert!(!sync.sensitive);
         // Operator operations: operator tooling only; replay and reroute are sensitive.
         for (p, sensitive) in [
             (NotificationsObservabilityRead, false),
@@ -2006,6 +2048,12 @@ mod tests {
             ),
             (OrganizationInvitationsRead, services::ORGANIZATIONS, false),
             (AccountRouteLeaseClaim, services::MEETING_SERVICE, false),
+            // N10 copy + catch-up: preference values and contact pairs are protected.
+            (
+                CommunicationsPreferencesExport,
+                services::COMMUNICATIONS,
+                true,
+            ),
         ] {
             let d = p.definition();
             assert_eq!(

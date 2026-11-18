@@ -249,9 +249,9 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
         "trusted_issuers": [
             issuer(s::MEETING_SERVICE, k("meeting"), &["notifications-event.publish", "notifications-user.forward"]),
             issuer(s::ORGANIZATIONS, k("organizations"), &["notifications-event.publish"]),
-            issuer(s::COMMUNICATIONS, k("communications"), &["notifications-event.publish"]),
+            issuer(s::COMMUNICATIONS, k("communications"), &["notifications-event.publish", "notifications-user.forward"]),
             issuer(s::CALLING, k("calling"), &["notifications-event.publish", "notifications-call-push.dispatch"]),
-            issuer(s::MESSAGING, k("messaging"), &["notifications-event.publish"]),
+            issuer(s::MESSAGING, k("messaging"), &["notifications-event.publish", "notifications-push-registration.sync"]),
             issuer(s::DEVELOPER_PLATFORM, k("developer"), &["notifications-event.publish"]),
             issuer(s::OPERATOR_CONSOLE, k("operator"), &["notifications-observability.read", "notifications-operations.replay", "notifications-operations.reroute"]),
         ],
@@ -383,6 +383,8 @@ impl Harness {
             workers_enabled: false,
             operator_emails: vec!["ops@example.com".into()],
             operator_alert_token: None,
+            hub_preferences: None,
+            first_party_scope: None,
         };
         Some(Self {
             router: http::app(state.clone()),

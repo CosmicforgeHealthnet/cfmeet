@@ -2607,6 +2607,12 @@
     },
     {
       "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/meeting-spaces/{id}/members/team",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
       "method": "DELETE",
       "path": "/api/v2/meeting-spaces/{id}/members/{memberId}",
       "class": "PUBLIC_CUSTOMER"
@@ -2818,6 +2824,13 @@
       "domain": "meetings",
       "method": "GET",
       "path": "/api/v2/organizations/{id}/meeting-spaces",
+      "class": "EXCLUDED",
+      "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/export",
       "class": "EXCLUDED",
       "reason": "MEETING_DIRECTORY_NOT_PUBLIC_FAMILY"
     },

@@ -99,6 +99,52 @@ class AddMemberRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// Gap audit G7: add every active member of one of the space's organization teams.
+class AddTeamMembersRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddTeamMembersRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddTeamMembersRequest.create({required Role role, required String teamId}) =>
+      AddTeamMembersRequest.fromJson(<String, Object?>{
+        'role': role,
+        'teamId': teamId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Role get role => json['role']! as String;
+
+  String get teamId => json['teamId']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Result of adding a team (gap audit G7).
+class AddTeamMembersResponse {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AddTeamMembersResponse.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AddTeamMembersResponse.create({required List<MemberResponse> added, required int skipped}) =>
+      AddTeamMembersResponse.fromJson(<String, Object?>{
+        'added': added.map((e) => e.toJson()).toList(),
+        'skipped': skipped,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Members added now.
+  List<MemberResponse> get added => (json['added']! as List<Object?>).map((e) => MemberResponse.fromJson(e! as Map<String, Object?>)).toList();
+
+  /// Team members skipped: already members, the owner, you, or not an active account.
+  int get skipped => (json['skipped']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// One of: WAITING, ADMITTED, DENIED, REMOVED, BANNED.
 typedef AdmissionState = String;
 

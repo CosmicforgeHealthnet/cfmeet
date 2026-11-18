@@ -11,9 +11,9 @@
 //!   arbitration stay in Calling, which also covers failure through its WebSocket ring and
 //!   recovery API.
 
-use std::{sync::Arc, time::Duration as StdDuration};
+use std::{fmt, sync::Arc, time::Duration as StdDuration};
 
-use cf_push_transport::{adapters::validate_handle_shape, PushOutcome, PushProvider};
+use cf_push_transport::{adapters::validate_handle_shape, PushOutcome, PushProvider, SendOptions};
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, FromQueryResult};
 use serde::Deserialize;
@@ -125,6 +125,278 @@ pub async fn register<C: ConnectionTrait>(
     )
     .await?;
     Ok(endpoint)
+}
+
+// ------------------------------------------------------------------------------------
+// I13: the Messaging push-registration facade and the D-1b copy (roadmap N9)
+// ------------------------------------------------------------------------------------
+
+/// Platforms a Messaging registration can carry (Messaging has no APNs VoIP).
+pub const MIRROR_PLATFORMS: &[&str] = &["APNS", "FCM", "WEB_PUSH"];
+/// Most registrations in one I13 request.
+pub const MIRROR_BATCH: usize = 100;
+
+/// One Messaging push registration of a CF Meet first-party account (I13 item). The
+/// endpoint it becomes is keyed by Messaging's own scope and device, so it never collides
+/// with an account-device registration (U8, first-party scope `00000000-…`).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MirrorItem {
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    pub principal_id: Uuid,
+    pub device_id: Uuid,
+    /// `cfmeet-user:<uuid>`; required when `enabled`.
+    #[serde(default)]
+    pub account_ref: Option<String>,
+    pub platform: String,
+    /// The registration handle; required when `enabled`, never echoed or logged.
+    #[serde(default)]
+    pub handle: Option<String>,
+    /// `false`: the registration was removed, disabled or no longer belongs to a CF Meet
+    /// first-party account; the mirrored endpoint is deleted.
+    pub enabled: bool,
+}
+
+impl fmt::Debug for MirrorRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Never prints a handle.
+        f.debug_struct("MirrorRequest")
+            .field("registrations", &self.registrations.len())
+            .finish()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MirrorRequest {
+    pub registrations: Vec<MirrorItem>,
+}
+
+/// What one I13 item did. Identifiers and classes only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirrorOutcome {
+    /// A new endpoint was created (the copy of a registration not seen before).
+    Created,
+    /// The endpoint's handle, platform or owner changed.
+    Updated,
+    /// Already mirrored exactly (idempotent replay).
+    Unchanged,
+    /// The mirrored endpoint was deleted.
+    Removed,
+    /// Nothing to remove.
+    Absent,
+    /// The same handle is registered by the same account through U8 (its account device):
+    /// that registration is authoritative; no copy is kept.
+    Superseded,
+    /// The same handle is registered through U8 by another account: never taken over.
+    HandleInUse,
+    /// Not the configured CF Meet first-party scope (nothing written).
+    OutOfScope,
+    /// Refused (reason class); any earlier copy of the device is deleted.
+    Invalid(&'static str),
+}
+
+impl MirrorOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "CREATED",
+            Self::Updated => "UPDATED",
+            Self::Unchanged => "UNCHANGED",
+            Self::Removed => "REMOVED",
+            Self::Absent => "ABSENT",
+            Self::Superseded => "SUPERSEDED",
+            Self::HandleInUse => "HANDLE_IN_USE",
+            Self::OutOfScope => "OUT_OF_SCOPE",
+            Self::Invalid(_) => "INVALID",
+        }
+    }
+}
+
+fn account_ref_valid(r: &str) -> bool {
+    r.strip_prefix("cfmeet-user:")
+        .and_then(|u| Uuid::parse_str(u).ok())
+        .is_some_and(|u| format!("cfmeet-user:{u}") == r)
+}
+
+#[derive(Debug, FromQueryResult)]
+struct MirroredRow {
+    id: Uuid,
+    platform: String,
+    handle_digest: String,
+    enabled: bool,
+    account_ref: Option<String>,
+    principal_id: Option<Uuid>,
+}
+
+#[derive(Debug, FromQueryResult)]
+struct HandleOwner {
+    account_ref: Option<String>,
+}
+
+async fn remove_mirrored<C: ConnectionTrait>(
+    conn: &C,
+    item: &MirrorItem,
+) -> Result<MirrorOutcome, DbErr> {
+    let n = db::exec(
+        conn,
+        "DELETE FROM notif_push_endpoints WHERE environment_id = $1 AND account_device_ref = $2",
+        vec![item.environment_id.into(), item.device_id.into()],
+    )
+    .await?;
+    Ok(if n > 0 {
+        MirrorOutcome::Removed
+    } else {
+        MirrorOutcome::Absent
+    })
+}
+
+/// I13 for one registration (run inside the caller's transaction). The handle is checked
+/// exactly as at U8 (structure and the provider's Web Push host allowlist), sealed under
+/// the endpoint id and stored with its keyed digest; it is never returned or logged.
+/// Returns the outcome and, when an endpoint exists afterwards, its `pushTargetRef`.
+pub async fn mirror_one<C: ConnectionTrait>(
+    conn: &C,
+    keys: &DataKeys,
+    provider: Option<&dyn PushProvider>,
+    item: &MirrorItem,
+    local_test_allowed: bool,
+    first_party: Option<(Uuid, Uuid, Uuid)>,
+) -> Result<(MirrorOutcome, Option<Uuid>), DbErr> {
+    let scope = (item.tenant_id, item.application_id, item.environment_id);
+    if first_party.is_some_and(|fp| fp != scope) {
+        return Ok((MirrorOutcome::OutOfScope, None));
+    }
+    // The first-party scope id of account-device registrations is never a Messaging scope.
+    if item.environment_id == FIRST_PARTY_SCOPE {
+        return Ok((MirrorOutcome::Invalid("SCOPE"), None));
+    }
+    if !item.enabled {
+        return Ok((remove_mirrored(conn, item).await?, None));
+    }
+    let invalid = |reason: &'static str| async move {
+        remove_mirrored(conn, item).await?;
+        Ok::<_, DbErr>((MirrorOutcome::Invalid(reason), None))
+    };
+    let Some(account) = item.account_ref.as_deref().filter(|r| account_ref_valid(r)) else {
+        return invalid("ACCOUNT_REF").await;
+    };
+    let platform = item.platform.as_str();
+    if !MIRROR_PLATFORMS.contains(&platform) && !(local_test_allowed && platform == "LOCAL_TEST") {
+        return invalid("PLATFORM").await;
+    }
+    let Some(handle) = item
+        .handle
+        .as_deref()
+        .map(str::trim)
+        .filter(|h| !h.is_empty() && h.len() <= 4096)
+    else {
+        return invalid("HANDLE").await;
+    };
+    if validate_handle_shape(platform, handle).is_err() {
+        return invalid("HANDLE").await;
+    }
+    if let Some(p) = provider {
+        if p.supports(platform) && p.validate_handle(platform, handle).is_err() {
+            return invalid("HANDLE").await;
+        }
+    }
+    let digest = keys.digest("push-handle", &format!("{platform}\u{0}{handle}"));
+    // An account-device registration (U8) of the same handle is authoritative.
+    let owner: Option<HandleOwner> = db::one(
+        conn,
+        "SELECT account_ref FROM notif_push_endpoints WHERE handle_digest = $1 AND environment_id = $2",
+        vec![digest.clone().into(), FIRST_PARTY_SCOPE.into()],
+    )
+    .await?;
+    if let Some(owner) = owner {
+        remove_mirrored(conn, item).await?;
+        return Ok((
+            if owner.account_ref.as_deref() == Some(account) {
+                MirrorOutcome::Superseded
+            } else {
+                MirrorOutcome::HandleInUse
+            },
+            None,
+        ));
+    }
+    let existing: Vec<MirroredRow> = db::all(
+        conn,
+        "SELECT id, platform, handle_digest, enabled, account_ref, principal_id FROM notif_push_endpoints
+          WHERE environment_id = $1 AND account_device_ref = $2 ORDER BY id",
+        vec![item.environment_id.into(), item.device_id.into()],
+    )
+    .await?;
+    if let [row] = existing.as_slice() {
+        if row.platform == platform
+            && row.handle_digest == digest
+            && row.enabled
+            && row.account_ref.as_deref() == Some(account)
+            && row.principal_id == Some(item.principal_id)
+        {
+            return Ok((MirrorOutcome::Unchanged, Some(row.id)));
+        }
+    }
+    // One Messaging registration per device: another platform of this device goes, and a
+    // handle that moved from another mirrored device leaves that device.
+    db::exec(
+        conn,
+        "DELETE FROM notif_push_endpoints WHERE environment_id = $1 AND account_device_ref = $2 AND platform <> $3",
+        vec![item.environment_id.into(), item.device_id.into(), platform.into()],
+    )
+    .await?;
+    db::exec(
+        conn,
+        "DELETE FROM notif_push_endpoints WHERE handle_digest = $1 AND NOT (environment_id = $2 AND account_device_ref = $3 AND platform = $4)",
+        vec![digest.clone().into(), item.environment_id.into(), item.device_id.into(), platform.into()],
+    )
+    .await?;
+    let row = conn
+        .query_one(db::stmt(
+            "INSERT INTO notif_push_endpoints (id, tenant_id, application_id, environment_id, account_ref, principal_id,
+                 account_device_ref, platform, handle_sealed, handle_key_id, handle_digest)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '', $9, $10)
+             ON CONFLICT (environment_id, account_device_ref, platform) DO UPDATE SET
+                 tenant_id = EXCLUDED.tenant_id, application_id = EXCLUDED.application_id,
+                 account_ref = EXCLUDED.account_ref, principal_id = EXCLUDED.principal_id,
+                 handle_digest = EXCLUDED.handle_digest, handle_key_id = EXCLUDED.handle_key_id,
+                 enabled = true, disabled_reason = NULL, updated_at = now()
+             RETURNING id, (xmax = 0) AS inserted",
+            vec![
+                Uuid::new_v4().into(),
+                item.tenant_id.into(),
+                item.application_id.into(),
+                item.environment_id.into(),
+                account.into(),
+                item.principal_id.into(),
+                item.device_id.into(),
+                platform.into(),
+                keys.kid().into(),
+                digest.into(),
+            ],
+        ))
+        .await?
+        .ok_or_else(|| DbErr::Custom("no endpoint row".into()))?;
+    let endpoint: Uuid = row.try_get("", "id")?;
+    let inserted: bool = row.try_get("", "inserted")?;
+    db::exec(
+        conn,
+        "UPDATE notif_push_endpoints SET handle_sealed = $2 WHERE id = $1",
+        vec![
+            endpoint.into(),
+            keys.seal(handle, &format!("push:{endpoint}")).into(),
+        ],
+    )
+    .await?;
+    Ok((
+        if inserted {
+            MirrorOutcome::Created
+        } else {
+            MirrorOutcome::Updated
+        },
+        Some(endpoint),
+    ))
 }
 
 /// U9: idempotent removal.
@@ -475,6 +747,30 @@ pub struct CallPushRequest {
     pub push_target_refs: Vec<Uuid>,
     pub payload: Value,
     pub expires_at: DateTime<Utc>,
+    /// 1.2.0 (N9): the invited CF Meet account (`cfmeet-user:<uuid>`). When present, only
+    /// endpoints of that account are woken; a reference to another account's endpoint
+    /// answers `UNKNOWN_TARGET` (a client-supplied `pushTargetRef` never reaches another
+    /// account's device).
+    #[serde(default)]
+    pub recipient_account_ref: Option<String>,
+}
+
+/// The collapse id of call alerts (a newer call alert replaces an older one).
+pub const CALL_COLLAPSE_ID: &str = "cfmeet-call";
+
+/// The delivery options of an I3 push to an endpoint of `platform`: the TTL is what is
+/// left of the invitation (never a late ring), call alerts collapse, and `APNS_VOIP`
+/// endpoints get a PushKit VoIP push.
+pub fn call_send_options(
+    platform: &str,
+    expires_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> SendOptions {
+    SendOptions {
+        ttl_seconds: Some((expires_at - now).num_seconds().clamp(0, 300) as u64),
+        collapse_id: Some(CALL_COLLAPSE_ID.into()),
+        voip: platform == "APNS_VOIP",
+    }
 }
 
 /// I3: best-effort call push, bounded to one second overall, never queued or retried.
@@ -485,17 +781,35 @@ pub async fn call_push(
     req: &CallPushRequest,
     now: DateTime<Utc>,
 ) -> Result<Value, DbErr> {
+    #[derive(Debug, FromQueryResult)]
+    struct CallTarget {
+        platform: String,
+        handle_sealed: String,
+        enabled: bool,
+        account_ref: Option<String>,
+    }
     let mut results = Vec::new();
     let expired = req.expires_at <= now;
     let rows: Vec<(Uuid, Option<EndpointRow>)> = {
         let mut v = Vec::new();
         for id in &req.push_target_refs {
-            let row: Option<EndpointRow> = db::one(
+            let row: Option<CallTarget> = db::one(
                 conn,
-                "SELECT platform, handle_sealed, enabled FROM notif_push_endpoints WHERE id = $1",
+                "SELECT platform, handle_sealed, enabled, account_ref FROM notif_push_endpoints WHERE id = $1",
                 vec![(*id).into()],
             )
             .await?;
+            // Another account's endpoint is indistinguishable from an unknown one.
+            let row = row
+                .filter(|r| match req.recipient_account_ref.as_deref() {
+                    Some(recipient) => r.account_ref.as_deref() == Some(recipient),
+                    None => true,
+                })
+                .map(|r| EndpointRow {
+                    platform: r.platform,
+                    handle_sealed: r.handle_sealed,
+                    enabled: r.enabled,
+                });
             v.push((*id, row));
         }
         v
@@ -515,8 +829,12 @@ pub async fn call_push(
                 if !p.supports(platform) {
                     "NOT_CONFIGURED"
                 } else if let Ok(handle) = keys.open(&r.handle_sealed, &format!("push:{id}")) {
-                    match tokio::time::timeout_at(deadline, p.send(platform, &handle, &payload))
-                        .await
+                    let options = call_send_options(&r.platform, req.expires_at, now);
+                    match tokio::time::timeout_at(
+                        deadline,
+                        p.send_with(platform, &handle, &payload, &options),
+                    )
+                    .await
                     {
                         Ok(PushOutcome::Sent) => "SENT",
                         Ok(PushOutcome::InvalidHandle) => {

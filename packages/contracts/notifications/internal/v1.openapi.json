@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Notification Service internal API",
-    "version": "1.1.0",
-    "description": "Internal signed API of the unified Notification Service (cfmeet.notifications; blueprint Document 4 §3.3): I1–I11 and the optional I12 (approved under D-15). Frozen by roadmap N1 before the service exists (lifecycle experimental). Every route except I12 requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle (x-cfmeet-internal-permission); durable jti nonces; request binding emitted from day one. Never routed by public ingress. Health (/health, /ready with routingProtocol and per-lane heartbeats) is not counted as an API."
+    "version": "1.2.0",
+    "description": "Internal signed API of the unified Notification Service (cfmeet.notifications; blueprint Document 4 §3.3): I1–I11, the optional I12 (approved under D-15) and I13 (roadmap N9, the Messaging push-registration facade and D-1b copy). Frozen by roadmap N1 before the service exists (lifecycle experimental). Every route except I12 requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle (x-cfmeet-internal-permission); durable jti nonces; request binding emitted from day one. Never routed by public ingress. Health (/health, /ready with routingProtocol and per-lane heartbeats) is not counted as an API."
   },
   "paths": {
     "/internal/v1/notification-events": {
@@ -163,7 +163,7 @@
       "post": {
         "operationId": "dispatchNotificationsUser",
         "summary": "Forward an account-authenticated user request (I2)",
-        "description": "Relay envelope (packages/communications-policy Dispatch) from the Meeting Service carrying the server-resolved VerifiedAccount; path allowlist U1–U9 only. The response is the U-operation's response.",
+        "description": "Relay envelope (packages/communications-policy Dispatch) from the Meeting Service carrying the server-resolved VerifiedAccount; path allowlist U1–U9 only. The response is the U-operation's response. 1.2.0 (roadmap N10): the Communications Hub also holds notifications-user.forward for its preference facade; from cfmeet.communications only GET and PUT /preferences (U6 / U7) are accepted, anything else is 403 FORBIDDEN, and its U7 writes are recorded with origin HUB_FACADE in the preference change log.",
         "tags": [
           "Relay"
         ],
@@ -280,7 +280,7 @@
       "post": {
         "operationId": "dispatchCallPush",
         "summary": "Call-invitation push fast lane (I3)",
-        "description": "Synchronous, ≤ 1 s, no queue, no retry (the WebSocket ring and the recovery API cover failure). Called post-commit, best-effort, by Calling; ringing and first-answer arbitration stay in Calling. APNs VoIP / FCM high priority / Web Push urgency high.",
+        "description": "Synchronous, ≤ 1 s, no queue, no retry (the WebSocket ring and the recovery API cover failure). Called post-commit, best-effort, by Calling; ringing and first-answer arbitration stay in Calling. APNs VoIP / FCM high priority / Web Push urgency high. 1.2.0 (N9): the TTL is what is left of the invitation (expiresAt, at most 300 s), call alerts collapse (Web Push Topic / apns-collapse-id / FCM collapse_key cfmeet-call), APNS_VOIP endpoints receive a PushKit VoIP push; the device payload is the metadata {v, type: call} only.",
         "tags": [
           "Call push"
         ],
@@ -320,6 +320,11 @@
                   "expiresAt": {
                     "type": "string",
                     "format": "date-time"
+                  },
+                  "recipientAccountRef": {
+                    "description": "1.2.0 (N9): the invited CF Meet account. When present, only push endpoints of this account are woken; a pushTargetRef of another account answers UNKNOWN_TARGET. Calling sends it for first-party (FIRST_PARTY tenant, NATIVE_CF_USER cfmeet-user:) recipients only.",
+                    "type": "string",
+                    "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
                   }
                 }
               }
@@ -364,6 +369,246 @@
                               "RETRYABLE_FAILURE",
                               "PERMANENT_FAILURE",
                               "EXPIRED"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (FORBIDDEN): the issuer does not hold the permission in the receiver's trust bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/push/registrations/sync": {
+      "post": {
+        "operationId": "syncMessagingPushRegistrations",
+        "summary": "Mirror Messaging push registrations (I13)",
+        "description": "Roadmap N9, D-1b copy path. Messaging mirrors the push registrations of CF Meet first-party accounts (ACTIVE NATIVE_CF_USER principals of the CF Meet personal scope whose Platform Access reference is cfmeet-user:<uuid>) into the service's push endpoints: the one-off copy and every later change through its registration facade. Idempotent per item (UNCHANGED when already mirrored); each item is its own transaction. The endpoint is keyed by Messaging's scope and device and owned by accountRef, so MESSAGE_WAKEUPS deliveries resolve it. An account-device registration (U8) of the same handle is authoritative (SUPERSEDED / HANDLE_IN_USE, the copy is not kept). When the service has the CF Meet first-party scope configured, other scopes answer OUT_OF_SCOPE. Handles are checked as at U8 (including the Web Push host allowlist), sealed at rest, never echoed or logged.",
+        "tags": [
+          "Push registrations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "notifications-push-registration.sync",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "registrations"
+                ],
+                "properties": {
+                  "registrations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "tenantId",
+                        "applicationId",
+                        "environmentId",
+                        "principalId",
+                        "deviceId",
+                        "platform",
+                        "enabled"
+                      ],
+                      "properties": {
+                        "tenantId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "applicationId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "environmentId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "principalId": {
+                          "description": "The Messaging principal.",
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "deviceId": {
+                          "description": "The Messaging device; the endpoint is keyed by (environmentId, deviceId).",
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "accountRef": {
+                          "description": "The CF Meet account of the principal; required when enabled.",
+                          "type": "string",
+                          "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                        },
+                        "platform": {
+                          "type": "string",
+                          "enum": [
+                            "APNS",
+                            "FCM",
+                            "WEB_PUSH",
+                            "LOCAL_TEST"
+                          ]
+                        },
+                        "handle": {
+                          "description": "The registration handle (a Web Push PushSubscription JSON, an APNs device token or an FCM registration token); required when enabled. Sealed at rest, never echoed or logged.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4096
+                        },
+                        "enabled": {
+                          "description": "false: the registration was removed, disabled or no longer belongs to a CF Meet first-party account; the mirrored endpoint is deleted.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-registration outcomes, in request order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "results"
+                  ],
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "deviceId",
+                          "platform",
+                          "outcome",
+                          "pushTargetRef"
+                        ],
+                        "properties": {
+                          "deviceId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "platform": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "APNS",
+                              "FCM",
+                              "WEB_PUSH",
+                              "LOCAL_TEST",
+                              null
+                            ]
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "CREATED",
+                              "UPDATED",
+                              "UNCHANGED",
+                              "REMOVED",
+                              "ABSENT",
+                              "SUPERSEDED",
+                              "HANDLE_IN_USE",
+                              "OUT_OF_SCOPE",
+                              "INVALID"
+                            ]
+                          },
+                          "pushTargetRef": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "reason": {
+                            "description": "INVALID only.",
+                            "type": "string",
+                            "enum": [
+                              "SCOPE",
+                              "ACCOUNT_REF",
+                              "PLATFORM",
+                              "HANDLE"
                             ]
                           }
                         }

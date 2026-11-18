@@ -818,11 +818,12 @@ pub async fn revoke(
         .copied()
         .find(|r| *r == request.reason)
         .ok_or_else(|| Error::validation("reason must be one of USER_REQUESTED, LOST_OR_STOLEN, COMPROMISED, REPLACED, ADMINISTRATIVE"))?;
+    let scope = ctx.scope;
     let ctx = ctx.clone();
     let acting = acting.clone();
     let st = state.clone();
     let request_ctx = request_context();
-    state
+    let revoked = state
         .db
         .transaction::<_, DeviceRow, Error>(move |txn| {
             Box::pin(async move {
@@ -905,7 +906,10 @@ pub async fn revoke(
             })
         })
         .await
-        .map_err(Error::from)
+        .map_err(Error::from)?;
+    // N9 facade (off by default): the revoked device's mirrored endpoint is removed.
+    crate::push_mirror::after_change(state, device_id, Some(scope));
+    Ok(revoked)
 }
 
 /// Counts one directory / proof lookup of the credential (anti-enumeration bound).

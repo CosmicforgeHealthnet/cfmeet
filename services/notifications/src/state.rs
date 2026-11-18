@@ -34,6 +34,13 @@ pub struct AppState {
     pub workers_enabled: bool,
     pub operator_emails: Vec<String>,
     pub operator_alert_token: Option<Arc<SecretString>>,
+    /// Roadmap N10: the Hub preference export (copy + catch-up). `None` without the Hub
+    /// owner API; the copy job then never starts.
+    pub hub_preferences: Option<Arc<dyn crate::preference_copy::HubPreferenceSource>>,
+    /// The CF Meet first-party (tenant, application, environment) — the
+    /// `CFMEET_COMMUNICATION_*` scope — when configured: I13 then mirrors Messaging push
+    /// registrations of that scope only (`OUT_OF_SCOPE` otherwise).
+    pub first_party_scope: Option<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
 }
 
 impl AppState {

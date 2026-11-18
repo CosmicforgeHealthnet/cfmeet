@@ -5,13 +5,15 @@
 //! the email worker delivers them through the configured provider (Resend in production).
 
 use chrono::{DateTime, Duration, Utc};
-use sea_orm::{ConnectionTrait, DatabaseConnection};
+use sea_orm::{ConnectionTrait, DatabaseConnection, TransactionTrait};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::config::EmailConfig;
 use crate::error::ApiResult;
+use crate::services::critical_notifications::{self as critical, CriticalEvent};
 use crate::services::email_delivery::{self, category, Enqueued, NewEmail};
+use crate::services::step_up::StepUpPurpose;
 use crate::templates::email::{
     email_change_code_email, email_changed_new_address_email, email_changed_old_address_email,
     email_in_use_notice_email, new_sign_in_email, notification_email, security_notice_email,
@@ -94,6 +96,12 @@ impl EmailService {
 
     /// Passwordless sign-in code, with an optional magic link (`link_token`, which the
     /// web app's `/auth/magic` page POSTs to `/api/v1/auth/otp/verify-link`).
+    ///
+    /// CRITICAL lane (N12, `AUTH_VERIFICATION`): routed by the fence; `LEGACY_ONLY`
+    /// records exactly this ledger row. Outside it the catalogue event is
+    /// `account.sign-in-code.requested`: the address may have no account yet, so it names
+    /// one email principal with the address, the code and the magic-link token sealed
+    /// (the service rebuilds the same link from `NOTIFICATIONS_APP_URL`).
     pub async fn send_sign_in_code(
         &self,
         to_email: &str,
@@ -101,77 +109,102 @@ impl EmailService {
         link_token: Option<&str>,
         details: &RequestDetails,
     ) -> ApiResult<Uuid> {
-        let link = link_token.map(|token| {
-            format!(
-                "{}/auth/magic?email={}&token={token}",
-                self.app_url.trim_end_matches('/'),
-                url_encode(to_email)
-            )
-        });
+        let link = link_token.map(|token| magic_link(&self.app_url, to_email, token));
         let template = sign_in_code_email(code, CODE_TTL_TEXT, link.as_deref(), details);
-        self.enqueue_template(
-            category::AUTH_VERIFICATION,
-            Some(format!(
-                "otp:signin:{}:{}",
-                email_delivery::recipient_hash(to_email),
-                digest(code)
-            )),
+        let event = CriticalEvent::sign_in_code(
             to_email,
-            None,
-            "Your CF Meet sign-in code",
-            template,
-            Some(Utc::now() + CODE_TTL),
+            code,
+            link_token,
+            CODE_TTL.num_minutes(),
+            details,
+        );
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::AUTH_VERIFICATION,
+                format!(
+                    "otp:signin:{}:{}",
+                    email_delivery::recipient_hash(to_email),
+                    digest(code)
+                ),
+                to_email,
+                None,
+                "Your CF Meet sign-in code",
+                template,
+                Utc::now() + CODE_TTL,
+            ),
+            event,
         )
         .await
         .map(|e| e.id)
     }
 
-    /// Step-up confirmation code sent to the account's current address.
+    /// Step-up confirmation code for `purpose`, sent to the account's current address.
+    /// CRITICAL lane (N12, `SECURITY_DEVICE_STEP_UP`): routed by the fence; `LEGACY_ONLY`
+    /// records exactly this ledger row. Outside it the catalogue event is
+    /// `account.step-up-code.requested` (the code sealed, `purpose` as data).
     pub async fn send_step_up_code(
         &self,
         to_email: &str,
         username: &str,
+        user_id: Uuid,
         code: &str,
-        action: &str,
+        purpose: StepUpPurpose,
     ) -> ApiResult<Uuid> {
-        let template = step_up_code_email(username, code, CODE_TTL_TEXT, action);
-        self.enqueue_template(
-            category::SECURITY_DEVICE_STEP_UP,
-            Some(format!(
-                "otp:stepup:{}:{}",
-                email_delivery::recipient_hash(to_email),
-                digest(code)
-            )),
-            to_email,
-            Some(username),
-            "Confirm it's you",
-            template,
-            Some(Utc::now() + CODE_TTL),
+        let template = step_up_code_email(username, code, CODE_TTL_TEXT, purpose.action());
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::SECURITY_DEVICE_STEP_UP,
+                format!(
+                    "otp:stepup:{}:{}",
+                    email_delivery::recipient_hash(to_email),
+                    digest(code)
+                ),
+                to_email,
+                Some(username),
+                "Confirm it's you",
+                template,
+                Utc::now() + CODE_TTL,
+            ),
+            CriticalEvent::step_up_code(user_id, purpose.as_str(), code, CODE_TTL.num_minutes()),
         )
         .await
         .map(|e| e.id)
     }
 
-    /// Code proving ownership of the new address of an email change.
+    /// Code proving ownership of the new address of an email change. CRITICAL lane (N12,
+    /// `AUTH_VERIFICATION`): routed by the fence; `LEGACY_ONLY` records exactly this ledger
+    /// row. Outside it the catalogue event is `account.email-change-code.requested`: the
+    /// address is not (yet) the account's, so it names one email principal with the new
+    /// address and the code sealed, on behalf of the account (`user_id`, the subject).
     pub async fn send_email_change_code(
         &self,
         to_new_email: &str,
         username: &str,
+        user_id: Uuid,
         code: &str,
     ) -> ApiResult<Uuid> {
         let template = email_change_code_email(username, code, CODE_TTL_TEXT);
-        self.enqueue_template(
-            category::AUTH_VERIFICATION,
-            Some(format!(
-                "otp:emailchange:{}:{}",
-                email_delivery::recipient_hash(to_new_email),
-                digest(code)
-            )),
-            to_new_email,
-            Some(username),
-            "Confirm your new CF Meet email address",
-            template,
-            Some(Utc::now() + CODE_TTL),
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::AUTH_VERIFICATION,
+                format!(
+                    "otp:emailchange:{}:{}",
+                    email_delivery::recipient_hash(to_new_email),
+                    digest(code)
+                ),
+                to_new_email,
+                Some(username),
+                "Confirm your new CF Meet email address",
+                template,
+                Utc::now() + CODE_TTL,
+            ),
+            CriticalEvent::email_change_code(user_id, to_new_email, code, CODE_TTL.num_minutes()),
         )
         .await
         .map(|e| e.id)
@@ -340,19 +373,47 @@ pub async fn email_changed_notices_on<C: ConnectionTrait>(
     Ok(())
 }
 
+/// One rendered legacy email of the CRITICAL lane (the row `LEGACY_ONLY` records; the
+/// same fields `EmailService::enqueue_template` writes).
+fn rendered(
+    category: &'static str,
+    key: String,
+    to: &str,
+    to_name: Option<&str>,
+    subject: &str,
+    template: EmailTemplate,
+    expires_at: DateTime<Utc>,
+) -> NewEmail {
+    NewEmail {
+        category,
+        idempotency_key: Some(key),
+        to: to.to_string(),
+        to_name: to_name.map(str::to_string),
+        subject: subject.to_string(),
+        html: template.html,
+        text: template.text,
+        expires_at: Some(expires_at),
+    }
+}
+
 /// N0-10 (S-9): a device security notice recorded on the caller's transaction, with the
-/// deterministic key `device-linked:<link id>` (one notice per completed link).
-pub async fn device_notice_on<C: ConnectionTrait>(
+/// deterministic key `device-linked:<link id>` (one notice per completed link). CRITICAL
+/// lane (N12): routed by the `SECURITY_DEVICE_LINKED` fence mode ([`critical::enqueue`]).
+#[allow(clippy::too_many_arguments)]
+pub async fn device_notice_on<C: ConnectionTrait + TransactionTrait>(
     conn: &C,
     to_email: &str,
     username: &str,
+    user_id: Uuid,
+    device_id: Uuid,
     link_id: Uuid,
     subject: &str,
     message: &str,
 ) -> ApiResult<Uuid> {
     let template = notification_email(username, subject, message);
-    email_delivery::enqueue(
+    critical::enqueue(
         conn,
+        critical::installed(),
         NewEmail {
             category: category::NOTIFICATION,
             idempotency_key: Some(format!("device-linked:{link_id}")),
@@ -363,9 +424,45 @@ pub async fn device_notice_on<C: ConnectionTrait>(
             text: template.text,
             expires_at: Some(Utc::now() + Duration::days(2)),
         },
+        CriticalEvent::device_linked(user_id, device_id, link_id),
     )
     .await
     .map(|e| e.id)
+}
+
+/// The device step-up code email (`account_devices`), recorded on the caller's
+/// transaction with the key `device-step-up:<link id>:<code digest prefix>`. CRITICAL lane
+/// (N12): routed by the `SECURITY_DEVICE_STEP_UP` fence mode ([`critical::enqueue`]); the
+/// catalogue event `account.device-step-up-code.requested` carries the sealed code.
+#[allow(clippy::too_many_arguments)]
+pub async fn device_step_up_code_on<C: ConnectionTrait + TransactionTrait>(
+    conn: &C,
+    to_email: &str,
+    username: &str,
+    user_id: Uuid,
+    device_id: Uuid,
+    key: String,
+    code: &str,
+    template: EmailTemplate,
+    expires_at: DateTime<Utc>,
+) -> ApiResult<Enqueued> {
+    let ttl_minutes = (expires_at - Utc::now()).num_minutes().max(1);
+    critical::enqueue(
+        conn,
+        critical::installed(),
+        NewEmail {
+            category: category::SECURITY_DEVICE_STEP_UP,
+            idempotency_key: Some(key),
+            to: to_email.to_string(),
+            to_name: Some(username.to_string()),
+            subject: "Your CF Meet device verification code".into(),
+            html: template.html,
+            text: template.text,
+            expires_at: Some(expires_at),
+        },
+        CriticalEvent::device_step_up_code(user_id, device_id, code, ttl_minutes),
+    )
+    .await
 }
 
 /// A security notice must never block the security change itself because the stored
@@ -380,6 +477,16 @@ pub fn tolerate_unsendable(result: ApiResult<Uuid>, user_id: Uuid, what: &str) -
         }
         Err(e) => Err(e),
     }
+}
+
+/// The sign-in magic link (the Notification Service builds the same link from the sealed
+/// token and address, `services/notifications/src/templates/mod.rs`).
+fn magic_link(app_url: &str, to_email: &str, token: &str) -> String {
+    format!(
+        "{}/auth/magic?email={}&token={token}",
+        app_url.trim_end_matches('/'),
+        url_encode(to_email)
+    )
 }
 
 /// Percent-encode a query value (RFC 3986 unreserved characters pass through).
@@ -405,6 +512,44 @@ mod passwordless_tests {
         assert_eq!(mask_email("nadia@example.com"), "n***@example.com");
         assert_eq!(mask_email("broken"), "***");
         assert_eq!(url_encode("a+b@x.com"), "a%2Bb%40x.com");
+    }
+
+    /// SHA-256 over subject, NUL, text, NUL, html, NUL of the sign-in email for a fixed
+    /// input. The Notification Service's renderer test (`templates::tests::
+    /// SIGN_IN_PARITY_DIGEST`) asserts the same value for the same input, so a user sees
+    /// the same email whichever path sends the code.
+    const SIGN_IN_PARITY_DIGEST: &str =
+        "611a75c830404a0965fb9a6feaa363b5b70ce86783b3b9ebc4882cf557919d53";
+
+    #[test]
+    fn the_sign_in_email_matches_the_notification_service_rendering() {
+        let link = magic_link(
+            "https://app.cfmeet.com/",
+            "Ada+cf@Example.com",
+            "tok_0123456789abcdefghij",
+        );
+        assert_eq!(
+            link,
+            "https://app.cfmeet.com/auth/magic?email=Ada%2Bcf%40Example.com&token=tok_0123456789abcdefghij"
+        );
+        let t = sign_in_code_email(
+            "482913",
+            CODE_TTL_TEXT,
+            Some(&link),
+            &RequestDetails {
+                client: Some("TestBrowser/1.0".into()),
+                address: Some("102.89.x.x".into()),
+                when_utc: "2026-11-17 12:00".into(),
+            },
+        );
+        let mut h = Sha256::new();
+        for part in ["Your CF Meet sign-in code", &t.text, &t.html] {
+            h.update(part.as_bytes());
+            h.update([0u8]);
+        }
+        assert_eq!(hex::encode(h.finalize()), SIGN_IN_PARITY_DIGEST);
+        assert_eq!(CODE_TTL_TEXT, "10 minutes");
+        assert_eq!(CODE_TTL.num_minutes(), 10);
     }
 }
 

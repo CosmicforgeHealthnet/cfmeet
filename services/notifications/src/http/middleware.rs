@@ -163,11 +163,12 @@ pub async fn request_context(request: Request, next: Next) -> Response {
 }
 
 #[allow(dead_code)]
-fn _permission_names() -> [InternalPermission; 6] {
+fn _permission_names() -> [InternalPermission; 7] {
     [
         InternalPermission::NotificationsEventPublish,
         InternalPermission::NotificationsUserForward,
         InternalPermission::NotificationsCallPushDispatch,
+        InternalPermission::NotificationsPushRegistrationSync,
         InternalPermission::NotificationsObservabilityRead,
         InternalPermission::NotificationsOperationsReplay,
         InternalPermission::NotificationsOperationsReroute,

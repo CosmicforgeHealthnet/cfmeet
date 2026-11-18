@@ -37,6 +37,20 @@
 //! **Idempotency.** `dedupe_key` per job; a per-recipient ledger keyed by the SHA-256 of
 //! the address, written before the email is queued, so a retried or re-claimed job never
 //! emails the same person twice (at-most-once per recipient and job).
+//!
+//! **Routing fence (Notification Service roadmap N7 / N11, Document 4 §9).** Every place
+//! that writes a legacy row of `MEETING_INVITATION`, `MEETING_NOTIFICATION` or
+//! `ORGANIZATION_INVITATION` first reads the category's mode
+//! ([`crate::services::notification_fence::current_mode`]). `LEGACY_ONLY` (or no fence
+//! history) runs exactly today's code. Otherwise one transaction records the sticky
+//! decision and writes the legacy row (`OLD`; plus one shadow publication in `SHADOW`) or
+//! the Notification Service publication only (`NEW`,
+//! [`crate::services::notification_publications`]). Decision keys are today's ledger
+//! keys: `meeting-invitation:<invitation>`, `org-invitation:<invitation>:<n>` (the email's
+//! ledger idempotency key once fenced) and the job's `dedupe_key` (`rescheduled:…`,
+//! `cancelled:…`, `reminder:<conference>:<start>`; its per-recipient emails are covered by
+//! the job's decision). A notification whose event cannot be published stays `OLD`
+//! (`RECIPIENT_LIMIT` / `UNPUBLISHABLE`), never dropped.
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -47,9 +61,11 @@ use std::{
 };
 
 use async_trait::async_trait;
+use cf_notification_client::{SealedPlaintext, SealingKey};
 use chrono::{DateTime, Duration, Utc};
 use sea_orm::{
-    ConnectionTrait, DatabaseConnection, DbBackend, EntityTrait, FromQueryResult, Statement,
+    ConnectionTrait, DatabaseConnection, DatabaseTransaction, DbBackend, EntityTrait,
+    FromQueryResult, Statement, TransactionTrait,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -63,6 +79,8 @@ use crate::{
     error::{ApiError, ApiResult},
     models::{conference_sessions, meeting_invitations, meeting_spaces},
     services::email::EmailService,
+    services::notification_fence::{self as fence, DecisionReason, MeetingCategory, RoutingMode},
+    services::notification_publications::{self as publications, event_type, EventDraft},
     services::ops_metrics::{inc, OPS_METRICS as OM},
     templates::email::meeting::{render, NotificationBody},
 };
@@ -121,34 +139,58 @@ impl MailError {
 pub trait NotificationMail: Send + Sync {
     /// Hand one email to the delivery queue.
     async fn send(&self, email: OutgoingEmail) -> Result<(), MailError>;
+
+    /// Hand one email to the delivery queue on the caller's transaction — the routed
+    /// (fenced) path, where the ledger row is written with its routing decision (Document 4
+    /// §9.3). Transports without a ledger (tests) send as [`NotificationMail::send`].
+    async fn send_in(
+        &self,
+        txn: &DatabaseTransaction,
+        email: OutgoingEmail,
+    ) -> Result<(), MailError> {
+        let _ = txn;
+        self.send(email).await
+    }
+}
+
+async fn enqueue_mail<C: ConnectionTrait>(conn: &C, email: OutgoingEmail) -> Result<(), MailError> {
+    crate::services::email_delivery::enqueue_with_calendar(
+        conn,
+        crate::services::email_delivery::NewEmail {
+            category: email.category,
+            idempotency_key: email.idempotency_key,
+            to: email.to,
+            to_name: email.to_name,
+            subject: email.subject,
+            html: email.html,
+            text: email.text,
+            expires_at: None,
+        },
+        email.calendar,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|e| match e {
+        ApiError::BadRequest(_) => MailError::InvalidAddress,
+        ApiError::Conflict(m) if m == crate::services::email_delivery::RECIPIENT_SUPPRESSED => {
+            MailError::Suppressed
+        }
+        _ => MailError::Unavailable,
+    })
 }
 
 #[async_trait]
 impl NotificationMail for EmailService {
     async fn send(&self, email: OutgoingEmail) -> Result<(), MailError> {
-        crate::services::email_delivery::enqueue_with_calendar(
-            self.db(),
-            crate::services::email_delivery::NewEmail {
-                category: email.category,
-                idempotency_key: email.idempotency_key,
-                to: email.to,
-                to_name: email.to_name,
-                subject: email.subject,
-                html: email.html,
-                text: email.text,
-                expires_at: None,
-            },
-            email.calendar,
-        )
-        .await
-        .map(|_| ())
-        .map_err(|e| match e {
-            ApiError::BadRequest(_) => MailError::InvalidAddress,
-            ApiError::Conflict(m) if m == crate::services::email_delivery::RECIPIENT_SUPPRESSED => {
-                MailError::Suppressed
-            }
-            _ => MailError::Unavailable,
-        })
+        enqueue_mail(self.db(), email).await
+    }
+
+    async fn send_in(
+        &self,
+        txn: &DatabaseTransaction,
+        email: OutgoingEmail,
+    ) -> Result<(), MailError> {
+        enqueue_mail(txn, email).await
     }
 }
 
@@ -316,11 +358,24 @@ impl PreferenceSource for HubPreferences {
 pub struct Notifier {
     pub mail: Arc<dyn NotificationMail>,
     pub preferences: Arc<dyn PreferenceSource>,
+    /// The Notification Service's public HPKE key (`CF_NOTIFICATIONS_SEALING_KEY`): seals
+    /// invitation tokens / addresses into published events. `None`: invitation emails
+    /// cannot be published and stay on the legacy path (`UNPUBLISHABLE`).
+    pub sealing: Option<SealingKey>,
 }
 
 impl Notifier {
     pub fn new(mail: Arc<dyn NotificationMail>, preferences: Arc<dyn PreferenceSource>) -> Self {
-        Self { mail, preferences }
+        Self {
+            mail,
+            preferences,
+            sealing: None,
+        }
+    }
+
+    pub fn with_sealing(mut self, sealing: Option<SealingKey>) -> Self {
+        self.sealing = sealing;
+        self
     }
 }
 
@@ -606,20 +661,32 @@ async fn meeting_invitation_inner(
                 .into(),
         ),
     });
-    let sent = ctx
-        .notifier
-        .mail
-        .send(OutgoingEmail {
-            category: crate::services::email_delivery::category::MEETING_INVITATION,
-            idempotency_key: None,
-            to: email,
-            to_name: account.as_ref().map(|a| a.name()),
-            subject,
-            html: template.html,
-            text: template.text,
-            calendar,
-        })
-        .await;
+    let outgoing = OutgoingEmail {
+        category: crate::services::email_delivery::category::MEETING_INVITATION,
+        idempotency_key: None,
+        to: email,
+        to_name: account.as_ref().map(|a| a.name()),
+        subject,
+        html: template.html,
+        text: template.text,
+        calendar,
+    };
+    // Routing fence (Document 4 §9.3): LEGACY_ONLY (or no fence history) is today's path.
+    let sent = match fence::current_mode(&ctx.db, MeetingCategory::MeetingInvitation).await? {
+        None | Some(RoutingMode::LegacyOnly) => ctx.notifier.mail.send(outgoing).await,
+        Some(_) => {
+            let key = format!("meeting-invitation:{}", invitation.id);
+            let draft = meeting_invitation_draft(invitation, account.as_ref(), token, &key);
+            send_routed(
+                ctx,
+                MeetingCategory::MeetingInvitation,
+                RoutingKey::Fixed(key),
+                outgoing,
+                |_| draft,
+            )
+            .await
+        }
+    };
     Ok(if sent.is_ok() {
         EmailDelivery::Accepted
     } else {
@@ -628,12 +695,15 @@ async fn meeting_invitation_inner(
 }
 
 /// Sends the invitation email for an organization invitation the Organizations Service
-/// just created (its authoritative answer carries the one-time token).
+/// just created (its authoritative answer carries the invitation id and the one-time
+/// token).
+#[allow(clippy::too_many_arguments)]
 pub async fn send_organization_invitation(
     ctx: &NotificationContext,
     inviter_name: &str,
     to_email: &str,
     organization_id: Uuid,
+    invitation_id: Option<Uuid>,
     role: &str,
     token: &str,
     expires_at: Option<DateTime<Utc>>,
@@ -698,23 +768,313 @@ pub async fn send_organization_invitation(
         action: Some(("Review invitation", &link)),
         footnote: Some("If you did not expect this invitation you can ignore this email.".into()),
     });
-    match ctx
-        .notifier
-        .mail
-        .send(OutgoingEmail {
-            category: crate::services::email_delivery::category::ORGANIZATION_INVITATION,
-            idempotency_key: None,
-            to: email,
-            to_name: account.as_ref().map(|a| a.name()),
-            subject,
-            html: template.html,
-            text: template.text,
-            calendar: None,
-        })
-        .await
-    {
+    let outgoing = OutgoingEmail {
+        category: crate::services::email_delivery::category::ORGANIZATION_INVITATION,
+        idempotency_key: None,
+        to: email.clone(),
+        to_name: account.as_ref().map(|a| a.name()),
+        subject,
+        html: template.html,
+        text: template.text,
+        calendar: None,
+    };
+    // Routing fence (Document 4 §9.3): LEGACY_ONLY (or no fence history) is today's path.
+    let sent = match fence::current_mode(&ctx.db, MeetingCategory::OrganizationInvitation).await {
+        Err(_) => Err(MailError::Unavailable),
+        Ok(None | Some(RoutingMode::LegacyOnly)) => ctx.notifier.mail.send(outgoing).await,
+        // Fenced: the decision key names the invitation, which the answer must carry.
+        Ok(Some(_)) => match invitation_id {
+            None => Err(MailError::Unavailable),
+            Some(invitation_id) => {
+                send_routed(
+                    ctx,
+                    MeetingCategory::OrganizationInvitation,
+                    RoutingKey::OrgInvitation(invitation_id),
+                    outgoing,
+                    |key| {
+                        organization_invitation_draft(
+                            invitation_id,
+                            organization_id,
+                            &email,
+                            token,
+                            expires_at,
+                            key,
+                        )
+                    },
+                )
+                .await
+            }
+        },
+    };
+    match sent {
         Ok(()) => EmailDelivery::Accepted,
         Err(_) => EmailDelivery::Failed,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Routing fence (Notification Service roadmap N7 / N11, Document 4 §9)
+// ---------------------------------------------------------------------------
+
+/// The decision key of a routed invitation email (today's ledger key formats, §9.3).
+enum RoutingKey {
+    /// `meeting-invitation:<invitation id>`.
+    Fixed(String),
+    /// `org-invitation:<invitation id>:<n>`: one per token Meeting emails for the
+    /// invitation (an idempotent replay at Organizations re-issues a fresh token), `n`
+    /// following the invitation's latest decision (serialized per invitation).
+    OrgInvitation(Uuid),
+}
+
+async fn resolve_key(txn: &DatabaseTransaction, key: RoutingKey) -> Result<String, sea_orm::DbErr> {
+    match key {
+        RoutingKey::Fixed(k) => Ok(k),
+        RoutingKey::OrgInvitation(id) => {
+            let prefix = format!("org-invitation:{id}:");
+            txn.execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                [prefix.clone().into()],
+            ))
+            .await?;
+            let last: i64 = txn
+                .query_one(Statement::from_sql_and_values(
+                    DbBackend::Postgres,
+                    "SELECT COALESCE(max(split_part(idempotency_key, ':', 3)::bigint), 0) AS last
+                       FROM notification_route_decisions
+                      WHERE category = 'ORGANIZATION_INVITATION' AND idempotency_key LIKE $1 || '%'",
+                    [prefix.clone().into()],
+                ))
+                .await?
+                .map(|r| r.try_get::<i64>("", "last"))
+                .transpose()?
+                .unwrap_or(0);
+            Ok(format!("{prefix}{}", last + 1))
+        }
+    }
+}
+
+/// The routed (fenced) send of one invitation email: ONE transaction records the sticky
+/// decision and writes the legacy ledger row (`OLD`, keyed by the decision key; plus one
+/// shadow publication in `SHADOW`) or the publication only (`NEW`). Any failure rolls the
+/// whole transaction back (nothing recorded; the email is reported `FAILED`).
+async fn send_routed<F>(
+    ctx: &NotificationContext,
+    category: MeetingCategory,
+    key: RoutingKey,
+    mut email: OutgoingEmail,
+    draft: F,
+) -> Result<(), MailError>
+where
+    F: FnOnce(&str) -> Result<EventDraft, DecisionReason> + Send,
+{
+    let txn = ctx.db.begin().await.map_err(|_| MailError::Unavailable)?;
+    let key = resolve_key(&txn, key)
+        .await
+        .map_err(|_| MailError::Unavailable)?;
+    let routed = publications::route(
+        &txn,
+        &key,
+        draft(&key),
+        category,
+        ctx.notifier.sealing.as_ref(),
+        Utc::now(),
+    )
+    .await
+    .map_err(|_| MailError::Unavailable)?;
+    if routed.write_legacy {
+        email.idempotency_key = Some(key);
+        ctx.notifier.mail.send_in(&txn, email).await?;
+    }
+    txn.commit().await.map_err(|_| MailError::Unavailable)
+}
+
+/// The `meeting-service.invitation.email-requested` event of an email-bound meeting
+/// invitation: the invitee's CF Meet account (the service reads its address through X1),
+/// the token sealed. An invitee without an eligible account (the catalogue seals no
+/// address for this type), or an invitation without a conference (`conferenceId` is
+/// required), has no complete envelope.
+fn meeting_invitation_draft(
+    invitation: &meeting_invitations::Model,
+    account: Option<&AccountRow>,
+    token: &str,
+    key: &str,
+) -> Result<EventDraft, DecisionReason> {
+    let account = account
+        .filter(|a| a.eligible())
+        .ok_or(DecisionReason::Unpublishable)?;
+    let conference = invitation
+        .conference_id
+        .ok_or(DecisionReason::Unpublishable)?;
+    Ok(EventDraft {
+        category: MeetingCategory::MeetingInvitation,
+        event_type: event_type::INVITATION,
+        subject_id: invitation.id,
+        subject_version: None,
+        data: vec![
+            ("conferenceId", json!(conference.to_string())),
+            ("invitationId", json!(invitation.id.to_string())),
+        ],
+        recipients: vec![format!("cfmeet-user:{}", account.id)],
+        dedupe_key: key.to_owned(),
+        idempotency_key: key.to_owned(),
+        cancel_key: None,
+        delivery_expires_at: Some(invitation.expires_at),
+        secret: Some(SealedPlaintext::default().with_token(token)),
+        publish_until: invitation.expires_at,
+    })
+}
+
+/// The `meeting-service.organization-invitation.email-requested` event: the invitation's
+/// email principal (`meeting-email-principal:<invitation id>`), token and address sealed.
+fn organization_invitation_draft(
+    invitation_id: Uuid,
+    organization_id: Uuid,
+    address: &str,
+    token: &str,
+    expires_at: Option<DateTime<Utc>>,
+    key: &str,
+) -> Result<EventDraft, DecisionReason> {
+    Ok(EventDraft {
+        category: MeetingCategory::OrganizationInvitation,
+        event_type: event_type::ORGANIZATION_INVITATION,
+        subject_id: invitation_id,
+        subject_version: None,
+        data: vec![
+            ("invitationId", json!(invitation_id.to_string())),
+            ("organizationId", json!(organization_id.to_string())),
+        ],
+        recipients: vec![format!("meeting-email-principal:{invitation_id}")],
+        dedupe_key: key.to_owned(),
+        idempotency_key: key.to_owned(),
+        cancel_key: None,
+        delivery_expires_at: expires_at,
+        secret: Some(
+            SealedPlaintext::default()
+                .with_token(token)
+                .with_address(address),
+        ),
+        publish_until: expires_at.unwrap_or_else(|| Utc::now() + publications::LIFETIME),
+    })
+}
+
+fn rfc3339(t: DateTime<Utc>) -> String {
+    t.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+}
+
+/// The conference notice event of a job (`MEETING_NOTIFICATION`): the audience is the
+/// worker's (same rule as X2), as CF Meet account references. An email-only participant
+/// cannot be addressed from an envelope (the service reads addresses through X1, for
+/// accounts only), so such an audience — or one larger than the configured maximum — has
+/// no complete envelope and the notice stays on the legacy path.
+#[allow(clippy::too_many_arguments)]
+async fn conference_draft<C: ConnectionTrait>(
+    conn: &C,
+    config: &NotificationConfig,
+    event_type: &'static str,
+    conference: &conference_sessions::Model,
+    dedupe_key: &str,
+    actor_user_id: Option<Uuid>,
+    starts_at: DateTime<Utc>,
+    reminder: bool,
+) -> ApiResult<Result<EventDraft, DecisionReason>> {
+    let (rows, truncated) = conference_recipients(
+        conn,
+        conference.meeting_space_id,
+        conference.id,
+        config.max_recipients,
+        actor_user_id,
+    )
+    .await?;
+    if truncated {
+        return Ok(Err(DecisionReason::RecipientLimit));
+    }
+    let mut recipients = Vec::with_capacity(rows.len());
+    for r in rows {
+        match r.user_id {
+            Some(id) => recipients.push(format!("cfmeet-user:{id}")),
+            None => return Ok(Err(DecisionReason::Unpublishable)),
+        }
+    }
+    recipients.sort();
+    recipients.dedup();
+    Ok(Ok(EventDraft {
+        category: MeetingCategory::MeetingNotification,
+        event_type,
+        subject_id: conference.id,
+        subject_version: Some(i64::from(conference.version)),
+        data: vec![
+            ("conferenceId", json!(conference.id.to_string())),
+            ("startsAt", json!(rfc3339(starts_at))),
+        ],
+        recipients,
+        dedupe_key: dedupe_key.to_owned(),
+        idempotency_key: format!("meeting-notification:{dedupe_key}"),
+        cancel_key: reminder.then(|| format!("conference-reminder:{}", conference.id)),
+        delivery_expires_at: reminder.then_some(starts_at),
+        secret: None,
+        publish_until: if reminder {
+            starts_at
+        } else {
+            Utc::now() + publications::LIFETIME
+        },
+    }))
+}
+
+/// One conference job, routed (Document 4 §9.3) on the caller's connection — the
+/// transaction of the change for reschedule / cancellation notices. LEGACY_ONLY (or no
+/// fence history): today's insert. Otherwise the decision (key = the job's `dedupe_key`)
+/// and the job (`OLD`, plus one shadow publication in `SHADOW`) or the publication only
+/// (`NEW`) are written on `conn`.
+#[allow(clippy::too_many_arguments)]
+async fn record_job<C: ConnectionTrait>(
+    conn: &C,
+    config: &NotificationConfig,
+    mode: Option<RoutingMode>,
+    kind: &str,
+    conference: &conference_sessions::Model,
+    dedupe_key: &str,
+    actor_user_id: Option<Uuid>,
+    payload: Value,
+    starts_at: DateTime<Utc>,
+) -> ApiResult<u64> {
+    let Some(mode) = mode.filter(|m| *m != RoutingMode::LegacyOnly) else {
+        return insert_job(conn, kind, conference, dedupe_key, actor_user_id, payload).await;
+    };
+    let event_type = match kind {
+        KIND_RESCHEDULED => event_type::RESCHEDULED,
+        KIND_CANCELLED => event_type::CANCELLED,
+        _ => event_type::SCHEDULED,
+    };
+    // FENCED_OLD routes OLD whatever the event: no audience is read for it.
+    let draft = if matches!(mode, RoutingMode::Shadow | RoutingMode::FencedNew) {
+        conference_draft(
+            conn,
+            config,
+            event_type,
+            conference,
+            dedupe_key,
+            actor_user_id,
+            starts_at,
+            kind == KIND_REMINDER,
+        )
+        .await?
+    } else {
+        Err(DecisionReason::Unpublishable)
+    };
+    let routed = publications::route(
+        conn,
+        dedupe_key,
+        draft,
+        MeetingCategory::MeetingNotification,
+        None,
+        Utc::now(),
+    )
+    .await?;
+    if routed.write_legacy {
+        insert_job(conn, kind, conference, dedupe_key, actor_user_id, payload).await
+    } else {
+        Ok(0)
     }
 }
 
@@ -763,8 +1123,11 @@ pub async fn record_rescheduled<C: ConnectionTrait>(
     let Some(to) = after.scheduled_start_at else {
         return Ok(());
     };
-    insert_job(
+    let mode = fence::current_mode(conn, MeetingCategory::MeetingNotification).await?;
+    record_job(
         conn,
+        config,
+        mode,
         KIND_RESCHEDULED,
         after,
         &format!("rescheduled:{}:{}", after.id, after.version),
@@ -775,6 +1138,7 @@ pub async fn record_rescheduled<C: ConnectionTrait>(
             "scheduledEndAt": after.scheduled_end_at,
             "conferenceVersion": after.version,
         }),
+        to,
     )
     .await?;
     Ok(())
@@ -794,13 +1158,17 @@ pub async fn record_cancelled<C: ConnectionTrait>(
     let Some(start) = conference.scheduled_start_at else {
         return Ok(());
     };
-    insert_job(
+    let mode = fence::current_mode(conn, MeetingCategory::MeetingNotification).await?;
+    record_job(
         conn,
+        config,
+        mode,
         KIND_CANCELLED,
         conference,
         &format!("cancelled:{}", conference.id),
         actor_user_id,
         json!({ "scheduledStartAt": start }),
+        start,
     )
     .await?;
     Ok(())
@@ -895,6 +1263,12 @@ pub async fn enqueue_due_reminders(
         return Ok(0);
     }
     let horizon = now + Duration::minutes(config.reminder_lead_minutes);
+    let mode = fence::current_mode(db, MeetingCategory::MeetingNotification)
+        .await?
+        .filter(|m| *m != RoutingMode::LegacyOnly);
+    if let Some(mode) = mode {
+        return enqueue_due_reminders_routed(db, config, mode, now, horizon).await;
+    }
     let due = conference_sessions::Model::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Postgres,
         "SELECT c.* FROM conference_sessions c JOIN meeting_spaces s ON s.id = c.meeting_space_id \
@@ -921,6 +1295,54 @@ pub async fn enqueue_due_reminders(
             json!({ "scheduledStartAt": start }),
         )
         .await?;
+    }
+    Ok(created)
+}
+
+/// The reminder scan outside LEGACY_ONLY (§9.9 phase 4.3a: Meeting's scan stays the only
+/// trigger; each reminder is routed under its `reminder_key`, one transaction each). A
+/// reminder already decided (OLD job or NEW publication) is not found again. Returns the
+/// legacy jobs created.
+async fn enqueue_due_reminders_routed(
+    db: &DatabaseConnection,
+    config: &NotificationConfig,
+    mode: RoutingMode,
+    now: DateTime<Utc>,
+    horizon: DateTime<Utc>,
+) -> ApiResult<u64> {
+    let due = conference_sessions::Model::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT c.* FROM conference_sessions c JOIN meeting_spaces s ON s.id = c.meeting_space_id \
+          WHERE c.scheduled_start_at > $1 AND c.scheduled_start_at <= $2 \
+            AND c.status IN ('CREATED', 'PREPARING', 'WAITING') AND c.origin = 'V2' AND s.status = 'ACTIVE' \
+            AND NOT EXISTS (SELECT 1 FROM meeting_notifications n WHERE n.dedupe_key = \
+                'reminder:' || c.id::text || ':' || floor(extract(epoch FROM c.scheduled_start_at))::bigint::text) \
+            AND NOT EXISTS (SELECT 1 FROM notification_route_decisions d WHERE d.idempotency_key = \
+                'reminder:' || c.id::text || ':' || floor(extract(epoch FROM c.scheduled_start_at))::bigint::text) \
+          ORDER BY c.scheduled_start_at LIMIT $3",
+        [now.into(), horizon.into(), REMINDER_SCAN_LIMIT.into()],
+    ))
+    .all(db)
+    .await?;
+    let mut created = 0;
+    for c in due {
+        let Some(start) = c.scheduled_start_at else {
+            continue;
+        };
+        let txn = db.begin().await?;
+        created += record_job(
+            &txn,
+            config,
+            Some(mode),
+            KIND_REMINDER,
+            &c,
+            &reminder_key(c.id, start),
+            None,
+            json!({ "scheduledStartAt": start }),
+            start,
+        )
+        .await?;
+        txn.commit().await?;
     }
     Ok(created)
 }
