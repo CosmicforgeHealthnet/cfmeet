@@ -98,7 +98,10 @@ impl AppState {
         Self {
             communications: None,
             db,
-            jwt_service: Arc::new(JwtService::new(app_config.jwt_secret.clone())),
+            jwt_service: Arc::new(
+                JwtService::new(app_config.jwt_secret.clone())
+                    .with_previous(JwtService::previous_from_env()),
+            ),
             email_service,
             legacy_rtc: Arc::new(LiveKitService::new(livekit_config)),
             redis,
