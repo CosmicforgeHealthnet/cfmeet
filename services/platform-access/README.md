@@ -77,6 +77,21 @@ $A identity import --bundle part-iii.json                 # hand-off from Part I
 $A identity export --out recovery.json                    # 0600; verifiers, never secrets
 ```
 
+## Credential expiry (P15)
+
+Every platform API credential expires; none is non-expiring by default or otherwise:
+
+* `platform_api_credentials.expires_at` is `NOT NULL` with `CHECK (expires_at > not_before)`
+  since the first migration, and authentication refuses an expired credential.
+* A credential created or rotated without `expiresAt` gets `not_before +
+  CREDENTIAL_DEFAULT_LIFETIME_DAYS` (default **365**); an explicit `expiresAt` may not exceed
+  `now + CREDENTIAL_MAX_LIFETIME_DAYS` (default **730**); the default may not exceed the
+  maximum (startup refuses). The Developer Platform passes no expiry unless the organization's
+  credential policy caps it, so console-created credentials get the same default.
+* Credential views report `expiringSoon` near the end, and the Developer Platform emits
+  `credential.expiring_soon` / `credential.expired` notices.
+* Existing credentials therefore all carry an expiry already; there is nothing to migrate.
+
 ## Tests
 
 ```bash
