@@ -16,9 +16,8 @@
 //!   blocks and history windows as for first-party wake-ups — that registered). Ids only:
 //!   never text, sender name or attachment metadata.
 //!
-//! `packages/notification-client` validates `platform-principal:<uuid>` recipients only
-//! (it predates the contract's two-id form): the envelope is built with the client's
-//! builder and its recipient references are then written in the contract's form.
+//! The envelope is built and validated with `packages/notification-client` (which knows
+//! the contract's `platform-principal:<environmentId>:<principalId>` recipients).
 
 use std::{sync::Arc, time::Duration as StdDuration};
 
@@ -509,19 +508,11 @@ async fn build(state: &AppState, row: &Row) -> std::result::Result<Value, &'stat
     )
     .data("eventSequence", row.event_sequence)
     .data("securityProfile", authorization.security_profile.clone());
-    // Validated by the client in its `platform-principal:<id>` form, then written in the
-    // contract's `platform-principal:<environmentId>:<principalId>` form.
     for p in &registered {
-        builder = builder.recipient(format!("{PLATFORM_PRINCIPAL}:{}", p.principal_id));
+        builder = builder.recipient(recipient(row.environment_id, p.principal_id));
     }
     let envelope = builder.build().map_err(|_| "INVALID")?;
-    let mut value = serde_json::to_value(envelope).map_err(|_| "INVALID")?;
-    value["recipients"] = Value::Array(
-        registered
-            .iter()
-            .map(|p| json!({ "ref": recipient(row.environment_id, p.principal_id) }))
-            .collect(),
-    );
+    let value = serde_json::to_value(envelope).map_err(|_| "INVALID")?;
     Ok(value)
 }
 
