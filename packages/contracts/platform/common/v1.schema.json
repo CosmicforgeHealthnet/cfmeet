@@ -162,6 +162,7 @@
         "notifications-event.publish",
         "notifications-user.forward",
         "notifications-call-push.dispatch",
+        "notifications-push-registration.sync",
         "notifications-observability.read",
         "notifications-operations.replay",
         "notifications-operations.reroute",
@@ -171,7 +172,8 @@
         "communications-restrictions.read",
         "organization-invitations.read",
         "account-route-lease.claim",
-        "calling-abuse-reports.review"
+        "calling-abuse-reports.review",
+        "communications-preferences.export"
       ]
     }
   }

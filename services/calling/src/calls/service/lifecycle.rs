@@ -656,6 +656,11 @@ impl CallService {
                 &[("call_kind", call.call_kind.as_str())],
                 missed.max(0) as u64,
             );
+            // Roadmap N7 (D-10): the same participants, one notification publication each
+            // (CF Meet accounts only), atomic with the terminal state.
+            if missed > 0 && self.config.notification_publications {
+                crate::notification_publications::enqueue_missed(txn, &call).await?;
+            }
         }
         record_lifecycle_metrics(row, &call, &plan);
         tracing::info!(

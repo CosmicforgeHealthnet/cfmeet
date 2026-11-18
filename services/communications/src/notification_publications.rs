@@ -179,7 +179,7 @@ pub fn envelope(
 /// the Notification Service is configured. Idempotent (one row per request and type).
 /// Returns whether a row was written.
 pub async fn enqueue(state: &State, txn: &DatabaseTransaction, n: Notice<'_>) -> Result<bool> {
-    if !state.config.notifications_configured {
+    if !state.config.notifications_publications {
         return Ok(false);
     }
     let now = Utc::now();

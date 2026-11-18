@@ -25,6 +25,7 @@ on:
       - "packages/service-auth/**"
       - "packages/usage-facts/**"
       - "packages/object-storage/**"
+      - "packages/notification-client/**"
       - ".github/workflows/backend.yml"
       - ".github/workflows/deploy-backend.yml"
   pull_request:

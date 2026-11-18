@@ -17,7 +17,8 @@ use sha2::{Digest, Sha256};
 
 use self::email::meeting::{render as render_notice, NotificationBody};
 use self::email::{
-    notification_email, password_changed_email, password_reset_email, verification_email,
+    email_change_code_email, notification_email, password_changed_email, password_reset_email,
+    sign_in_code_email, step_up_code_email, verification_email, RequestDetails,
 };
 
 /// Meeting notice footnote (Meeting `notifications.rs` FOOTNOTE, verbatim).
@@ -89,11 +90,71 @@ pub struct RecipientFacts {
     pub time_zone: Option<String>,
 }
 
-/// Sealed values opened for this render only.
-#[derive(Debug, Clone, Default)]
+/// Sealed values opened for this render only (`Debug` is redacted).
+#[derive(Clone, Default)]
 pub struct Secrets {
     pub code: Option<String>,
     pub token: Option<String>,
+    /// The sealed address (the sign-in magic link carries it, as Meeting's does).
+    pub address: Option<String>,
+}
+
+impl std::fmt::Debug for Secrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Secrets")
+            .field("code", &self.code.as_ref().map(|_| "[REDACTED]"))
+            .field("token", &self.token.as_ref().map(|_| "[REDACTED]"))
+            .field("address", &self.address.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
+}
+
+/// The sentence a step-up code confirms, per `purpose` (Meeting `StepUpPurpose::action`,
+/// verbatim). `None`: not a catalogue purpose (never rendered).
+pub fn step_up_action(purpose: &str) -> Option<&'static str> {
+    match purpose {
+        "DEACTIVATE_ACCOUNT" => Some("deactivate your CF Meet account"),
+        "CHANGE_EMAIL" => Some("change the email address of your CF Meet account"),
+        _ => None,
+    }
+}
+
+/// Percent-encodes a query value (RFC 3986 unreserved characters pass through; Meeting
+/// `services::email::url_encode`, verbatim).
+pub fn url_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for b in value.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// The sign-in magic link (Meeting `EmailService::send_sign_in_code`): the web app's
+/// `/auth/magic` page POSTs it to `/api/v1/auth/otp/verify-link`.
+pub fn magic_link(app_url: &str, address: &str, token: &str) -> String {
+    format!(
+        "{}/auth/magic?email={}&token={token}",
+        app_url.trim_end_matches('/'),
+        url_encode(address)
+    )
+}
+
+/// The request facts of a sign-in code (`requestedAt`, `requestClient`, `requestNetwork`)
+/// as Meeting's `RequestDetails`.
+fn request_details(data: &Map<String, Value>) -> RequestDetails {
+    RequestDetails {
+        client: data_str(data, "requestClient").map(|c| clean(c, 80)),
+        address: data_str(data, "requestNetwork").map(|a| clean(a, 64)),
+        when_utc: data_str(data, "requestedAt")
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|t| t.with_timezone(&Utc).format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default(),
+    }
 }
 
 /// A rendered email.
@@ -279,9 +340,14 @@ pub fn push_payload(
         if let Some(c) = data.get("conversationId").and_then(Value::as_str) {
             m.insert("conversationId".into(), json!(c));
         }
-        if let Some(s) = data.get("eventSequence") {
-            if s.is_number() || s.is_string() {
-                m.insert("eventSequence".into(), s.clone());
+        // Parity with Messaging's legacy job payload (the 5 metadata keys `v`, `type`,
+        // `conversationId`, `eventSequence`, `sequence`): `sequence` is the message
+        // sequence, optional in the event (1.1.0).
+        for key in ["eventSequence", "sequence"] {
+            if let Some(s) = data.get(key) {
+                if s.is_number() || s.is_string() {
+                    m.insert(key.into(), s.clone());
+                }
             }
         }
         return Value::Object(m);
@@ -320,6 +386,50 @@ pub fn render_email(
             let t = password_reset_email(name, code()?, ttl.as_deref().unwrap_or("1 hour"));
             RenderedEmail {
                 subject: "Reset your CF Meet password".into(),
+                html: t.html,
+                text: t.text,
+            }
+        }
+        "account.sign_in_code" => {
+            // No greeting: the address may have no account yet (Meeting PR #97 wording).
+            let (Some(token), Some(address)) =
+                (secrets.token.as_deref(), secrets.address.as_deref())
+            else {
+                return Err(RenderError::SecretUnavailable);
+            };
+            let link = magic_link(app_url, address, token);
+            let t = sign_in_code_email(
+                code()?,
+                ttl.as_deref().unwrap_or("10 minutes"),
+                Some(&link),
+                &request_details(&obj),
+            );
+            RenderedEmail {
+                subject: "Your CF Meet sign-in code".into(),
+                html: t.html,
+                text: t.text,
+            }
+        }
+        "account.email_change_code" => {
+            let t = email_change_code_email(name, code()?, ttl.as_deref().unwrap_or("10 minutes"));
+            RenderedEmail {
+                subject: "Confirm your new CF Meet email address".into(),
+                html: t.html,
+                text: t.text,
+            }
+        }
+        "account.step_up_code" => {
+            let action = data_str(&obj, "purpose")
+                .and_then(step_up_action)
+                .ok_or(RenderError::NoEmail)?;
+            let t = step_up_code_email(
+                name,
+                code()?,
+                ttl.as_deref().unwrap_or("10 minutes"),
+                action,
+            );
+            RenderedEmail {
+                subject: "Confirm it's you".into(),
                 html: t.html,
                 text: t.text,
             }
@@ -531,7 +641,7 @@ mod tests {
             },
             &Secrets {
                 code: Some("123456".into()),
-                token: None,
+                ..Default::default()
             },
             None,
             "https://cfmeet.com",
@@ -608,6 +718,26 @@ mod tests {
             0,
         );
         assert!(cf_push_transport::adapters::metadata(&m).is_some());
+        // N9 parity: exactly Messaging's legacy job payload (5 keys), nothing else.
+        let full = push_payload(
+            "message.created",
+            &data(&[
+                ("conversationId", json!("c")),
+                ("conversationKind", json!("DIRECT")),
+                ("eventSequence", json!(4)),
+                ("sequence", json!(3)),
+                ("securityProfile", json!("PRIVATE_E2EE")),
+            ]),
+            9,
+        );
+        assert_eq!(
+            full,
+            json!({ "v": 1, "type": "message", "conversationId": "c", "eventSequence": 4, "sequence": 3 })
+        );
+        assert_eq!(
+            cf_push_transport::adapters::metadata(&full).unwrap().len(),
+            5
+        );
         let i = push_payload("contact.requested", &data(&[("actorRef", json!("x"))]), 7);
         assert!(cf_push_transport::adapters::metadata(&i).is_some());
         assert_eq!(i["type"], "inbox");
@@ -622,6 +752,191 @@ mod tests {
                 assert_ne!(t, "Notification", "{}", r.template);
             }
         }
+    }
+
+    /// SHA-256 over subject, NUL, text, NUL, html, NUL of the passwordless sign-in email for
+    /// the fixed input below. Meeting's `services::email` test
+    /// (`the_sign_in_email_matches_the_notification_service_rendering`) computes the same
+    /// value from PR #97's legacy template and link, so the two renderers cannot drift
+    /// apart unnoticed.
+    pub const SIGN_IN_PARITY_DIGEST: &str =
+        "611a75c830404a0965fb9a6feaa363b5b70ce86783b3b9ebc4882cf557919d53";
+
+    fn parity_digest(r: &RenderedEmail) -> String {
+        let mut h = Sha256::new();
+        for part in [&r.subject, &r.text, &r.html] {
+            h.update(part.as_bytes());
+            h.update([0u8]);
+        }
+        hex::encode(h.finalize())
+    }
+
+    fn sign_in_secrets() -> Secrets {
+        Secrets {
+            code: Some("482913".into()),
+            token: Some("tok_0123456789abcdefghij".into()),
+            address: Some("Ada+cf@Example.com".into()),
+        }
+    }
+
+    fn sign_in_data() -> BTreeMap<String, Value> {
+        data(&[
+            ("ttlMinutes", json!(10)),
+            ("requestedAt", json!("2026-11-17T12:00:00Z")),
+            ("requestClient", json!("TestBrowser/1.0")),
+            ("requestNetwork", json!("102.89.x.x")),
+        ])
+    }
+
+    #[test]
+    fn sign_in_email_has_meeting_parity() {
+        let r = render_email(
+            "account.sign_in_code",
+            &sign_in_data(),
+            &RecipientFacts::default(),
+            &sign_in_secrets(),
+            None,
+            "https://app.cfmeet.com/",
+        )
+        .unwrap();
+        let link = "https://app.cfmeet.com/auth/magic?email=Ada%2Bcf%40Example.com&token=tok_0123456789abcdefghij";
+        let legacy = sign_in_code_email(
+            "482913",
+            "10 minutes",
+            Some(link),
+            &RequestDetails {
+                client: Some("TestBrowser/1.0".into()),
+                address: Some("102.89.x.x".into()),
+                when_utc: "2026-11-17 12:00".into(),
+            },
+        );
+        assert_eq!(r.subject, "Your CF Meet sign-in code");
+        assert_eq!(r.text, legacy.text);
+        assert_eq!(r.html, legacy.html);
+        assert!(r.text.contains(link));
+        assert!(r.text.contains(
+            "Requested on 2026-11-17 12:00 (UTC) from TestBrowser/1.0 (network 102.89.x.x)."
+        ));
+        assert!(
+            !r.text.contains("Hi "),
+            "no greeting: the address may have no account"
+        );
+        assert_eq!(parity_digest(&r), SIGN_IN_PARITY_DIGEST);
+        // Without the optional request facts the sentence is shorter, as in Meeting.
+        let mut bare = sign_in_data();
+        bare.remove("requestClient");
+        bare.remove("requestNetwork");
+        let r = render_email(
+            "account.sign_in_code",
+            &bare,
+            &RecipientFacts::default(),
+            &sign_in_secrets(),
+            None,
+            "https://app.cfmeet.com",
+        )
+        .unwrap();
+        assert!(r.text.contains("Requested on 2026-11-17 12:00 (UTC)."));
+    }
+
+    #[test]
+    fn sign_in_needs_every_sealed_part_and_codes_need_theirs() {
+        for missing in ["code", "token", "address"] {
+            let mut s = sign_in_secrets();
+            match missing {
+                "code" => s.code = None,
+                "token" => s.token = None,
+                _ => s.address = None,
+            }
+            assert_eq!(
+                render_email(
+                    "account.sign_in_code",
+                    &sign_in_data(),
+                    &RecipientFacts::default(),
+                    &s,
+                    None,
+                    "https://cfmeet.com",
+                ),
+                Err(RenderError::SecretUnavailable),
+                "{missing}"
+            );
+        }
+        for template in ["account.email_change_code", "account.step_up_code"] {
+            assert_eq!(
+                render_email(
+                    template,
+                    &data(&[
+                        ("ttlMinutes", json!(10)),
+                        ("purpose", json!("CHANGE_EMAIL"))
+                    ]),
+                    &RecipientFacts::default(),
+                    &Secrets::default(),
+                    None,
+                    "https://cfmeet.com",
+                ),
+                Err(RenderError::SecretUnavailable),
+                "{template}"
+            );
+        }
+        let secrets = sign_in_secrets();
+        assert!(!format!("{secrets:?}").contains("482913"));
+        assert!(!format!("{secrets:?}").contains("Example.com"));
+    }
+
+    #[test]
+    fn email_change_and_step_up_codes_match_the_meeting_templates() {
+        let ada = RecipientFacts {
+            display_name: Some("ada".into()),
+            time_zone: None,
+        };
+        let code = Secrets {
+            code: Some("715302".into()),
+            ..Default::default()
+        };
+        let r = render_email(
+            "account.email_change_code",
+            &data(&[("ttlMinutes", json!(10))]),
+            &ada,
+            &code,
+            None,
+            "https://cfmeet.com",
+        )
+        .unwrap();
+        let legacy = email_change_code_email("ada", "715302", "10 minutes");
+        assert_eq!(r.subject, "Confirm your new CF Meet email address");
+        assert_eq!((r.text, r.html), (legacy.text, legacy.html));
+        for (purpose, action) in [
+            ("DEACTIVATE_ACCOUNT", "deactivate your CF Meet account"),
+            (
+                "CHANGE_EMAIL",
+                "change the email address of your CF Meet account",
+            ),
+        ] {
+            let r = render_email(
+                "account.step_up_code",
+                &data(&[("ttlMinutes", json!(10)), ("purpose", json!(purpose))]),
+                &ada,
+                &code,
+                None,
+                "https://cfmeet.com",
+            )
+            .unwrap();
+            let legacy = step_up_code_email("ada", "715302", "10 minutes", action);
+            assert_eq!(r.subject, "Confirm it's you");
+            assert_eq!((r.text, r.html), (legacy.text, legacy.html));
+        }
+        // A purpose outside the closed set is never rendered.
+        assert_eq!(
+            render_email(
+                "account.step_up_code",
+                &data(&[("ttlMinutes", json!(10)), ("purpose", json!("OTHER"))]),
+                &ada,
+                &code,
+                None,
+                "https://cfmeet.com",
+            ),
+            Err(RenderError::NoEmail)
+        );
+        assert_eq!(url_encode("a+b@x.com"), "a%2Bb%40x.com");
     }
 
     #[test]

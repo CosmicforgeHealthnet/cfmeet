@@ -34,6 +34,9 @@ pub mod media;
 pub mod metrics;
 pub mod middleware;
 pub mod models;
+/// Roadmap N7: publications to the Notification Service (missed call, voicemail and
+/// recording ready), only while `CF_NOTIFICATIONS_BASE_URL` is configured.
+pub mod notification_publications;
 pub mod numbering;
 pub mod platform;
 pub mod privacy_relay;

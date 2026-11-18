@@ -55,6 +55,10 @@ pub fn app(state: AppState) -> Router {
         .route("/notification-events", post(internal::ingest))
         .route("/notifications/dispatch", post(user::dispatch))
         .route("/push/call-invitations", post(internal::call_push))
+        .route(
+            "/push/registrations/sync",
+            post(internal::push_registrations_sync),
+        )
         .route("/admin/deliveries", get(internal::deliveries))
         .route("/admin/dead-letters", get(internal::dead_letters))
         .route("/admin/dead-letters/replay", post(internal::replay))
@@ -155,6 +159,7 @@ async fn ready(State(state): State<AppState>) -> Response {
             "emailProvider": state.email.provider.as_str(),
             "emailWebhook": state.email.resend_webhook_secret.is_some(),
             "pushPlatforms": state.push.as_ref().map(|p| ["APNS", "FCM", "WEB_PUSH", "LOCAL_TEST"].iter().filter(|x| p.supports(x)).copied().collect::<Vec<_>>()).unwrap_or_default(),
+            "webPushApplicationServerKey": state.push.as_ref().and_then(|p| p.web_push_application_server_key()),
             "sealedOpening": state.opening.is_some(),
             "authorities": state.authorities.configured(),
             "routing": { "nonOffRows": active },

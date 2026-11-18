@@ -12,7 +12,9 @@
 //! | `CF_PRIVACY_RELAY_BASE_URL`, `CF_TELEPHONY_BASE_URL` | no | authenticated API base URLs |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority (ADR 0032) |
 //! | `CF_NUMBERING_BASE_URL` | no | Numbering (Part IV L): DCN grants; unset = DCN calls fail closed |
+//! | `CF_NOTIFICATIONS_BASE_URL` | with `CALLING_PUSH_TRANSPORT=notifications` | the Notification Service's call fast lane I3 (`notifications-call-push.dispatch`, roadmap N9) |
 //! | `CF_DEVELOPER_PLATFORM_BASE_URL` | with `CALLING_PUBLIC_EVENTS_DESTINATION` `developer-platform` / `both` | the Developer Platform's central event ingestion (`developer-event.publish`, Part VI §53) |
+//! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service (roadmap N7): Calling writes and relays its `calling.*` publications (missed call, voicemail / recording ready) to I1 (`notifications-event.publish`); unset = nothing is written or sent, and the notification-publications migration history is not required |
 //!
 //! There is no default key, no inline-key variable and no shared secret. A missing or
 //! malformed key or bundle stops the service. Error messages never contain key material.
@@ -57,6 +59,14 @@ const TARGETS: &[(&str, &str)] = &[
     (
         "CF_DEVELOPER_PLATFORM_BASE_URL",
         cf_service_auth::services::DEVELOPER_PLATFORM,
+    ),
+    // Roadmap N7: the Notification Service's I1 (notifications-event.publish) for Calling's
+    // missed-call / voicemail / recording publications (optional; unset = none written).
+    // Notification Service roadmap N9: the call fast lane (I3) when
+    // CALLING_PUSH_TRANSPORT=notifications.
+    (
+        "CF_NOTIFICATIONS_BASE_URL",
+        cf_service_auth::services::NOTIFICATIONS,
     ),
 ];
 

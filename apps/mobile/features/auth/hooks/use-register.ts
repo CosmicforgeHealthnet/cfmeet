@@ -2,8 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { authApi } from "../api/auth.api";
 import { ApiRequestError, decodeApiError } from "@/lib/api/errors";
-import type { RegisterResponse } from "@/lib/api/generated/meeting-service";
 import type { RegisterRequest } from "../types";
+
+import type { RegisterResponse } from "../legacy-contract";
 
 export function useRegister() {
   return useMutation({

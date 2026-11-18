@@ -1304,6 +1304,9 @@ pub async fn create_organization_invitation(
                     &inviter,
                     &to,
                     id,
+                    reply.body["id"]
+                        .as_str()
+                        .and_then(|s| uuid::Uuid::parse_str(s).ok()),
                     reply.body["role"].as_str().unwrap_or("MEMBER"),
                     &token,
                     expires_at,

@@ -114,8 +114,19 @@
         "developer-platform.credential.expired",
         "developer-platform.production-access.decided",
         "operator.alert.fired",
+        "account.sign-in-code.requested",
+        "account.email-change-code.requested",
+        "account.step-up-code.requested",
         "notifications.cancel"
       ]
+    },
+    "StepUpPurpose": {
+      "type": "string",
+      "enum": [
+        "DEACTIVATE_ACCOUNT",
+        "CHANGE_EMAIL"
+      ],
+      "description": "The action an account.step-up-code.requested code confirms (`data.purpose`)."
     },
     "AccountRef": {
       "type": "string",

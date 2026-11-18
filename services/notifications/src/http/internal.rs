@@ -64,6 +64,15 @@ pub async fn call_push(
     if !req.payload.is_object() {
         return Err(ApiError::validation("payload must be an object"));
     }
+    if req
+        .recipient_account_ref
+        .as_deref()
+        .is_some_and(|r| !r.starts_with("cfmeet-user:") || r.len() != 48)
+    {
+        return Err(ApiError::validation(
+            "recipientAccountRef is cfmeet-user:<uuid>",
+        ));
+    }
     let modes = routing::category(&state.db, "CALL_INVITATIONS").await?;
     if routing::highest(&modes) != routing::Mode::Active {
         let results: Vec<Value> = req
@@ -82,6 +91,55 @@ pub async fn call_push(
     )
     .await?;
     Ok(json_ok(out))
+}
+
+/// I13 (roadmap N9, D-1b): Messaging mirrors the push registrations of CF Meet
+/// first-party accounts (the one-off copy and every later change through its facade).
+/// Each item is applied in its own transaction and answered with an outcome class and the
+/// endpoint id; handles are sealed at rest and never echoed or logged.
+pub async fn push_registrations_sync(
+    State(state): State<AppState>,
+    caller: Caller,
+    body: Bytes,
+) -> ApiResult<Response> {
+    use sea_orm::TransactionTrait;
+    caller.require(InternalPermission::NotificationsPushRegistrationSync)?;
+    let req: push::MirrorRequest = parse(&body)?;
+    if req.registrations.is_empty() || req.registrations.len() > push::MIRROR_BATCH {
+        return Err(ApiError::validation("registrations holds 1 to 100 items"));
+    }
+    let mut results = Vec::with_capacity(req.registrations.len());
+    for item in &req.registrations {
+        let txn = state.db.begin().await?;
+        let (outcome, target) = push::mirror_one(
+            &txn,
+            &state.keys,
+            state.push.as_deref(),
+            item,
+            state.local_test_push_allowed(),
+            state.first_party_scope,
+        )
+        .await?;
+        txn.commit().await?;
+        state.metrics.inc(
+            "notif_push_registration_sync_total",
+            format!("outcome=\"{}\"", outcome.as_str()),
+        );
+        let platform = ["APNS", "FCM", "WEB_PUSH", "LOCAL_TEST"]
+            .contains(&item.platform.as_str())
+            .then_some(item.platform.as_str());
+        let mut r = json!({
+            "deviceId": item.device_id,
+            "platform": platform,
+            "outcome": outcome.as_str(),
+            "pushTargetRef": target,
+        });
+        if let push::MirrorOutcome::Invalid(reason) = outcome {
+            r["reason"] = json!(reason);
+        }
+        results.push(r);
+    }
+    Ok(json_ok(json!({ "results": results })))
 }
 
 #[derive(Debug, Deserialize)]

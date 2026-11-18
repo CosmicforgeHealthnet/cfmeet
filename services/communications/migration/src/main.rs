@@ -1,6 +1,6 @@
 use sea_orm_migration::sea_orm::Database;
 
-/// `up` applies every history (foundation, Sections 9-23, Section 14, MSG-009, N7). Other subcommands
+/// `up` applies every history (foundation, Sections 9-23, Section 14, MSG-009, N7, N10). Other subcommands
 /// (`status`, `fresh` and so on) keep the standard CLI for the foundation history.
 #[tokio::main]
 async fn main() {

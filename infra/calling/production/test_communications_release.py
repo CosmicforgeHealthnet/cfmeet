@@ -205,8 +205,13 @@ class CommunicationsRuntimePreservation(unittest.TestCase):
         for open_path in ('/internal/rtc/livekit/webhook','/internal/transcription/events','location ^~ /internal/ '):
             self.assertNotIn(open_path,candidate)
         self.assertEqual(release.public_ingress_config(candidate),candidate)
-        # Probes cover every new denial (N0-6 operator routes, N6 Meeting owner routes X1 / X2).
-        self.assertEqual(len(release.PUBLIC_DENIAL_PROBES),6)
+        # Probes cover every new denial (N0-6 operator routes, N6 Meeting owner routes X1 / X2,
+        # N12 Account lease routes X6 / X7).
+        self.assertEqual(len(release.PUBLIC_DENIAL_PROBES),8)
+        for probe in ('/internal/v1/accounts/notification-route-decisions/leases',
+                      '/internal/v1/accounts/notification-route-decisions/completions'):
+            self.assertIn(probe,release.NOTIFICATION_OWNER_DENIAL_PROBES)
+            self.assertIn('location ^~ /internal/v1/accounts/notification-route-decisions/ ',candidate)
         for probe in release.NOTIFICATION_OWNER_DENIAL_PROBES:self.assertIn(probe,release.PUBLIC_DENIAL_PROBES)
         # The X2 denial is scoped to the notification-recipients route only.
         x2=re.compile(r'^/internal/v1/conferences/[^/]+/notification-recipients/')

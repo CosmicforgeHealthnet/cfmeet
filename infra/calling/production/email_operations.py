@@ -360,6 +360,42 @@ def otp_from_redis(cr, env, key):
     return code if last_line(out) == 'OK' else None
 
 
+def address_hash_sql(address):
+    """The Meeting Service's recipient hash of an address, as SQL (sha256 of the lower-cased address)."""
+    return "encode(sha256(convert_to(lower('%s'),'UTF8')),'hex')" % address.replace("'", '')
+
+
+def sign_in_route(cr, address):
+    """The routing-fence decision of the newest sign-in code to this address (Meeting's
+    notification_route_decisions, keyed otp:signin:<recipient hash>:<code digest>). No decision
+    means the category is LEGACY_ONLY: the code is in the Meeting ledger."""
+    out = cr.meeting_psql(
+        "SELECT route || '|' || decision_id || '|' || reason FROM notification_route_decisions "
+        "WHERE idempotency_key LIKE 'otp:signin:' || %s || ':%%' ORDER BY decided_at DESC LIMIT 1;"
+        % address_hash_sql(address))
+    if not out:
+        return {'route': 'OLD', 'decisionId': None, 'reason': 'NO_DECISION'}
+    route, decision_id, reason = out.split('|')
+    return {'route': route, 'decisionId': decision_id, 'reason': reason}
+
+
+def wait_for_service_email(cr, decision_id, seconds):
+    """The Notification Service's email for a CRITICAL route decision (notif_email_messages,
+    route_decision_id), once Resend has accepted it. Status and provider only."""
+    assert re.fullmatch(r'[0-9a-f-]{36}', decision_id or '')
+    db = cr.SERVICES['notifications']['db']
+    deadline = time.monotonic() + seconds
+    while True:
+        out = cr.release.db_sql(db, "SELECT coalesce(json_agg(json_build_object('status', status, 'provider', provider)), "
+                                    "'[]') FROM notif_email_messages WHERE route_decision_id = '%s';" % decision_id)
+        rows = json.loads(out or '[]')
+        if rows and rows[0]['status'] in ('ACCEPTED', 'DELIVERED'):
+            return rows[0]
+        if time.monotonic() > deadline:
+            return None
+        time.sleep(3)
+
+
 def otp_journey(cr, run_id):
     """Passwordless sign-in through the public API, with the code mailed through Resend:
     request → Resend → wrong / valid / reused code → session → step-up → deactivate."""
@@ -372,18 +408,32 @@ def otp_journey(cr, run_id):
     if status != 200:
         return checks
     time.sleep(2)
-    rows = cr.meeting_psql(
-        "SELECT id || '|' || status FROM email_deliveries WHERE category='AUTH_VERIFICATION' "
-        "AND idempotency_key LIKE 'otp:signin:%%' "
-        "AND recipient_hash = encode(sha256(convert_to(lower('%s'),'UTF8')),'hex') "
-        "ORDER BY created_at DESC LIMIT 1;" % address.replace("'", ''))
-    delivery_id = rows.split('|')[0] if rows else None
-    checks['sign_in_email_recorded'] = 'PASS' if delivery_id else 'FAIL'
-    if delivery_id:
-        accepted = wait_for(env, delivery_id, ('ACCEPTED', 'DELIVERED'), 90)
-        checks['sign_in_email_accepted_by_resend'] = (
-            'PASS' if accepted and accepted['status'] in ('ACCEPTED', 'DELIVERED') and accepted['provider'] == 'resend'
-            else 'FAIL %s' % json.dumps(accepted))
+    route = sign_in_route(cr, address)
+    checks['sign_in_route'] = route['route']
+    if route['route'] == 'NEW':
+        # N12: the Notification Service sends it under an X6 lease (FENCED_NEW); a failover
+        # moves the same code back to the Meeting ledger (reason AUTO_FAILOVER, route OLD).
+        message = wait_for_service_email(cr, route['decisionId'], 90)
+        if message is None and sign_in_route(cr, address)['route'] == 'OLD':
+            route = sign_in_route(cr, address)
+            checks['sign_in_route'] = 'OLD after %s' % route['reason']
+        else:
+            checks['sign_in_email_recorded'] = 'PASS' if message else 'FAIL'
+            checks['sign_in_email_accepted_by_resend'] = (
+                'PASS' if message and message['provider'] == 'resend' else 'FAIL %s' % json.dumps(message))
+    if 'sign_in_email_recorded' not in checks:
+        rows = cr.meeting_psql(
+            "SELECT id || '|' || status FROM email_deliveries WHERE category='AUTH_VERIFICATION' "
+            "AND idempotency_key LIKE 'otp:signin:%%' "
+            "AND recipient_hash = %s "
+            "ORDER BY created_at DESC LIMIT 1;" % address_hash_sql(address))
+        delivery_id = rows.split('|')[0] if rows else None
+        checks['sign_in_email_recorded'] = 'PASS' if delivery_id else 'FAIL'
+        if delivery_id:
+            accepted = wait_for(env, delivery_id, ('ACCEPTED', 'DELIVERED'), 90)
+            checks['sign_in_email_accepted_by_resend'] = (
+                'PASS' if accepted and accepted['status'] in ('ACCEPTED', 'DELIVERED') and accepted['provider'] == 'resend'
+                else 'FAIL %s' % json.dumps(accepted))
     code = otp_from_redis(cr, env, controlled_otp.hashed_key(address))
     checks['code_issued'] = 'PASS' if code else 'FAIL'
     wrong = '000000' if code != '000000' else '111111'
@@ -421,12 +471,36 @@ def deactivate(cr, env, token, user_id):
     return 'PASS' if status in (200, 204) else 'MANUAL %s' % status
 
 
+def fallback_drill(cr, run_id):
+    """N12: the Account CRITICAL fallback path. One drill email, sealed and opened with the
+    Account fallback key (CF_ACCOUNT_FALLBACK_KEY_FILE) on the Meeting Service, sent through the
+    legacy ledger to the acceptance recipient: ACCEPTED, then a signed DELIVERED."""
+    env = p.env_of(p.inspect(cr.MEETING))
+    recipient = acceptance_recipient(cr)
+    reference = 'drill-' + re.sub(r'[^0-9a-z-]', '-', run_id.lower())[:40]
+    status, body = internal(env, 'POST', '/internal/operations/email/fallback-drill',
+                            {'to': recipient, 'reference': reference})
+    result = {'reference': reference, 'recipientDomain': domain_of(recipient), 'status': status}
+    if status != 202 or not body or not body.get('deliveryId'):
+        emit('fallbackDrill', result)
+        raise RuntimeError('The fallback drill could not be queued (HTTP %s; the fallback key may be missing)' % status)
+    result['deliveryId'] = body['deliveryId']
+    result['accepted'] = wait_for(env, body['deliveryId'], ('ACCEPTED', 'DELIVERED'), 90)
+    result['delivered'] = wait_for(env, body['deliveryId'], ('DELIVERED',), 180)
+    emit('fallbackDrill', result)
+    if not result['delivered'] or result['delivered']['status'] != 'DELIVERED':
+        raise RuntimeError('The fallback drill email was not delivered: %s' % json.dumps(result['delivered']))
+    return result
+
+
 def email_acceptance(cr, sha, run_id, confirm):
     require_ledger(cr)
     env = p.env_of(p.inspect(cr.MEETING))
     if env.get('EMAIL_PROVIDER') != 'resend':
         raise RuntimeError('Resend is not the active provider (run activate-resend-email)')
     email_acceptance_check(cr, run_id, bool(env.get('RESEND_WEBHOOK_SECRET_FILE')))
+    if 'fallback' in (confirm or '').split(','):
+        fallback_drill(cr, run_id)
     if 'otp' in (confirm or '').split(','):
         checks = otp_journey(cr, run_id)
         emit('otpJourney', checks)

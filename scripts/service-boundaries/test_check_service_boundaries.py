@@ -372,7 +372,10 @@ class RealRepository(unittest.TestCase):
                                      # and the retention audit (ADR 0030).
                                      "calling_orphan_objects", "calling_retention_holds",
                                      "calling_retention_audit", "calling_communication_inbox",
-                                     "calling_communication_revocations"}
+                                     "calling_communication_revocations",
+                                     # Roadmap N7: Calling's outbox of publications to the
+                                     # Notification Service (its own history).
+                                     "calling_notification_publications"}
                             for t in calling), calling)
         # No second Call authority.
         self.assertFalse(calling & {"enterprise_calls", "pbx_calls", "voicemail_calls", "ivr_calls"})

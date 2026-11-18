@@ -108,7 +108,7 @@ pub async fn request(state: &AppState, user: &users::Model, new_email: &str) -> 
             .await?;
         state
             .email_service
-            .send_email_change_code(&new_email, &user.username, &code)
+            .send_email_change_code(&new_email, &user.username, user.id, &code)
             .await?;
     }
     security::record_event_best_effort(

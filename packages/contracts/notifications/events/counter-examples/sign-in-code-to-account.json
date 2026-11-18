@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "eventId": "evt_0123456789abcdef0123456789abcdef",
+  "eventType": "account.sign-in-code.requested",
+  "eventVersion": 1,
+  "producer": "cfmeet.meeting-service",
+  "occurredAt": "2026-11-15T12:00:00Z",
+  "correlationId": "corr_fedcba9876543210fedcba9876543210",
+  "recipients": [
+    {
+      "ref": "cfmeet-user:6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b"
+    }
+  ],
+  "delivery": {
+    "priority": "CRITICAL",
+    "dedupeKey": "otp:signin:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b:0a1b2c3d4e5f60718293a4b5",
+    "idempotencyKey": "otp:signin:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b:0a1b2c3d4e5f60718293a4b5",
+    "expiresAt": "2026-11-15T12:10:00Z"
+  },
+  "route": {
+    "decisionId": "0b9f6c1e-2d3a-4b5c-8d7e-6f5a4b3c2d1e",
+    "routingVersion": 3,
+    "protocol": 1
+  },
+  "data": {
+    "requestClient": "Mozilla/5.0 (X11; Linux x86_64) Firefox/133.0",
+    "requestNetwork": "102.89.x.x",
+    "requestedAt": "2026-11-15T12:00:00Z",
+    "ttlMinutes": 10
+  },
+  "sealed": {
+    "kid": "notif-hpke-2026-11",
+    "enc": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "ct": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+  }
+}

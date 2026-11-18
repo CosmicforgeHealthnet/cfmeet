@@ -42,6 +42,8 @@
 //! | `MESSAGING_REALTIME_MAX_CONNECTIONS` / `_PER_TENANT_CONNECTIONS` / `_PER_PRINCIPAL_CONNECTIONS` / `_PER_DEVICE_CONNECTIONS` | no | per instance: defaults 50000 / 10000 / 20 / 5 |
 //! | `MESSAGING_REALTIME_FRAMES_PER_SECOND` / `_DRAIN_SECONDS` | no | defaults 20 / 10 |
 //! | `MESSAGING_PUSH_PROVIDER` | no | `none` (default) or `local-test` (local / test runtimes only): the explicitly local adapter |
+//! | `MESSAGING_PUSH_REGISTRATION_MIRROR` | no | `off` (default: unchanged behaviour) or `on`: the N9 facade mirrors CF Meet first-party push registrations to the Notification Service (I13; needs `CF_NOTIFICATIONS_BASE_URL` and `CF_COMMUNICATIONS_PERSONAL_*`), see `push_mirror` |
+//! | `MESSAGING_PUSH_REGISTRATION_MIRROR_INTERVAL_SECONDS` | no | 10–3600, default 60: copy / repair pass interval (a full pass every 6 h) |
 //! | `MESSAGING_PUSH_APNS_KEY_FILE` / `_KEY_ID` / `_TEAM_ID` / `_TOPIC` | no | APNs token-based adapter (all four, or none): the `.p8` key file, its key id, the team id, the bundle id. `MESSAGING_PUSH_APNS_ENVIRONMENT` `production` (default) / `sandbox`; `MESSAGING_PUSH_APNS_BASE_URL` overrides the endpoint in local / test runtimes only |
 //! | `MESSAGING_PUSH_FCM_SERVICE_ACCOUNT_FILE` | no | FCM HTTP v1 adapter: the Google service-account key file (secret). `MESSAGING_PUSH_FCM_BASE_URL` overrides the endpoint in local / test runtimes only |
 //! | `MESSAGING_PUSH_WEB_VAPID_KEY_FILE` / `_VAPID_SUBJECT` | no | Web Push adapter (both, or neither): the VAPID P-256 key (PKCS#8 PEM) and its `mailto:` / `https:` contact. `MESSAGING_PUSH_WEB_ALLOWED_HOSTS` replaces the push-service host allowlist (comma-separated, `*.` = subdomains) |

@@ -1,13 +1,15 @@
 import type {
+  UserInfo as ContractUserInfo,
+} from "@/lib/api/generated/meeting-service";
+import type {
   ChangePasswordRequest as ContractChangePasswordRequest,
   ForgotPasswordRequest as ContractForgotPasswordRequest,
   LoginRequest as ContractLoginRequest,
   RegisterRequest as ContractRegisterRequest,
   ResetPasswordRequest as ContractResetPasswordRequest,
-  UserInfo as ContractUserInfo,
   VerifyEmailRequest as ContractVerifyEmailRequest,
   VerifyResetTokenRequest as ContractVerifyResetTokenRequest,
-} from "@/lib/api/generated/meeting-service";
+} from "./legacy-contract";
 
 /** Request bodies are the contract's (generated) DTOs. */
 export type ChangePasswordRequest = ContractChangePasswordRequest;

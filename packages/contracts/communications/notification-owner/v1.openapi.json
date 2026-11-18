@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Communications Hub — Notification Service owner API",
-    "version": "1.0.0",
-    "description": "X4 checkCommunicationRestrictions (blueprint Document 4 §3.4): batch block / privacy / operator-hold check for notifications, replacing the per-recipient policy/check calls. Frozen by roadmap N1; implemented in N6. Grantable to cfmeet.notifications only."
+    "version": "1.1.0",
+    "description": "X4 checkCommunicationRestrictions (blueprint Document 4 §3.4): batch block / privacy / operator-hold check for notifications, replacing the per-recipient policy/check calls. Frozen by roadmap N1; implemented in N6. 1.1.0 (roadmap N10, Document 5 §6 Phase 4.2): exportNotificationPreferences and listNotificationPreferenceChanges (communications-preferences.export) for the one-off copy and change-feed catch-up of the Hub's notification preferences into the Notification Service. Grantable to cfmeet.notifications only."
   },
   "paths": {
     "/internal/v1/communications/restrictions/check": {
@@ -153,6 +153,482 @@
           },
           "503": {
             "description": "UNAVAILABLE (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/notification-preferences/export": {
+      "post": {
+        "operationId": "exportNotificationPreferences",
+        "summary": "Export the Hub's notification preferences (N10 copy)",
+        "description": "One page, in key order, of the Hub's notification preference rows of one kind in the signed first-party scope: ACCOUNT (the 7 switches), CONVERSATION (notifications / mutedUntil) or CONTACT (the contact notification level, keyed by the contact's account reference), each with the Hub row version (recorded by the service as source_version). Security events are not stored and never exported. Read-only.",
+        "tags": [
+          "Notification owner"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-preferences.export",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "limit"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "ACCOUNT",
+                      "CONVERSATION",
+                      "CONTACT"
+                    ]
+                  },
+                  "after": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 80,
+                    "description": "nextCursor of the previous page (opaque)."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One page of rows.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "kind",
+                    "items",
+                    "nextCursor",
+                    "feedPosition",
+                    "settledPosition",
+                    "oldestPosition"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 1
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "ACCOUNT",
+                        "CONVERSATION",
+                        "CONTACT"
+                      ]
+                    },
+                    "items": {
+                      "type": "array",
+                      "maxItems": 500,
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "accountRef",
+                              "version",
+                              "directMessages",
+                              "groupMessages",
+                              "incomingCalls",
+                              "missedCalls",
+                              "contactRequests",
+                              "groupInvitations",
+                              "meetingInvitations"
+                            ],
+                            "properties": {
+                              "accountRef": {
+                                "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+                              },
+                              "version": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "directMessages": {
+                                "type": "boolean"
+                              },
+                              "groupMessages": {
+                                "type": "boolean"
+                              },
+                              "incomingCalls": {
+                                "type": "boolean"
+                              },
+                              "missedCalls": {
+                                "type": "boolean"
+                              },
+                              "contactRequests": {
+                                "type": "boolean"
+                              },
+                              "groupInvitations": {
+                                "type": "boolean"
+                              },
+                              "meetingInvitations": {
+                                "type": "boolean"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "accountRef",
+                              "conversationId",
+                              "notifications",
+                              "mutedUntil",
+                              "version"
+                            ],
+                            "properties": {
+                              "accountRef": {
+                                "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+                              },
+                              "conversationId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "notifications": {
+                                "type": "string",
+                                "enum": [
+                                  "ALL",
+                                  "MENTIONS",
+                                  "MUTED"
+                                ]
+                              },
+                              "mutedUntil": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time",
+                                "description": "Only with MUTED."
+                              },
+                              "version": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "accountRef",
+                              "contactRef",
+                              "notifications",
+                              "version"
+                            ],
+                            "properties": {
+                              "accountRef": {
+                                "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+                              },
+                              "contactRef": {
+                                "type": "string",
+                                "maxLength": 80,
+                                "description": "The contact's account reference (the other party of the owner's contact alias)."
+                              },
+                              "notifications": {
+                                "type": "string",
+                                "enum": [
+                                  "ALL",
+                                  "MENTIONS",
+                                  "MUTED"
+                                ]
+                              },
+                              "version": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 80
+                    },
+                    "feedPosition": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Latest change-feed position, read before the rows of this page."
+                    },
+                    "settledPosition": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Highest position whose entries are older than 60 s; a catch-up cursor never passes it (a later-committing entry is re-read, never skipped)."
+                    },
+                    "oldestPosition": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Oldest retained position (30-day retention); a catch-up cursor behind it must copy again."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (limit outside 1-500, malformed cursor, unknown kind or field).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (AUTHENTICATION_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: the issuer is not cfmeet.notifications holding communications-preferences.export, or the signed first-party scope is missing or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PREFERENCE_AUTHORITY_MOVED: the Hub preference switch is SERVICE; the Hub rows are a mirror of the Notification Service and are never copied again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "COMMUNICATIONS_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/notification-preferences/changes": {
+      "post": {
+        "operationId": "listNotificationPreferenceChanges",
+        "summary": "List notification preference changes (N10 catch-up)",
+        "description": "The NOTIFICATION_PREFERENCE, CONVERSATION_PREFERENCE and CONTACT entries of the Hub change feed after a position, in the signed first-party scope, each resolved to the row's current value (an entry naming no contact alias of its owner is omitted). Read-only.",
+        "tags": [
+          "Notification owner"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications-preferences.export",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "after",
+                  "limit"
+                ],
+                "properties": {
+                  "after": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Entries after the position.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "schemaVersion",
+                    "items",
+                    "nextAfter",
+                    "more",
+                    "feedPosition",
+                    "settledPosition",
+                    "oldestPosition"
+                  ],
+                  "properties": {
+                    "schemaVersion": {
+                      "const": 1
+                    },
+                    "items": {
+                      "type": "array",
+                      "maxItems": 500,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "seq",
+                          "kind",
+                          "accountRef",
+                          "preference"
+                        ],
+                        "properties": {
+                          "seq": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "ACCOUNT",
+                              "CONVERSATION",
+                              "CONTACT"
+                            ]
+                          },
+                          "accountRef": {
+                            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/AccountRef"
+                          },
+                          "conversationId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "CONVERSATION entries."
+                          },
+                          "contactRef": {
+                            "type": "string",
+                            "maxLength": 80,
+                            "description": "CONTACT entries."
+                          },
+                          "preference": {
+                            "description": "The row's CURRENT value (account: version and the 7 switches; conversation: notifications, mutedUntil, version; contact: notifications, version), or null when the Hub holds no row (defaults).",
+                            "type": [
+                              "object",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "nextAfter": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Last position scanned; pass it as after for the next page."
+                    },
+                    "more": {
+                      "type": "boolean"
+                    },
+                    "feedPosition": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Latest change-feed position, read before the rows of this page."
+                    },
+                    "settledPosition": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Highest position whose entries are older than 60 s; a catch-up cursor never passes it (a later-committing entry is re-read, never skipped)."
+                    },
+                    "oldestPosition": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Oldest retained position (30-day retention); a catch-up cursor behind it must copy again."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (limit outside 1-500, malformed cursor, unknown kind or field).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (AUTHENTICATION_REQUIRED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: the issuer is not cfmeet.notifications holding communications-preferences.export, or the signed first-party scope is missing or not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PREFERENCE_AUTHORITY_MOVED: the Hub preference switch is SERVICE; the Hub rows are a mirror of the Notification Service and are never copied again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "COMMUNICATIONS_UNAVAILABLE.",
             "content": {
               "application/json": {
                 "schema": {

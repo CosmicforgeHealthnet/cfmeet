@@ -4,6 +4,7 @@
 use crate::{
     error::{Error, Result},
     model::*,
+    preference_authority::{account_view_from_service, Authority},
     relationships::uuid_field,
     store::{execute, one, rows},
     State,
@@ -61,14 +62,42 @@ impl State {
     }
 
     // ---- C01/C02 ----
+    /// C01. Roadmap N10: with the preference switch on SERVICE, `notifications` /
+    /// `mutedUntil` come from the Notification Service (media auto-download and the row
+    /// version stay the Hub's); a service failure is a 503, never a stale answer.
     pub async fn get_conversation_preferences(
         &self,
         scope: &DelegatedPlatformContext,
         p: &Profile,
         conversation: Uuid,
     ) -> Result<Value> {
+        self.conversation_preferences_view(scope, p, conversation, true)
+            .await
+    }
+    /// The conversation preference view; `strict = false` (embedded in U05) falls back to
+    /// the Hub mirror when the Notification Service cannot answer.
+    pub async fn conversation_preferences_view(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+        conversation: Uuid,
+        strict: bool,
+    ) -> Result<Value> {
         self.conversation(scope, p, conversation, None).await?;
         let row:Option<Value>=one(&self.store.db,"SELECT to_jsonb(c) doc FROM communication_conversation_preferences c WHERE owner_profile_id=$1 AND conversation_id=$2",vec![p.id.into(),conversation.into()]).await?;
+        if self.preference_authority(&self.store.db, false).await? == Authority::Service {
+            match self
+                .service_conversation_row(p, conversation, row.clone())
+                .await
+            {
+                Ok(merged) => return Ok(preference_view(conversation, Some(&merged))),
+                Err(e) if strict || !fallback_allowed(&e) => return Err(e),
+                Err(_) => tracing::warn!(
+                    service = "communications",
+                    "conversation preferences embedded from the Hub mirror: Notification Service unavailable"
+                ),
+            }
+        }
         Ok(preference_view(conversation, row.as_ref()))
     }
     pub async fn put_conversation_preferences(
@@ -103,6 +132,10 @@ impl State {
         }
         self.conversation(scope, p, conversation, None).await?;
         let txn = self.store.begin().await?;
+        let authority = self.preference_authority(&txn, true).await?;
+        if authority == Authority::Freeze {
+            return Err(Error::PreferencesFrozen);
+        }
         let op = "conversation.preferences";
         if let Some(v) = self
             .store
@@ -132,6 +165,21 @@ impl State {
             one(&txn,"UPDATE communication_conversation_preferences c SET notifications=$3,muted_until=$4,media_auto_download=$5,version=c.version+1,updated_at=now() WHERE owner_profile_id=$1 AND conversation_id=$2 AND version=$6 RETURNING to_jsonb(c) doc",values).await?
         };
         let row = row.ok_or(Error::Version)?;
+        if authority == Authority::Service {
+            // N10: the Notification Service is the single writer of the notification
+            // level; the Hub row (media auto-download, version, mirror of the level) is
+            // committed only once the service accepted it.
+            let mut entry = json!({"notifications":input.notifications});
+            if let Some(t) = input.muted_until {
+                entry["mutedUntil"] = json!(t);
+            }
+            self.service_update_entry(
+                p,
+                json!({"conversations":{conversation.to_string():entry}}),
+                key,
+            )
+            .await?;
+        }
         self.store
             .change(
                 &txn,
@@ -351,9 +399,32 @@ impl State {
     }
 
     // ---- C17/C18 ----
+    /// C17. Roadmap N10: with the preference switch on SERVICE this is a facade over U6
+    /// (same schema; the version is the service's); a service failure is a 503.
     pub async fn get_notification_preferences(&self, p: &Profile) -> Result<Value> {
+        if self.preference_authority(&self.store.db, false).await? == Authority::Service {
+            return account_view_from_service(&self.service_preferences(p).await?);
+        }
+        self.local_notification_preferences(p).await
+    }
+    async fn local_notification_preferences(&self, p: &Profile) -> Result<Value> {
         let row:Option<Value>=one(&self.store.db,"SELECT to_jsonb(n) doc FROM communication_notification_preferences n WHERE profile_id=$1",vec![p.id.into()]).await?;
         Ok(notification_view(row.as_ref()))
+    }
+    /// The preferences embedded in U01 bootstrap and N07 delivery status: as C17, but an
+    /// unavailable Notification Service falls back to the Hub mirror (which holds every
+    /// change made through these endpoints) instead of failing the whole aggregate.
+    pub async fn notification_preferences_embedded(&self, p: &Profile) -> Result<Value> {
+        match self.get_notification_preferences(p).await {
+            Err(e) if fallback_allowed(&e) => {
+                tracing::warn!(
+                    service = "communications",
+                    "notification preferences embedded from the Hub mirror: Notification Service unavailable"
+                );
+                self.local_notification_preferences(p).await
+            }
+            r => r,
+        }
     }
     pub async fn put_notification_preferences(
         &self,
@@ -378,10 +449,47 @@ impl State {
             return Err(Error::Validation);
         }
         let txn = self.store.begin().await?;
+        let authority = self.preference_authority(&txn, true).await?;
+        if authority == Authority::Freeze {
+            return Err(Error::PreferencesFrozen);
+        }
         let op = "notification-preferences.put";
         if let Some(v) = self.store.idempotency(&txn, p, op, key, &body).await? {
             txn.commit().await?;
             return Ok(v);
+        }
+        if authority == Authority::Service {
+            // N10: U7 decides (optimistic version of the service document); the Hub row is
+            // then updated as a mirror in the same transaction, never before.
+            let accepted = self
+                .service_update(
+                    p,
+                    json!({"expectedVersion":i.expected_version,"categories":{
+                        "directMessages":i.direct_messages,"groupMessages":i.group_messages,
+                        "incomingCalls":i.incoming_calls,"missedCalls":i.missed_calls,
+                        "contactRequests":i.contact_requests,"groupInvitations":i.group_invitations,
+                        "meetingInvitations":i.meeting_invitations}}),
+                    key,
+                )
+                .await?
+                .ok_or(Error::Version)?;
+            let result = account_view_from_service(&accepted)?;
+            execute(&txn,"INSERT INTO communication_notification_preferences AS n (profile_id,direct_messages,group_messages,incoming_calls,missed_calls,contact_requests,group_invitations,meeting_invitations) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (profile_id) DO UPDATE SET direct_messages=EXCLUDED.direct_messages,group_messages=EXCLUDED.group_messages,incoming_calls=EXCLUDED.incoming_calls,missed_calls=EXCLUDED.missed_calls,contact_requests=EXCLUDED.contact_requests,group_invitations=EXCLUDED.group_invitations,meeting_invitations=EXCLUDED.meeting_invitations,version=n.version+1,updated_at=now()",
+                vec![p.id.into(),i.direct_messages.into(),i.group_messages.into(),i.incoming_calls.into(),i.missed_calls.into(),i.contact_requests.into(),i.group_invitations.into(),i.meeting_invitations.into()]).await?;
+            self.store
+                .change(
+                    &txn,
+                    p.id,
+                    "NOTIFICATION_PREFERENCE",
+                    Some(p.id),
+                    result["version"].as_i64(),
+                )
+                .await?;
+            self.store
+                .finish_idempotency(&txn, p, op, key, result.clone())
+                .await?;
+            txn.commit().await?;
+            return Ok(result);
         }
         let values = vec![
             p.id.into(),
@@ -561,6 +669,15 @@ fn saved_view(r: &Value, available: bool, reason: Option<&str>) -> Value {
     json!({"schemaVersion":1,"savedId":r["id"],"conversationId":r["conversation_id"],"messageId":r["message_id"],
         "messageSequence":r["message_sequence"],"savedAt":r["created_at"],"available":available,"unavailableReason":reason})
 }
+/// Embedded views may fall back to the Hub mirror on these (never on a validation,
+/// version or database error).
+fn fallback_allowed(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Unavailable | Error::RateLimited | Error::DependencyNotConfigured
+    )
+}
+
 fn notification_view(r: Option<&Value>) -> Value {
     let get = |k: &str| r.map(|r| r[k] == true).unwrap_or(true);
     json!({"schemaVersion":1,"version":r.and_then(|r| r["version"].as_i64()).unwrap_or(0),

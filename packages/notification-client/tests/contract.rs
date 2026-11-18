@@ -8,7 +8,7 @@
 use std::{fs, path::PathBuf};
 
 use cf_notification_client::{
-    catalogue::{LegacyKey, SealedField, CATALOGUE, CONTROL_EVENT},
+    catalogue::{LegacyKey, RecipientKind, SealedField, CATALOGUE, CONTROL_EVENT},
     envelope::{
         allowed_data_key, validate, Envelope, EnvelopeBuilder, EnvelopeError,
         FORBIDDEN_DATA_KEY_PARTS,
@@ -88,9 +88,13 @@ const U: &str = "5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607";
 /// A schema-valid sample value for each data key used by the catalogue.
 fn sample(key: &str) -> Value {
     match key {
-        "startsAt" | "changedAt" | "expiresAt" => json!("2026-11-20T09:00:00Z"),
+        "startsAt" | "changedAt" | "expiresAt" | "requestedAt" => json!("2026-11-20T09:00:00Z"),
+        "purpose" => json!("CHANGE_EMAIL"),
+        "requestClient" => json!("Mozilla/5.0 (X11; Linux x86_64) Firefox/133.0"),
+        "requestNetwork" => json!("102.89.x.x"),
         "ttlMinutes" => json!(1440),
         "eventSequence" => json!(42),
+        "sequence" => json!(41),
         "role" => json!("MEMBER"),
         "conversationKind" => json!("DIRECT"),
         "securityProfile" => json!("MANAGED"),
@@ -122,6 +126,12 @@ fn build(spec: &cf_notification_client::EventSpec, key: &SealingKey) -> Envelope
         b = b.cancel_key(format!("conference:{U}"));
     } else if producer == Producer::Alertmanager {
         b = b.recipient("operator-group:platform-operators");
+    } else if spec.recipient == Some(RecipientKind::EmailPrincipal) {
+        b = b.recipient(format!("meeting-email-principal:{U}"));
+        // The sign-in code may be for an address without an account: it names no subject.
+        if spec.event_type != "account.sign-in-code.requested" {
+            b = b.subject(Uuid::parse_str(U).unwrap(), Some(1));
+        }
     } else {
         b = b
             .recipient(format!("cfmeet-user:{U}"))
@@ -153,7 +163,7 @@ fn the_rust_catalogue_equals_the_contract_catalogue() {
     let contract = read(EVENTS);
     let entries = contract["x-cfmeet-catalogue"].as_array().unwrap();
     assert_eq!(entries.len(), CATALOGUE.len());
-    assert_eq!(CATALOGUE.iter().filter(|s| !s.is_control()).count(), 31);
+    assert_eq!(CATALOGUE.iter().filter(|s| !s.is_control()).count(), 34);
     assert_eq!(CATALOGUE.iter().filter(|s| s.optional).count(), 1);
     for (e, s) in entries.iter().zip(CATALOGUE) {
         let what = s.event_type;
@@ -185,6 +195,27 @@ fn the_rust_catalogue_equals_the_contract_catalogue() {
             .collect();
         keys.sort_unstable();
         assert_eq!(e["dataKeys"], json!(keys), "{what}");
+        assert_eq!(
+            e["recipient"],
+            json!(s.recipient.map(RecipientKind::as_str)),
+            "{what}"
+        );
+    }
+    // Closed data values agree with the per-type schema enums.
+    let rules = contract["allOf"].as_array().unwrap();
+    for s in CATALOGUE {
+        for (key, values) in s.closed_data {
+            let rule = rules
+                .iter()
+                .find(|r| r["if"]["properties"]["eventType"]["const"] == s.event_type)
+                .unwrap();
+            assert_eq!(
+                rule["then"]["properties"]["data"]["properties"][key]["enum"],
+                json!(values),
+                "{} {key}",
+                s.event_type
+            );
+        }
     }
     // The control event's producers.
     let control = entries
@@ -210,18 +241,8 @@ fn legacy_key_formats_agree_with_the_contract_patterns() {
     let patterns = contract["x-cfmeet-legacy-idempotency-keys"]
         .as_object()
         .unwrap();
-    let all = [
-        LegacyKey::OtpVerify,
-        LegacyKey::OtpReset,
-        LegacyKey::DeviceStepUp,
-        LegacyKey::PasswordChanged,
-        LegacyKey::DeviceLinked,
-        LegacyKey::MeetingInvitation,
-        LegacyKey::OrgInvitation,
-        LegacyKey::MeetingNotification,
-        LegacyKey::DevplatAccess,
-    ];
-    assert_eq!(patterns.len(), all.len());
+    let all = LegacyKey::ALL.iter().copied();
+    assert_eq!(patterns.len(), LegacyKey::ALL.len());
     let samples = |f: LegacyKey| {
         vec![
             sample_idempotency_key(f),
@@ -493,6 +514,11 @@ fn counter_examples_are_refused_for_their_intended_reason() {
         ("no-recipients.json", Some(Invalid("recipients"))),
         ("operator-alert-to-user.json", Some(Invalid("recipients"))),
         ("sealed-not-allowed.json", Some(SealedNotAllowed)),
+        ("sign-in-code-to-account.json", Some(Invalid("recipients"))),
+        (
+            "step-up-unknown-purpose.json",
+            Some(DataValue("purpose".into())),
+        ),
         ("token-in-data.json", Some(DataKey("inviteToken".into()))),
         ("unknown-event-type.json", Some(UnknownEventType)),
         ("unsealed-code.json", Some(SealedRequired("code"))),
@@ -512,4 +538,117 @@ fn counter_examples_are_refused_for_their_intended_reason() {
             (got, want) => panic!("{name}: parsed={} expected={want:?}", got.is_ok()),
         }
     }
+}
+
+/// The passwordless account codes (contract 1.1.0): each names exactly one recipient of its
+/// kind, carries exactly its sealed fields, and the step-up purpose is a closed enum — in
+/// Rust and in the schema.
+#[test]
+fn passwordless_account_codes_follow_their_catalogue_rules() {
+    let v = validator();
+    let key = key();
+    let conforms = |env: &Envelope| v.is_valid(&serde_json::to_value(env).unwrap());
+    let sign_in = build(
+        cf_notification_client::spec("account.sign-in-code.requested").unwrap(),
+        &key,
+    );
+    assert!(conforms(&sign_in));
+    assert!(sign_in.subject.is_none());
+    // An account recipient, a second recipient, or a subject on the sign-in code.
+    for refs in [
+        vec![format!("cfmeet-user:{U}")],
+        vec![
+            format!("meeting-email-principal:{U}"),
+            "meeting-email-principal:6f1d2c3b-4a59-4e6f-8a7b-9c0d1e2f3a4b".to_string(),
+        ],
+    ] {
+        let mut env = sign_in.clone();
+        env.recipients = refs
+            .into_iter()
+            .map(|reference| cf_notification_client::envelope::Recipient { reference })
+            .collect();
+        assert_eq!(
+            validate(&env, None).unwrap_err(),
+            EnvelopeError::Invalid("recipients")
+        );
+        assert!(!conforms(&env));
+    }
+    let mut with_subject = sign_in.clone();
+    with_subject.subject = Some(cf_notification_client::envelope::Subject {
+        kind: "ACCOUNT".into(),
+        id: Uuid::parse_str(U).unwrap(),
+        version: None,
+    });
+    assert!(
+        !conforms(&with_subject),
+        "the sign-in code names no account"
+    );
+    // The sealed fields are exactly the declared ones.
+    let b = |t: &str, r: &str| {
+        EnvelopeBuilder::new(Producer::MeetingService, t, "2026-11-15T12:00:00Z", route())
+            .unwrap()
+            .recipient(r.to_string())
+            .dedupe_key("d")
+            .data("ttlMinutes", 10)
+    };
+    let principal = format!("meeting-email-principal:{U}");
+    let no_token = b("account.sign-in-code.requested", &principal)
+        .data("requestedAt", "2026-11-15T12:00:00Z")
+        .idempotency_key("otp:signin:a:b")
+        .secret(
+            SealedPlaintext::default()
+                .with_code("123456")
+                .with_address("a@example.com"),
+        )
+        .build_sealed(&key);
+    assert_eq!(
+        no_token.unwrap_err(),
+        EnvelopeError::SealedRequired("token")
+    );
+    let no_address = b("account.email-change-code.requested", &principal)
+        .idempotency_key("otp:emailchange:a:b")
+        .secret(SealedPlaintext::default().with_code("123456"))
+        .build_sealed(&key);
+    assert_eq!(
+        no_address.unwrap_err(),
+        EnvelopeError::SealedRequired("address")
+    );
+    let wrong_key = b("account.email-change-code.requested", &principal)
+        .idempotency_key("otp:verify:a:b")
+        .secret(
+            SealedPlaintext::default()
+                .with_code("123456")
+                .with_address("a@example.com"),
+        )
+        .build_sealed(&key);
+    assert_eq!(wrong_key.unwrap_err(), EnvelopeError::IdempotencyKeyFormat);
+    // The step-up purpose: only the closed values, as strings.
+    let account = format!("cfmeet-user:{U}");
+    for (purpose, ok) in [
+        (json!("DEACTIVATE_ACCOUNT"), true),
+        (json!("CHANGE_EMAIL"), true),
+        (json!("change_email"), false),
+        (json!(1), false),
+        (Value::Null, false),
+    ] {
+        let env = b("account.step-up-code.requested", &account)
+            .data("purpose", purpose.clone())
+            .idempotency_key("otp:stepup:a:b")
+            .subject(Uuid::parse_str(U).unwrap(), None)
+            .secret(SealedPlaintext::default().with_code("123456"))
+            .build_sealed(&key);
+        assert_eq!(env.is_ok(), ok, "{purpose}");
+        if let Ok(env) = env {
+            assert!(conforms(&env));
+        }
+    }
+    let to_principal = b("account.step-up-code.requested", &principal)
+        .data("purpose", "CHANGE_EMAIL")
+        .idempotency_key("otp:stepup:a:b")
+        .secret(SealedPlaintext::default().with_code("123456"))
+        .build_sealed(&key);
+    assert_eq!(
+        to_principal.unwrap_err(),
+        EnvelopeError::Invalid("recipients")
+    );
 }
