@@ -109,6 +109,10 @@ pub async fn erase(state: &AppState, user_id: Uuid, session: Option<Uuid>) -> Ap
             vec![user_id.into()],
         ),
         (
+            "DELETE FROM account_avatars WHERE user_id = $1",
+            vec![user_id.into()],
+        ),
+        (
             "UPDATE meeting_members SET status = 'REVOKED', revoked_at = now() WHERE user_id = $1 AND status = 'ACTIVE'",
             vec![user_id.into()],
         ),

@@ -40,6 +40,7 @@ mod m20261116_000001_notification_fence;
 mod m20261117_000001_account_passwordless;
 mod m20261118_000001_case_insensitive_identity;
 mod m20261118_000002_account_mfa;
+mod m20261118_000003_account_avatars;
 
 pub mod phase2_backfill;
 
@@ -265,6 +266,7 @@ impl MigratorTrait for AccountSecurityMigrator {
             Box::new(m20261117_000001_account_passwordless::Migration),
             Box::new(m20261118_000001_case_insensitive_identity::Migration),
             Box::new(m20261118_000002_account_mfa::Migration),
+            Box::new(m20261118_000003_account_avatars::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {

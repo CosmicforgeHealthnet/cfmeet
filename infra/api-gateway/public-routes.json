@@ -2489,6 +2489,27 @@
     },
     {
       "domain": "meetings",
+      "method": "PUT",
+      "path": "/api/v2/me/avatar",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/me/avatar",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/avatars/{avatarId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_ACCOUNT"
+    },
+    {
+      "domain": "meetings",
       "method": "GET",
       "path": "/api/v2/meeting-spaces",
       "class": "PUBLIC_CUSTOMER"

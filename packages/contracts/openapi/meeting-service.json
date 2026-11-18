@@ -3736,6 +3736,54 @@
         ]
       }
     },
+    "/api/v2/avatars/{avatarId}": {
+      "get": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Get an avatar image",
+        "description": "Public and read-only: the image bytes of an uploaded avatar, with its content type. An\naddress never changes content (a new upload gets a new address), so it may be cached\nfor a long time. A replaced or removed image, or one of a deactivated or suspended\naccount, answers `404 AVATAR_NOT_FOUND`.",
+        "operationId": "v2_get_avatar",
+        "parameters": [
+          {
+            "name": "avatarId",
+            "in": "path",
+            "description": "Avatar id from the profile's avatarUrl",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image (image/png, image/jpeg or image/webp)",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "AVATAR_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/api/v2/conferences/{id}": {
       "get": {
         "tags": [
@@ -11320,6 +11368,120 @@
           },
           "403": {
             "description": "REAUTHENTICATION_REQUIRED - missing, wrong, used or expired step-up token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/avatar": {
+      "put": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Upload my avatar",
+        "description": "Sends the image itself as the request body (`Content-Type: image/png`, `image/jpeg` or\n`image/webp`; at most 512 KiB). Uploads need the service's https public address\n(`AVATAR_PUBLIC_BASE_URL`); without one they answer `404 FEATURE_DISABLED`. The image\nis recognised by its content; a body that is\nnot one of these images, or whose declared type does not match, answers `400\nVALIDATION_ERROR`. The profile's `avatarUrl` becomes the image's public, immutable\naddress (`/api/v2/avatars/{avatarId}`), replacing any earlier upload. Returns the\nupdated profile.",
+        "operationId": "v2_upload_my_avatar",
+        "requestBody": {
+          "description": "PNG, JPEG or WebP image, at most 512 KiB",
+          "content": {
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "REQUEST_TOO_LARGE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Account profile (v2)"
+        ],
+        "summary": "Remove my avatar",
+        "description": "Removes the uploaded avatar image (if any) and clears the profile's `avatarUrl`.\nReturns the updated profile. Removing when there is no avatar is not an error.",
+        "operationId": "v2_remove_my_avatar",
+        "responses": {
+          "200": {
+            "description": "Updated profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
             "content": {
               "application/json": {
                 "schema": {
@@ -25610,6 +25772,7 @@
           "DEVICE_NOT_FOUND",
           "MFA_REQUIRED",
           "USER_NOT_FOUND",
+          "AVATAR_NOT_FOUND",
           "DEVICE_KEY_IN_USE",
           "DEVICE_LINK_INVALID",
           "DATABASE_ERROR",
