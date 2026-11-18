@@ -1,4 +1,4 @@
-//! CF Meet public API Gateway — Part VI customer ingress (foundation).
+//! CF Meet Platform API Gateway — the single customer ingress of the CF Meet Platform (Part VI).
 //!
 //! * [`routing`]: the default-deny route table (REST and WebSocket routes; internal,
 //!   provider-callback, operator and Telephony surfaces are never routable).

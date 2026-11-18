@@ -1,7 +1,15 @@
-# services/api-gateway — public API Gateway (Part VI foundation)
+# services/api-gateway — CF Meet Platform API Gateway
 
-Customer ingress of the CF Meet platform ([ADR 0055](../../docs/decisions/0055-developer-platform-and-api-gateway-foundation.md)).
-Foundation only: the Section 51 route catalogue is not implemented.
+The single front door of the **CF Meet Platform** (`https://api.cfmeet.com/v1`): partner backends
+use CF Meet meetings, messaging and calling from their own products with a scoped API key
+([ADR 0055](../../docs/decisions/0055-developer-platform-and-api-gateway-foundation.md),
+[ADR 0061](../../docs/decisions/0061-cf-meet-platform-partner-embedding.md)). CF Meet's own apps do
+not use it (they stay on their direct `/api/v2` ingress), and partner end-user devices use
+short-lived credentials on the direct realtime / media / signaling ingress.
+
+The route table is generated (`infra/api-gateway/route-manifest.json`, from the contracts and the
+allow-list `infra/api-gateway/public-routes.json` by `scripts/contracts/public_api.py`). In
+production the edge sends only the activated `/v1` families here (`coordinated_release.py`).
 
 Request pipeline (`src/http/ingress.rs`):
 
@@ -15,14 +23,14 @@ Request pipeline (`src/http/ingress.rs`):
    are built from scratch;
 4. `Authorization: Bearer` verified by **Platform Access** (`platform-credential.authenticate`);
    tenant / application / environment / service account come only from its authority chain;
-5. route scope check (Platform Access scopes), protocol check (WebSocket forwarding is
-   Section 51: `PROTOCOL_NOT_ENABLED`), bounded JSON body;
+5. route scope check (Platform Access scopes), protocol check (WebSocket forwarding is off
+   unless `API_GATEWAY_WEBSOCKETS_ENABLED`: `PROTOCOL_NOT_ENABLED`), bounded JSON body;
 6. forward with a fresh **short-lived (60 s) signed service token** carrying the
    `DelegatedPlatformContext` for exactly one upstream audience, under the route deadline.
    The domain service keeps final resource authorization; its status and JSON are relayed.
 
 The gateway owns **no database** and no communications data. It enforces platform
-request quotas on platform-credential traffic, with limits from the Developer Platform.
+request quotas on platform-credential traffic, with limits from the Developer Console (`services/developer-platform`).
 With `API_GATEWAY_REDIS_URL` set, the counters are shared across instances in Redis;
 otherwise each instance counts on its own. Setting
 `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` adds a per-token ceiling on end-user and

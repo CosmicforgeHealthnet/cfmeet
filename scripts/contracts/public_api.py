@@ -390,11 +390,11 @@ def public_doc(domain, manifest):
     doc = {
         "openapi": "3.1.0",
         "info": dict(bundled["info"]),
-        "servers": [{"url": GATEWAY_URL, "description": "CF Meet public API Gateway"}],
+        "servers": [{"url": GATEWAY_URL, "description": "CF Meet Platform API Gateway"}],
         "paths": paths,
         "components": copy.deepcopy(bundled.get("components", {})),
     }
-    doc["info"]["title"] = f"CF Meet public API — {domain}"
+    doc["info"]["title"] = f"CF Meet Platform API — {domain}"
     doc["info"]["x-cfmeet-source-contract"] = next(c for d, _, _, c in SOURCES if d == domain)
     doc["info"]["x-cfmeet-source-version"] = bundled["info"]["version"]
     schemes = doc["components"].get("securitySchemes", {})
@@ -411,9 +411,9 @@ def public_doc(domain, manifest):
 def aggregate(docs):
     agg = {
         "openapi": "3.1.0",
-        "info": {"title": "CF Meet public API", "version": "1.0.0",
-                 "description": "Aggregate customer-facing API reference of the CF Meet public API Gateway, generated from the authoritative service contracts and the explicit public route allow-list. Each service keeps its own API version (x-cfmeet-source-version); there is no monolithic version. Internal, operator and provider-callback operations are never included."},
-        "servers": [{"url": GATEWAY_URL, "description": "CF Meet public API Gateway"}],
+        "info": {"title": "CF Meet Platform API", "version": "1.0.0",
+                 "description": "Aggregate customer-facing API reference of the CF Meet Platform API Gateway (meetings, messaging and calling for partner products), generated from the authoritative service contracts and the explicit public route allow-list. Each service keeps its own API version (x-cfmeet-source-version); there is no monolithic version. Internal, operator and provider-callback operations are never included."},
+        "servers": [{"url": GATEWAY_URL, "description": "CF Meet Platform API Gateway"}],
         "tags": [],
         "paths": {},
         "components": {},

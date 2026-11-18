@@ -1,8 +1,13 @@
-# services/developer-platform — Developer Platform (Part VI foundation)
+# services/developer-platform — CF Meet Platform Developer Console
 
-The developer / enterprise control plane of CF Meet ([ADR 0055](../../docs/decisions/0055-developer-platform-and-api-gateway-foundation.md)).
-This is the §§1–5 **foundation**; the functional Developer Platform (Sections 50+) is not
-implemented.
+The **Developer Console** of the CF Meet Platform: the control plane where a partner manages its
+**workspaces** (called *organizations* in paths and fields: `/v1/organizations`,
+`organizationId`), projects, environments, service accounts, API keys, scopes, webhooks, usage,
+limits, plans and production access
+([ADR 0055](../../docs/decisions/0055-developer-platform-and-api-gateway-foundation.md),
+[ADR 0061](../../docs/decisions/0061-cf-meet-platform-partner-embedding.md)). It is served through
+the API Gateway and is not on the data path of meetings, messaging or calling. The service,
+crate and database keep the name `developer-platform`.
 
 * **Authority:** Platform Access is the only authority for tenants, applications,
   environments, service accounts, API credential verifiers, scopes and principals. The
@@ -85,7 +90,7 @@ implemented.
   ADMIN manage, DEVELOPER reads, machine credentials need `service_accounts.manage`;
   SANDBOX / TEST only (PRODUCTION: `POLICY_VIOLATION`), never deleted or revoked here, and
   no credential is issued (Section 54).
-* **Developer Console:** `apps/web/src/app/dashboard/developers/` stays the future console
+* **Console UI (frontend-owned):** `apps/web/src/app/dashboard/developers/` is the console
   UI; it will call the published gateway API with the same contracts as every customer
   (see `docs/phases/phase-06/developer-console-boundary.md`).
 

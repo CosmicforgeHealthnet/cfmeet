@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet public API — meetings",
+    "title": "CF Meet Platform API — meetings",
     "description": "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
     "contact": {
       "name": "CosmicForge Team",
@@ -17,7 +17,7 @@
   "servers": [
     {
       "url": "https://api.cfmeet.com",
-      "description": "CF Meet public API Gateway"
+      "description": "CF Meet Platform API Gateway"
     }
   ],
   "paths": {

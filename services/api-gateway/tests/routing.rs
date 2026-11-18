@@ -242,14 +242,12 @@ fn the_generated_catalogue_is_in_parity_with_the_contracts() {
         );
     }
     // Contact Vault operations stay private; numbering administration is never public.
-    assert!(table
+    assert!(!table.definitions().any(|d| d.pattern.contains("/contacts")));
+    // The CF Meet app's own Communications Hub is first-party direct ingress only
+    // (FIRST_PARTY_COMMUNICATIONS_HUB, ADR 0061): never a partner route.
+    assert!(!table
         .definitions()
-        .filter(|d| d.pattern.contains("/contacts"))
-        .all(|d| d.domain == "communications"
-            && d.pattern.starts_with("/api/v2/communications/contacts")));
-    assert!(table
-        .definitions()
-        .any(|d| d.domain == "communications" && d.pattern == "/api/v2/communications/contacts"));
+        .any(|d| d.domain == "communications" || d.pattern.starts_with("/api/v2/communications")));
     assert!(!table
         .definitions()
         .any(|d| d.pattern.starts_with("/v1/admin")));

@@ -1,4 +1,10 @@
-# sdks/ — CF Meet platform SDKs (Part VI scaffolding)
+# sdks/ — CF Meet Platform SDKs
+
+The SDKs partners use to call the CF Meet Platform (meetings, messaging, calling and the
+Developer Console) from their backends, and to connect their end users' devices with the
+short-lived credentials their backend obtains
+([ADR 0061](../docs/decisions/0061-cf-meet-platform-partner-embedding.md)). Not published yet:
+publishing waits for an owner decision (registry, publisher, licence, version policy).
 
 | SDK | Path | Package | Status |
 |---|---|---|---|
@@ -15,9 +21,11 @@ python3 sdks/generate.py --check  # CI: generated files current, public contract
 make sdks-check
 ```
 
-First-party products and external customers use the same SDKs and the same
-published API contracts; they differ only through the scopes Platform Access grants and
-the tenant's trust classification. There is no product-specific SDK or endpoint.
+Every partner uses the same SDKs and the same published API contracts; partners differ
+only through the scopes Platform Access grants and the tenant's trust classification.
+There is no partner-specific SDK or endpoint. The SDKs cover only the operations the API
+Gateway routes: the CF Meet app's own first-party surfaces (for example the Communications
+Hub, `FIRST_PARTY_COMMUNICATIONS_HUB`) are not part of them.
 
 ## TypeScript (`sdks/typescript`, beta)
 
