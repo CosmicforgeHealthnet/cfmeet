@@ -144,6 +144,7 @@ impl MigratorTrait for GapClosureMigrator {
             Box::new(gap::m20261203_000052_call_host_controls::Migration),
             Box::new(gap::m20261204_000053_call_history_visibility::Migration),
             Box::new(gap::m20261205_000054_direct_call_routing::Migration),
+            Box::new(gap::m20261206_000055_queue_wrap_up_hold_music::Migration),
         ]
     }
 

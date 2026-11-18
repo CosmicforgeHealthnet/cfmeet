@@ -103,6 +103,8 @@ export namespace Calling {
     /** Bounded display name (no control characters, never a telephone number). */
     displayLabel: string;
   };
+  /** C15: the controlled built-in hold-music catalogue. The media plane / application client plays its own copy of each; never a URL, path or file name. */
+  export type BuiltinHoldMusic = "DEFAULT" | "CALM" | "BRIGHT";
   /** The controlled built-in prompt catalog. The media plane plays its own copy (Telephony maps it to edge-local audio; an application client to its own asset). Never a URL, path, file name or synthesized text. Each prompt has a nominal length the media plane's audio must fit (WELCOME, MENU, NO_INPUT, GOODBYE 2 s; PLEASE_HOLD, TRANSFERRING, CLOSED 3 s; INVALID_OPTION 4 s; VOICEMAIL_GREETING 6 s; BEEP … */
   export type BuiltinPrompt = "WELCOME" | "MENU" | "INVALID_OPTION" | "NO_INPUT" | "PLEASE_HOLD" | "TRANSFERRING" | "GOODBYE" | "CLOSED" | "VOICEMAIL_GREETING" | "BEEP";
   /** A business-hours schedule. */
@@ -530,6 +532,10 @@ export namespace Calling {
     capacity: number;
     /** Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER. */
     overflow?: Destination | null;
+    /** C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up. */
+    wrapUpSeconds?: number;
+    /** C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment. */
+    holdMusic?: HoldMusicRef | null;
   };
   /** Body of POST /v1/enterprise/recording-policies. A recording policy is SEPARATE from the right to call, enterprise membership, Privacy Relay authorization and any meeting recording policy. */
   export type CreateRecordingPolicyRequest = {
@@ -699,6 +705,8 @@ export namespace Calling {
     state: QueueEntryState;
     position: number | null;
     enteredAt: string;
+    /** C15: the queue's built-in hold music the caller's application plays while it waits (null = none). */
+    holdMusic?: HoldMusicRef | null;
   };
   /** Stable public error codes of the Calling service. */
   export type ErrorCode = "AUTHENTICATION_FAILED" | "INSUFFICIENT_SCOPE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "SERVICE_UNAVAILABLE" | "INTERNAL_ERROR" | "STALE_CALL_VERSION" | "CALL_STATE_CONFLICT" | "CALL_EVIDENCE_REQUIRED" | "CALL_NOT_AUTHORIZED" | "CONCURRENT_CALL_LIMIT_EXCEEDED" | "CALL_RESOURCE_STATE_CONFLICT" | "CONFLICT" | "IDEMPOTENCY_CONFLICT" | "INVITATION_EXPIRED" | "INVITATION_NOT_ACTIONABLE" | "ANSWERED_ELSEWHERE" | "CAPABILITY_UNAVAILABLE" | "MEDIA_UNAVAILABLE" | "PARTICIPANT_LIMIT_EXCEEDED" | "TARGET_UNAVAILABLE" | "PRIVACY_AUTHORIZATION_UNAVAILABLE" | "PUBLIC_ROUTE_DENIED" | "PUBLIC_ROUTE_UNAVAILABLE" | "TELECOM_SPEND_LIMIT_EXCEEDED" | "VERSION_CONFLICT" | "ENTERPRISE_POLICY_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "RECORDING_NOT_AUTHORIZED" | "PRINCIPAL_NOT_ELIGIBLE" | "COMMUNICATIONS_POLICY_UNAVAILABLE" | "SIGNALING_CREDENTIAL_EXPIRED";
@@ -764,6 +772,10 @@ export namespace Calling {
   export type HistoryDestinationType = "EXTENSION" | "RING_GROUP" | "QUEUE" | "IVR" | "VOICEMAIL";
   /** Direction of a Call relative to the principal whose history it is. */
   export type HistoryDirection = "INBOUND" | "OUTBOUND";
+  /** C15: a queue's hold music: a built-in choice (customer audio artifacts are not accepted by this deployment). */
+  export type HoldMusicRef = {
+    builtin: BuiltinHoldMusic;
+  };
   /** Body of POST /v1/calls/{call_id}/participants/{participant_id}/remove (1.8.0): the acting participant, which must be the Call's host. */
   export type HostActionRequest = {
     /** The Call's host. */
@@ -1053,6 +1065,10 @@ export namespace Calling {
     capacity: number;
     /** Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER. */
     overflow: Destination | null;
+    /** C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up. */
+    wrapUpSeconds: number;
+    /** C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment. */
+    holdMusic: HoldMusicRef | null;
     members: Array<QueueMember>;
     waiting: number;
     status: ResourceStatus;
@@ -1469,7 +1485,7 @@ export namespace Calling {
     isDefault?: boolean;
     rules?: PolicyRules;
   };
-  /** Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline. */
+  /** Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline. holdMusic null removes the hold music. */
   export type UpdateQueueRequest = {
     /** The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing. */
     expectedVersion: number;
@@ -1480,6 +1496,10 @@ export namespace Calling {
     capacity?: number;
     /** Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER. */
     overflow?: Destination | null;
+    /** C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up. */
+    wrapUpSeconds?: number;
+    /** C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment. */
+    holdMusic?: HoldMusicRef | null;
   };
   /** Body of PATCH /v1/enterprise/recording-policies/{recording_policy_id}. A change that stops permitting a running recording (DISABLED, no longer the default, stricter notice / consent) stops it (POLICY_REVOKED). */
   export type UpdateRecordingPolicyRequest = {
