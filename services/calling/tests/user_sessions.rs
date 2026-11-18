@@ -564,7 +564,10 @@ async fn first_party_tenants_never_exchange_user_tokens() {
     );
     let r = exchange(a.h(), &token, "install-0001", "MOBILE").await;
     assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.text);
-    assert!(refusals("not_external") >= 1, "refused for the tenant class");
+    assert!(
+        refusals("not_external") >= 1,
+        "refused for the tenant class"
+    );
     assert_eq!(count(&a, "SELECT COUNT(*) FROM call_endpoints").await, 0);
 }
 
