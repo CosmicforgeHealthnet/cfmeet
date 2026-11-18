@@ -15,12 +15,13 @@
   - use OAuth or an app directory.
 - **Owner decisions (2026-11-18):**
   - Build AND Integrate together.
-  - Pushes go out with the partner's own APNs/VoIP/FCM keys, through the Notification Service (another team → handover contract).
+  - Pushes go out with the partner's own APNs/VoIP/FCM keys, through the Notification Service (we build it there).
+  - **Scope (owner, 2026-11-18):** we work on the Notification Service and every other backend service where needed; only the frontend (`apps/web`, `apps/mobile`) is out of scope.
   - Partner chat is MANAGED (server-readable) by default; E2EE optional.
   - Core SDKs come first (TypeScript, Flutter/Dart, React Native); ready-made screens later.
 - **Constraints**:
   - backend only (never `apps/web` or `apps/mobile`);
-  - Notification Service code is changed by its own team;
+  - Notification Service changes are ours too: careful, additive, behind its own flags, and its existing first-party behaviour must stay unchanged;
   - telecom stays off;
   - every feature is behind a default-off flag and switched on by a journaled `coordinated_release.py` activation whose post-checks use **two fresh tenants**, including cross-tenant 404 checks;
   - migrations are additive;
@@ -72,7 +73,7 @@ The Developer Console delegates to a new Platform Access router `src/http/end_us
 - The Developer Console uploads partner APNs (incl. VoIP) and FCM keys, sealed to the Notification Service on upload, and keeps only metadata.
 - Messaging is the device push-registration facade (`platform-principal` subject).
 - Calling and Messaging send to a `platform-principal` recipient.
-- The Notification team builds N-P1..N-P5:
+- We build N-P1..N-P5 in `services/notifications` (plus `packages/notification-client` and its contracts):
   - **N-P1** provider vault, scope-locked;
   - **N-P2** registrations;
   - **N-P3** VoIP/FCM fast lane for calls;
@@ -121,7 +122,7 @@ Build track (B) and Integrate track (I) run in parallel. Platform Access migrati
 | **B2** User tokens + allowed websites | Platform Access `identity/user_tokens.rs`, `environment_origins.rs`; Developer Console token + origins routes, sandbox token generator; gateway `origins.rs` and CORS; `activate-platform-user-tokens` | Tampered or foreign token refused; key revocation takes effect within 30 s; preflight allowed for partner website only on device routes |
 | **B3** Partner chat | Messaging `session_devices.rs`, `sessions.rs`, `middleware.rs`, new `realtime/user_sessions.rs`, `realtime/http.rs` origins, `policy.rs` partner baseline, `MESSAGE_SENT`; `activate-partner-chat` | User sends and receives live in a MANAGED chat; E2EE refused; revoking the user closes the socket |
 | **B4** Partner calls | Calling `endpoints/user_sessions.rs`; `/v1/calls` and `/v1/calling` moved behind the gateway (journaled snippet with automatic restore); `activate-partner-calls` | **M1: KarryGo rider calls and chats with a customer in sandbox (app open)** |
-| **B5** Push (needs Notification team N-P1..N-P4) | Developer Console `control/push_credentials.rs`; Messaging push registrations + wake-ups; Calling `signaling/push.rs` platform recipient; `activate-partner-push` | **M2: closed KarryGo app rings**; A's call never reaches B's phones |
+| **B5** Push | Notification Service N-P1..N-P5 (provider vault, `platform-principal` registrations, VoIP/FCM call fast lane, catalogue recipient kind, metrics); Developer Console `control/push_credentials.rs`; Messaging push registrations + wake-ups; Calling `signaling/push.rs` platform recipient; `activate-partner-push` | **M2: closed KarryGo app rings**; A's call never reaches B's phones |
 | **B6** Meetings | Meeting Service `actor.rs` PlatformUser, `admission.rs` grant join, `meeting_platform_participants`, `unified_messaging` partner chat; Platform Access widened `ensure`; `activate-platform-meetings` | **M3: KarryGo support video meeting in sandbox** with chat; foreign token 404; minutes and webhooks recorded |
 | **B7** SDKs (alongside B3–B6) | TypeScript and Dart: `userToken` + `tokenProvider`, chat/calls/meetings/push clients; new `sdks/react-native` (TS core + native bridge interface); v0.2.0; publish after M3 | Generator check; sample app against local stack |
 | **B8** Go-live | Reviewers activation; `END_USERS`/`PUSH` capabilities; production checks; `ACTIVE_USER_DAY` exporter; `activate-platform-metering` | **M4: KarryGo live in production**; MAU visible in usage |
@@ -135,7 +136,6 @@ Build track (B) and Integrate track (I) run in parallel. Platform Access migrati
 | **Later** | E2EE partner chats, partner-signed tokens, recordings/transcripts, device-placed calls, guest join links, embeddable prebuilt pages, partner web push, UI kits | — |
 
 ## Handovers (not our code)
-- **Notification team:** N-P1..N-P5 (B5).
 - **Frontend:**
   - console pages: Users, Allowed websites, test token generator, Push keys, Apps, review;
   - OAuth consent page and Connected apps;
@@ -157,7 +157,7 @@ Build track (B) and Integrate track (I) run in parallel. Platform Access migrati
   - *Platform Access verify load*: cache, plus load tests before B8;
   - *calling edge move*: canary, automatic restore, first-party smoke test;
   - *display names stored as PII*: erased on delete, never logged;
-  - *Notification team dependency*: only M2 waits on it.
+  - *Notification Service changes*: additive and flag-gated; its first-party push, email and inbox tests must stay green; partner credentials are scope-locked so one partner's key can never send to another's users.
 
 ## Open owner decisions (asked at the phase that needs them)
 1. Do partner devices go through `api.cfmeet.com`, and do `/v1/calls` and `/v1/calling` move behind the gateway? (recommended yes; B2/B4)
@@ -318,7 +318,7 @@ There are **two different kinds** of "third-party" platform. Most companies offe
 | Part | Owner |
 |---|---|
 | Users API, user tokens, origins and push-key settings, meeting grants, managed chat for partners, metering, go-live | Backend (us) |
-| Push sending to partner apps | Shared with the Notification Service team |
+| Push sending to partner apps | Backend (us), in the Notification Service |
 | Embed pages, UI kits, console screens | Frontend |
 | React Native / Swift / Kotlin SDKs | Mobile team |
 
