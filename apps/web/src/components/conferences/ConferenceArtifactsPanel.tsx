@@ -316,23 +316,19 @@ function ReportsTab({ conferenceId, canList, canExport, canRead, canDelete }: { 
       {failure && <RequestError error={failure} />}
       {notice && <p role="status" className="flex items-center gap-2 rounded-xl bg-primary/5 px-4 py-3 text-sm text-foreground"><CheckCircle2 className="size-4 text-primary" />{notice}</p>}
       {canExport && (
-        <div className="flex flex-wrap gap-2">
-          {REPORTS.map(({ value, label }) => (
-            <button key={value} type="button" onClick={() => void downloadReport(conferenceId, value, label).catch(setFailure)}
-              className="inline-flex h-9 items-center gap-2 rounded-full border border-border px-3 text-xs font-semibold text-foreground hover:bg-muted">
-              <Download className="size-3.5" />Download {label.toLowerCase()}
-            </button>
-          ))}
-        </div>
-      )}
-      {canExport && (
         <div className="grid gap-2 sm:grid-cols-3">
           {REPORTS.map(({ value, label, hint, icon: Icon }) => (
-            <button key={value} type="button" disabled={generate.isPending} onClick={() => generate.mutate({ artifactType: value }, { onSuccess: () => setNotice(`${label} report created.`) })}
-              className="flex items-center gap-3 rounded-2xl border border-border p-3 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 disabled:opacity-50">
+            <div key={value} className="flex items-center gap-3 rounded-2xl border border-border p-3">
               <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Icon className="size-5" /></span>
-              <span className="min-w-0"><span className="block text-sm font-semibold text-foreground">{label}</span><span className="block truncate text-xs text-muted-foreground">{hint}</span></span>
-            </button>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-foreground">{label}</span>
+                <span className="block truncate text-xs text-muted-foreground">{hint}</span>
+                <button type="button" disabled={generate.isPending} onClick={() => generate.mutate({ artifactType: value }, { onSuccess: () => setNotice(`${label} report saved below.`) })}
+                  className="mt-0.5 text-xs font-semibold text-primary hover:underline disabled:opacity-50">Save a copy</button>
+              </span>
+              <button type="button" aria-label={`Download ${label.toLowerCase()}`} title="Download" onClick={() => void downloadReport(conferenceId, value, label).catch(setFailure)}
+                className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><Download className="size-4" /></button>
+            </div>
           ))}
         </div>
       )}

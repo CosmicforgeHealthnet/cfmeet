@@ -99,22 +99,41 @@ export function MeetingRules({ org }: { org: BusinessOrganization }) {
   });
   if (!allowed) return null;
   const current = policy.data ?? {};
-  const recordingOff = current.recording?.allowed === false;
-  const toggle = () => {
-    const recording = { ...(current.recording ?? {}) };
-    if (recordingOff) delete recording.allowed; else recording.allowed = false;
-    const next: Record<string, unknown> = { ...current, recording };
-    if (!Object.keys(recording).length) delete next.recording;
+  // A rule left at its default isn't stored, so spaces keep their own setting.
+  const toggle = (rule: Rule) => {
+    const section = { ...(current[rule.section] ?? {}) };
+    const on = (section[rule.key] ?? rule.fallback) === true;
+    if (!on === rule.fallback) delete section[rule.key]; else section[rule.key] = !on;
+    const next: Record<string, unknown> = { ...current, [rule.section]: section };
+    if (!Object.keys(section).length) delete next[rule.section];
     save.mutate(next);
   };
   return (
     <Section title="Meeting rules" description="Applies to every meeting space in this organization. A space can be stricter, never looser.">
       {policy.isError ? <OrgError error={policy.error} retry={() => void policy.refetch()} /> : null}
       {save.isError ? <OrgError error={save.error} /> : null}
-      <label className="flex items-center justify-between gap-4">
-        <span><span className="block text-sm font-medium">Allow recording</span><span className="block text-xs text-muted-foreground">Turn off to stop anyone recording meetings.</span></span>
-        <input type="checkbox" role="switch" className="size-5 accent-primary" checked={!recordingOff} disabled={policy.isLoading || save.isPending} onChange={toggle} />
-      </label>
+      <div className="divide-y divide-border">
+        {RULES.map((rule) => (
+          <label key={`${rule.section}.${rule.key}`} className="flex items-center justify-between gap-4 py-3">
+            <span><span className="block text-sm font-medium">{rule.label}</span><span className="block text-xs text-muted-foreground">{rule.hint}</span></span>
+            <input type="checkbox" role="switch" className="size-5 shrink-0 accent-primary" checked={(current[rule.section]?.[rule.key] ?? rule.fallback) === true} disabled={policy.isLoading || save.isPending} onChange={() => toggle(rule)} />
+          </label>
+        ))}
+      </div>
     </Section>
   );
 }
+
+type Rule = { section: string; key: string; label: string; hint: string; fallback: boolean };
+const RULES: Rule[] = [
+  { section: "recording", key: "allowed", label: "Allow recording", hint: "Turn off to stop anyone recording meetings.", fallback: true },
+  { section: "transcription", key: "allowed", label: "Allow transcripts", hint: "Turn off to stop live captions and transcripts.", fallback: true },
+  { section: "exports", key: "chatExportAllowed", label: "Allow chat downloads", hint: "Lets hosts download in-meeting chat.", fallback: true },
+  { section: "exports", key: "attendanceReportAllowed", label: "Allow attendance reports", hint: "Lets hosts see who joined and for how long.", fallback: true },
+  { section: "exports", key: "pollReportAllowed", label: "Allow poll reports", hint: "Lets hosts download poll results.", fallback: true },
+  { section: "dataSharing", key: "allowed", label: "Allow sharing meeting data", hint: "Turn off to keep meeting data inside the organization.", fallback: true },
+  { section: "access", key: "publicAccessAllowed", label: "Allow people without an account", hint: "Turn off so only signed-in people can join.", fallback: true },
+  { section: "access", key: "waitingRoomForced", label: "Always use a waiting room", hint: "Hosts admit everyone before they join.", fallback: false },
+  { section: "intelligence", key: "consentRequired", label: "Ask before AI notes", hint: "Everyone must agree before AI notes start.", fallback: false },
+  { section: "audit", key: "enhanced", label: "Detailed activity log", hint: "Records more about who did what in meetings.", fallback: false },
+];
