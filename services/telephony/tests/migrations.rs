@@ -24,6 +24,7 @@ const TABLES: &[&str] = &[
     "telephony_incidents",
     "telephony_ingress_windows",
     "telephony_legs",
+    "telephony_numbering_reports",
     "telephony_operator_audit",
     "telephony_outbox",
     "telephony_reconciliation_runs",
@@ -31,7 +32,7 @@ const TABLES: &[&str] = &[
     "telephony_retention_holds",
     "telephony_usage_records",
 ];
-const MIGRATIONS: usize = 17;
+const MIGRATIONS: usize = 18;
 
 async fn tables(conn: &DatabaseConnection) -> Vec<String> {
     let rows = conn

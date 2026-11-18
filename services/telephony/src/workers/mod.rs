@@ -1,6 +1,6 @@
 //! Background workers (every instance runs them; `SKIP LOCKED` leases make that safe):
 //! command execution, outbox delivery to Calling, reconciliation, usage finalization,
-//! duration limits, bridge expiry, provider health.
+//! duration limits, bridge expiry, provider health, Numbering usage / risk reports.
 
 use std::time::Duration;
 
@@ -32,6 +32,8 @@ pub struct SweepReport {
     pub abuse_signals: usize,
     /// Part F: edge captures delivered to Calling.
     pub captures_delivered: usize,
+    /// Gap C10: usage / risk reports delivered to Numbering.
+    pub numbering_reports_delivered: usize,
 }
 
 impl TelephonyService {
@@ -137,6 +139,9 @@ impl TelephonyService {
         report.delivery_failures = failed;
         // Part F: after the leg events (a caller's hang-up reaches Calling first).
         report.captures_delivered = self.deliver_captures_once(20).await?.delivered;
+        // Gap C10: never in a call's path; a Numbering outage only delays them.
+        report.numbering_reports_delivered =
+            self.deliver_numbering_reports_once(50).await?.delivered;
         Ok(report)
     }
 

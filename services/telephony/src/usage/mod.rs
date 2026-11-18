@@ -7,6 +7,8 @@
 //! provider actually reported it; otherwise the route's conservative estimate is kept as
 //! an estimate (`cost_known = false`). Calling receives USAGE_FINALIZED to settle the
 //! spend reservation; no provider commercial data leaves Telephony beyond that amount.
+//! A billable leg that carried a DCN also queues a usage report for Numbering (gap C10,
+//! [`crate::numbering_reports`]; off unless enabled), in the same transaction.
 
 use sea_orm::{FromQueryResult, TransactionTrait};
 use serde_json::json;
@@ -121,6 +123,20 @@ impl TelephonyService {
         )
         .await?;
         if inserted == 1 {
+            // Gap C10: a billable DCN leg's seconds are Numbering's cost evidence too.
+            crate::numbering_reports::enqueue_leg_usage(
+                &txn,
+                &self.numbering_reports,
+                &leg,
+                billable_seconds,
+                if cost_known {
+                    provider_cost.zip(currency.clone())
+                } else {
+                    None
+                },
+                now,
+            )
+            .await?;
             crate::metrics::inc(
                 "telephony_usage_finalized_total",
                 &[("cost_known", if cost_known { "true" } else { "false" })],
