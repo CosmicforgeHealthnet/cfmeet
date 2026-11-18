@@ -419,6 +419,8 @@ pub enum SecurityNotice {
     SignedOutEverywhere,
     /// The account was deactivated.
     Deactivated,
+    /// The owner signed back in to an account they had deactivated (gap audit A16).
+    Reactivated,
     /// The first device of the account became trusted (gap audit A6).
     FirstDeviceTrusted,
     /// The account was deleted (gap audit A2).
@@ -436,6 +438,7 @@ impl SecurityNotice {
             SecurityNotice::RefreshTokenReuse => "refresh-reuse",
             SecurityNotice::SignedOutEverywhere => "signed-out-everywhere",
             SecurityNotice::Deactivated => "deactivated",
+            SecurityNotice::Reactivated => "reactivated",
             SecurityNotice::FirstDeviceTrusted => "first-device-trusted",
             SecurityNotice::Deleted => "deleted",
             SecurityNotice::MfaEnabled => "mfa-enabled",
@@ -460,7 +463,11 @@ impl SecurityNotice {
             ),
             SecurityNotice::Deactivated => (
                 "Your CF Meet account was deactivated",
-                "Your CF Meet account was just deactivated and every sign-in was ended. Contact support if you did not do this.",
+                "Your CF Meet account was just deactivated and every sign-in was ended. You can sign in again within 30 days to reactivate it. Contact support if you did not do this.",
+            ),
+            SecurityNotice::Reactivated => (
+                "Your CF Meet account was reactivated",
+                "You signed in to your deactivated CF Meet account, so it is active again. Contact support if this was not you.",
             ),
             SecurityNotice::FirstDeviceTrusted => (
                 "A device is now trusted on your CF Meet account",

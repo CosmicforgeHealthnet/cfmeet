@@ -484,6 +484,37 @@ pub async fn enforce_identity_uniqueness<C: ConnectionTrait>(db: &C) -> ApiResul
     Ok(())
 }
 
+/// How long after deactivating their own account a person can sign back in to reactivate
+/// it (gap audit A16).
+pub const SELF_REACTIVATION_DAYS: i64 = 30;
+
+/// Gap audit A16: whether the account's most recent status change is its owner's own
+/// deactivation, made less than [`SELF_REACTIVATION_DAYS`] ago. An account an
+/// administrator deactivated or suspended is never reactivated by signing in.
+pub async fn self_reactivation_allowed<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+) -> ApiResult<bool> {
+    let row = db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT event_type, actor_kind, actor_user_id, \
+                    occurred_at > now() - make_interval(days => $2) AS recent \
+             FROM account_security_events \
+             WHERE user_id = $1 AND outcome = 'SUCCESS' \
+               AND event_type IN ('ACCOUNT_DEACTIVATED', 'ACCOUNT_STATUS_CHANGED', 'ACCOUNT_REACTIVATED') \
+             ORDER BY seq DESC LIMIT 1",
+            [user_id.into(), (SELF_REACTIVATION_DAYS as i32).into()],
+        ))
+        .await?;
+    let Some(row) = row else { return Ok(false) };
+    let kind: String = row.try_get("", "event_type")?;
+    let actor: String = row.try_get("", "actor_kind")?;
+    let actor_user: Option<Uuid> = row.try_get("", "actor_user_id")?;
+    let recent: bool = row.try_get("", "recent")?;
+    Ok(kind == "ACCOUNT_DEACTIVATED" && actor == "USER" && actor_user == Some(user_id) && recent)
+}
+
 /// Whether an account with this id exists.
 pub async fn user_exists<C: ConnectionTrait>(db: &C, user_id: Uuid) -> ApiResult<bool> {
     Ok(users::Entity::find_by_id(user_id).one(db).await?.is_some())

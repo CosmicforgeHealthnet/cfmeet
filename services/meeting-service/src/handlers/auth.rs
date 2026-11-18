@@ -58,11 +58,53 @@ const CODE_SENT: &str =
 /// Uniform answer to a wrong, expired, used or replaced code or link.
 const INVALID_CODE: &str = "Invalid or expired code";
 
-fn disabled(user: &users::Model) -> bool {
-    matches!(
-        user.status,
-        users::UserStatus::Inactive | users::UserStatus::Suspended
+/// Whether sign-in is refused: suspended accounts and deactivated ones, except an account
+/// its owner deactivated within the reactivation window (gap audit A16).
+async fn blocked(state: &AppState, user: &users::Model) -> ApiResult<bool> {
+    Ok(match user.status {
+        users::UserStatus::Suspended => true,
+        users::UserStatus::Inactive => {
+            !security::self_reactivation_allowed(&state.db, user.id).await?
+        }
+        _ => false,
+    })
+}
+
+/// Gap audit A16: once every factor is proven, an account its owner deactivated is active
+/// again. The status trigger advances the Hub, Messaging and Calling authority; every
+/// credential from before the deactivation stays void.
+async fn reactivate_if_deactivated(
+    state: &AppState,
+    user: users::Model,
+    via: &str,
+) -> ApiResult<users::Model> {
+    if user.status != users::UserStatus::Inactive {
+        return Ok(user);
+    }
+    if !security::self_reactivation_allowed(&state.db, user.id).await? {
+        return Err(ApiError::Forbidden(
+            "Account has been deactivated".to_string(),
+        ));
+    }
+    let mut active: users::ActiveModel = user.into();
+    active.status = Set(users::UserStatus::Active);
+    active.updated_at = Set(now_utc());
+    let user = active.update(&state.db).await?;
+    security::record_event_best_effort(
+        &state.db,
+        SecurityEvent::new("ACCOUNT_REACTIVATED", Outcome::Success)
+            .by_user(user.id)
+            .detail(serde_json::json!({ "method": via })),
     )
+    .await;
+    security::notify_security(
+        state,
+        user.id,
+        crate::services::email::SecurityNotice::Reactivated,
+        &Uuid::new_v4().to_string(),
+    )
+    .await;
+    Ok(user)
 }
 
 /// Request a sign-in code
@@ -105,7 +147,7 @@ pub async fn request_otp(
         return Ok(accepted());
     }
     if let Some(user) = security::find_user_by_email(&state.db, &email).await? {
-        if disabled(&user) {
+        if blocked(&state, &user).await? {
             return Ok(accepted());
         }
     }
@@ -260,7 +302,7 @@ pub async fn verify_mfa(
         .one(&state.db)
         .await?
         .ok_or_else(|| ApiError::BadRequest("Invalid or expired code".into()))?;
-    if disabled(&user) {
+    if blocked(&state, &user).await? {
         return Err(ApiError::Forbidden(
             "Account has been deactivated".to_string(),
         ));
@@ -348,7 +390,7 @@ async fn complete_sign_in(
 ) -> ApiResult<OtpVerifyResponse> {
     let (mut user, created) = find_or_create_account(state, email).await?;
 
-    if disabled(&user) {
+    if blocked(state, &user).await? {
         security::record_event_best_effort(
             &state.db,
             SecurityEvent::new("LOGIN", Outcome::Denied)
@@ -401,6 +443,7 @@ async fn finish_sign_in(
     via: &str,
     test_account: bool,
 ) -> ApiResult<OtpVerifyResponse> {
+    let user = reactivate_if_deactivated(state, user, via).await?;
     let label = security::client_label(headers);
     let issued =
         security::start_session(state, &user, AuthMethod::EmailOtp, None, label.clone()).await?;
@@ -1416,6 +1459,7 @@ async fn google_session(
         };
         return Err(crate::services::mfa::challenge(state, &pending).await?);
     }
+    let user = reactivate_if_deactivated(state, user, "GOOGLE").await?;
     let issued = security::start_session(
         state,
         &user,
@@ -1468,18 +1512,12 @@ pub async fn resolve_google_account(
     state: &AppState,
     identity: &GoogleIdentity,
 ) -> ApiResult<(users::Model, &'static str)> {
-    let disabled = |u: &users::Model| {
-        matches!(
-            u.status,
-            users::UserStatus::Inactive | users::UserStatus::Suspended
-        )
-    };
     if let Some(user_id) = security::user_for_google_subject(&state.db, &identity.subject).await? {
         let user = Users::find_by_id(user_id)
             .one(&state.db)
             .await?
             .ok_or_else(|| ApiError::Unauthorized("Account is unavailable".into()))?;
-        if disabled(&user) {
+        if blocked(state, &user).await? {
             return Err(ApiError::Forbidden("Account has been deactivated".into()));
         }
         return Ok((user, "GOOGLE_SIGN_IN"));
@@ -1487,7 +1525,7 @@ pub async fn resolve_google_account(
 
     match security::find_user_by_email(&state.db, &identity.email).await? {
         Some(user) => {
-            if disabled(&user) {
+            if blocked(state, &user).await? {
                 return Err(ApiError::Forbidden("Account has been deactivated".into()));
             }
             if security::google_subject_for_user(&state.db, user.id)

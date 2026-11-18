@@ -123,7 +123,12 @@ pub async fn account_event(
     let mut fan_out = "NONE";
     if let Some(p) = profile {
         if p.account_version < event.source_version {
-            let next = if p.activation_state == Activation::Deactivated {
+            // Gap audit A16: a deactivated profile stays deactivated unless the account
+            // itself was reactivated (a status change to a non-suspended, non-deactivated
+            // state): it then returns to ACCOUNT_CREATED and is activated again.
+            let reactivated = event.kind == AccountEventKind::StatusChanged
+                && !matches!(event.state, Activation::Suspended | Activation::Deactivated);
+            let next = if p.activation_state == Activation::Deactivated && !reactivated {
                 "DEACTIVATED"
             } else {
                 match event.kind {

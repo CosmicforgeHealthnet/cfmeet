@@ -503,11 +503,13 @@ async fn deactivation_requires_a_step_up_code() {
         let (s, _) = app.get("/api/v1/users/me", Auth::Bearer(t)).await;
         assert!(s.is_client_error());
     }
+    // Past the self-reactivation window (gap audit A16), signing in does not bring it back.
+    backdate_deactivation(&app, id, 31).await;
     let (s, _) = login(&app, "deact@example.com").await;
     assert_eq!(
         s,
         StatusCode::FORBIDDEN,
-        "a deactivated account cannot sign in"
+        "a long-deactivated account cannot sign in"
     );
 
     // Administrator reactivation is the reverse path, and it is audited.
@@ -532,6 +534,97 @@ async fn deactivation_requires_a_step_up_code() {
     );
     let (s, v) = login(&app, "deact@example.com").await;
     assert_eq!(s, StatusCode::OK, "{v}");
+}
+
+/// Move the account's own deactivation `days` into the past (the audit trail is
+/// append-only, so its guard is lifted for this one statement).
+async fn backdate_deactivation(app: &TestApp, id: Uuid, days: i64) {
+    app.db
+        .conn
+        .execute_unprepared(&format!(
+            "BEGIN; ALTER TABLE account_security_events DISABLE TRIGGER trg_account_security_events_no_update; \
+             UPDATE account_security_events SET occurred_at = now() - interval '{days} days' \
+              WHERE user_id = '{id}' AND event_type = 'ACCOUNT_DEACTIVATED'; \
+             ALTER TABLE account_security_events ENABLE TRIGGER trg_account_security_events_no_update; COMMIT;"
+        ))
+        .await
+        .unwrap();
+}
+
+async fn self_deactivate(app: &TestApp, id: Uuid, email: &str) -> String {
+    let (_, v) = login(app, email).await;
+    let access = v["access_token"].as_str().unwrap().to_string();
+    let token = app.step_up_token(&access, id, "DEACTIVATE_ACCOUNT").await;
+    let (s, v) = app
+        .post(
+            "/api/v1/users/me/deactivate",
+            Auth::Bearer(&access),
+            json!({ "step_up_token": token }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(status_of(app, id).await, "inactive");
+    access
+}
+
+/// Gap audit A16: the owner of an account they deactivated reactivates it by signing in
+/// again within 30 days; old credentials stay void, and the Hub, Messaging and Calling
+/// are told. An administrator's deactivation or a suspension is never undone this way.
+#[tokio::test]
+async fn owners_reactivate_by_signing_in_again() {
+    let app = app_with_redis!();
+    let id = email_user(&app, "back@example.com", "active").await;
+    let old = self_deactivate(&app, id, "back@example.com").await;
+    // A code can be requested again (it is mailed) ...
+    let (s, _) = app
+        .post(
+            "/api/v1/auth/otp/request",
+            Auth::None,
+            json!({ "email": "back@example.com" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        app.scalar(
+            "SELECT count(*) FROM email_deliveries WHERE category = 'AUTH_VERIFICATION' \
+              AND recipient_hash = encode(sha256(convert_to('back@example.com', 'UTF8')), 'hex')"
+        )
+        .await,
+        1
+    );
+    // ... and signing in reactivates the account.
+    let (s, v) = login(&app, "back@example.com").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(status_of(&app, id).await, "active");
+    assert_eq!(events(&app, id, "ACCOUNT_REACTIVATED", "SUCCESS").await, 1);
+    let (s, _) = app.get("/api/v1/users/me", Auth::Bearer(&old)).await;
+    assert!(s.is_client_error(), "credentials from before stay void");
+    let fresh = v["access_token"].as_str().unwrap();
+    let (s, _) = app.get("/api/v1/users/me", Auth::Bearer(fresh)).await;
+    assert_eq!(s, StatusCode::OK);
+    // The status trigger carries the reactivation to the Hub, Messaging and Calling
+    // (covered with the communications authority history).
+
+    // An administrator's deactivation is not undone by signing in.
+    let admin = app.admin("deactivator").await;
+    let (s, v) = app
+        .patch(
+            format!("/api/v1/admin/users/{id}"),
+            Auth::Bearer(&admin.token),
+            json!({ "status": "inactive" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = login(&app, "back@example.com").await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(status_of(&app, id).await, "inactive");
+
+    // Nor is an account its owner never deactivated (suspension is covered by the
+    // same rule: only the owner's own deactivation qualifies).
+    let seeded = email_user(&app, "seeded@example.com", "inactive").await;
+    let (s, _) = login(&app, "seeded@example.com").await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(status_of(&app, seeded).await, "inactive");
 }
 
 #[tokio::test]
