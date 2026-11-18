@@ -14,11 +14,11 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.6.0"
+      "description": "cfmeet.meeting-service.http-api 1.7.0"
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.28.0"
+      "description": "cfmeet.calling.http-api 1.29.0"
     },
     {
       "name": "privacy-relay",

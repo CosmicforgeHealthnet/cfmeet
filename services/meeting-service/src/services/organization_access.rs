@@ -12,6 +12,14 @@
 //!   suspended principal can no longer read, send, call or keep a subscription in the
 //!   organization scope. SUSPENDED (not DEACTIVATED) keeps re-admission possible.
 //!
+//! Gap audit G3 — in the same pass, the Enterprise Calling extensions routed to the
+//! member's organization principal follow (Calling
+//! `POST /internal/v1/organization-members/extension-status`,
+//! `calling-organization-member.offboard`): SUSPENDED / REMOVED disables them, so a
+//! removed member's extension stops ringing; ACTIVE restores exactly the ones disabled
+//! that way. Idempotent on Calling's side; a refusal is retried and reported like any
+//! other failure (the row is not settled until both steps succeeded).
+//!
 //! The member's personal-scope principal is a different principal in a different
 //! environment and is never touched: personal conversations keep working.
 //!
@@ -56,6 +64,16 @@ pub trait PrincipalStatusPort: Send + Sync {
         user_id: Uuid,
         status: &str,
     ) -> Result<(), PortError>;
+
+    /// Gap audit G3: applies `status` (`ACTIVE` / `SUSPENDED`) to the Enterprise Calling
+    /// extensions routed to the member's organization principal `principal_id` in one
+    /// organization environment (Calling disables / restores them idempotently).
+    async fn set_extension_status(
+        &self,
+        scope: &ScopeEnvironment,
+        principal_id: Uuid,
+        status: &str,
+    ) -> Result<(), PortError>;
 }
 
 #[async_trait]
@@ -67,6 +85,39 @@ impl PrincipalStatusPort for super::organization_calling::OrganizationCalling {
         status: &str,
     ) -> Result<(), PortError> {
         self.set_principal_status(scope, user_id, status).await
+    }
+
+    async fn set_extension_status(
+        &self,
+        scope: &ScopeEnvironment,
+        principal_id: Uuid,
+        status: &str,
+    ) -> Result<(), PortError> {
+        self.set_member_extension_status(scope, principal_id, status)
+            .await
+    }
+}
+
+/// An organization environment and the member's principal recorded in it.
+#[derive(Debug, Clone, FromQueryResult)]
+struct ScopedPrincipal {
+    organization_id: Uuid,
+    tenant_id: Uuid,
+    application_id: Uuid,
+    environment_id: Uuid,
+    service_account_id: Uuid,
+    principal_id: Uuid,
+}
+
+impl ScopedPrincipal {
+    fn scope(&self) -> ScopeEnvironment {
+        ScopeEnvironment {
+            organization_id: self.organization_id,
+            tenant_id: self.tenant_id,
+            application_id: self.application_id,
+            environment_id: self.environment_id,
+            service_account_id: self.service_account_id,
+        }
     }
 }
 
@@ -125,6 +176,9 @@ pub struct AccessReport {
     pub applied: u64,
     pub failed: u64,
     pub principals_updated: u64,
+    /// Gap audit G3: organization environments whose Calling extensions of the member
+    /// were brought in line.
+    pub extensions_applied: u64,
     /// Gap audit G16: changes settled with nothing to apply because no technical scope
     /// environment was ever recorded for the organization (reported, never silent).
     pub unscoped: u64,
@@ -159,8 +213,8 @@ pub async fn run_once(
     txn.commit().await?;
 
     for row in due {
-        let scopes = ScopeEnvironment::find_by_statement(stmt(
-            "SELECT e.organization_id, e.tenant_id, e.application_id, e.environment_id, e.service_account_id \
+        let scopes = ScopedPrincipal::find_by_statement(stmt(
+            "SELECT e.organization_id, e.tenant_id, e.application_id, e.environment_id, e.service_account_id, l.principal_id \
              FROM organization_scope_environments e \
              JOIN communication_principal_links l ON l.environment_id = e.environment_id \
                AND l.subject_kind = 'USER' AND l.subject_id = $2 \
@@ -194,9 +248,20 @@ pub async fn run_once(
         }
         let status = principal_status(&row.desired_state);
         let mut failure: Option<PortError> = None;
-        for scope in &scopes {
-            match port.set_status(scope, row.user_id, status).await {
+        for scoped in &scopes {
+            let scope = scoped.scope();
+            match port.set_status(&scope, row.user_id, status).await {
                 Ok(()) => report.principals_updated += 1,
+                Err(e) => {
+                    failure = Some(e);
+                    break;
+                }
+            }
+            match port
+                .set_extension_status(&scope, scoped.principal_id, status)
+                .await
+            {
+                Ok(()) => report.extensions_applied += 1,
                 Err(e) => {
                     failure = Some(e);
                     break;

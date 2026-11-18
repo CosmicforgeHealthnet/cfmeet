@@ -14,16 +14,16 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 294 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.7.0 | 298 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.7.0 | 74 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.28.0 | 145 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.29.0 | 145 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.19.0 | 105 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **691** |
+| **Total** | | | **695** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
-Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
+Contract `packages/contracts/openapi/meeting-service.json` version **1.7.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
 
 ### API Keys
 
@@ -353,6 +353,10 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | GET | `/api/v2/organizations/{id}/meeting-profile-policy` | account session | Organization meeting profile policy. | 200, 403, 404, 503 | ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_get_organization_meeting_profile_policy` |
 | PUT | `/api/v2/organizations/{id}/meeting-profile-policy` | account session | Replace the organization meeting profile policy. | 200, 400, 403, 404, 503 | ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_put_organization_meeting_profile_policy` |
 | GET | `/api/v2/organizations/{id}/meeting-spaces` | account session | Meeting spaces of an organization (managers). | 200, 400, 403, 404, 503 | FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_organization_meeting_spaces` |
+| GET | `/api/v2/organizations/{id}/member-calling/endpoints` | account session | List my calling endpoints in the organization's own Calling scope. | 200, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_member_calling_endpoints_list` |
+| POST | `/api/v2/organizations/{id}/member-calling/endpoints` | account session | Register (or refresh) my calling endpoint in the organization's own Calling scope. | 200, 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_member_calling_endpoints_register` |
+| DELETE | `/api/v2/organizations/{id}/member-calling/endpoints/{endpointId}` | account session | Revoke my calling endpoint in the organization's own Calling scope. | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_member_calling_endpoints_revoke` |
+| POST | `/api/v2/organizations/{id}/member-calling/signaling-credentials` | account session | Obtain a signaling credential for my calling endpoint in the organization's scope. | 201, 400, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, MEMBERSHIP_REQUIRED, NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_organization_member_calling_signaling_credential` |
 | GET | `/api/v2/organizations/{id}/members` | account session | List members (platform admins, organization OWNER/ADMIN). | 200, 400, 403, 404, 503 | MEETING_NOT_FOUND, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_organization_members` |
 | POST | `/api/v2/organizations/{id}/members/me/leave` | account session | Leave an organization. | 200, 404, 409, 503 | FEATURE_DISABLED, LAST_OWNER, ORGANIZATION_NOT_FOUND, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_leave_organization` |
 | PATCH | `/api/v2/organizations/{id}/members/{userId}` | account session | Change a member's role or status. | 200, 400, 403, 404, 409, 503 | FEATURE_DISABLED, LAST_OWNER, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR, VERSION_CONFLICT | `openapi/meeting-service.json#v2_update_organization_membership` |
@@ -669,7 +673,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.7.
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.28.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.29.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 

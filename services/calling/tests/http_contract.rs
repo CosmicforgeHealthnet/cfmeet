@@ -221,6 +221,7 @@ fn contract_paths_equal_the_registered_routes() {
             || path.ends_with("src/webhooks/ingest.rs")
             || path.ends_with("src/webhooks/ownership_migration.rs")
             || path.ends_with("src/calls/app/abuse_review.rs")
+            || path.ends_with("src/organization_members.rs")
             || path.ends_with("src/communications.rs")
         {
             "/internal/v1"
@@ -607,6 +608,12 @@ fn every_operation_declares_its_authentication() {
                     }
                     p if p.starts_with("/internal/v1/abuse-reports") => {
                         "calling-abuse-reports.review"
+                    }
+                    "/internal/v1/organization-members/extension-status" => {
+                        "calling-organization-member.offboard"
+                    }
+                    p if p.starts_with("/internal/v1/organization-members/") => {
+                        "calling-organization-member.act"
                     }
                     _ => "communication-authority.enforce",
                 };
