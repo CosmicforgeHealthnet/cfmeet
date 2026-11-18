@@ -955,3 +955,181 @@ async fn personal_data_is_exported_and_the_account_can_be_deleted() {
         0
     );
 }
+
+/// Raw request: (status, headers, body bytes).
+async fn raw(
+    app: &TestApp,
+    method: &str,
+    uri: &str,
+    token: Option<&str>,
+    content_type: Option<&str>,
+    body: Vec<u8>,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    use tower::ServiceExt;
+    let mut req = axum::http::Request::builder().method(method).uri(uri);
+    if let Some(t) = token {
+        req = req.header("authorization", format!("Bearer {t}"));
+    }
+    if let Some(c) = content_type {
+        req = req.header("content-type", c);
+    }
+    let resp = app
+        .router
+        .clone()
+        .oneshot(req.body(axum::body::Body::from(body)).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    (status, headers, bytes)
+}
+
+/// Gap audit A22: an avatar image is uploaded (PNG, JPEG or WebP, recognised by its
+/// content, at most 512 KiB), served at a public immutable address that becomes the
+/// profile's avatarUrl, replaced by a new upload, and removed with the account's consent.
+#[tokio::test]
+async fn avatars_are_uploaded_served_replaced_and_removed() {
+    // Profiles hold https:// references only; this is the service's public address.
+    std::env::set_var("AVATAR_PUBLIC_BASE_URL", "https://api.example.test");
+    let app = app_with_redis!();
+    let id = email_user(&app, "pic@example.com", "active").await;
+    let (_, v) = login(&app, "pic@example.com").await;
+    let token = v["access_token"].as_str().unwrap().to_string();
+    let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDRpixels".to_vec();
+
+    // Not signed in; not an image; a mismatched type; too large.
+    let (s, _, _) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        None,
+        Some("image/png"),
+        png.clone(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    for (kind, body) in [
+        (
+            "image/svg+xml",
+            b"<svg xmlns='http://www.w3.org/2000/svg'/>".to_vec(),
+        ),
+        ("image/jpeg", png.clone()),
+    ] {
+        let (s, _, b) = raw(
+            &app,
+            "PUT",
+            "/api/v2/me/avatar",
+            Some(&token),
+            Some(kind),
+            body,
+        )
+        .await;
+        assert_eq!(
+            s,
+            StatusCode::BAD_REQUEST,
+            "{}",
+            String::from_utf8_lossy(&b)
+        );
+    }
+    let mut big = png.clone();
+    big.resize(512 * 1024 + 1, 0);
+    let (s, _, _) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        Some(&token),
+        Some("image/png"),
+        big,
+    )
+    .await;
+    assert_eq!(s, StatusCode::PAYLOAD_TOO_LARGE);
+
+    // Upload: the profile points at the public address.
+    let (s, _, b) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        Some(&token),
+        Some("image/png"),
+        png.clone(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let profile: Value = serde_json::from_slice(&b).unwrap();
+    let url = profile["avatarUrl"].as_str().unwrap().to_string();
+    let path = &url[url.find("/api/v2/avatars/").unwrap()..];
+    let (s, h, bytes) = raw(&app, "GET", path, None, None, vec![]).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(bytes, png);
+    assert_eq!(h["content-type"], "image/png");
+    assert_eq!(h["x-content-type-options"], "nosniff");
+    assert_eq!(events(&app, id, "AVATAR_UPLOADED", "SUCCESS").await, 1);
+
+    // A new upload replaces it: the old address is gone.
+    let jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3];
+    let (s, _, b) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        Some(&token),
+        Some("image/jpeg"),
+        jpeg.clone(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let replaced: Value = serde_json::from_slice(&b).unwrap();
+    let new_url = replaced["avatarUrl"].as_str().unwrap().to_string();
+    assert_ne!(new_url, url);
+    let (s, _, _) = raw(&app, "GET", path, None, None, vec![]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let new_path = new_url[new_url.find("/api/v2/avatars/").unwrap()..].to_string();
+    let (s, h, _) = raw(&app, "GET", &new_path, None, None, vec![]).await;
+    assert_eq!(
+        (s, h["content-type"].to_str().unwrap()),
+        (StatusCode::OK, "image/jpeg")
+    );
+
+    // Pointing the profile elsewhere drops the upload.
+    let (s, v) = app
+        .patch(
+            "/api/v2/me/profile",
+            Auth::Bearer(&token),
+            json!({ "avatarUrl": "https://cdn.example.com/me.png" }),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _, _) = raw(&app, "GET", &new_path, None, None, vec![]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Upload again, then remove: the profile has no avatar and the image is gone.
+    let (_, _, b) = raw(
+        &app,
+        "PUT",
+        "/api/v2/me/avatar",
+        Some(&token),
+        Some("image/png"),
+        png,
+    )
+    .await;
+    let again: Value = serde_json::from_slice(&b).unwrap();
+    let again_url = again["avatarUrl"].as_str().unwrap().to_string();
+    let (s, v) = app.delete("/api/v2/me/avatar", Auth::Bearer(&token)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["avatarUrl"].is_null());
+    let (s, _, b) = raw(
+        &app,
+        "GET",
+        &again_url[again_url.find("/api/v2/avatars/").unwrap()..],
+        None,
+        None,
+        vec![],
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let body: Value = serde_json::from_slice(&b).unwrap();
+    assert_eq!(body["error"]["code"], "AVATAR_NOT_FOUND");
+}

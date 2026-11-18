@@ -188,6 +188,8 @@ pub enum ErrorCode {
     MfaRequired,
     /// Gap audit A20: an administrator named an account that does not exist.
     UserNotFound,
+    /// Gap audit A22: no such (current) avatar image.
+    AvatarNotFound,
     /// Multi-device policy: the device key is already bound to another live device.
     DeviceKeyInUse,
     /// Multi-device policy: the linking challenge does not exist, is not the caller's,
@@ -316,6 +318,7 @@ impl ErrorCode {
             ErrorCode::DeviceDeclarationRequired => "DEVICE_DECLARATION_REQUIRED",
             ErrorCode::DeviceNotFound => "DEVICE_NOT_FOUND",
             ErrorCode::UserNotFound => "USER_NOT_FOUND",
+            ErrorCode::AvatarNotFound => "AVATAR_NOT_FOUND",
             ErrorCode::MfaRequired => "MFA_REQUIRED",
             ErrorCode::DeviceKeyInUse => "DEVICE_KEY_IN_USE",
             ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
@@ -438,7 +441,9 @@ impl ErrorCode {
             ErrorCode::WebDeviceLimitReached
             | ErrorCode::DeviceDeclarationRefused
             | ErrorCode::DeviceKeyInUse => StatusCode::CONFLICT,
-            ErrorCode::DeviceNotFound | ErrorCode::UserNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::DeviceNotFound | ErrorCode::UserNotFound | ErrorCode::AvatarNotFound => {
+                StatusCode::NOT_FOUND
+            }
             ErrorCode::DeviceLinkInvalid => StatusCode::GONE,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {

@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 281 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 284 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.26.0 | 142 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **670** |
+| **Total** | | | **673** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -58,6 +58,9 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/api/v2/avatars/{avatarId}` | optional / public | Get an avatar image | 200, 404 | AVATAR_NOT_FOUND | `openapi/meeting-service.json#v2_get_avatar` |
+| DELETE | `/api/v2/me/avatar` | account session | Remove my avatar | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_remove_my_avatar` |
+| PUT | `/api/v2/me/avatar` | account session | Upload my avatar | 200, 400, 401, 404, 413 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, REQUEST_TOO_LARGE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_upload_my_avatar` |
 | GET | `/api/v2/me/profile` | account session | Get my profile | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_profile` |
 | PATCH | `/api/v2/me/profile` | account session | Update my profile | 200, 400, 401, 409 | AUTHENTICATION_REQUIRED, USERNAME_TAKEN, VALIDATION_ERROR | `openapi/meeting-service.json#v2_update_my_profile` |
 

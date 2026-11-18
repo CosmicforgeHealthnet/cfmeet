@@ -10,7 +10,9 @@
 //!   (5 minutes, at most 5 attempts) that `POST /api/v1/auth/mfa/verify` redeems with an
 //!   authenticator code or a recovery code. A code's time step is accepted once.
 //! * The secret is sealed at rest: XOR with an HMAC-SHA256 keystream derived from
-//!   `MFA_ENCRYPTION_KEY` (or `JWT_SECRET`), the account and a random nonce.
+//!   `MFA_ENCRYPTION_KEY` (or `JWT_SECRET`), the account and a random nonce. The sealed
+//!   value names its key, so a rotated key keeps unsealing from
+//!   `MFA_PREVIOUS_ENCRYPTION_KEYS` (or `JWT_PREVIOUS_SECRETS`).
 use hmac::{Hmac, Mac};
 use rand::RngCore;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};
@@ -33,38 +35,65 @@ fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> Statement {
     Statement::from_sql_and_values(DbBackend::Postgres, sql, values)
 }
 
-fn key() -> Vec<u8> {
+/// The sealing key: `MFA_ENCRYPTION_KEY`, else `JWT_SECRET`.
+fn key() -> String {
     std::env::var("MFA_ENCRYPTION_KEY")
         .or_else(|_| std::env::var("JWT_SECRET"))
         .unwrap_or_default()
-        .into_bytes()
 }
 
-fn keystream(user: Uuid, nonce: &[u8]) -> [u8; 32] {
-    let mut mac = Hmac::<Sha256>::new_from_slice(&key()).expect("any key length");
+/// Keys still accepted for unsealing after a rotation (gap audit A15):
+/// `MFA_PREVIOUS_ENCRYPTION_KEYS`, else `JWT_PREVIOUS_SECRETS` (comma-separated).
+fn previous_keys() -> Vec<String> {
+    std::env::var("MFA_PREVIOUS_ENCRYPTION_KEYS")
+        .or_else(|_| std::env::var("JWT_PREVIOUS_SECRETS"))
+        .unwrap_or_default()
+        .split(',')
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .collect()
+}
+
+fn keystream(key: &str, user: Uuid, nonce: &[u8]) -> [u8; 32] {
+    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes()).expect("any key length");
     mac.update(b"cfmeet-mfa-totp-v1");
     mac.update(user.as_bytes());
     mac.update(nonce);
     mac.finalize().into_bytes().into()
 }
 
+/// `v2:<key id>:<nonce>:<ciphertext>`; the key id picks the key after a rotation.
 fn seal(user: Uuid, secret: &[u8]) -> String {
     let mut nonce = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut nonce);
-    let ks = keystream(user, &nonce);
+    let key = key();
+    let ks = keystream(&key, user, &nonce);
     let ct: Vec<u8> = secret.iter().zip(ks.iter()).map(|(a, b)| a ^ b).collect();
-    format!("v1:{}:{}", hex::encode(nonce), hex::encode(ct))
+    format!(
+        "v2:{}:{}:{}",
+        crate::services::auth::key_id(&key),
+        hex::encode(nonce),
+        hex::encode(ct)
+    )
 }
 
 fn unseal(user: Uuid, sealed: &str) -> ApiResult<Vec<u8>> {
-    let mut parts = sealed.split(':');
     let bad = || ApiError::InternalError("unreadable MFA secret".into());
-    let (Some("v1"), Some(nonce), Some(ct)) = (parts.next(), parts.next(), parts.next()) else {
-        return Err(bad());
+    let parts: Vec<&str> = sealed.split(':').collect();
+    let (key, nonce, ct) = match parts.as_slice() {
+        ["v1", nonce, ct] => (key(), *nonce, *ct),
+        ["v2", kid, nonce, ct] => {
+            let key = std::iter::once(key())
+                .chain(previous_keys())
+                .find(|k| crate::services::auth::key_id(k) == *kid)
+                .ok_or_else(bad)?;
+            (key, *nonce, *ct)
+        }
+        _ => return Err(bad()),
     };
     let nonce = hex::decode(nonce).map_err(|_| bad())?;
     let ct = hex::decode(ct).map_err(|_| bad())?;
-    let ks = keystream(user, &nonce);
+    let ks = keystream(&key, user, &nonce);
     Ok(ct.iter().zip(ks.iter()).map(|(a, b)| a ^ b).collect())
 }
 

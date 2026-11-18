@@ -1339,7 +1339,11 @@ async fn oauth_google_callback_inner(
 
     // Exchange code for tokens
     let token_response = reqwest::Client::new()
-        .post("https://oauth2.googleapis.com/token")
+        .post(
+            // Overridable for tests and private deployments (gap audit A14).
+            std::env::var("GOOGLE_TOKEN_URL")
+                .unwrap_or_else(|_| "https://oauth2.googleapis.com/token".into()),
+        )
         .form(&[
             ("code", code),
             ("client_id", state.google_client_id.as_str()),

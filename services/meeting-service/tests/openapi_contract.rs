@@ -409,6 +409,9 @@ fn every_v2_route_is_documented() {
         // Blueprint Section 9 — personal account profile
         ("get", "/api/v2/me/profile"),
         ("patch", "/api/v2/me/profile"),
+        ("put", "/api/v2/me/avatar"),
+        ("delete", "/api/v2/me/avatar"),
+        ("get", "/api/v2/avatars/{avatarId}"),
         // Multi-device policy — linked devices, linking challenges, security log
         ("get", "/api/v2/me/device-policy"),
         ("get", "/api/v2/me/devices"),
@@ -685,11 +688,13 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
             );
             if let Some(body) = op.get("requestBody") {
                 let types: Vec<_> = body["content"].as_object().unwrap().keys().collect();
-                assert_eq!(
-                    types,
-                    ["application/json"],
-                    "{method} {path} request content"
-                );
+                // Gap audit A22: an avatar upload is the image itself.
+                let expected = if path == "/api/v2/me/avatar" {
+                    ["image/png"]
+                } else {
+                    ["application/json"]
+                };
+                assert_eq!(types, expected, "{method} {path} request content");
                 assert!(
                     method != "get" && method != "delete",
                     "{method} {path} must not take a body"
@@ -702,6 +707,11 @@ fn j_e2e_07_contract_is_resolvable_and_consistent() {
                     // Blueprint Section 10: RFC 5545 exports are the only non-JSON success.
                     if path.ends_with("/calendar.ics") && status == "200" {
                         assert_eq!(types, ["text/calendar"], "{method} {path} {status}");
+                        continue;
+                    }
+                    // Gap audit A22: the public avatar address serves the image itself.
+                    if path == "/api/v2/avatars/{avatarId}" && status == "200" {
+                        assert_eq!(types, ["image/png"], "{method} {path} {status}");
                         continue;
                     }
                     assert_eq!(types, ["application/json"], "{method} {path} {status}");

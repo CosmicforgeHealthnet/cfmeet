@@ -698,6 +698,19 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(crate::handlers::v2::account_profile::get_my_profile)
                 .patch(crate::handlers::v2::account_profile::update_my_profile),
         )
+        // Gap audit A22: avatar upload, and the public image address
+        .route(
+            "/me/avatar",
+            put(crate::handlers::v2::account_profile::upload_my_avatar)
+                .delete(crate::handlers::v2::account_profile::remove_my_avatar)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::services::account_avatar::MAX_AVATAR_BYTES,
+                )),
+        )
+        .route(
+            "/avatars/:avatar_id",
+            get(crate::handlers::v2::account_profile::get_avatar),
+        )
         // Blueprint Section 2: account sessions and the security audit
         .route(
             "/me/sessions",

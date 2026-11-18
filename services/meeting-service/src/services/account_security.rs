@@ -1424,6 +1424,8 @@ mod tests {
             typ: Some("access".into()),
             sid: sid.then(|| Uuid::new_v4().to_string()),
             rti: None,
+            iss: None,
+            aud: None,
         }
     }
 

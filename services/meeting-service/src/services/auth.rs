@@ -36,6 +36,12 @@ pub struct Claims {
     /// Refresh-token id for rotation and reuse detection (refresh tokens only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rti: Option<String>,
+    /// Issuer (`cfmeet-account`); absent on tokens issued before gap audit A15.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iss: Option<String>,
+    /// Audience (`cfmeet-api`); absent on tokens issued before gap audit A15.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aud: Option<String>,
 }
 
 impl Claims {
@@ -65,8 +71,27 @@ impl Claims {
     }
 }
 
+/// Issuer of every Account token (gap audit A15).
+pub const TOKEN_ISSUER: &str = "cfmeet-account";
+/// Audience of every Account token: the CF Meet API (gap audit A15).
+pub const TOKEN_AUDIENCE: &str = "cfmeet-api";
+
+/// Key id of a signing secret: a short digest, never the secret itself.
+pub fn key_id(secret: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!(
+        "hs-{}",
+        &hex::encode(Sha256::digest(secret.as_bytes()))[..16]
+    )
+}
+
 pub struct JwtService {
     secret: String,
+    kid: String,
+    /// Earlier signing secrets still accepted for verification during a rotation
+    /// (`JWT_PREVIOUS_SECRETS`, comma-separated). New tokens are always signed with
+    /// `secret`.
+    previous: Vec<(String, String)>,
     access_token_expiry: Duration,
     refresh_token_expiry: Duration,
 }
@@ -74,10 +99,40 @@ pub struct JwtService {
 impl JwtService {
     pub fn new(secret: String) -> Self {
         Self {
+            kid: key_id(&secret),
             secret,
+            previous: Vec::new(),
             access_token_expiry: Duration::minutes(15), // 15 minutes
             refresh_token_expiry: Duration::days(7),    // 7 days
         }
+    }
+
+    /// Gap audit A15: key rotation. Tokens signed with one of `previous` stay valid until
+    /// they expire (at most the refresh lifetime), so a rotation is: set the new
+    /// `JWT_SECRET`, move the old one to `JWT_PREVIOUS_SECRETS`, and remove it after
+    /// seven days.
+    pub fn with_previous<I: IntoIterator<Item = String>>(mut self, previous: I) -> Self {
+        self.previous = previous
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && *s != self.secret)
+            .map(|s| (key_id(&s), s))
+            .collect();
+        self
+    }
+
+    /// Previous secrets from `JWT_PREVIOUS_SECRETS`.
+    pub fn previous_from_env() -> Vec<String> {
+        std::env::var("JWT_PREVIOUS_SECRETS")
+            .unwrap_or_default()
+            .split(',')
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// The key id new tokens carry.
+    pub fn current_key_id(&self) -> &str {
+        &self.kid
     }
 
     pub fn generate_access_token(&self, user_id: Uuid, role: &str) -> ApiResult<String> {
@@ -169,24 +224,65 @@ impl JwtService {
             typ: Some(typ.to_string()),
             sid: session_id.map(|s| s.to_string()),
             rti: refresh_id.map(|r| r.to_string()),
+            iss: Some(TOKEN_ISSUER.to_string()),
+            aud: Some(TOKEN_AUDIENCE.to_string()),
+        };
+        let header = Header {
+            kid: Some(self.kid.clone()),
+            ..Header::default()
         };
 
         encode(
-            &Header::default(),
+            &header,
             &claims,
             &EncodingKey::from_secret(self.secret.as_bytes()),
         )
         .map_err(|e| ApiError::InternalError(format!("Failed to generate token: {}", e)))
     }
 
+    /// Verify a token: HS256 only, signed by the current or a previous key (chosen by
+    /// `kid` when present), and, when it names them, issued by Account for the CF Meet
+    /// API. Tokens issued before A15 carry neither `kid`, `iss` nor `aud`; they stay
+    /// valid until they expire.
     pub fn verify_token(&self, token: &str) -> ApiResult<Claims> {
-        decode::<Claims>(
-            token,
-            &DecodingKey::from_secret(self.secret.as_bytes()),
-            &Validation::default(),
-        )
-        .map(|data| data.claims)
-        .map_err(|e| ApiError::Unauthorized(format!("Invalid token: {}", e)))
+        let invalid = |e: String| ApiError::Unauthorized(format!("Invalid token: {}", e));
+        let header = jsonwebtoken::decode_header(token).map_err(|e| invalid(e.to_string()))?;
+        let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+        // `aud`/`iss` are optional for pre-A15 tokens, so they are checked below.
+        validation.validate_aud = false;
+        let keys: Vec<&str> = match header.kid.as_deref() {
+            Some(kid) if kid == self.kid => vec![self.secret.as_str()],
+            Some(kid) => self
+                .previous
+                .iter()
+                .filter(|(k, _)| k == kid)
+                .map(|(_, s)| s.as_str())
+                .collect(),
+            None => std::iter::once(self.secret.as_str())
+                .chain(self.previous.iter().map(|(_, s)| s.as_str()))
+                .collect(),
+        };
+        let mut last = "unknown signing key".to_string();
+        for key in keys {
+            match decode::<Claims>(
+                token,
+                &DecodingKey::from_secret(key.as_bytes()),
+                &validation,
+            ) {
+                Ok(data) => {
+                    let claims = data.claims;
+                    if claims.iss.as_deref().is_some_and(|i| i != TOKEN_ISSUER) {
+                        return Err(invalid("unexpected issuer".into()));
+                    }
+                    if claims.aud.as_deref().is_some_and(|a| a != TOKEN_AUDIENCE) {
+                        return Err(invalid("unexpected audience".into()));
+                    }
+                    return Ok(claims);
+                }
+                Err(e) => last = e.to_string(),
+            }
+        }
+        Err(invalid(last))
     }
 }
 
@@ -244,11 +340,86 @@ mod communications_authentication_tests {
             typ: None,
             sid: None,
             rti: None,
+            iss: None,
+            aud: None,
         };
         assert_eq!(legacy(15 * 60).kind(), Some(TokenKind::Access));
         assert_eq!(legacy(7 * 24 * 3600).kind(), Some(TokenKind::Refresh));
         let mut unknown = legacy(900);
         unknown.typ = Some("id".into());
         assert_eq!(unknown.kind(), None);
+    }
+
+    #[test]
+    fn tokens_name_their_key_issuer_and_audience_and_keys_rotate() {
+        let old = JwtService::new("test-only-rotation-old-secret-0123456789abcdef".into());
+        let legacy_claims = Claims {
+            sub: Uuid::new_v4().to_string(),
+            role: "user".into(),
+            exp: Utc::now().timestamp() + 600,
+            iat: Utc::now().timestamp(),
+            auth_time: None,
+            typ: Some(TOKEN_TYPE_ACCESS.into()),
+            sid: None,
+            rti: None,
+            iss: None,
+            aud: None,
+        };
+        // A pre-A15 token: no kid, iss or aud.
+        let legacy = encode(
+            &Header::default(),
+            &legacy_claims,
+            &EncodingKey::from_secret(b"test-only-rotation-old-secret-0123456789abcdef"),
+        )
+        .unwrap();
+        let signed_old = old.generate_access_token(Uuid::new_v4(), "user").unwrap();
+        let header = jsonwebtoken::decode_header(&signed_old).unwrap();
+        assert_eq!(header.kid.as_deref(), Some(old.current_key_id()));
+        let claims = old.verify_token(&signed_old).unwrap();
+        assert_eq!(
+            (claims.iss.as_deref(), claims.aud.as_deref()),
+            (Some(TOKEN_ISSUER), Some(TOKEN_AUDIENCE))
+        );
+
+        // Rotation: the new key signs; the old key still verifies until expiry.
+        let rotated = JwtService::new("test-only-rotation-new-secret-0123456789abcdef".into())
+            .with_previous(["test-only-rotation-old-secret-0123456789abcdef".to_string()]);
+        assert!(rotated.verify_token(&signed_old).is_ok());
+        assert!(rotated.verify_token(&legacy).is_ok());
+        let signed_new = rotated
+            .generate_access_token(Uuid::new_v4(), "user")
+            .unwrap();
+        assert!(rotated.verify_token(&signed_new).is_ok());
+        assert!(
+            old.verify_token(&signed_new).is_err(),
+            "the old key alone cannot verify"
+        );
+        // Once the old key is retired, its tokens stop verifying.
+        let retired = JwtService::new("test-only-rotation-new-secret-0123456789abcdef".into());
+        assert!(retired.verify_token(&signed_old).is_err());
+
+        // A token for another audience or issuer is refused even with a valid signature.
+        for (iss, aud) in [(Some("someone-else"), None), (None, Some("another-api"))] {
+            let claims = Claims {
+                iss: iss.map(str::to_string),
+                aud: aud.map(str::to_string),
+                ..legacy_claims.clone()
+            };
+            let t = encode(
+                &Header::default(),
+                &claims,
+                &EncodingKey::from_secret(b"test-only-rotation-old-secret-0123456789abcdef"),
+            )
+            .unwrap();
+            assert!(old.verify_token(&t).is_err());
+        }
+        // Other algorithms are refused.
+        let hs512 = encode(
+            &Header::new(jsonwebtoken::Algorithm::HS512),
+            &legacy_claims,
+            &EncodingKey::from_secret(b"test-only-rotation-old-secret-0123456789abcdef"),
+        )
+        .unwrap();
+        assert!(old.verify_token(&hs512).is_err());
     }
 }
