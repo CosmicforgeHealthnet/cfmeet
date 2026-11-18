@@ -756,7 +756,15 @@ PRODUCER_DIAGNOSTICS_SQL = {
         "GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4, 5) q), "
         "'legacyEmailsSinceFenceChange', (SELECT coalesce(json_agg(e), '[]') FROM (SELECT r.category, e.status, "
         "count(*) AS count FROM email_deliveries e JOIN notification_routing_state r ON r.category = e.category "
-        "AND e.created_at >= r.changed_at GROUP BY 1, 2 ORDER BY 1, 2) e));"),
+        "AND e.created_at >= r.changed_at GROUP BY 1, 2 ORDER BY 1, 2) e), "
+        # The CRITICAL lane (account_notification_outbox, N12): each row's relay state with its
+        # decision's lease / acknowledgement / completion flags (counts and error classes only).
+        "'criticalOutbox', (SELECT coalesce(json_agg(c), '[]') FROM (SELECT d.category, d.route, d.reason, o.shadow, "
+        "o.state, o.outcome, o.last_error, o.settled_at IS NOT NULL AS settled, d.lease_count AS leases, "
+        "d.ns_acked_at IS NOT NULL AS acked, d.ns_completed_at IS NOT NULL AS completed, "
+        "o.expires_at > now() AS open, count(*) AS count, max(o.created_at) AS last "
+        "FROM account_notification_outbox o JOIN notification_route_decisions d ON d.decision_id = o.decision_id "
+        "GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ORDER BY 1, 2, 3, 4, 5, 6, 7) c));"),
 }
 SERVICE_DIAGNOSTICS_SQL = (
     "SELECT json_build_object("
@@ -772,8 +780,10 @@ SERVICE_DIAGNOSTICS_SQL = (
     "'pushAttempts', (SELECT coalesce(json_agg(a), '[]') FROM (SELECT a.outcome, (a.http_status / 100) || 'xx' AS http, "
     "count(*) AS count FROM notif_delivery_attempts a JOIN notif_deliveries d ON d.id = a.delivery_id "
     "WHERE d.channel = 'PUSH' GROUP BY 1, 2 ORDER BY 1, 2) a), "
-    "'emailMessages', (SELECT coalesce(json_agg(e), '[]') FROM (SELECT category, lane, status, provider, count(*) AS count, "
-    "max(updated_at) AS last FROM notif_email_messages GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4) e), "
+    "'emailMessages', (SELECT coalesce(json_agg(e), '[]') FROM (SELECT category, lane, status, provider, "
+    "last_error_class, last_error_status, route_decision_id IS NOT NULL AS decided, max(attempts) AS attempts, "
+    "count(*) AS count, max(updated_at) AS last FROM notif_email_messages GROUP BY 1, 2, 3, 4, 5, 6, 7 "
+    "ORDER BY 1, 2, 3, 4) e), "
     "'emailProviderEvents', (SELECT count(*) FROM notif_email_provider_events), "
     "'inboxItems', (SELECT coalesce(json_agg(i), '[]') FROM (SELECT category, count(*) AS count FROM notif_inbox_items "
     "GROUP BY 1 ORDER BY 1) i), "
