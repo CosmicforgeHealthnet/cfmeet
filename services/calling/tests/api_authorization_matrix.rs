@@ -285,6 +285,22 @@ const CLASSIFIED: &[(&str, Probe)] = &[
         Probe::Body,
     ),
     (
+        "POST /internal/v1/organization-members/endpoints",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/organization-members/endpoints/revoke",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/organization-members/signaling-credentials",
+        Probe::Body,
+    ),
+    (
+        "POST /internal/v1/organization-members/extension-status",
+        Probe::Body,
+    ),
+    (
         "POST /internal/v1/webhook-migration/rollback/subscriptions",
         Probe::Body,
     ),
@@ -1052,6 +1068,8 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                     peers.developer_platform.clone()
                 } else if permission == "calling-abuse-reports.review" {
                     peers.operator_console.clone()
+                } else if permission.starts_with("calling-organization-member.") {
+                    peers.meeting_service.clone()
                 } else {
                     peers.privacy_relay.clone()
                 };

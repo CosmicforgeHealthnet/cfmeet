@@ -38,6 +38,7 @@ pub mod models;
 /// recording ready), only while `CF_NOTIFICATIONS_BASE_URL` is configured.
 pub mod notification_publications;
 pub mod numbering;
+pub mod organization_members;
 pub mod platform;
 pub mod privacy_relay;
 pub mod public_docs;
