@@ -1,6 +1,7 @@
-//! The closed event catalogue (Document 4 §5.2): 34 inbound types (30 core, the optional
-//! `operator.alert.fired` approved under D-15, and since contract 1.2.0 the three
-//! passwordless account codes #32–#34 of PR #97) and the control event
+//! The closed event catalogue (Document 4 §5.2): 38 inbound types (30 core, the optional
+//! `operator.alert.fired` approved under D-15, since contract 1.2.0 the three
+//! passwordless account codes #32–#34 of PR #97, and since 1.3.0 the four account notices
+//! #35–#38: welcome, new sign-in, email-in-use and email-changed) and the control event
 //! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
 //! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
 //! the two ever differ.
@@ -108,6 +109,12 @@ pub enum SealedField {
     Code,
     Token,
     Address,
+    /// A masked address (`n***@example.com`, contract 1.3.0).
+    MaskedAddress,
+    /// The client label of the request an account notice reports (contract 1.3.0).
+    RequestClient,
+    /// The masked network of that request (contract 1.3.0).
+    RequestNetwork,
 }
 
 impl SealedField {
@@ -116,6 +123,9 @@ impl SealedField {
             SealedField::Code => "code",
             SealedField::Token => "token",
             SealedField::Address => "address",
+            SealedField::MaskedAddress => "maskedAddress",
+            SealedField::RequestClient => "requestClient",
+            SealedField::RequestNetwork => "requestNetwork",
         }
     }
 }
@@ -139,6 +149,15 @@ pub enum LegacyKey {
     OrgInvitation,
     MeetingNotification,
     DevplatAccess,
+    /// `welcome:<account id>` — the welcome email (once per account; contract 1.3.0).
+    Welcome,
+    /// `new-sign-in:<session id>` — the new sign-in alert (contract 1.3.0).
+    NewSignIn,
+    /// `email-in-use:<recipient hash>:<hour>` — the email-change attempt notice to an
+    /// address that already has an account (contract 1.3.0).
+    EmailInUse,
+    /// `email-changed:{old,new}:<change id>` — the email-changed notices (contract 1.3.0).
+    EmailChanged,
 }
 
 fn free_suffix(s: &str) -> bool {
@@ -165,6 +184,10 @@ impl LegacyKey {
         LegacyKey::OrgInvitation,
         LegacyKey::MeetingNotification,
         LegacyKey::DevplatAccess,
+        LegacyKey::Welcome,
+        LegacyKey::NewSignIn,
+        LegacyKey::EmailInUse,
+        LegacyKey::EmailChanged,
     ];
 
     /// The contract's key name (`x-cfmeet-legacy-idempotency-keys`).
@@ -182,6 +205,10 @@ impl LegacyKey {
             LegacyKey::OrgInvitation => "org-invitation",
             LegacyKey::MeetingNotification => "meeting-notification",
             LegacyKey::DevplatAccess => "devplat-access",
+            LegacyKey::Welcome => "welcome",
+            LegacyKey::NewSignIn => "new-sign-in",
+            LegacyKey::EmailInUse => "email-in-use",
+            LegacyKey::EmailChanged => "email-changed",
         }
     }
 
@@ -199,6 +226,10 @@ impl LegacyKey {
             LegacyKey::OrgInvitation => "org-invitation:",
             LegacyKey::MeetingNotification => "meeting-notification:",
             LegacyKey::DevplatAccess => "devplat-access:",
+            LegacyKey::Welcome => "welcome:",
+            LegacyKey::NewSignIn => "new-sign-in:",
+            LegacyKey::EmailInUse => "email-in-use:",
+            LegacyKey::EmailChanged => "email-changed:",
         }
     }
 
@@ -208,7 +239,14 @@ impl LegacyKey {
             return false;
         };
         match self {
-            LegacyKey::DeviceLinked | LegacyKey::MeetingInvitation => uuid_like(rest),
+            LegacyKey::DeviceLinked
+            | LegacyKey::MeetingInvitation
+            | LegacyKey::Welcome
+            | LegacyKey::NewSignIn => uuid_like(rest),
+            LegacyKey::EmailChanged => rest
+                .strip_prefix("old:")
+                .or_else(|| rest.strip_prefix("new:"))
+                .is_some_and(uuid_like),
             LegacyKey::OrgInvitation => match rest.split_once(':') {
                 Some((id, version)) => {
                     uuid_like(id)
@@ -251,6 +289,11 @@ impl RecipientKind {
 /// `StepUpPurpose`).
 pub const STEP_UP_PURPOSES: &[&str] = &["DEACTIVATE_ACCOUNT", "CHANGE_EMAIL"];
 
+/// The closed `side` values of `account.security.email-changed` (contract
+/// `EmailChangedSide`): the notice to the previous address (`OLD`, with the masked new
+/// address and, for a self-service change, the undo token) or to the new one (`NEW`).
+pub const EMAIL_CHANGED_SIDES: &[&str] = &["OLD", "NEW"];
+
 /// One catalogue entry.
 #[derive(Debug, Clone, Copy)]
 pub struct EventSpec {
@@ -264,6 +307,9 @@ pub struct EventSpec {
     pub subject_kind: Option<&'static str>,
     /// Fields the sealed part must contain (empty: `sealed` is refused).
     pub sealed: &'static [SealedField],
+    /// Fields the sealed part may also contain (contract `sealedOptional`, 1.3.0): what
+    /// the legacy email shows only sometimes (an undo link, the request's client label).
+    pub sealed_optional: &'static [SealedField],
     pub idempotency_key: Option<LegacyKey>,
     pub optional: bool,
     pub required_data: &'static [&'static str],
@@ -285,6 +331,11 @@ impl EventSpec {
 
     pub fn sealed_allowed(&self) -> bool {
         !self.sealed.is_empty()
+    }
+
+    /// Whether `field` may appear in this type's sealed part (required or optional).
+    pub fn seals(&self, field: SealedField) -> bool {
+        self.sealed.contains(&field) || self.sealed_optional.contains(&field)
     }
 
     pub fn allows_producer(&self, producer: Producer) -> bool {
@@ -313,7 +364,7 @@ use Producer::{
     Alertmanager as AM, Calling as CAL, Communications as HUB, DeveloperPlatform as DEV,
     MeetingService as MEET, Messaging as MSG, Organizations as ORG,
 };
-use SealedField::{Address, Code, Token};
+use SealedField::{Address, Code, MaskedAddress, RequestClient, RequestNetwork, Token};
 
 const fn e(
     number: u8,
@@ -332,6 +383,7 @@ const fn e(
         category: Some(category),
         subject_kind: Some(subject_kind),
         sealed: &[],
+        sealed_optional: &[],
         idempotency_key: None,
         optional: false,
         required_data,
@@ -347,7 +399,7 @@ const CONNECTION: &[&str] = &["actorRef", "connectionId"];
 const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
 const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
 
-/// The catalogue, in contract order (#1–#34, then the control event).
+/// The catalogue, in contract order (#1–#38, then the control event).
 pub const CATALOGUE: &[EventSpec] = &[
     EventSpec {
         optional_data: &["role"],
@@ -741,6 +793,73 @@ pub const CATALOGUE: &[EventSpec] = &[
             &["purpose", "ttlMinutes"],
         )
     },
+    // Account notices (contract 1.3.0): the emails Meeting sent only through its legacy
+    // ledger. Each names one email principal with its address sealed (the exact legacy
+    // recipient, which a later address change cannot redirect); the account, when there is
+    // one, is the ACCOUNT subject (X1 authorizes the send and names the greeting). What the
+    // email shows beyond ids and times — the undo token, the masked new address, the
+    // request's client label and network — is sealed too, never in data.
+    EventSpec {
+        sealed: &[Address],
+        idempotency_key: Some(K::Welcome),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            35,
+            "account.welcome.requested",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &[],
+        )
+    },
+    EventSpec {
+        sealed: &[Address],
+        sealed_optional: &[RequestClient, RequestNetwork],
+        idempotency_key: Some(K::NewSignIn),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            36,
+            "account.security.new-sign-in",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["requestedAt"],
+        )
+    },
+    // To an address that already belongs to an account: no subject (the event must not
+    // reveal which account).
+    EventSpec {
+        sealed: &[Address],
+        idempotency_key: Some(K::EmailInUse),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        ..e(
+            37,
+            "account.security.email-in-use",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &[],
+        )
+    },
+    EventSpec {
+        sealed: &[Address],
+        sealed_optional: &[MaskedAddress, Token],
+        idempotency_key: Some(K::EmailChanged),
+        recipient: Some(RecipientKind::EmailPrincipal),
+        closed_data: &[("side", EMAIL_CHANGED_SIDES)],
+        ..e(
+            38,
+            "account.security.email-changed",
+            MEET,
+            Critical,
+            "SECURITY",
+            "ACCOUNT",
+            &["changedAt", "side"],
+        )
+    },
     EventSpec {
         number: 0,
         event_type: CONTROL_EVENT,
@@ -749,6 +868,7 @@ pub const CATALOGUE: &[EventSpec] = &[
         category: None,
         subject_kind: None,
         sealed: &[],
+        sealed_optional: &[],
         idempotency_key: None,
         optional: false,
         required_data: &[],

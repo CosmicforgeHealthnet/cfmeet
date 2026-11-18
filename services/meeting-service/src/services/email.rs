@@ -13,6 +13,7 @@ use crate::config::EmailConfig;
 use crate::error::ApiResult;
 use crate::services::critical_notifications::{self as critical, CriticalEvent};
 use crate::services::email_delivery::{self, category, Enqueued, NewEmail};
+use crate::services::notification_fence::MeetingCategory;
 use crate::services::step_up::StepUpPurpose;
 use crate::templates::email::{
     email_change_code_email, email_changed_new_address_email, email_changed_old_address_email,
@@ -212,42 +213,63 @@ impl EmailService {
 
     /// Someone tried to move another account to an address that already has one (at most
     /// one notice per hour per address; no code is sent, nothing changes).
+    ///
+    /// CRITICAL lane (`ACCOUNT_NOTICES`): routed by the fence; `LEGACY_ONLY` records exactly
+    /// this ledger row. Outside it the catalogue event is `account.security.email-in-use`:
+    /// one email principal with the address sealed and no subject (the event never names
+    /// the account the address belongs to).
     pub async fn send_email_in_use_notice(&self, to_email: &str) -> ApiResult<Uuid> {
         let now = Utc::now();
-        self.enqueue_template(
-            category::NOTIFICATION,
-            Some(format!(
-                "email-in-use:{}:{}",
-                email_delivery::recipient_hash(to_email),
-                now.format("%Y%m%d%H")
-            )),
-            to_email,
-            None,
-            "Email change attempt on CF Meet",
-            email_in_use_notice_email(),
-            Some(now + Duration::days(1)),
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::NOTIFICATION,
+                format!(
+                    "email-in-use:{}:{}",
+                    email_delivery::recipient_hash(to_email),
+                    now.format("%Y%m%d%H")
+                ),
+                to_email,
+                None,
+                "Email change attempt on CF Meet",
+                email_in_use_notice_email(),
+                now + Duration::days(1),
+            ),
+            CriticalEvent::email_in_use(to_email),
         )
         .await
         .map(|e| e.id)
     }
 
     /// Security alert: a sign-in from a device not seen on this account recently.
+    ///
+    /// CRITICAL lane (`ACCOUNT_NOTICES`): routed by the fence; `LEGACY_ONLY` records exactly
+    /// this ledger row. Outside it the catalogue event is `account.security.new-sign-in`
+    /// (the address, the client label and the masked network sealed; `requestedAt` as
+    /// data; the service rebuilds the sessions link from `NOTIFICATIONS_APP_URL`).
     pub async fn send_new_sign_in_alert(
         &self,
         to_email: &str,
         username: &str,
+        user_id: Uuid,
         session_id: Uuid,
         details: &RequestDetails,
     ) -> ApiResult<Uuid> {
-        let sessions_url = format!("{}/settings/sessions", self.app_url.trim_end_matches('/'));
-        self.enqueue_template(
-            category::NOTIFICATION,
-            Some(format!("new-sign-in:{session_id}")),
-            to_email,
-            Some(username),
-            "New sign-in to your CF Meet account",
-            new_sign_in_email(username, details, &sessions_url),
-            Some(Utc::now() + Duration::days(2)),
+        let sessions_url = sessions_link(&self.app_url);
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::NOTIFICATION,
+                format!("new-sign-in:{session_id}"),
+                to_email,
+                Some(username),
+                "New sign-in to your CF Meet account",
+                new_sign_in_email(username, details, &sessions_url),
+                Utc::now() + Duration::days(2),
+            ),
+            CriticalEvent::new_sign_in(user_id, to_email, details),
         )
         .await
         .map(|e| e.id)
@@ -277,6 +299,10 @@ impl EmailService {
     }
 
     /// Welcome email (once per account).
+    ///
+    /// CRITICAL lane (`ACCOUNT_NOTICES`): routed by the fence; `LEGACY_ONLY` records exactly
+    /// this ledger row (`AUTH_WELCOME`, suppressible as today). Outside it the catalogue
+    /// event is `account.welcome.requested` (the address sealed, the account the subject).
     pub async fn send_welcome_email(
         &self,
         to_email: &str,
@@ -284,14 +310,19 @@ impl EmailService {
         user_id: Uuid,
     ) -> ApiResult<Uuid> {
         let template = welcome_email(username, &self.app_url);
-        self.enqueue_template(
-            category::AUTH_WELCOME,
-            Some(format!("welcome:{user_id}")),
-            to_email,
-            Some(username),
-            "Welcome to CF Meet",
-            template,
-            Some(Utc::now() + Duration::days(2)),
+        critical::enqueue(
+            &self.db,
+            critical::installed(),
+            rendered(
+                category::AUTH_WELCOME,
+                format!("welcome:{user_id}"),
+                to_email,
+                Some(username),
+                "Welcome to CF Meet",
+                template,
+                Utc::now() + Duration::days(2),
+            ),
+            welcome_event(&self.app_url, user_id, to_email),
         )
         .await
         .map(|e| e.id)
@@ -320,54 +351,97 @@ impl EmailService {
     }
 }
 
+/// The welcome's catalogue event. The welcome shows `APP_URL` as configured, while the
+/// Notification Service renders `NOTIFICATIONS_APP_URL` without a trailing `/`: an `APP_URL`
+/// ending in `/` is a link the service cannot render exactly, so that welcome stays on the
+/// legacy path (`UNPUBLISHABLE`).
+fn welcome_event(app_url: &str, user_id: Uuid, to_email: &str) -> CriticalEvent {
+    if app_url.ends_with('/') {
+        CriticalEvent::not_in_catalogue(MeetingCategory::AccountNotices)
+    } else {
+        CriticalEvent::welcome(user_id, to_email)
+    }
+}
+
+/// The undo window as the email-changed notice words it.
+pub const EMAIL_CHANGE_UNDO_WINDOW_TEXT: &str = "7 days";
+
+/// The single-use undo link of a self-service email change (the web app's
+/// `/auth/email-change/undo` page). The Notification Service builds the same link from the
+/// sealed token and `NOTIFICATIONS_APP_URL` (`services/notifications/src/templates/mod.rs`).
+pub fn undo_link(app_url: &str, token: &str) -> String {
+    format!(
+        "{}/auth/email-change/undo?token={token}",
+        app_url.trim_end_matches('/')
+    )
+}
+
+/// The signed-in devices page linked from security alerts (the Notification Service builds
+/// the same link from `NOTIFICATIONS_APP_URL`).
+pub fn sessions_link(app_url: &str) -> String {
+    format!("{}/settings/sessions", app_url.trim_end_matches('/'))
+}
+
 /// Email change notices, recorded on the caller's transaction (the one that changes the
 /// address), so a committed change always has both notices queued: the previous address
-/// learns of it (with the undo link `undo_url`, or a support note when `None`) and the
-/// new address gets a confirmation.
+/// learns of it (with the undo link built from `undo_token` and `app_url`, or a support
+/// note when `None`) and the new address gets a confirmation.
+///
+/// CRITICAL lane (`ACCOUNT_NOTICES`): each notice is routed by the fence; `LEGACY_ONLY`
+/// records exactly these ledger rows. Outside it each is an `account.security.email-changed`
+/// event (`side` OLD / NEW) to one email principal with its address sealed, on behalf of the
+/// account; the OLD notice also seals the masked new address and the undo token, never in
+/// clear.
 #[allow(clippy::too_many_arguments)]
-pub async fn email_changed_notices_on<C: ConnectionTrait>(
+pub async fn email_changed_notices_on<C: ConnectionTrait + TransactionTrait>(
     conn: &C,
     old_email: &str,
     new_email: &str,
     username: &str,
+    user_id: Uuid,
     change_id: Uuid,
-    undo_url: Option<&str>,
+    app_url: &str,
+    undo_token: Option<&str>,
 ) -> ApiResult<()> {
     let now = Utc::now();
+    let masked = mask_email(new_email);
+    let undo_url = undo_token.map(|t| undo_link(app_url, t));
     let old = email_changed_old_address_email(
         username,
-        &mask_email(new_email),
+        &masked,
         &now.format("%Y-%m-%d %H:%M").to_string(),
-        undo_url,
-        "7 days",
+        undo_url.as_deref(),
+        EMAIL_CHANGE_UNDO_WINDOW_TEXT,
     );
-    email_delivery::enqueue(
+    critical::enqueue(
         conn,
-        NewEmail {
-            category: category::NOTIFICATION,
-            idempotency_key: Some(format!("email-changed:old:{change_id}")),
-            to: old_email.to_string(),
-            to_name: Some(username.to_string()),
-            subject: "Your CF Meet email address was changed".to_string(),
-            html: old.html,
-            text: old.text,
-            expires_at: Some(now + EMAIL_CHANGE_UNDO_WINDOW),
-        },
+        critical::installed(),
+        rendered(
+            category::NOTIFICATION,
+            format!("email-changed:old:{change_id}"),
+            old_email,
+            Some(username),
+            "Your CF Meet email address was changed",
+            old,
+            now + EMAIL_CHANGE_UNDO_WINDOW,
+        ),
+        CriticalEvent::email_changed_old(user_id, old_email, &masked, undo_token, now),
     )
     .await?;
     let new = email_changed_new_address_email(username);
-    email_delivery::enqueue(
+    critical::enqueue(
         conn,
-        NewEmail {
-            category: category::NOTIFICATION,
-            idempotency_key: Some(format!("email-changed:new:{change_id}")),
-            to: new_email.to_string(),
-            to_name: Some(username.to_string()),
-            subject: "Your CF Meet email address was updated".to_string(),
-            html: new.html,
-            text: new.text,
-            expires_at: Some(now + Duration::days(2)),
-        },
+        critical::installed(),
+        rendered(
+            category::NOTIFICATION,
+            format!("email-changed:new:{change_id}"),
+            new_email,
+            Some(username),
+            "Your CF Meet email address was updated",
+            new,
+            now + Duration::days(2),
+        ),
+        CriticalEvent::email_changed_new(user_id, new_email, now),
     )
     .await?;
     Ok(())
@@ -550,6 +624,90 @@ mod passwordless_tests {
         assert_eq!(hex::encode(h.finalize()), SIGN_IN_PARITY_DIGEST);
         assert_eq!(CODE_TTL_TEXT, "10 minutes");
         assert_eq!(CODE_TTL.num_minutes(), 10);
+    }
+
+    /// SHA-256 over subject, NUL, text, NUL, html, NUL of each account notice (`ACCOUNT_
+    /// NOTICES`) for the fixed inputs below, in this order: welcome, new sign-in, email in
+    /// use, email changed (previous address, self-service with the undo link), email
+    /// changed (previous address, support-assisted), email changed (new address). The
+    /// Notification Service's renderer test (`templates::tests::
+    /// ACCOUNT_NOTICES_PARITY_DIGEST`) asserts the same value for the same input, so a user
+    /// sees the same notice whichever path sends it.
+    const ACCOUNT_NOTICES_PARITY_DIGEST: &str =
+        "4f7c7439dacb3c0316d1809bb34b54c50949d0f95662bf6f290bacb214a8d28d";
+
+    #[test]
+    fn the_account_notices_match_the_notification_service_rendering() {
+        let app_url = "https://app.cfmeet.com/";
+        let undo = undo_link(app_url, "tok_0123456789abcdefghij");
+        assert_eq!(
+            undo,
+            "https://app.cfmeet.com/auth/email-change/undo?token=tok_0123456789abcdefghij"
+        );
+        assert_eq!(
+            sessions_link(app_url),
+            "https://app.cfmeet.com/settings/sessions"
+        );
+        let masked = mask_email("nadia.new@example.com");
+        assert_eq!(masked, "n***@example.com");
+        let details = RequestDetails {
+            client: Some("TestBrowser/1.0".into()),
+            address: Some("102.89.x.x".into()),
+            when_utc: "2026-11-17 12:00".into(),
+        };
+        let notices = [
+            ("Welcome to CF Meet", welcome_email("ada", app_url)),
+            (
+                "New sign-in to your CF Meet account",
+                new_sign_in_email("ada", &details, &sessions_link(app_url)),
+            ),
+            (
+                "Email change attempt on CF Meet",
+                email_in_use_notice_email(),
+            ),
+            (
+                "Your CF Meet email address was changed",
+                email_changed_old_address_email(
+                    "ada",
+                    &masked,
+                    "2026-11-17 12:00",
+                    Some(&undo),
+                    EMAIL_CHANGE_UNDO_WINDOW_TEXT,
+                ),
+            ),
+            (
+                "Your CF Meet email address was changed",
+                email_changed_old_address_email(
+                    "ada",
+                    &masked,
+                    "2026-11-17 12:00",
+                    None,
+                    EMAIL_CHANGE_UNDO_WINDOW_TEXT,
+                ),
+            ),
+            (
+                "Your CF Meet email address was updated",
+                email_changed_new_address_email("ada"),
+            ),
+        ];
+        let mut h = Sha256::new();
+        for (subject, t) in &notices {
+            for part in [*subject, &t.text, &t.html] {
+                h.update(part.as_bytes());
+                h.update([0u8]);
+            }
+        }
+        assert_eq!(hex::encode(h.finalize()), ACCOUNT_NOTICES_PARITY_DIGEST);
+        // The service trims NOTIFICATIONS_APP_URL: a welcome showing an APP_URL with a
+        // trailing slash is not the catalogue's email and stays legacy.
+        let id = Uuid::new_v4();
+        assert_eq!(
+            welcome_event("https://app.cfmeet.com", id, "a@x.com").event_type,
+            Some(critical::event_type::WELCOME)
+        );
+        assert_eq!(welcome_event(app_url, id, "a@x.com").event_type, None);
+        assert_eq!(EMAIL_CHANGE_UNDO_WINDOW_TEXT, "7 days");
+        assert_eq!(EMAIL_CHANGE_UNDO_WINDOW.num_days(), 7);
     }
 }
 

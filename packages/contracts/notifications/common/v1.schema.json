@@ -117,6 +117,10 @@
         "account.sign-in-code.requested",
         "account.email-change-code.requested",
         "account.step-up-code.requested",
+        "account.welcome.requested",
+        "account.security.new-sign-in",
+        "account.security.email-in-use",
+        "account.security.email-changed",
         "notifications.cancel"
       ]
     },
@@ -127,6 +131,14 @@
         "CHANGE_EMAIL"
       ],
       "description": "The action an account.step-up-code.requested code confirms (`data.purpose`)."
+    },
+    "EmailChangedSide": {
+      "type": "string",
+      "enum": [
+        "OLD",
+        "NEW"
+      ],
+      "description": "Which notice of an email change an account.security.email-changed event is (`data.side`): OLD, to the previous address (the masked new address and, for a self-service change, the undo token are sealed); NEW, to the new address."
     },
     "AccountRef": {
       "type": "string",
@@ -183,7 +195,7 @@
         "enc",
         "ct"
       ],
-      "description": "HPKE (RFC 9180) base mode, DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM, to the service public key `kid`. info = \"cfmeet.notifications.sealed.v1\", aad = the UTF-8 bytes of `<producer>|<eventId>|<eventType>` (binds the sealed part to its envelope). The plaintext is a JSON object with only `code`, `token` and/or `address`, as the catalogue allows per type. Opened only by the renderer; never logged.",
+      "description": "HPKE (RFC 9180) base mode, DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM, to the service public key `kid`. info = \"cfmeet.notifications.sealed.v1\", aad = the UTF-8 bytes of `<producer>|<eventId>|<eventType>` (binds the sealed part to its envelope). The plaintext is a JSON object with only `code`, `token`, `address`, `maskedAddress`, `requestClient` and/or `requestNetwork`, as the catalogue allows per type (`sealed`: required, `sealedOptional`: allowed). Opened only by the renderer; never logged.",
       "properties": {
         "kid": {
           "type": "string",
@@ -219,6 +231,26 @@
           "type": "string",
           "maxLength": 254,
           "pattern": "^[^@\\s]{1,64}@[^@\\s]{1,253}$"
+        },
+        "maskedAddress": {
+          "type": "string",
+          "maxLength": 260,
+          "pattern": "^[^@\\s*\\u0000-\\u001f\\u007f]?\\*\\*\\*@[^@\\s\\u0000-\\u001f\\u007f]{1,253}$",
+          "description": "A masked address as the legacy email shows it (`n***@example.com`), never a full address."
+        },
+        "requestClient": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+          "description": "The shortened client label (User-Agent) of the request an account notice reports."
+        },
+        "requestNetwork": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[0-9A-Fa-f.:]*x[0-9A-Fa-fx.:]*$",
+          "description": "The masked network prefix of that request (`102.89.x.x`, `2001:db8:x:x`), never a full address."
         }
       }
     },
