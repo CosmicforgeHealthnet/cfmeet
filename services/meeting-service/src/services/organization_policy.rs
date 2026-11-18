@@ -146,3 +146,150 @@ pub async fn admission_actor<'a>(
         }
     }
 }
+
+/// Gap audit G17: the organization layer of the meeting profile policy
+/// (`organizations.profile_policy`), which the resolver turns into ceilings for every
+/// meeting space of the organization. Managed by callers holding
+/// `organization.policies.manage` (authoritative mode) or the organization's OWNER /
+/// ADMIN (legacy directory).
+pub mod meeting_profile {
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
+    use serde_json::{json, Value};
+    use uuid::Uuid;
+
+    use super::authoritative;
+    use crate::{
+        error::{ApiError, ApiResult, ErrorCode},
+        services::{
+            account_security::{self as security, Outcome, SecurityEvent},
+            actor::ActorContext,
+            meeting_core::{permission_denied, validation, DomainCore},
+            organizations_authority::ActingUser,
+            profiles::validate_patch,
+            workspaces::{self, OrganizationFeature},
+        },
+    };
+
+    /// Largest stored organization layer.
+    pub const MAX_BYTES: usize = 16 * 1024;
+    const POLICIES_MANAGE: &str = "organization.policies.manage";
+
+    async fn require_manager(
+        core: &DomainCore,
+        actor: &ActorContext,
+        organization: Uuid,
+    ) -> ApiResult<Uuid> {
+        let user = actor
+            .registered()
+            .ok_or_else(|| permission_denied("Sign in to manage organization policy"))?;
+        if let Some(authority) = authoritative(core) {
+            workspaces::require_organization_capability(
+                authority,
+                &ActingUser::of(user),
+                organization,
+                OrganizationFeature::Meetings,
+                Some(POLICIES_MANAGE),
+            )
+            .await?;
+            return Ok(user.user_id);
+        }
+        let row = core
+            .db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT 1 AS ok FROM organization_memberships m JOIN organizations o ON o.id = m.organization_id \
+                 WHERE m.organization_id = $1 AND m.user_id = $2 AND lower(m.status::text) = 'active' \
+                   AND lower(m.role::text) IN ('owner', 'admin') AND lower(o.status::text) = 'active'",
+                [organization.into(), user.user_id.into()],
+            ))
+            .await?;
+        if row.is_none() && !user.platform_admin {
+            return Err(ApiError::domain(
+                ErrorCode::OrganizationNotFound,
+                "Organization not found",
+            ));
+        }
+        Ok(user.user_id)
+    }
+
+    async fn stored(core: &DomainCore, organization: Uuid) -> ApiResult<Value> {
+        // Authoritative mode: the local row is a projection; make sure it exists.
+        if let Some(authority) = authoritative(core) {
+            let present = core
+                .db
+                .query_one(Statement::from_sql_and_values(
+                    DbBackend::Postgres,
+                    "SELECT 1 AS ok FROM organizations WHERE id = $1",
+                    [organization.into()],
+                ))
+                .await?
+                .is_some();
+            if !present {
+                let snapshot = authority
+                    .organization_snapshot(organization)
+                    .await
+                    .map_err(|_| crate::services::organizations_authority::unavailable())?
+                    .ok_or_else(|| {
+                        ApiError::domain(ErrorCode::OrganizationNotFound, "Organization not found")
+                    })?;
+                authority.project(&core.db, &snapshot).await?;
+            }
+        }
+        let row = core
+            .db
+            .query_one(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "SELECT profile_policy FROM organizations WHERE id = $1",
+                [organization.into()],
+            ))
+            .await?
+            .ok_or_else(|| {
+                ApiError::domain(ErrorCode::OrganizationNotFound, "Organization not found")
+            })?;
+        Ok(row.try_get("", "profile_policy")?)
+    }
+
+    /// The stored organization layer (sparse; `{}` when nothing is set).
+    pub async fn get(
+        core: &DomainCore,
+        actor: &ActorContext,
+        organization: Uuid,
+    ) -> ApiResult<Value> {
+        require_manager(core, actor, organization).await?;
+        Ok(json!({ "organizationId": organization, "policy": stored(core, organization).await? }))
+    }
+
+    /// Replace the organization layer. Validated like a space override; every value set
+    /// becomes a ceiling for the organization's spaces from their next resolution.
+    pub async fn put(
+        core: &DomainCore,
+        actor: &ActorContext,
+        organization: Uuid,
+        policy: Value,
+    ) -> ApiResult<Value> {
+        let user = require_manager(core, actor, organization).await?;
+        if !policy.is_object() {
+            return Err(validation("policy must be an object"));
+        }
+        if policy.to_string().len() > MAX_BYTES {
+            return Err(validation("policy is too large"));
+        }
+        validate_patch(&policy).map_err(validation)?;
+        stored(core, organization).await?;
+        core.db
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                "UPDATE organizations SET profile_policy = $2, updated_at = now() WHERE id = $1",
+                [organization.into(), policy.clone().into()],
+            ))
+            .await?;
+        security::record_event_best_effort(
+            &core.db,
+            SecurityEvent::new("ORGANIZATION_MEETING_PROFILE_UPDATED", Outcome::Success)
+                .by_user(user)
+                .detail(json!({ "organizationId": organization })),
+        )
+        .await;
+        Ok(json!({ "organizationId": organization, "policy": policy }))
+    }
+}

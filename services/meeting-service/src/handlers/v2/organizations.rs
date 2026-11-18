@@ -2555,3 +2555,77 @@ pub async fn list_organization_meeting_spaces(
             .await?,
     ))
 }
+
+fn profile_policy_view(v: serde_json::Value) -> ApiResult<OrganizationMeetingProfilePolicy> {
+    Ok(OrganizationMeetingProfilePolicy {
+        organization_id: v["organizationId"]
+            .as_str()
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .ok_or_else(|| ApiError::InternalError("missing organization".into()))?,
+        policy: v["policy"].clone(),
+    })
+}
+
+/// Organization meeting profile policy.
+///
+/// Gap audit G17: the organization layer of the meeting profile policy, which the Meeting Service
+/// applies as ceilings to every meeting space of the organization (a space can be stricter, never
+/// more permissive). Sparse; `{}` when nothing is set. Requires `organization.policies.manage`
+/// (Organizations authoritative mode) or, with the legacy directory, the organization's OWNER /
+/// ADMIN.
+#[utoipa::path(
+    get, path = "/api/v2/organizations/{id}/meeting-profile-policy", tag = "Organizations (v2)", operation_id = "v2_get_organization_meeting_profile_policy",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    responses(
+        (status = 200, description = "The organization layer", body = OrganizationMeetingProfilePolicy),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_organization_meeting_profile_policy(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+) -> ApiResult<Json<OrganizationMeetingProfilePolicy>> {
+    let v =
+        crate::services::organization_policy::meeting_profile::get(&state.meeting.core, &actor, id)
+            .await?;
+    Ok(Json(profile_policy_view(v)?))
+}
+
+/// Replace the organization meeting profile policy.
+///
+/// Gap audit G17: sets the organization layer (validated like a space override: unknown fields,
+/// out-of-range values and privileged role mappings are VALIDATION_ERROR; at most 16 KiB). Every
+/// value set becomes a ceiling for the organization's meeting spaces from their next resolution.
+/// `{}` removes every organization value. Same permission as reading it; the change is audited.
+#[utoipa::path(
+    put, path = "/api/v2/organizations/{id}/meeting-profile-policy", tag = "Organizations (v2)", operation_id = "v2_put_organization_meeting_profile_policy",
+    params(("id" = Uuid, Path, description = "Organization id")),
+    request_body = PutOrganizationMeetingProfilePolicyRequest,
+    responses(
+        (status = 200, description = "Stored", body = OrganizationMeetingProfilePolicy),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 404, description = "ORGANIZATION_NOT_FOUND", body = ErrorEnvelope),
+        (status = 503, description = "SERVICE_UNAVAILABLE", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn put_organization_meeting_profile_policy(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+    V2Json(req): V2Json<PutOrganizationMeetingProfilePolicyRequest>,
+) -> ApiResult<Json<OrganizationMeetingProfilePolicy>> {
+    let v = crate::services::organization_policy::meeting_profile::put(
+        &state.meeting.core,
+        &actor,
+        id,
+        req.policy,
+    )
+    .await?;
+    Ok(Json(profile_policy_view(v)?))
+}

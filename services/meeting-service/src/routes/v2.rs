@@ -567,6 +567,11 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             get(organizations::list_organization_meeting_spaces),
         )
         .route(
+            "/organizations/:id/meeting-profile-policy",
+            get(organizations::get_organization_meeting_profile_policy)
+                .put(organizations::put_organization_meeting_profile_policy),
+        )
+        .route(
             "/organizations/:id/members/me/leave",
             post(organizations::leave_organization),
         )

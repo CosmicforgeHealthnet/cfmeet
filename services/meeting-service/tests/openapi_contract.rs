@@ -122,6 +122,8 @@ fn every_v2_route_is_documented() {
         ("patch", "/api/v2/admin/organizations/{id}"),
         ("get", "/api/v2/organizations/{id}/members"),
         ("get", "/api/v2/organizations/{id}/meeting-spaces"),
+        ("get", "/api/v2/organizations/{id}/meeting-profile-policy"),
+        ("put", "/api/v2/organizations/{id}/meeting-profile-policy"),
         ("put", "/api/v2/organizations/{id}/members/{userId}"),
         ("get", "/api/v2/me/organizations"),
         // Blueprint Section 8 — workspace context (per request; no switch endpoint)

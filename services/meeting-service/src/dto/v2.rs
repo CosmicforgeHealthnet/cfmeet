@@ -297,6 +297,25 @@ pub struct OrganizationMeetingSpace {
     pub archived_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// Gap audit G17: the organization layer of the meeting profile policy. Sparse, in the
+/// same shape as a space override; every value set binds the organization's spaces.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrganizationMeetingProfilePolicy {
+    pub organization_id: Uuid,
+    #[schema(value_type = Object)]
+    pub policy: serde_json::Value,
+}
+
+/// Replace the organization layer (gap audit G17).
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutOrganizationMeetingProfilePolicyRequest {
+    /// Sparse profile policy, e.g. `{"recording": {"allowed": false}}`; `{}` clears it.
+    #[schema(value_type = Object)]
+    pub policy: serde_json::Value,
+}
+
 /// `GET /api/v2/organizations/{id}/meeting-spaces` page (gap audit G13).
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]

@@ -19100,6 +19100,162 @@
         ]
       }
     },
+    "/api/v2/organizations/{id}/meeting-profile-policy": {
+      "get": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Organization meeting profile policy.",
+        "description": "Gap audit G17: the organization layer of the meeting profile policy, which the Meeting Service\napplies as ceilings to every meeting space of the organization (a space can be stricter, never\nmore permissive). Sparse; `{}` when nothing is set. Requires `organization.policies.manage`\n(Organizations authoritative mode) or, with the legacy directory, the organization's OWNER /\nADMIN.",
+        "operationId": "v2_get_organization_meeting_profile_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization layer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMeetingProfilePolicy"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Organizations (v2)"
+        ],
+        "summary": "Replace the organization meeting profile policy.",
+        "description": "Gap audit G17: sets the organization layer (validated like a space override: unknown fields,\nout-of-range values and privileged role mappings are VALIDATION_ERROR; at most 16 KiB). Every\nvalue set becomes a ceiling for the organization's meeting spaces from their next resolution.\n`{}` removes every organization value. Same permission as reading it; the change is audited.",
+        "operationId": "v2_put_organization_meeting_profile_policy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutOrganizationMeetingProfilePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMeetingProfilePolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "ORGANIZATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organizations/{id}/meeting-spaces": {
       "get": {
         "tags": [
@@ -28329,6 +28485,23 @@
           }
         }
       },
+      "OrganizationMeetingProfilePolicy": {
+        "type": "object",
+        "description": "Gap audit G17: the organization layer of the meeting profile policy. Sparse, in the\nsame shape as a space override; every value set binds the organization's spaces.",
+        "required": [
+          "organizationId",
+          "policy"
+        ],
+        "properties": {
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "policy": {
+            "type": "object"
+          }
+        }
+      },
       "OrganizationMeetingSpace": {
         "type": "object",
         "description": "Gap audit G13: one meeting space of an organization, as its managers oversee it\n(whatever its access policy or security profile). Governance fields only: no\npasscode, invitation, participant or content data.",
@@ -30352,6 +30525,20 @@
             "type": "string"
           }
         }
+      },
+      "PutOrganizationMeetingProfilePolicyRequest": {
+        "type": "object",
+        "description": "Replace the organization layer (gap audit G17).",
+        "required": [
+          "policy"
+        ],
+        "properties": {
+          "policy": {
+            "type": "object",
+            "description": "Sparse profile policy, e.g. `{\"recording\": {\"allowed\": false}}`; `{}` clears it."
+          }
+        },
+        "additionalProperties": false
       },
       "QualityIngestResponse": {
         "type": "object",

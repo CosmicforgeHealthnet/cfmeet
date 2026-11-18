@@ -4860,3 +4860,68 @@ async fn g13_managers_list_every_organization_meeting_space() {
         );
     }
 }
+
+/// Gap audit G17: the organization's meeting profile policy has a write path; its values
+/// become ceilings for the organization's meeting spaces. Members cannot change it and
+/// invalid policies are refused.
+#[tokio::test]
+async fn g17_organization_meeting_profile_policy_is_managed_and_enforced() {
+    let (signer, fake) = organizations().await;
+    let live = authority(&signer, &fake.url(), AuthorityMode::Authoritative);
+    let app = some!(app_with(Some(live)).await);
+    let owner = app.user("g17-owner").await;
+    let member = app.user("g17-member").await;
+    let org = fake.add_org("g17", &[(owner.id, "OWNER"), (member.id, "MEMBER")]);
+    let uri = format!("/api/v2/organizations/{org}/meeting-profile-policy");
+    let (s, v) = app.get(&uri, Auth::Bearer(&owner.token)).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["policy"], json!({}));
+    let put = |who: &User, policy: Value| {
+        let (app, token, uri) = (&app, who.token.clone(), uri.clone());
+        async move {
+            app.call(
+                Method::PUT,
+                &uri,
+                Auth::Bearer(&token),
+                Some(json!({ "policy": policy })),
+            )
+            .await
+        }
+    };
+    let (s, _) = put(&member, json!({ "recording": { "allowed": false } })).await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+    let (s, _) = put(&owner, json!({ "recording": { "retentionDays": 0 } })).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = put(&owner, json!({ "nonsense": true })).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, v) = put(&owner, json!({ "recording": { "allowed": false } })).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["policy"]["recording"]["allowed"], false);
+
+    // A space of the organization resolves with the ceiling.
+    let (s, space) = create_org_space(
+        &app,
+        &member,
+        org,
+        json!({ "title": "Sync", "accessPolicy": "ORGANIZATION_ONLY" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{space}");
+    let (s, p) = app
+        .get(
+            format!(
+                "/api/v2/meeting-spaces/{}/profile-policy",
+                space["id"].as_str().unwrap()
+            ),
+            Auth::Bearer(&member.token),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    assert_eq!(
+        p["effective"]["policy"]["recording"]["allowed"], false,
+        "{p}"
+    );
+}

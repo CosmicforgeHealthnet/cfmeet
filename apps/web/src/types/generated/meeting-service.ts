@@ -2116,6 +2116,15 @@ export interface OrganizationLifecycleRequest {
 }
 
 /**
+ * Gap audit G17: the organization layer of the meeting profile policy. Sparse, in the
+ * same shape as a space override; every value set binds the organization's spaces.
+ */
+export interface OrganizationMeetingProfilePolicy {
+  organizationId: string;
+  policy: Record<string, unknown>;
+}
+
+/**
  * Gap audit G13: one meeting space of an organization, as its managers oversee it
  * (whatever its access policy or security profile). Governance fields only: no
  * passcode, invitation, participant or content data.
@@ -2819,6 +2828,12 @@ export interface PublicMeetingInfoResponse {
   start_time: string;
   status: string;
   title: string;
+}
+
+/** Replace the organization layer (gap audit G17). */
+export interface PutOrganizationMeetingProfilePolicyRequest {
+  /** Sparse profile policy, e.g. `{"recording": {"allowed": false}}`; `{}` clears it. */
+  policy: Record<string, unknown>;
 }
 
 
@@ -4039,6 +4054,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}/audit-events": "v2_list_organization_audit_events",
   "GET /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_get",
   "GET /api/v2/organizations/{id}/invitations": "v2_list_organization_invitations",
+  "GET /api/v2/organizations/{id}/meeting-profile-policy": "v2_get_organization_meeting_profile_policy",
   "GET /api/v2/organizations/{id}/meeting-spaces": "v2_list_organization_meeting_spaces",
   "GET /api/v2/organizations/{id}/members": "v2_list_organization_members",
   "GET /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_get",
@@ -4239,6 +4255,7 @@ export const CONTRACT_OPERATIONS = {
   "PUT /api/v2/notifications/devices/{accountDeviceId}/push": "v2_notifications_push_register",
   "PUT /api/v2/notifications/preferences": "v2_notifications_preferences_update",
   "PUT /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_put",
+  "PUT /api/v2/organizations/{id}/meeting-profile-policy": "v2_put_organization_meeting_profile_policy",
   "PUT /api/v2/organizations/{id}/members/{userId}": "v2_upsert_organization_member",
   "PUT /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_put",
 } as const;

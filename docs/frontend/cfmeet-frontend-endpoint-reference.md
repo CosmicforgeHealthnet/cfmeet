@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 287 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 289 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.26.0 | 142 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **676** |
+| **Total** | | | **678** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -348,6 +348,8 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | GET | `/api/v2/organizations/{id}/invitations` | account session | List an organization's invitations. | 200, 403, 404, 503 | FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_list_organization_invitations` |
 | POST | `/api/v2/organizations/{id}/invitations` | account session | Invite someone to an organization by email or CF Meet ID. | 201, 400, 403, 404, 409, 429, 503 | ALREADY_MEMBER, CF_MEET_ID, FEATURE_DISABLED, IDEMPOTENCY_CONFLICT, INVITEE_NOT_FOUND, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_organization_invitation` |
 | POST | `/api/v2/organizations/{id}/invitations/{invitationId}/revoke` | account session | Revoke an organization invitation. | 200, 403, 404, 503 | FEATURE_DISABLED, INVITATION_INVALID, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_revoke_organization_invitation` |
+| GET | `/api/v2/organizations/{id}/meeting-profile-policy` | account session | Organization meeting profile policy. | 200, 403, 404, 503 | ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_get_organization_meeting_profile_policy` |
+| PUT | `/api/v2/organizations/{id}/meeting-profile-policy` | account session | Replace the organization meeting profile policy. | 200, 400, 403, 404, 503 | ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_put_organization_meeting_profile_policy` |
 | GET | `/api/v2/organizations/{id}/meeting-spaces` | account session | Meeting spaces of an organization (managers). | 200, 400, 403, 404, 503 | FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_organization_meeting_spaces` |
 | GET | `/api/v2/organizations/{id}/members` | account session | List members (platform admins, organization OWNER/ADMIN). | 200, 400, 403, 404, 503 | MEETING_NOT_FOUND, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_list_organization_members` |
 | POST | `/api/v2/organizations/{id}/members/me/leave` | account session | Leave an organization. | 200, 404, 409, 503 | FEATURE_DISABLED, LAST_OWNER, ORGANIZATION_NOT_FOUND, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_leave_organization` |
