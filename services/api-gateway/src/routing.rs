@@ -13,9 +13,12 @@
 //!   `operator`, `provider-callbacks`, `callbacks` or `metrics`;
 //! * upstream paths that are not the public pattern itself, except the Developer
 //!   Platform's `/internal/v1/` gateway routes (never an administration namespace) and
-//!   the partner meetings family: a PLATFORM_CREDENTIAL-only REST route
-//!   `/v1/meetings/<rest>` served by the Meeting Service at `/api/v2/<rest>` (the same
-//!   segments and parameters; production edge keeps first-party `/api/v2` direct);
+//!   the partner meetings family: a REST route `/v1/meetings/<rest>` served by the
+//!   Meeting Service at `/api/v2/<rest>` (the same segments and parameters; production
+//!   edge keeps first-party `/api/v2` direct) whose authentication modes are machine
+//!   credentials only (PLATFORM_CREDENTIAL and, ADR 0064, OAUTH_ACCESS_TOKEN);
+//! * `forwardAuthorization` on anything but an ANONYMOUS-only Developer Platform REST
+//!   route (the OAuth userinfo shape, see [`RouteDefinition::forward_authorization`]);
 //! * duplicate ids or (method, pattern) pairs, unknown authentication modes, and
 //!   WebSocket routes while `API_GATEWAY_WEBSOCKETS_ENABLED` is off.
 
@@ -72,6 +75,12 @@ pub enum AuthMode {
     /// (`API_GATEWAY_USER_TOKENS_ENABLED`), then transported unchanged; the owning
     /// service verifies it live.
     UserToken,
+    /// A CF Meet Apps OAuth access token (`Bearer cfoa_…`) or bot token (`Bearer cfob_…`,
+    /// ADR 0064, `API_GATEWAY_OAUTH_ENABLED`): authenticated HERE through Platform Access
+    /// exactly like a platform credential and forwarded as a signed delegated context
+    /// whose initiating principal is the token's single restricted principal (never as
+    /// the token).
+    OauthAccessToken,
     /// No credential (the owning service decides what an anonymous caller may do).
     Anonymous,
 }
@@ -87,6 +96,7 @@ impl AuthMode {
             "MEETING_SESSION" => AuthMode::MeetingSession,
             "PARTICIPANT_TOKEN" => AuthMode::ParticipantToken,
             "USER_TOKEN" => AuthMode::UserToken,
+            "OAUTH_ACCESS_TOKEN" => AuthMode::OauthAccessToken,
             "ANONYMOUS" => AuthMode::Anonymous,
             _ => return None,
         })
@@ -102,6 +112,7 @@ impl AuthMode {
             AuthMode::MeetingSession => "MEETING_SESSION",
             AuthMode::ParticipantToken => "PARTICIPANT_TOKEN",
             AuthMode::UserToken => "USER_TOKEN",
+            AuthMode::OauthAccessToken => "OAUTH_ACCESS_TOKEN",
             AuthMode::Anonymous => "ANONYMOUS",
         }
     }
@@ -110,7 +121,16 @@ impl AuthMode {
     pub fn is_passthrough(&self) -> bool {
         !matches!(
             self,
-            AuthMode::PlatformCredential | AuthMode::DeveloperSession
+            AuthMode::PlatformCredential | AuthMode::DeveloperSession | AuthMode::OauthAccessToken
+        )
+    }
+
+    /// Machine credentials authenticated HERE through Platform Access and forwarded as a
+    /// signed delegated context (the partner meetings family accepts only these).
+    pub fn is_machine_credential(&self) -> bool {
+        matches!(
+            self,
+            AuthMode::PlatformCredential | AuthMode::OauthAccessToken
         )
     }
 
@@ -149,6 +169,18 @@ pub struct RouteDefinition {
     pub forward_headers: Vec<String>,
     /// Per-route deadline (default: the gateway's upstream timeout).
     pub timeout: Option<Duration>,
+    /// Dedicated `Authorization` pass-through (manifest `forwardAuthorization`, from the
+    /// contract marker `x-cfmeet-forward-authorization: true`; ADR 0064 OAuth userinfo).
+    ///
+    /// Only on an ANONYMOUS-only Developer Platform REST route (refused otherwise at
+    /// construction) and only while `API_GATEWAY_OAUTH_ENABLED` is on: a presented
+    /// `Bearer cfoa_…` / `Bearer cfob_…` is transported unchanged to the Developer Console,
+    /// which introspects it live with Platform Access (`platform-oauth.token`) before
+    /// answering. Safe because the gateway grants the request no authority of its own
+    /// (no delegated context, no scope), the token reaches only the Developer Console
+    /// (itself a Platform Access client verifying it), and a platform credential or a
+    /// refresh token is never transported (refused 401 before forwarding).
+    pub forward_authorization: bool,
 }
 
 impl RouteDefinition {
@@ -168,7 +200,7 @@ pub enum RouteError {
     ForbiddenUpstream(String, String),
     #[error("route {0}: the public pattern must be a normalized /v1/ or /api/v2/ path without internal, administrative or callback segments")]
     ForbiddenPattern(String),
-    #[error("route {0}: the upstream path must be the public pattern (or a Developer Platform /internal/v1/ gateway path, or the Meeting Service /api/v2/ path of a platform-credential /v1/meetings/ route) with the pattern's parameters")]
+    #[error("route {0}: the upstream path must be the public pattern (or a Developer Platform /internal/v1/ gateway path, or the Meeting Service /api/v2/ path of a machine-credential /v1/meetings/ route) with the pattern's parameters")]
     ForbiddenUpstreamPath(String),
     #[error("route {0} is defined twice")]
     Duplicate(String),
@@ -176,6 +208,10 @@ pub enum RouteError {
     WebSocketsDisabled(String),
     #[error("route {0}: no or unknown authentication mode")]
     InvalidAuth(String),
+    #[error(
+        "route {0}: forwardAuthorization is only for ANONYMOUS-only Developer Platform REST routes"
+    )]
+    ForbiddenForwardAuthorization(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,14 +229,15 @@ const MEETINGS_ALIAS_PREFIX: &str = "/v1/meetings/";
 const MEETINGS_UPSTREAM_PREFIX: &str = "/api/v2/";
 
 /// The upstream segments of the one allowed meetings rewrite, or `None` when `d` is not
-/// exactly that shape: Meeting Service upstream, REST, PLATFORM_CREDENTIAL only, and
-/// an upstream path that is `/api/v2/` followed by the public pattern's own remainder
-/// (identical literal segments and parameters), never naming a forbidden segment.
+/// exactly that shape: Meeting Service upstream, REST, machine credentials only
+/// (PLATFORM_CREDENTIAL and / or OAUTH_ACCESS_TOKEN), and an upstream path that is
+/// `/api/v2/` followed by the public pattern's own remainder (identical literal segments
+/// and parameters), never naming a forbidden segment.
 fn meetings_alias_upstream(d: &RouteDefinition) -> Option<Vec<Segment>> {
     if d.upstream != services::MEETING_SERVICE
         || d.protocol != Protocol::Rest
         || d.auth.is_empty()
-        || d.auth.iter().any(|m| *m != AuthMode::PlatformCredential)
+        || !d.auth.iter().all(AuthMode::is_machine_credential)
     {
         return None;
     }
@@ -341,6 +378,13 @@ impl RouteTable {
             }
             if d.auth.is_empty() {
                 return Err(RouteError::InvalidAuth(id));
+            }
+            if d.forward_authorization
+                && (d.auth != [AuthMode::Anonymous]
+                    || d.upstream != services::DEVELOPER_PLATFORM
+                    || d.protocol != Protocol::Rest)
+            {
+                return Err(RouteError::ForbiddenForwardAuthorization(id));
             }
             let public = PUBLIC_PREFIXES
                 .iter()
@@ -533,6 +577,7 @@ mod tests {
             required_scope: Some("meetings.read".into()),
             forward_headers: Vec::new(),
             timeout: None,
+            forward_authorization: false,
         }
     }
 
@@ -586,9 +631,11 @@ mod tests {
 
     #[test]
     fn every_other_meetings_rewrite_shape_is_refused() {
-        // (a) PLATFORM_CREDENTIAL only.
+        // (a) machine credentials only.
         for auth in [
             vec![AuthMode::PlatformCredential, AuthMode::MeetingSession],
+            vec![AuthMode::OauthAccessToken, AuthMode::UserToken],
+            vec![AuthMode::OauthAccessToken, AuthMode::Anonymous],
             vec![AuthMode::MeetingSession],
             vec![AuthMode::ParticipantToken],
             vec![AuthMode::UserToken],
@@ -663,6 +710,90 @@ mod tests {
             )
         };
         assert!(refused(ws));
+    }
+
+    #[test]
+    fn the_partner_meetings_family_also_accepts_oauth_access_tokens() {
+        // ADR 0064 §6: auth modes ⊆ {PLATFORM_CREDENTIAL, OAUTH_ACCESS_TOKEN}.
+        for auth in [
+            vec![AuthMode::PlatformCredential, AuthMode::OauthAccessToken],
+            vec![AuthMode::OauthAccessToken],
+        ] {
+            let d = RouteDefinition {
+                auth: auth.clone(),
+                ..alias("/v1/meetings/meeting-spaces", "/api/v2/meeting-spaces")
+            };
+            let table = RouteTable::new(vec![d], true).unwrap();
+            match table.lookup(&Method::GET, "/v1/meetings/meeting-spaces") {
+                Lookup::Matched(m) => {
+                    assert_eq!(m.upstream_path, "/api/v2/meeting-spaces", "{auth:?}");
+                    assert!(m.definition.allows(AuthMode::OauthAccessToken));
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(
+            AuthMode::parse("OAUTH_ACCESS_TOKEN"),
+            Some(AuthMode::OauthAccessToken)
+        );
+        assert_eq!(AuthMode::OauthAccessToken.as_str(), "OAUTH_ACCESS_TOKEN");
+        assert!(!AuthMode::OauthAccessToken.is_passthrough());
+        assert!(!AuthMode::OauthAccessToken.is_device());
+    }
+
+    #[test]
+    fn forward_authorization_is_only_for_anonymous_developer_platform_rest_routes() {
+        let userinfo = RouteDefinition {
+            id: "developer-platform.oauthUserinfo".into(),
+            domain: "developer-platform".into(),
+            method: Method::GET,
+            pattern: "/v1/oauth/userinfo".into(),
+            protocol: Protocol::Rest,
+            upstream: services::DEVELOPER_PLATFORM.into(),
+            upstream_path: "/v1/oauth/userinfo".into(),
+            auth: vec![AuthMode::Anonymous],
+            required_scope: None,
+            forward_headers: Vec::new(),
+            timeout: None,
+            forward_authorization: true,
+        };
+        assert!(RouteTable::new(vec![userinfo.clone()], true).is_ok());
+        for (name, d) in [
+            (
+                "authenticated mode",
+                RouteDefinition {
+                    auth: vec![AuthMode::Anonymous, AuthMode::PlatformCredential],
+                    ..userinfo.clone()
+                },
+            ),
+            (
+                "oauth mode",
+                RouteDefinition {
+                    auth: vec![AuthMode::OauthAccessToken],
+                    ..userinfo.clone()
+                },
+            ),
+            (
+                "other upstream",
+                RouteDefinition {
+                    upstream: services::MEETING_SERVICE.into(),
+                    ..userinfo.clone()
+                },
+            ),
+            (
+                "websocket",
+                RouteDefinition {
+                    protocol: Protocol::WebSocket,
+                    ..userinfo.clone()
+                },
+            ),
+        ] {
+            assert_eq!(
+                RouteTable::new(vec![d], true).unwrap_err(),
+                RouteError::ForbiddenForwardAuthorization(userinfo.id.clone()),
+                "{name}"
+            );
+        }
     }
 
     #[test]

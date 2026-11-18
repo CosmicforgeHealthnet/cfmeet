@@ -13,7 +13,7 @@ import { CfMeetClient, type ParamsOf, type ResponseOf } from './client.js';
 import { Emitter, RenewingCredential, expiryMs, isAuthRefusal, type Expiring } from './device-shared.js';
 import { CfMeetApiError, CfMeetConfigurationError, CfMeetError } from './errors.js';
 import type { Messaging } from './generated/models.js';
-import type { InstallationIdStore } from './installation.js';
+import type { InstallationIdSource } from './installation.js';
 import { isValidInstallationId } from './installation.js';
 import { DEVICE_ROUTES } from './platform-routes.js';
 import type { RealtimeCloseInfo, RealtimeConnection, RealtimeOptions } from './realtime.js';
@@ -55,7 +55,7 @@ export interface ChatConnectOptions extends Omit<RealtimeOptions, 'signal'> {
 }
 
 export interface ChatDefaults {
-  readonly installationIds: InstallationIdStore;
+  readonly installationIds: InstallationIdSource;
   readonly realtime: Omit<RealtimeOptions, 'signal'>;
   readonly renewBeforeMs: number;
   readonly autoRenew: boolean;
@@ -165,7 +165,7 @@ export class ChatSession<M = unknown> {
   /** Sends a MANAGED message (a `clientMessageId` is generated when absent, so a resend is deduplicated). */
   sendMessage(conversationId: string, message: ChatMessageInput, options?: RequestOptions): Promise<ApiResponse<ResponseOf<'messaging', 'sendMessage'>>> {
     const body: Messaging.SendMessageRequest =
-      typeof message === 'string' ? { text: message, clientMessageId: newUuid() } : { clientMessageId: newUuid(), ...message };
+      typeof message === 'string' ? { text: message, clientMessageId: newUuid() } : { ...message, clientMessageId: message.clientMessageId ?? newUuid() };
     return this.request('sendMessage', { path: { conversationId }, body }, options);
   }
 

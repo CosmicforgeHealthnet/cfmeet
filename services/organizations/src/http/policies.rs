@@ -114,6 +114,13 @@ pub async fn update(
     if !req.policy.is_object() {
         return Err(ApiError::validation("policy must be an object"));
     }
+    // ADR 0064: the `apps` section exists only while app installs are enabled (off: refused
+    // exactly like any unknown section).
+    if !state.app_installs_enabled && req.policy.get("apps").is_some() {
+        return Err(ApiError::validation(
+            "the policy has a missing, unknown or mistyped field",
+        ));
+    }
     let txn = state.db.begin().await?;
     let access = authorize(&txn, id, user, Capability::PoliciesManage, true).await?;
     let row = store::policy_row(&txn, id, true).await?;

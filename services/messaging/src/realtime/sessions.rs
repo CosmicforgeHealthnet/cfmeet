@@ -89,6 +89,7 @@ impl SessionRow {
                 .map(str::to_string)
                 .collect(),
             principal_restriction: Some([self.principal_id].into_iter().collect()),
+            oauth: None,
         })
     }
 

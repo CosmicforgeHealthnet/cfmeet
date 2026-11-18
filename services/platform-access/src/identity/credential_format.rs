@@ -48,7 +48,28 @@ impl fmt::Debug for GeneratedCredential {
     }
 }
 
+/// A credential family sharing this wire format and verifier construction: its prefix
+/// and its verifier domain-separation label. API credentials are [`API_CREDENTIAL`];
+/// ADR 0064 OAuth client secrets, codes and tokens are other families (distinct
+/// prefixes AND labels, so a value of one family never verifies as another).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CredentialFamily {
+    pub prefix: &'static str,
+    pub context: &'static [u8],
+}
+
+/// The API credential family (`cfmk_`, the Part III label).
+pub(crate) const API_CREDENTIAL: CredentialFamily = CredentialFamily {
+    prefix: CREDENTIAL_PREFIX,
+    context: VERIFIER_CONTEXT,
+};
+
 pub(crate) fn generate(kind: EnvironmentKind) -> GeneratedCredential {
+    generate_as(API_CREDENTIAL, kind)
+}
+
+/// [`generate`] for another credential family.
+pub(crate) fn generate_as(family: CredentialFamily, kind: EnvironmentKind) -> GeneratedCredential {
     let mut public = [0u8; PUBLIC_ID_BYTES];
     OsRng.fill_bytes(&mut public);
     let mut secret = Zeroizing::new([0u8; SECRET_BYTES]);
@@ -58,7 +79,8 @@ pub(crate) fn generate(kind: EnvironmentKind) -> GeneratedCredential {
     let secret_hex = Zeroizing::new(hex::encode(secret.as_ref()));
     let last_four = secret_hex[secret_hex.len() - 4..].to_string();
     let token = IssuedSecret::new(format!(
-        "{CREDENTIAL_PREFIX}_{}_{public_id}_{}",
+        "{}_{}_{public_id}_{}",
+        family.prefix,
         kind.credential_tag(),
         secret_hex.as_str()
     ));
@@ -93,12 +115,15 @@ fn is_lower_hex(s: &str, len: usize) -> bool {
 
 /// Strict parse. Returns `None` for anything that is not exactly a well-formed credential.
 pub(crate) fn parse(presented: &str) -> Option<PresentedCredential> {
+    parse_as(API_CREDENTIAL, presented)
+}
+
+/// [`parse`] for another credential family.
+pub(crate) fn parse_as(family: CredentialFamily, presented: &str) -> Option<PresentedCredential> {
     if presented.len() > MAX_PRESENTED_LEN || !presented.is_ascii() {
         return None;
     }
-    let rest = presented
-        .strip_prefix(CREDENTIAL_PREFIX)?
-        .strip_prefix('_')?;
+    let rest = presented.strip_prefix(family.prefix)?.strip_prefix('_')?;
     let mut parts = rest.split('_');
     let (tag, public_id, secret_hex) = (parts.next()?, parts.next()?, parts.next()?);
     if parts.next().is_some() {
@@ -125,11 +150,21 @@ pub(crate) fn verifier_message(
     public_id: &str,
     secret: &[u8; SECRET_BYTES],
 ) -> Zeroizing<Vec<u8>> {
+    verifier_message_as(API_CREDENTIAL, kind, public_id, secret)
+}
+
+/// [`verifier_message`] under another family's label.
+pub(crate) fn verifier_message_as(
+    family: CredentialFamily,
+    kind: EnvironmentKind,
+    public_id: &str,
+    secret: &[u8; SECRET_BYTES],
+) -> Zeroizing<Vec<u8>> {
     let tag = kind.credential_tag().as_bytes();
     let mut message = Zeroizing::new(Vec::with_capacity(
-        VERIFIER_CONTEXT.len() + tag.len() + public_id.len() + SECRET_BYTES + 3,
+        family.context.len() + tag.len() + public_id.len() + SECRET_BYTES + 3,
     ));
-    message.extend_from_slice(VERIFIER_CONTEXT);
+    message.extend_from_slice(family.context);
     message.push(0);
     message.extend_from_slice(tag);
     message.push(0);
@@ -209,6 +244,24 @@ mod tests {
         let live = verifier_message(EnvironmentKind::Production, &g.public_id, &g.secret);
         let sbx = verifier_message(EnvironmentKind::Sandbox, &g.public_id, &g.secret);
         assert_ne!(live.as_slice(), sbx.as_slice());
+    }
+
+    #[test]
+    fn other_families_never_parse_or_verify_as_api_credentials() {
+        const OTHER: CredentialFamily = CredentialFamily {
+            prefix: "cfoa",
+            context: b"cfmeet.platform-access.test-family.v1",
+        };
+        let g = generate_as(OTHER, EnvironmentKind::Production);
+        let token = g.token.expose_once().to_string();
+        assert!(token.starts_with("cfoa_live_"));
+        assert!(parse(&token).is_none());
+        let parsed = parse_as(OTHER, &token).expect("parses in its family");
+        assert_eq!(parsed.public_id, g.public_id);
+        assert!(parse_as(OTHER, &token.replacen("cfoa_", "cfmk_", 1)).is_none());
+        let a = verifier_message(EnvironmentKind::Production, &g.public_id, &g.secret);
+        let b = verifier_message_as(OTHER, EnvironmentKind::Production, &g.public_id, &g.secret);
+        assert_ne!(a.as_slice(), b.as_slice());
     }
 
     #[test]

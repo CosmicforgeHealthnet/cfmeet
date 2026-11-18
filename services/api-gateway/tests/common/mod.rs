@@ -64,6 +64,8 @@ pub fn customer(scopes: &[&str]) -> AuthenticatedCustomer {
             .iter()
             .map(|s| s.to_string())
             .collect::<BTreeSet<_>>(),
+        principal_restriction: None,
+        oauth: None,
     }
 }
 
@@ -139,6 +141,8 @@ pub struct Received {
     pub request_id: Option<String>,
     pub delegated: Option<DelegatedPlatformContext>,
     pub expires_in: i64,
+    /// The request body exactly as received.
+    pub raw_body: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -217,6 +221,7 @@ async fn upstream_handler(
         request_id,
         delegated: delegated.clone(),
         expires_in,
+        raw_body: bytes.to_vec(),
     });
     let delay = *s.delay.lock().unwrap();
     if !delay.is_zero() {
@@ -302,6 +307,7 @@ async fn ws_handler(
         request_id: None,
         delegated: None,
         expires_in: 0,
+        raw_body: Vec::new(),
     });
     let offered = headers
         .get("sec-websocket-protocol")
@@ -434,6 +440,7 @@ pub fn route(
             _ => vec![],
         },
         timeout: None,
+        forward_authorization: false,
     }
 }
 
@@ -600,6 +607,8 @@ pub struct Options {
     pub user_tokens: Option<Arc<UserTokenVerifier>>,
     /// ADR 0062: `Some` turns `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED` on with this index.
     pub origins: Option<Arc<OriginIndex>>,
+    /// ADR 0064: `API_GATEWAY_OAUTH_ENABLED`.
+    pub oauth: bool,
 }
 
 impl Default for Options {
@@ -615,6 +624,7 @@ impl Default for Options {
             token_rate_limit: 0,
             user_tokens: None,
             origins: None,
+            oauth: false,
         }
     }
 }
@@ -697,6 +707,7 @@ impl Gateway {
                 websockets: true,
                 user_tokens: o.user_tokens.is_some(),
                 environment_origins: o.origins.is_some(),
+                oauth: o.oauth,
             })
             .with_controls(o.controls)
             .with_upstream_timeout(o.timeout)

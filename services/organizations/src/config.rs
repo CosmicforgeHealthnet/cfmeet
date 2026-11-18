@@ -12,6 +12,7 @@
 //! | `CF_SERVICE_TRUST_BUNDLE_FILE` | yes | the receiver-authoritative trust bundle of `cfmeet.organizations` |
 //! | `ORGANIZATIONS_PROVISIONING_ENABLED` | no | `true` / `false` (default `false`): run the Section 7 Platform Access provisioning saga |
 //! | `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` | no | `true` / `false` (default `false`): the saga also creates, verifies, renews and (on archive) revokes each organization's Calling and Messaging service bindings through Platform Access (`platform-identity.bind-organization-services`, ADR 0058 A2); an organization is READY only once both are verified. Refused without provisioning |
+//! | `ORGANIZATIONS_APP_INSTALLS_ENABLED` | no | `true` / `false` (default `false`): ADR 0064 workspace app installs — the policy section `apps` and `POST /internal/v1/organizations/{id}/app-install-check` (`organization-apps.evaluate`, Meeting Service only); off: the section is refused and the route answers 404 like any unknown route |
 //! | `ORGANIZATIONS_EVENT_DESTINATIONS` | no | comma-separated consumers that receive organization events (today only `cfmeet.meeting-service`); empty (default): events stay PENDING in the outbox |
 //! | `CF_SERVICE_AUTH_KEY_ID` | when provisioning, event delivery or notification publication | `kid` of the Organizations signing key |
 //! | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning, event delivery or notification publication | PKCS#8 PEM Ed25519 private key FILE |
@@ -114,6 +115,8 @@ pub struct OrganizationsConfig {
     pub provisioning: Option<OutboundSettings>,
     /// `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true` (requires provisioning).
     pub service_bindings_enabled: bool,
+    /// `ORGANIZATIONS_APP_INSTALLS_ENABLED=true` (ADR 0064).
+    pub app_installs_enabled: bool,
     /// Consumers organization events are delivered to (empty: delivery disabled).
     pub event_consumers: Vec<EventConsumer>,
     /// `CF_NOTIFICATIONS_BASE_URL`: the Notification Service (I1); `None`: no
@@ -133,6 +136,7 @@ impl fmt::Debug for OrganizationsConfig {
             .field("runtime_environment", &self.runtime_environment)
             .field("provisioning_enabled", &self.provisioning.is_some())
             .field("service_bindings_enabled", &self.service_bindings_enabled)
+            .field("app_installs_enabled", &self.app_installs_enabled)
             .field(
                 "event_destinations",
                 &self
@@ -261,6 +265,16 @@ impl OrganizationsConfig {
                     ))
                 }
             };
+        let app_installs_enabled = match get("ORGANIZATIONS_APP_INSTALLS_ENABLED").as_deref() {
+            None | Some("false") => false,
+            Some("true") => true,
+            Some(_) => {
+                return Err(invalid(
+                    "ORGANIZATIONS_APP_INSTALLS_ENABLED",
+                    "must be `true` or `false`",
+                ))
+            }
+        };
         let required = |var: &'static str| get(var).ok_or(ConfigError::Missing { var });
         let mut event_consumers: Vec<EventConsumer> = Vec::new();
         for name in get("ORGANIZATIONS_EVENT_DESTINATIONS")
@@ -343,6 +357,7 @@ impl OrganizationsConfig {
             trust_bundle_file,
             provisioning,
             service_bindings_enabled,
+            app_installs_enabled,
             event_consumers,
             notifications_base_url,
             signing,

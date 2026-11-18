@@ -61,8 +61,13 @@ export interface InstallationIdStoreOptions {
   readonly key?: string;
 }
 
+/** Anything that yields the installation id. */
+export interface InstallationIdSource {
+  get(): Promise<string>;
+}
+
 /** Reads the persisted installation id, creating and saving one on first use. */
-export class InstallationIdStore {
+export class InstallationIdStore implements InstallationIdSource {
   readonly #storage: KeyValueStorage;
   readonly #key: string;
   #pending: Promise<string> | null = null;
@@ -84,7 +89,7 @@ export class InstallationIdStore {
     return this.#pending;
   }
 
-  /** Forgets the id (e.g. on sign-out when the app wants a new device identity). */
+  /** Replaces the id with a new one (e.g. on sign-out, when the app wants a new device identity). */
   async reset(): Promise<string> {
     const id = generateInstallationId();
     await this.#storage.setItem(this.#key, id);

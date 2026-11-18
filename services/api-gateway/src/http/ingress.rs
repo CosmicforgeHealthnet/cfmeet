@@ -27,15 +27,44 @@
 //!      keys), then `Authorization` is transported unchanged — the owning service
 //!      verifies the token live.
 //!
-//!    End-user / device traffic (every mode above except PLATFORM_CREDENTIAL and
-//!    anonymous) is held to a per-token ceiling when
+//!    * OAUTH_ACCESS_TOKEN (`Bearer cfoa_…` / `Bearer cfob_…`, ADR 0064,
+//!      `API_GATEWAY_OAUTH_ENABLED`): a CF Meet Apps token, authenticated through Platform
+//!      Access exactly like a platform credential (same refusals, scope pre-check and
+//!      quotas). Platform Access must report the matching `credentialKind`
+//!      (`OAUTH_ACCESS` for `cfoa_`, `OAUTH_BOT` for `cfob_`) and a principal restriction
+//!      of exactly one principal, otherwise 401. The upstream receives the signed
+//!      delegated context with `initiating_credential_id` = the token's credential id and
+//!      `initiating_principal` = the restricted principal (`NATIVE_CF_USER` for access,
+//!      `BOT_OR_SERVICE` for bot tokens) — never the token. A `cfor_` refresh token is
+//!      refused 401 everywhere; an OAuth token on a route that does not list
+//!      OAUTH_ACCESS_TOKEN is refused `403 CREDENTIAL_NOT_ACCEPTED` (never transported),
+//!      except on a `forwardAuthorization` route (the OAuth userinfo of the Developer
+//!      Console, ANONYMOUS): there `Authorization` is transported unchanged and the
+//!      Developer Console introspects the token with Platform Access.
+//!
+//!      Quotas: the authority chain of an OAuth token is the INSTALL TARGET (the user's
+//!      or organization's FIRST_PARTY environment and the installation service account),
+//!      so the platform request quota is that environment's (the app's own developer
+//!      environment is not charged), and the API_OPERATION usage is recorded for that
+//!      environment with the token's credential id and the installation service account
+//!      as the caller dimensions.
+//!
+//!    Anonymous requests to the Developer Platform (OAuth token / revoke / metadata, the
+//!    app directory) carry a gateway service token WITHOUT a delegated context or a
+//!    session — the Developer Platform's public API is reachable only through the
+//!    gateway; anonymous requests to other services are transported as before.
+//!
+//!    End-user / device traffic (every mode above except PLATFORM_CREDENTIAL,
+//!    OAUTH_ACCESS_TOKEN and anonymous) is held to a per-token ceiling when
 //!    `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` is set (Section 15, PLT-012): the bucket
 //!    is a digest of the presented token (never the token), counted in the platform
 //!    quota store; over it the request is refused `429 RATE_LIMITED` with `Retry-After`
 //!    and the `x-cf-quota-window` / `x-cf-quota-level: GATEWAY_TOKEN` headers. Anonymous
 //!    requests carry nothing to key on (client addresses are never taken from spoofable
 //!    forwarding headers) and stay with the services and the edge.
-//! 5. Bounded body, per-route deadline, safe upstream errors; the owning service keeps
+//! 5. Bounded body (any media type the route's contract declares — JSON, or
+//!    `application/x-www-form-urlencoded` for the OAuth endpoints — forwarded verbatim with
+//!    its `Content-Type`), per-route deadline, safe upstream errors; the owning service keeps
 //!    final resource authorization; its status, allow-listed headers and body (streamed)
 //!    are relayed.
 //!
@@ -48,7 +77,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use cf_service_auth::OutboundServiceRequest;
+use cf_service_auth::{services, OutboundServiceRequest};
 use futures_util::TryStreamExt;
 use tracing::Instrument;
 
@@ -59,7 +88,7 @@ use crate::{
         presents_service_token, safe_value, stripped_authority_headers, FORWARDED_REQUEST_HEADERS,
         RELAYED_RESPONSE_HEADERS,
     },
-    identity::{AuthenticatedCustomer, Authentication},
+    identity::{AuthenticatedCustomer, Authentication, CredentialKind},
     quota::{token_bucket, Decision, TokenDecision, Window},
     routing::{AuthMode, Lookup, Protocol, RouteMatch},
     state::AppState,
@@ -69,6 +98,26 @@ use crate::{
 pub const USER_SESSION_HEADER: &str = "x-cf-user-session";
 pub const CREDENTIAL_PREFIX: &str = "cfmk_";
 pub const SIGNALING_CREDENTIAL_PREFIX: &str = "cfsig_";
+/// CF Meet Apps OAuth tokens (ADR 0064).
+pub const OAUTH_ACCESS_PREFIX: &str = "cfoa_";
+pub const OAUTH_BOT_PREFIX: &str = "cfob_";
+pub const OAUTH_REFRESH_PREFIX: &str = "cfor_";
+
+/// The OAuth credential kind a presented token claims by its prefix (`None`: not an
+/// OAuth access or bot token).
+pub fn oauth_token_kind(token: &str) -> Option<CredentialKind> {
+    if token.starts_with(OAUTH_ACCESS_PREFIX) {
+        Some(CredentialKind::OauthAccess)
+    } else if token.starts_with(OAUTH_BOT_PREFIX) {
+        Some(CredentialKind::OauthBot)
+    } else {
+        None
+    }
+}
+
+fn is_oauth_token(token: &str) -> bool {
+    oauth_token_kind(token).is_some() || token.starts_with(OAUTH_REFRESH_PREFIX)
+}
 
 /// Response extension: the environment of the device token a request was authenticated
 /// with, for the partner-website CORS decision ([`crate::http`]). Set only for device
@@ -149,15 +198,34 @@ pub enum Forward {
 }
 
 /// Chooses the authentication mode (see the module documentation). `user_tokens`:
-/// `API_GATEWAY_USER_TOKENS_ENABLED` (off: a `cfut_` token is treated exactly as before).
+/// `API_GATEWAY_USER_TOKENS_ENABLED` (off: a `cfut_` token is treated exactly as before);
+/// `oauth`: `API_GATEWAY_OAUTH_ENABLED` (off: `cfoa_` / `cfob_` / `cfor_` tokens are
+/// treated exactly as before).
 pub fn select_mode(
     route: &RouteMatch<'_>,
     auth: Option<&Presented>,
     headers: &HeaderMap,
     user_tokens: bool,
+    oauth: bool,
 ) -> Result<AuthMode, ApiError> {
     let d = route.definition;
     match auth {
+        Some(p) if oauth && is_oauth_token(&p.token) => {
+            if !p.scheme.eq_ignore_ascii_case("bearer") || oauth_token_kind(&p.token).is_none() {
+                // A refresh token is never a request credential (and an OAuth token
+                // travels only as a bearer token).
+                Err(ApiError::Code(ErrorCode::AuthenticationFailed))
+            } else if d.allows(AuthMode::OauthAccessToken) {
+                Ok(AuthMode::OauthAccessToken)
+            } else if d.forward_authorization && d.allows(AuthMode::Anonymous) {
+                // Dedicated pass-through (OAuth userinfo): the Developer Console
+                // introspects the token itself.
+                Ok(AuthMode::Anonymous)
+            } else {
+                // Never transported to a service that does not take it.
+                Err(ApiError::Code(ErrorCode::CredentialNotAccepted))
+            }
+        }
         Some(p)
             if user_tokens
                 && p.scheme.eq_ignore_ascii_case("bearer")
@@ -278,6 +346,7 @@ async fn handle(state: AppState, request: Request, context: RequestContext) -> R
         auth.as_ref(),
         &parts.headers,
         state.flags.user_tokens,
+        state.flags.oauth,
     ) {
         Ok(m) => m,
         Err(e) => return e.into_response(),
@@ -384,12 +453,15 @@ async fn dispatch(
         return ApiError::Code(ErrorCode::ValidationError).into_response();
     }
     let forward = match mode {
-        AuthMode::PlatformCredential => {
+        AuthMode::PlatformCredential | AuthMode::OauthAccessToken => {
             let token = auth.as_ref().map(|a| a.token.clone()).unwrap_or_default();
             let customer = match authenticate(state, &token, context, &route_id).await {
                 Ok(c) => c,
                 Err(e) => return e.into_response(),
             };
+            if let Err(e) = check_credential_kind(mode, &token, &customer, &route_id) {
+                return e.into_response();
+            }
             if let Some(scope) = &route.definition.required_scope {
                 if !customer.has_scope(scope) {
                     tracing::info!(route = %route_id, scope = %scope, "scope check denied");
@@ -498,16 +570,64 @@ async fn dispatch(
     response
 }
 
+/// The authenticated credential must be of the presented kind: an API key (no OAuth
+/// kind) for PLATFORM_CREDENTIAL; for OAUTH_ACCESS_TOKEN the OAuth kind of the token's
+/// prefix (`cfoa_` access, `cfob_` bot) restricted to exactly one principal (it becomes
+/// the forwarded initiating principal). Anything else is refused 401.
+fn check_credential_kind(
+    mode: AuthMode,
+    token: &str,
+    customer: &AuthenticatedCustomer,
+    route_id: &str,
+) -> Result<(), ApiError> {
+    let ok = match (mode, customer.oauth) {
+        (AuthMode::PlatformCredential, None) => true,
+        (AuthMode::OauthAccessToken, Some(oauth)) => {
+            if Some(oauth.kind) != oauth_token_kind(token) {
+                false
+            } else if customer.oauth_principal().is_none() {
+                tracing::warn!(
+                    route = route_id,
+                    app = %oauth.app_id,
+                    grant = %oauth.grant_id,
+                    "oauth credential refused: the principal restriction is not exactly one principal"
+                );
+                return Err(ApiError::Code(ErrorCode::AuthenticationFailed));
+            } else {
+                tracing::info!(
+                    route = route_id,
+                    kind = oauth.kind.as_str(),
+                    app = %oauth.app_id,
+                    grant = %oauth.grant_id,
+                    "oauth credential authenticated"
+                );
+                true
+            }
+        }
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        tracing::warn!(
+            route = route_id,
+            mode = mode.as_str(),
+            "authentication refused: credential kind does not match the presented token"
+        );
+        Err(ApiError::Code(ErrorCode::AuthenticationFailed))
+    }
+}
+
 /// The end-user / device token a passthrough or session request is counted under
-/// (`None`: platform credentials — metered by the platform quotas — and requests that
-/// present no token).
+/// (`None`: platform credentials and OAuth tokens — metered by the platform quotas — and
+/// requests that present no token).
 pub fn rate_limited_token<'a>(
     mode: AuthMode,
     auth: Option<&'a Presented>,
     headers: &'a HeaderMap,
 ) -> Option<&'a str> {
     match mode {
-        AuthMode::PlatformCredential | AuthMode::Anonymous => None,
+        AuthMode::PlatformCredential | AuthMode::OauthAccessToken | AuthMode::Anonymous => None,
         AuthMode::ParticipantToken => headers
             .get("x-participant-token")
             .and_then(|v| v.to_str().ok())
@@ -623,6 +743,15 @@ pub fn forwarded_headers(
                 out.insert(header::AUTHORIZATION, a.raw.clone());
             }
         }
+        // The dedicated OAuth pass-through ([`RouteDefinition::forward_authorization`]):
+        // only an OAuth access / bot bearer token, only on the marked route.
+        Some(AuthMode::Anonymous) if route.definition.forward_authorization => {
+            if let Some(a) = auth.filter(|a| {
+                a.scheme.eq_ignore_ascii_case("bearer") && oauth_token_kind(&a.token).is_some()
+            }) {
+                out.insert(header::AUTHORIZATION, a.raw.clone());
+            }
+        }
         _ => {}
     }
     out
@@ -705,6 +834,23 @@ async fn forward_rest(
                     headers.insert(HeaderName::from_static(USER_SESSION_HEADER), session);
                 }
                 _ => return ApiError::Code(ErrorCode::AuthenticationFailed).into_response(),
+            }
+        }
+        // The Developer Platform's public API is reachable only through the gateway: an
+        // anonymous request carries a gateway token with no delegated context and no
+        // session (the Developer Platform decides what an anonymous caller may do).
+        Forward::Passthrough(AuthMode::Anonymous)
+            if route.upstream.as_str() == services::DEVELOPER_PLATFORM =>
+        {
+            let hop =
+                OutboundServiceRequest::continuing(route.upstream.clone(), &context.correlation_id);
+            match state
+                .service_auth
+                .signer()
+                .sign_request(&hop, &parts.method, upstream_path)
+            {
+                Ok(signed) => signed.apply_to(&mut headers),
+                Err(_) => return ApiError::Code(ErrorCode::InternalError).into_response(),
             }
         }
         Forward::Passthrough(_) => {}

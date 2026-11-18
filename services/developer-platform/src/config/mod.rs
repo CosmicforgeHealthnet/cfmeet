@@ -30,6 +30,12 @@
 //! | `DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED` | no | feature flag (default `false`, ADR 0062): `GET` / `PUT /v1/environments/{id}/allowed-origins` (delegated to Platform Access); off, 404 |
 //! | `DEVELOPER_PLATFORM_TEST_TOKENS_ENABLED` | no | feature flag (default `false`, ADR 0062): the console development token generator `POST /v1/environments/{id}/test-user-tokens` (SANDBOX only); off, 404 |
 //! | `DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED` | no | feature flag (default `false`, ADR 0063): partner push credentials `/v1/environments/{id}/push-credentials*` (sealed to the Notification Service, metadata only here); off, 404. Needs `CF_NOTIFICATIONS_BASE_URL` and `CF_NOTIFICATIONS_SEALING_KEY`, else 503 `CAPABILITY_UNAVAILABLE` |
+//! | `DEVELOPER_PLATFORM_APPS_ENABLED` | no | feature flag (default `false`, ADR 0064 / 0065): app registration on projects (`/v1/projects/{id}/app*`) and the operator app review routes; off, 404 |
+//! | `DEVELOPER_PLATFORM_OAUTH_ENABLED` | no | feature flag (default `false`): the anonymous OAuth endpoints `/v1/oauth/token`, `/revoke`, `/userinfo`, `/metadata`; off, 404 |
+//! | `DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED` | no | feature flag (default `false`): the anonymous app directory `/v1/app-directory*`; off, 404 |
+//! | `DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED` | no | feature flag (default `false`): the worker projects Platform Access `APP_GRANT` changes and event ingestion routes install-target events to installed apps; off, nothing changes |
+//! | `DEVELOPER_PLATFORM_APP_REVIEWERS` | no | comma-separated operator names allowed to review / approve / reject / publish apps (empty: no decision possible) |
+//! | `DEVELOPER_PLATFORM_OAUTH_ISSUER`, `DEVELOPER_PLATFORM_OAUTH_AUTHORIZATION_ENDPOINT` | no | https URLs advertised by `/v1/oauth/metadata` (defaults `https://api.cfmeet.com`, `https://cfmeet.com/oauth/authorize`) |
 //! | `CF_NOTIFICATIONS_SEALING_KEY` | no | the Notification Service's public HPKE key `<kid>:<base64url>` that push secrets are sealed to on receipt |
 //! | `DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED` | no | feature flag (default `false`): enforce the workspace / project creation caps below (409 `LIMIT_EXCEEDED`) |
 //! | `DEVELOPER_PLATFORM_MAX_WORKSPACES_PER_OWNER` | no | workspaces (not CLOSED) a CF Meet account may OWN (0 = unlimited, max 1000, default 3) |
@@ -109,6 +115,17 @@ pub struct BuildFeatures {
     pub max_workspaces_per_owner: u32,
     /// Projects per workspace (0 = unlimited).
     pub max_projects_per_workspace: u32,
+    /// `DEVELOPER_PLATFORM_APPS_ENABLED` (ADR 0064 / 0065): app registration, versions,
+    /// client secrets, review submission, grants and test accounts on projects, and the
+    /// operator review routes.
+    pub apps: bool,
+    /// `DEVELOPER_PLATFORM_OAUTH_ENABLED`: the anonymous OAuth endpoints `/v1/oauth/*`.
+    pub oauth: bool,
+    /// `DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED`: the anonymous `/v1/app-directory*`.
+    pub app_directory: bool,
+    /// `DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED`: the Platform Access `APP_GRANT`
+    /// projection (worker) and the install routing pass of event ingestion.
+    pub install_events: bool,
 }
 
 impl Default for BuildFeatures {
@@ -121,6 +138,10 @@ impl Default for BuildFeatures {
             creation_caps: false,
             max_workspaces_per_owner: 3,
             max_projects_per_workspace: 10,
+            apps: false,
+            oauth: false,
+            app_directory: false,
+            install_events: false,
         }
     }
 }
@@ -146,6 +167,10 @@ fn build_features(get: &impl Fn(&str) -> Option<String>) -> Result<BuildFeatures
             0,
             10_000,
         )? as u32,
+        apps: flag(get, "DEVELOPER_PLATFORM_APPS_ENABLED")?,
+        oauth: flag(get, "DEVELOPER_PLATFORM_OAUTH_ENABLED")?,
+        app_directory: flag(get, "DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED")?,
+        install_events: flag(get, "DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED")?,
     })
 }
 
@@ -167,6 +192,52 @@ fn notifications_sealing_key(
     }
 }
 
+/// ADR 0064: the public URLs `/v1/oauth/metadata` advertises.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthEndpoints {
+    /// `DEVELOPER_PLATFORM_OAUTH_ISSUER` (default `https://api.cfmeet.com`): the issuer
+    /// and the base of the token, revocation and userinfo endpoints (`/v1/oauth/*`).
+    pub issuer: String,
+    /// `DEVELOPER_PLATFORM_OAUTH_AUTHORIZATION_ENDPOINT` (default
+    /// `https://cfmeet.com/oauth/authorize`, the frontend consent page).
+    pub authorization_endpoint: String,
+}
+
+impl Default for OAuthEndpoints {
+    fn default() -> Self {
+        Self {
+            issuer: "https://api.cfmeet.com".into(),
+            authorization_endpoint: "https://cfmeet.com/oauth/authorize".into(),
+        }
+    }
+}
+
+impl OAuthEndpoints {
+    fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let defaults = Self::default();
+        let https = |var: &'static str, default: String| -> Result<String, ConfigError> {
+            match get(var) {
+                None => Ok(default),
+                Some(v)
+                    if v.starts_with("https://")
+                        && v.len() <= 200
+                        && !v.contains(['?', '#', ' ', '@']) =>
+                {
+                    Ok(v.trim_end_matches('/').to_string())
+                }
+                Some(_) => Err(ConfigError::invalid(var, "must be an https URL")),
+            }
+        };
+        Ok(Self {
+            issuer: https("DEVELOPER_PLATFORM_OAUTH_ISSUER", defaults.issuer)?,
+            authorization_endpoint: https(
+                "DEVELOPER_PLATFORM_OAUTH_AUTHORIZATION_ENDPOINT",
+                defaults.authorization_endpoint,
+            )?,
+        })
+    }
+}
+
 pub struct DeveloperPlatformConfig {
     /// Final completion (production-access workflow): the named operators allowed to
     /// review, approve or reject production-access requests
@@ -174,6 +245,12 @@ pub struct DeveloperPlatformConfig {
     /// any operator holding `developer-platform.administer` (previous behaviour). Customer
     /// submissions (`…_PRODUCTION_ACCESS_WORKFLOW_ENABLED`) require at least one reviewer.
     pub production_reviewers: Vec<String>,
+    /// ADR 0065: the named operators allowed to review, approve, reject and publish apps
+    /// (`DEVELOPER_PLATFORM_APP_REVIEWERS`, comma separated operator names). Empty: no app
+    /// review decision is possible (fail closed).
+    pub app_reviewers: Vec<String>,
+    /// ADR 0064: the public OAuth endpoints advertised by `/v1/oauth/metadata`.
+    pub oauth_endpoints: OAuthEndpoints,
     /// `…_PRODUCTION_ACCESS_WORKFLOW_ENABLED=true` was requested but no reviewer is named:
     /// the workflow was kept off (reported at startup).
     pub production_access_withheld: bool,
@@ -436,6 +513,22 @@ impl DeveloperPlatformConfig {
                 "must be comma-separated operator names",
             ));
         }
+        let app_reviewers: Vec<String> = get("DEVELOPER_PLATFORM_APP_REVIEWERS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|r| r.trim().to_string())
+            .filter(|r| !r.is_empty())
+            .collect();
+        if app_reviewers
+            .iter()
+            .any(|r| !crate::control::operator::valid_operator(r))
+        {
+            return Err(ConfigError::invalid(
+                "DEVELOPER_PLATFORM_APP_REVIEWERS",
+                "must be comma-separated operator names",
+            ));
+        }
+        let oauth_endpoints = OAuthEndpoints::from_lookup(&get)?;
         // Customer submissions are only accepted while someone can decide them: without a
         // named reviewer the workflow stays off (submit / cancel / activate answer 503
         // `CAPABILITY_UNAVAILABLE`) and everything else starts normally.
@@ -505,6 +598,8 @@ impl DeveloperPlatformConfig {
         )? as u64;
         Ok(Self {
             production_reviewers,
+            app_reviewers,
+            oauth_endpoints,
             production_access_withheld,
             auto_approval_refused,
             database_url,
@@ -669,6 +764,38 @@ mod tests {
         ] {
             let err = with(&[(var, value)]).unwrap_err();
             assert!(!err.to_string().contains(value), "{var}");
+        }
+    }
+
+    #[test]
+    fn app_features_are_off_by_default_and_reviewers_are_named() {
+        let cfg = DeveloperPlatformConfig::from_lookup(lookup(BASE)).unwrap();
+        let b = cfg.build;
+        assert!(!b.apps && !b.oauth && !b.app_directory && !b.install_events);
+        assert!(cfg.app_reviewers.is_empty());
+        assert_eq!(cfg.oauth_endpoints, OAuthEndpoints::default());
+        let mut pairs = BASE.to_vec();
+        pairs.extend([
+            ("DEVELOPER_PLATFORM_APPS_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_OAUTH_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_APP_REVIEWERS", "github-alice, github-bob"),
+            ("DEVELOPER_PLATFORM_OAUTH_ISSUER", "https://api.example.test/"),
+        ]);
+        let cfg = DeveloperPlatformConfig::from_lookup(lookup(&pairs)).unwrap();
+        let b = cfg.build;
+        assert!(b.apps && b.oauth && b.app_directory && b.install_events);
+        assert_eq!(cfg.app_reviewers, ["github-alice", "github-bob"]);
+        assert_eq!(cfg.oauth_endpoints.issuer, "https://api.example.test");
+        for (var, value) in [
+            ("DEVELOPER_PLATFORM_APP_REVIEWERS", "not a name!"),
+            ("DEVELOPER_PLATFORM_OAUTH_ISSUER", "http://api.example.test"),
+            ("DEVELOPER_PLATFORM_APPS_ENABLED", "maybe"),
+        ] {
+            let mut pairs = BASE.to_vec();
+            pairs.push((var, value));
+            assert!(DeveloperPlatformConfig::from_lookup(lookup(&pairs)).is_err(), "{var}");
         }
     }
 
