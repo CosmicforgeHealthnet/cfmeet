@@ -324,6 +324,8 @@ class RealRepository(unittest.TestCase):
             "call_endpoints", "call_invitations", "call_answer_claims",
             "call_participant_media_permissions", "call_media_sessions", "call_commands",
             "call_transfers", "call_media_provider_events",
+            # Gap audit C14: attended (consultative) transfer.
+            "call_consultations",
             # Part D sections 26-30: evidence of Privacy Relay decisions / enforcement.
             "call_privacy_authorizations", "call_privacy_enforcements",
             # Part E sections 37-38: the typed routing policy of the Routing Engine.
