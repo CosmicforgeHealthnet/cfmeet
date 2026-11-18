@@ -436,6 +436,35 @@ pub enum InternalPermission {
     /// catch-up into the Notification Service. Notification Service only.
     #[serde(rename = "communications-preferences.export")]
     CommunicationsPreferencesExport,
+    // ---- CF Meet Platform "Build" (ADR 0062 / 0063) ----
+    /// Platform Access: the Developer Console's partner Users API and user-token minting
+    /// (create / read / update / delete EXTERNAL_APPLICATION_PRINCIPAL users of the
+    /// forwarded credential's own environment, revoke their sessions, mint user tokens).
+    /// The forwarded credential is re-verified live; never another environment, never a
+    /// FIRST_PARTY tenant. Developer Console only.
+    #[serde(rename = "platform-end-users.delegate")]
+    PlatformEndUsersDelegate,
+    /// Platform Access: verify a CF Meet user token (`cfut_`) and read the public keys that
+    /// sign them; returns the user's scope, profile and effective grants.
+    #[serde(rename = "platform-user-token.verify")]
+    PlatformUserTokenVerify,
+    /// Platform Access: read the allowed websites (exact origins) of environments.
+    #[serde(rename = "platform-environment-origins.read")]
+    PlatformEnvironmentOriginsRead,
+    /// Platform Access: ensure the fixed meeting system principal of an EXTERNAL
+    /// environment (and temporary meeting participants) for partner meeting chat.
+    /// Meeting Service only.
+    #[serde(rename = "platform-principal.ensure-meeting-platform")]
+    PlatformPrincipalEnsureMeetingPlatform,
+    /// Messaging: receive a partner meeting's chat synchronisation from the Meeting
+    /// Service in the partner environment's own scope. Meeting Service only.
+    #[serde(rename = "messaging-meeting.sync-platform")]
+    MessagingMeetingSyncPlatform,
+    /// Notification Service: store, verify, read status of and delete a partner
+    /// environment's own push provider credentials (APNs / APNs VoIP / FCM), sealed;
+    /// scope-locked to that environment. Developer Console only.
+    #[serde(rename = "notifications-push-provider.manage")]
+    NotificationsPushProviderManage,
 }
 
 /// Registry entry: which service receives the permission and who may be granted it.
@@ -1180,6 +1209,64 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         sensitive: true,
         description: "Export the Hub's notification preferences (account switches, conversation and contact notification levels with their versions) and their change-feed entries for the copy and catch-up into the Notification Service; account references, conversation ids and levels only, never profile data",
     },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformEndUsersDelegate,
+        name: "platform-end-users.delegate",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Partner Users API and user-token minting for the forwarded credential's own EXTERNAL environment (credential re-verified live): create, read, update, delete EXTERNAL_APPLICATION_PRINCIPAL users, revoke their sessions, mint CF Meet user tokens; never another environment, never FIRST_PARTY",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformUserTokenVerify,
+        name: "platform-user-token.verify",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[
+            services::MESSAGING,
+            services::CALLING,
+            services::MEETING_SERVICE,
+            services::API_GATEWAY,
+        ],
+        sensitive: false,
+        description: "Verify a CF Meet user token and read its signing public keys: the user's scope triple, profile and effective grants (claimed grants intersected with the minting credential's current scopes); never a secret",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformEnvironmentOriginsRead,
+        name: "platform-environment-origins.read",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[
+            services::API_GATEWAY,
+            services::MESSAGING,
+            services::CALLING,
+            services::MEETING_SERVICE,
+        ],
+        sensitive: false,
+        description: "Read the allowed websites (exact origins) of environments and their change feed; origins only",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::PlatformPrincipalEnsureMeetingPlatform,
+        name: "platform-principal.ensure-meeting-platform",
+        receiver: services::PLATFORM_ACCESS,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Ensure the fixed meeting system principal and temporary meeting participants of an ACTIVE EXTERNAL environment for partner meeting chat; no other kind or reference",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::MessagingMeetingSyncPlatform,
+        name: "messaging-meeting.sync-platform",
+        receiver: services::MESSAGING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Synchronise a partner meeting's MANAGED chat conversation and membership in the partner environment's own scope, after Platform Access confirms the environment is ACTIVE and EXTERNAL",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::NotificationsPushProviderManage,
+        name: "notifications-push-provider.manage",
+        receiver: services::NOTIFICATIONS,
+        grantable_to: &[services::DEVELOPER_PLATFORM],
+        sensitive: false,
+        description: "Store (sealed), verify, read the status of and delete a partner environment's own APNs / APNs VoIP / FCM push credentials; scope-locked to that environment; the secret is never returned",
+    },
 ];
 
 /// Values that must never be used as an ordinary permission.
@@ -1290,6 +1377,12 @@ impl InternalPermission {
         InternalPermission::AccountRouteLeaseClaim,
         InternalPermission::CallingAbuseReportsReview,
         InternalPermission::CommunicationsPreferencesExport,
+        InternalPermission::PlatformEndUsersDelegate,
+        InternalPermission::PlatformUserTokenVerify,
+        InternalPermission::PlatformEnvironmentOriginsRead,
+        InternalPermission::PlatformPrincipalEnsureMeetingPlatform,
+        InternalPermission::MessagingMeetingSyncPlatform,
+        InternalPermission::NotificationsPushProviderManage,
     ];
 
     pub fn definition(&self) -> &'static PermissionDefinition {
@@ -1588,6 +1681,11 @@ mod tests {
                     "messaging-wakeups.authorize",
                     &[services::NOTIFICATIONS][..]
                 ),
+                // ADR 0062: partner meeting chat in the partner environment's scope.
+                (
+                    "messaging-meeting.sync-platform",
+                    &[services::MEETING_SERVICE][..]
+                ),
             ]
         );
         // Native account bootstrap remains owned by Account; Hub backfill reuses its bindings.
@@ -1634,6 +1732,9 @@ mod tests {
         "notifications-event.publish",
         // Notification Service I13 (N9): the push-registration facade and D-1b copy.
         "notifications-push-registration.sync",
+        // ADR 0062: partner user tokens and allowed websites.
+        "platform-user-token.verify",
+        "platform-environment-origins.read",
     ];
 
     #[test]
@@ -1687,6 +1788,8 @@ mod tests {
                 "meeting-request.forward",
                 "developer-entitlement.read",
                 "developer-usage.record",
+                "platform-user-token.verify",
+                "platform-environment-origins.read",
             ]
         );
         assert!(received(services::API_GATEWAY).is_empty());
@@ -1703,6 +1806,9 @@ mod tests {
                 "webhook-migration.import",
                 // Notification Service I1: developer notices from its own outbox.
                 "notifications-event.publish",
+                // ADR 0062 / 0063: the partner Users API and partner push credentials.
+                "platform-end-users.delegate",
+                "notifications-push-provider.manage",
             ]
         );
         assert_eq!(
@@ -1797,7 +1903,8 @@ mod tests {
                 "organization.act-for-user",
                 "organization.administer",
                 "organization.migrate",
-                "calling-request.act-for-organization"
+                "calling-request.act-for-organization",
+                "platform-principal.ensure-meeting-platform"
             ]
         );
         for d in REGISTRY
@@ -1806,6 +1913,9 @@ mod tests {
         {
             let expected = if d.permission == CallingRequestActForOrganization {
                 services::CALLING
+            } else if d.permission == PlatformPrincipalEnsureMeetingPlatform {
+                // ADR 0062: partner meeting chat's fixed system principal.
+                services::PLATFORM_ACCESS
             } else {
                 services::ORGANIZATIONS
             };
@@ -1987,6 +2097,8 @@ mod tests {
                 "notifications-observability.read",
                 "notifications-operations.replay",
                 "notifications-operations.reroute",
+                // ADR 0063: partner push provider credentials (Developer Console only).
+                "notifications-push-provider.manage",
             ]
         );
         // Granted to the Notification Service: the owner read / fencing APIs X1–X7 only.

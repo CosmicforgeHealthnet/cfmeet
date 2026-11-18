@@ -174,7 +174,13 @@
         "organization-invitations.read",
         "account-route-lease.claim",
         "calling-abuse-reports.review",
-        "communications-preferences.export"
+        "communications-preferences.export",
+        "platform-end-users.delegate",
+        "platform-user-token.verify",
+        "platform-environment-origins.read",
+        "platform-principal.ensure-meeting-platform",
+        "messaging-meeting.sync-platform",
+        "notifications-push-provider.manage"
       ]
     }
   }
