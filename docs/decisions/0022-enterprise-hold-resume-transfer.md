@@ -65,3 +65,30 @@ is recorded as pending with that bridge.
 * One state machine, one idempotency model, one recovery path for every transfer.
 * A principal joins a Call once (Part C): a declined target is not re-offered on the
   same Call.
+
+## Amendment — attended (consultative) transfer (gap closure C14 / CAL-019, 2026-11)
+
+Attended transfer is hold + a second canonical Call + the canonical transfer; it adds no
+call state and no second transfer path.
+
+* `POST /v1/calls/{call_id}/consultations` (Idempotency-Key): the transferring participant
+  of a CONNECTED / HELD Call names a target (principal, or an extension / destination
+  resolved exactly like a transfer target; the enterprise `transferAllowed` gate applies).
+  A CONNECTED Call is HELD (canonical hold), then an ordinary application Call — the
+  consultation Call — is placed from the participant's own endpoint to the target through
+  the unchanged `POST /v1/calls` path (authorization, personal policy, blocks, limits,
+  ringing). If it cannot be created the hold is undone. One active consultation per Call.
+* `…/consultations/{id}/complete` requires the consultation Call to be CONNECTED and starts
+  the canonical transfer of the ORIGINAL Call to the target (pre-transfer state HELD). The
+  parties of the consultation Call receive `call.consultation_transfer` (consultation,
+  original Call, transfer ids) so the target's client answers that TRANSFER offer. When
+  the target joins, the transferring participant is retired, the original Call is
+  CONNECTED and the consultation Call ends; a failed transfer returns the original Call
+  to HELD and the consultation to CONSULTING.
+* `…/consultations/{id}/cancel` ends the consultation Call and resumes the original Call
+  when the consultation held it.
+* A transfer that started from HELD now re-applies the CONNECTED permissions at the media
+  provider when it completes (previously the provider kept the hold mask).
+* Evidence: `call_consultations` (gap-closure migration 000056) links the two Calls and
+  the completing transfer; both Calls keep their own events, webhooks and history.
+* Certification: `tests/attended_transfer.rs`.

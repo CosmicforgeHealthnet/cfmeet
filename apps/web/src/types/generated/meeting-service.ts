@@ -4,7 +4,7 @@
 /* eslint-disable */
 
 export const CONTRACT_TITLE = "CosmicForge RTC API";
-export const CONTRACT_VERSION = "1.6.0";
+export const CONTRACT_VERSION = "1.7.0";
 
 /** Access-policy configuration (no secrets). */
 export interface AccessConfig {
@@ -3981,6 +3981,7 @@ export const CONTRACT_OPERATIONS = {
   "DELETE /api/v2/messaging/relay/{path}": "v2_messaging_relay_delete",
   "DELETE /api/v2/notifications/devices/{accountDeviceId}/push": "v2_notifications_push_remove",
   "DELETE /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_delete",
+  "DELETE /api/v2/organizations/{id}/member-calling/endpoints/{endpointId}": "v2_organization_member_calling_endpoints_revoke",
   "DELETE /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_delete",
   "DELETE /api/v2/organizations/{id}/teams/{teamId}/members/{memberId}": "v2_remove_organization_team_member",
   "GET /": "get_app_info",
@@ -4071,6 +4072,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}/invitations": "v2_list_organization_invitations",
   "GET /api/v2/organizations/{id}/meeting-profile-policy": "v2_get_organization_meeting_profile_policy",
   "GET /api/v2/organizations/{id}/meeting-spaces": "v2_list_organization_meeting_spaces",
+  "GET /api/v2/organizations/{id}/member-calling/endpoints": "v2_organization_member_calling_endpoints_list",
   "GET /api/v2/organizations/{id}/members": "v2_list_organization_members",
   "GET /api/v2/organizations/{id}/messaging/moderation/{path}": "v2_organization_messaging_moderation_get",
   "GET /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_get",
@@ -4253,6 +4255,8 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_post",
   "POST /api/v2/organizations/{id}/invitations": "v2_create_organization_invitation",
   "POST /api/v2/organizations/{id}/invitations/{invitationId}/revoke": "v2_revoke_organization_invitation",
+  "POST /api/v2/organizations/{id}/member-calling/endpoints": "v2_organization_member_calling_endpoints_register",
+  "POST /api/v2/organizations/{id}/member-calling/signaling-credentials": "v2_organization_member_calling_signaling_credential",
   "POST /api/v2/organizations/{id}/members/me/leave": "v2_leave_organization",
   "POST /api/v2/organizations/{id}/messaging/members/resolve": "v2_organization_messaging_resolve_members",
   "POST /api/v2/organizations/{id}/messaging/moderation/{path}": "v2_organization_messaging_moderation_post",

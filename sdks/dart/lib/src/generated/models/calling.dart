@@ -345,6 +345,11 @@ class BindSipDeviceRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// C15: the controlled built-in hold-music catalogue. The media plane / application client plays its own copy of each; never a URL, path or file name.
+///
+/// One of: DEFAULT, CALM, BRIGHT.
+typedef BuiltinHoldMusic = String;
+
 /// The controlled built-in prompt catalog. The media plane plays its own copy (Telephony maps it to edge-local audio; an application client to its own asset). Never a URL, path, file name or synthesized text. Each prompt has a nominal length the media plane's audio must fit (WELCOME, MENU, NO_INPUT, GOODBYE 2 s; PLEASE_HOLD, TRANSFERRING, CLOSED 3 s; INVALID_OPTION 4 s; VOICEMAIL_GREETING 6 s; BEEP …
 ///
 /// One of: WELCOME, MENU, INVALID_OPTION, NO_INPUT, PLEASE_HOLD, TRANSFERRING, GOODBYE, CLOSED, VOICEMAIL_GREETING, BEEP.
@@ -1511,6 +1516,161 @@ typedef ConsentDecision = String;
 /// One of: NONE, ALL_PARTICIPANTS, OTHER_PARTICIPANTS.
 typedef ConsentParticipants = String;
 
+/// C14: an attended transfer's consultation: the original Call, the consultation Call the transferring participant placed to the target, and its state. CONSULTING (the consultation Call is going on; the original Call is held) -› COMPLETING (the canonical transfer of the original Call to the target is ringing) -› COMPLETED (the target joined the original Call, the transferring participant was …
+class Consultation {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const Consultation.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory Consultation.create({required Uuid callId, required Uuid consultationCallId, required Uuid consultationId, required String createdAt, required String? endedAt, required bool heldOriginal, required String state, required Uuid targetPrincipalId, required Uuid? transferId, required Uuid transferringParticipantId, required String updatedAt, required int version}) =>
+      Consultation.fromJson(<String, Object?>{
+        'callId': callId,
+        'consultationCallId': consultationCallId,
+        'consultationId': consultationId,
+        'createdAt': createdAt,
+        'endedAt': endedAt,
+        'heldOriginal': heldOriginal,
+        'state': state,
+        'targetPrincipalId': targetPrincipalId,
+        'transferId': transferId,
+        'transferringParticipantId': transferringParticipantId,
+        'updatedAt': updatedAt,
+        'version': version,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The original Call.
+  Uuid get callId => json['callId']! as String;
+
+  /// The consultation Call (an ordinary canonical Call).
+  Uuid get consultationCallId => json['consultationCallId']! as String;
+
+  Uuid get consultationId => json['consultationId']! as String;
+
+  String get createdAt => json['createdAt']! as String;
+
+  String? get endedAt => json['endedAt'] as String?;
+
+  /// The consultation put the original Call on hold (it was CONNECTED); cancelling resumes it.
+  bool get heldOriginal => json['heldOriginal']! as bool;
+
+  String get state => json['state']! as String;
+
+  Uuid get targetPrincipalId => json['targetPrincipalId']! as String;
+
+  /// The latest transfer of the original Call that completes (or completed) this consultation.
+  Uuid? get transferId => json['transferId'] as String?;
+
+  Uuid get transferringParticipantId => json['transferringParticipantId']! as String;
+
+  String get updatedAt => json['updatedAt']! as String;
+
+  int get version => (json['version']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C14: result of cancelling a consultation: the consultation (CANCELLED), the original Call and whether it was resumed.
+class ConsultationCancelResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConsultationCancelResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConsultationCancelResult.create({required CommonCallSummary call, required Consultation consultation, required bool resumed}) =>
+      ConsultationCancelResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'consultation': consultation.toJson(),
+        'resumed': resumed,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  Consultation get consultation => Consultation.fromJson(json['consultation']! as Map<String, Object?>);
+
+  /// The original Call was resumed (it was held by this consultation and resuming succeeded).
+  bool get resumed => json['resumed']! as bool;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C14: body of POST /v1/calls/{call_id}/consultations/{consultation_id}/complete: the original Call's version.
+class ConsultationCompleteRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConsultationCompleteRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConsultationCompleteRequest.create({required int expectedVersion}) =>
+      ConsultationCompleteRequest.fromJson(<String, Object?>{
+        'expectedVersion': expectedVersion,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.
+  int get expectedVersion => (json['expectedVersion']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C14: result of completing a consultation: the consultation (COMPLETING), the original Call (TRANSFERRING) and its transfer to the target. A repeat after the transfer started returns the consultation and the Call without the transfer.
+class ConsultationCompletion {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConsultationCompletion.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConsultationCompletion.create({required CommonCallSummary call, required Consultation consultation, CallTransfer? transfer}) =>
+      ConsultationCompletion.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'consultation': consultation.toJson(),
+        if (transfer != null) 'transfer': transfer.toJson(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  Consultation get consultation => Consultation.fromJson(json['consultation']! as Map<String, Object?>);
+
+  CallTransfer? get transfer => json['transfer'] == null ? null : CallTransfer.fromJson(json['transfer']! as Map<String, Object?>);
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C14: body of POST /v1/calls/{call_id}/consultations (Idempotency-Key required): the participant who consults, the target (exactly one of a principal, an enterprise extension or a typed enterprise destination, resolved like a transfer target) and the participant's own endpoint the consultation Call is placed from. A CONNECTED Call is held first; an enterprise Call's policy must permit transfers …
+typedef ConsultationRequest = Object;
+
+/// C14: result of POST /v1/calls/{call_id}/consultations: the consultation, the original Call (HELD) and the consultation Call as created by POST /v1/calls.
+class ConsultationResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConsultationResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConsultationResult.create({required CommonCallSummary call, required Consultation consultation, required CreateCallResult consultationCall}) =>
+      ConsultationResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'consultation': consultation.toJson(),
+        'consultationCall': consultationCall.toJson(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  Consultation get consultation => Consultation.fromJson(json['consultation']! as Map<String, Object?>);
+
+  CreateCallResult get consultationCall => CreateCallResult.fromJson(json['consultationCall']! as Map<String, Object?>);
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Opaque, server-generated ContactReference (UUID) of a protected contact, scoped to one tenant / application / environment. It never encodes a number, country, provider or user; knowing it grants nothing.
 typedef ContactReference = Uuid;
 
@@ -1771,19 +1931,24 @@ class CreateQueueRequest {
   const CreateQueueRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CreateQueueRequest.create({required int capacity, required int maxWaitSeconds, required String name, required int offerTimeoutSeconds, Destination? overflow}) =>
+  factory CreateQueueRequest.create({required int capacity, HoldMusicRef? holdMusic, required int maxWaitSeconds, required String name, required int offerTimeoutSeconds, Destination? overflow, int? wrapUpSeconds}) =>
       CreateQueueRequest.fromJson(<String, Object?>{
         'capacity': capacity,
+        if (holdMusic != null) 'holdMusic': holdMusic.toJson(),
         'maxWaitSeconds': maxWaitSeconds,
         'name': name,
         'offerTimeoutSeconds': offerTimeoutSeconds,
         if (overflow != null) 'overflow': overflow.toJson(),
+        if (wrapUpSeconds != null) 'wrapUpSeconds': wrapUpSeconds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
   int get capacity => (json['capacity']! as num).toInt();
+
+  /// C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment.
+  HoldMusicRef? get holdMusic => json['holdMusic'] == null ? null : HoldMusicRef.fromJson(json['holdMusic']! as Map<String, Object?>);
 
   int get maxWaitSeconds => (json['maxWaitSeconds']! as num).toInt();
 
@@ -1794,6 +1959,9 @@ class CreateQueueRequest {
 
   /// Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER.
   Destination? get overflow => json['overflow'] == null ? null : Destination.fromJson(json['overflow']! as Map<String, Object?>);
+
+  /// C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up.
+  int? get wrapUpSeconds => (json['wrapUpSeconds'] as num?)?.toInt();
 
   Map<String, Object?> toJson() => json;
 }
@@ -2376,9 +2544,10 @@ class EnterpriseQueueState {
   const EnterpriseQueueState.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory EnterpriseQueueState.create({required String enteredAt, required int? position, required Uuid queueId, required QueueEntryState state}) =>
+  factory EnterpriseQueueState.create({required String enteredAt, HoldMusicRef? holdMusic, required int? position, required Uuid queueId, required QueueEntryState state}) =>
       EnterpriseQueueState.fromJson(<String, Object?>{
         'enteredAt': enteredAt,
+        if (holdMusic != null) 'holdMusic': holdMusic.toJson(),
         'position': position,
         'queueId': queueId,
         'state': state,
@@ -2388,6 +2557,9 @@ class EnterpriseQueueState {
   final Map<String, Object?> json;
 
   String get enteredAt => json['enteredAt']! as String;
+
+  /// C15: the queue's built-in hold music the caller's application plays while it waits (null = none).
+  HoldMusicRef? get holdMusic => json['holdMusic'] == null ? null : HoldMusicRef.fromJson(json['holdMusic']! as Map<String, Object?>);
 
   int? get position => (json['position'] as num?)?.toInt();
 
@@ -2601,6 +2773,25 @@ typedef HistoryDestinationType = String;
 ///
 /// One of: INBOUND, OUTBOUND.
 typedef HistoryDirection = String;
+
+/// C15: a queue's hold music: a built-in choice (customer audio artifacts are not accepted by this deployment).
+class HoldMusicRef {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const HoldMusicRef.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory HoldMusicRef.create({required BuiltinHoldMusic builtin}) =>
+      HoldMusicRef.fromJson(<String, Object?>{
+        'builtin': builtin,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  BuiltinHoldMusic get builtin => json['builtin']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
 
 /// Body of POST /v1/calls/{call_id}/participants/{participant_id}/remove (1.8.0): the acting participant, which must be the Call's host.
 class HostActionRequest {
@@ -3607,11 +3798,12 @@ class Queue {
   const Queue.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Queue.create({required int capacity, required String createdAt, required String? disabledAt, required int maxWaitSeconds, required List<QueueMember> members, required String name, required int offerTimeoutSeconds, required Destination? overflow, required Uuid queueId, required ResourceStatus status, required String updatedAt, required int version, required int waiting}) =>
+  factory Queue.create({required int capacity, required String createdAt, required String? disabledAt, required HoldMusicRef? holdMusic, required int maxWaitSeconds, required List<QueueMember> members, required String name, required int offerTimeoutSeconds, required Destination? overflow, required Uuid queueId, required ResourceStatus status, required String updatedAt, required int version, required int waiting, required int wrapUpSeconds}) =>
       Queue.fromJson(<String, Object?>{
         'capacity': capacity,
         'createdAt': createdAt,
         'disabledAt': disabledAt,
+        'holdMusic': holdMusic?.toJson(),
         'maxWaitSeconds': maxWaitSeconds,
         'members': members.map((e) => e.toJson()).toList(),
         'name': name,
@@ -3622,6 +3814,7 @@ class Queue {
         'updatedAt': updatedAt,
         'version': version,
         'waiting': waiting,
+        'wrapUpSeconds': wrapUpSeconds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
@@ -3632,6 +3825,9 @@ class Queue {
   String get createdAt => json['createdAt']! as String;
 
   String? get disabledAt => json['disabledAt'] as String?;
+
+  /// C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment.
+  HoldMusicRef? get holdMusic => json['holdMusic'] == null ? null : HoldMusicRef.fromJson(json['holdMusic']! as Map<String, Object?>);
 
   int get maxWaitSeconds => (json['maxWaitSeconds']! as num).toInt();
 
@@ -3655,6 +3851,9 @@ class Queue {
   int get version => (json['version']! as num).toInt();
 
   int get waiting => (json['waiting']! as num).toInt();
+
+  /// C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up.
+  int get wrapUpSeconds => (json['wrapUpSeconds']! as num).toInt();
 
   Map<String, Object?> toJson() => json;
 }
@@ -5048,20 +5247,22 @@ class UpdatePolicyRequest {
   Map<String, Object?> toJson() => json;
 }
 
-/// Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline.
+/// Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline. holdMusic null removes the hold music.
 class UpdateQueueRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const UpdateQueueRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory UpdateQueueRequest.create({int? capacity, required int expectedVersion, int? maxWaitSeconds, String? name, int? offerTimeoutSeconds, Destination? overflow}) =>
+  factory UpdateQueueRequest.create({int? capacity, required int expectedVersion, HoldMusicRef? holdMusic, int? maxWaitSeconds, String? name, int? offerTimeoutSeconds, Destination? overflow, int? wrapUpSeconds}) =>
       UpdateQueueRequest.fromJson(<String, Object?>{
         if (capacity != null) 'capacity': capacity,
         'expectedVersion': expectedVersion,
+        if (holdMusic != null) 'holdMusic': holdMusic.toJson(),
         if (maxWaitSeconds != null) 'maxWaitSeconds': maxWaitSeconds,
         if (name != null) 'name': name,
         if (offerTimeoutSeconds != null) 'offerTimeoutSeconds': offerTimeoutSeconds,
         if (overflow != null) 'overflow': overflow.toJson(),
+        if (wrapUpSeconds != null) 'wrapUpSeconds': wrapUpSeconds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
@@ -5072,6 +5273,9 @@ class UpdateQueueRequest {
   /// The version the change was decided on. A different current version is refused with 409 VERSION_CONFLICT and changes nothing.
   int get expectedVersion => (json['expectedVersion']! as num).toInt();
 
+  /// C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment.
+  HoldMusicRef? get holdMusic => json['holdMusic'] == null ? null : HoldMusicRef.fromJson(json['holdMusic']! as Map<String, Object?>);
+
   int? get maxWaitSeconds => (json['maxWaitSeconds'] as num?)?.toInt();
 
   /// Bounded display name (no control characters, never a telephone number).
@@ -5081,6 +5285,9 @@ class UpdateQueueRequest {
 
   /// Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER.
   Destination? get overflow => json['overflow'] == null ? null : Destination.fromJson(json['overflow']! as Map<String, Object?>);
+
+  /// C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up.
+  int? get wrapUpSeconds => (json['wrapUpSeconds'] as num?)?.toInt();
 
   Map<String, Object?> toJson() => json;
 }

@@ -19,6 +19,7 @@ pub mod abuse_reports;
 pub mod abuse_review;
 mod auto_end;
 pub mod blocks;
+mod consultation;
 mod control;
 mod create;
 pub mod enterprise;
@@ -50,6 +51,7 @@ use uuid::Uuid;
 
 pub use auto_end::AutoEndReason;
 pub use blocks::AbuseControls;
+pub use consultation::{ConsultationRequest, ConsultationStarted, ConsultationView};
 pub use control::{ActionAvailability, AvailableActions};
 pub use create::{CreateAppCall, CreatedAppCall};
 pub use invite::InviteParticipants;

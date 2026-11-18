@@ -305,8 +305,16 @@ class UsageExport(unittest.TestCase):
         with patch.object(cr, 'env_of', lambda n: envs[n]), \
                 patch.object(cr, 'apply_activation', lambda op, sha, run, changes, **k: captured.update(changes=changes)):
             cr.activate_usage_export('a' * 40, '1-1', '')
-        self.assertEqual(captured['changes'], [(n, {'CFMEET_USAGE_EXPORT_ENABLED': 'true'})
-                                               for n in ('calling', 'messaging', 'meeting-service')])
+        self.assertEqual(captured['changes'], [
+            ('calling', {'CFMEET_USAGE_EXPORT_ENABLED': 'true', 'CALLING_DIRECT_USAGE_ACCOUNTING': 'on'}),
+            ('messaging', {'CFMEET_USAGE_EXPORT_ENABLED': 'true'}),
+            ('meeting-service', {'CFMEET_USAGE_EXPORT_ENABLED': 'true'})])
+        # P6: Calling's direct-route usage grant belongs to this step, not to the
+        # already-activated webhooks step (certification checks every activated grant).
+        self.assertIn(('activate-usage-export', 'developer-platform', 'calling', ('developer-usage.record',)),
+                      cr.GRANTS)
+        self.assertIn(('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish',)),
+                      cr.GRANTS)
         envs['messaging'] = {}
         with patch.object(cr, 'env_of', lambda n: envs[n]), self.assertRaisesRegex(RuntimeError, 'messaging'):
             cr.activate_usage_export('a' * 40, '1-1', '')

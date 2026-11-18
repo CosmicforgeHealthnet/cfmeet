@@ -1,0 +1,9 @@
+{
+  "name": "Support",
+  "maxWaitSeconds": 600,
+  "offerTimeoutSeconds": 20,
+  "capacity": 50,
+  "holdMusic": {
+    "url": "https://music.example.com/hold.mp3"
+  }
+}

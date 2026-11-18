@@ -159,6 +159,8 @@
         "platform-identity.provision-first-party",
         "platform-identity.bind-organization-services",
         "calling-request.act-for-organization",
+        "calling-organization-member.act",
+        "calling-organization-member.offboard",
         "meeting-organization-events.apply",
         "notifications-event.publish",
         "notifications-user.forward",

@@ -27,6 +27,7 @@ release does; production steps need the release approvals of ADR 0056 §2 / §9.
 | `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED` | no | `true` / `false` (default `false`; requires provisioning): the saga also creates, verifies, renews and (after archive) revokes each organization's Calling and Messaging service bindings (ADR 0058 A2; Platform Access must grant `platform-identity.bind-organization-services`) |
 | `ORGANIZATIONS_EVENT_DESTINATIONS` | no | comma-separated organization-event consumers (today only `cfmeet.meeting-service`, with `CF_MEETING_SERVICE_BASE_URL`); empty: events stay PENDING |
 | `CF_NOTIFICATIONS_BASE_URL` | no | Notification Service internal base URL (https outside local / test). When set, the catalogue events `organizations.*` are published to its I1 (see below); unset (default): nothing is published and nothing is written |
+| `ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED` | no | `true` / `false` (default `false`; gap audit G19): with `CF_NOTIFICATIONS_BASE_URL`, also publish `organizations.organization.{archived, reactivated}` to the organization's ACTIVE members. Keep off until the Notification Service catalogue carries both types (until then an enabled event is recorded `SKIPPED NOT_IN_CATALOGUE`, never sent). Turning it on also needs the pending migration `migration/pending/m20261118_000007_lifecycle_notification_types.rs` released first (kept out of the history for rollback safety); without it the service refuses to start |
 | `CF_SERVICE_AUTH_KEY_ID` | when provisioning, event delivery or notification publication | `kid` of the Organizations signing key |
 | `CF_SERVICE_AUTH_PRIVATE_KEY_FILE` | when provisioning, event delivery or notification publication | PKCS#8 PEM Ed25519 private key file |
 | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (https outside local / test) |
@@ -83,6 +84,16 @@ everything it publishes is new-only.
   and known invitee for revoked / expired; the member for membership events; the new and
   previous owner for `ownership.transferred`; ACTIVE members (chunks of 40) for
   `organization.suspended`.
+* **Lifecycle (gap audit G19, off by default).** With
+  `ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED=true`, `organization.archived` and
+  `organization.reactivated` are discovered too (`organizations.organization.archived` /
+  `.reactivated`, data `organizationId`, the organization's ACTIVE members in chunks of
+  40, never the actor). Notification Service owner prerequisite: both catalogue types
+  (category `ORGANIZATION_UPDATES`, subject `ORGANIZATION`, required data
+  `organizationId`, templates and the `OPEN_ORGANIZATION` action like
+  `organizations.organization.suspended`) in `packages/notification-client`, the
+  notification event contracts and the service catalogue. Before that, an enabled event
+  is recorded `SKIPPED NOT_IN_CATALOGUE` and nothing is sent.
 * **Relay.** Batches of ≤ 100 to `POST /internal/v1/notification-events`
   (audience `cfmeet.notifications`, permission `notifications-event.publish`; the
   Notification Service trust bundle must grant it to `cfmeet.organizations`). ACCEPTED /

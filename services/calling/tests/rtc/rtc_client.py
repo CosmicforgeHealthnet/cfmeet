@@ -6,7 +6,10 @@ server actually allows — it never decides anything itself.
 
 Commands:
   {"cmd": "connect", "url": ..., "token": ...}         -> {"ok": true, "identity": ...}
-  {"cmd": "publish", "kind": "audio"|"video"}          -> {"ok": bool, "error"?: ...}
+  {"cmd": "publish", "kind": "audio"|"video"|"screen"} -> {"ok": bool, "error"?: ...}
+                                                          (screen: a video track with the
+                                                           SCREEN_SHARE source)
+  {"cmd": "sources"}                                   -> {"ok": true, "sources": [TrackSource, ...]}
   {"cmd": "status"}                                    -> {"connected": bool, "subscribed": [...],
                                                            "remote": [...], "disconnect_reason": ...,
                                                            "can_publish": bool, "can_subscribe": bool}
@@ -79,7 +82,8 @@ class Client:
     def _wire(self, room):
         @room.on("track_subscribed")
         def _on_sub(track, publication, participant):
-            self.subscribed.append({"kind": int(track.kind), "from": participant.identity})
+            self.subscribed.append({"kind": int(track.kind), "from": participant.identity,
+                                    "source": int(publication.source)})
 
         @room.on("disconnected")
         def _on_disc(reason):
@@ -142,9 +146,12 @@ class Client:
                     await asyncio.sleep(0.005)
         else:
             source = rtc.VideoSource(64, 64)
-            track = rtc.LocalVideoTrack.create_video_track("cert-cam", source)
+            screen = kind == "screen"
+            track = rtc.LocalVideoTrack.create_video_track(
+                "cert-screen" if screen else "cert-cam", source)
             opts = rtc.TrackPublishOptions()
-            opts.source = rtc.TrackSource.SOURCE_CAMERA
+            opts.source = (rtc.TrackSource.SOURCE_SCREENSHARE if screen
+                           else rtc.TrackSource.SOURCE_CAMERA)
 
             async def feed():
                 frame = rtc.VideoFrame(64, 64, rtc.VideoBufferType.RGBA, bytearray(64 * 64 * 4))
