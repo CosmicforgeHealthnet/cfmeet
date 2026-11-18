@@ -67,10 +67,14 @@ pub enum MeetingCategory {
     MeetingInvitation,
     MeetingNotification,
     OrganizationInvitation,
+    /// The account notices (welcome, new sign-in, email-in-use, email-changed) that the
+    /// legacy ledger records under `AUTH_WELCOME` / `NOTIFICATION` (owner decision A,
+    /// roadmap N12 follow-up). CRITICAL.
+    AccountNotices,
 }
 
 impl MeetingCategory {
-    pub const ALL: [MeetingCategory; 8] = [
+    pub const ALL: [MeetingCategory; 9] = [
         MeetingCategory::AuthVerification,
         MeetingCategory::AuthPasswordReset,
         MeetingCategory::SecurityDeviceStepUp,
@@ -79,6 +83,7 @@ impl MeetingCategory {
         MeetingCategory::MeetingInvitation,
         MeetingCategory::MeetingNotification,
         MeetingCategory::OrganizationInvitation,
+        MeetingCategory::AccountNotices,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -91,6 +96,7 @@ impl MeetingCategory {
             MeetingCategory::MeetingInvitation => "MEETING_INVITATION",
             MeetingCategory::MeetingNotification => "MEETING_NOTIFICATION",
             MeetingCategory::OrganizationInvitation => "ORGANIZATION_INVITATION",
+            MeetingCategory::AccountNotices => "ACCOUNT_NOTICES",
         }
     }
 
@@ -107,6 +113,7 @@ impl MeetingCategory {
                 | MeetingCategory::SecurityDeviceStepUp
                 | MeetingCategory::SecurityPasswordChanged
                 | MeetingCategory::SecurityDeviceLinked
+                | MeetingCategory::AccountNotices
         )
     }
 }
@@ -1009,7 +1016,8 @@ mod tests {
                 "AUTH_PASSWORD_RESET",
                 "SECURITY_DEVICE_STEP_UP",
                 "SECURITY_PASSWORD_CHANGED",
-                "SECURITY_DEVICE_LINKED"
+                "SECURITY_DEVICE_LINKED",
+                "ACCOUNT_NOTICES"
             ]
         );
         assert!(validate_key("").is_err());

@@ -488,7 +488,13 @@ async fn finish_sign_in(
         let details = crate::services::passwordless::request_details(&state.auth_policy, headers);
         match state
             .email_service
-            .send_new_sign_in_alert(&user.email, &user.username, issued.session_id, &details)
+            .send_new_sign_in_alert(
+                &user.email,
+                &user.username,
+                user.id,
+                issued.session_id,
+                &details,
+            )
             .await
         {
             Ok(_) => inc(&OM.auth_new_sign_in_alerts),

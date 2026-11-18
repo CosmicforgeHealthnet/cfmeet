@@ -66,12 +66,13 @@ macro_rules! some {
     };
 }
 
-const ALL: [MeetingCategory; 5] = [
+const ALL: [MeetingCategory; 6] = [
     MeetingCategory::AuthVerification,
     MeetingCategory::AuthPasswordReset,
     MeetingCategory::SecurityDeviceStepUp,
     MeetingCategory::SecurityPasswordChanged,
     MeetingCategory::SecurityDeviceLinked,
+    MeetingCategory::AccountNotices,
 ];
 
 /// The process's CRITICAL-lane keys (as `main` installs them from the environment).
@@ -1946,4 +1947,538 @@ async fn settled_rows_are_purged_after_retention() {
         0
     );
     assert!(h.decision(&key).await.6);
+}
+
+// ------------------------------------------------------------------- account notices
+
+/// The legacy email one account notice enqueue point records (what `LEGACY_ONLY` writes and
+/// what a NEW decision's `fallback_sealed` must hold, byte for byte).
+struct LegacyNotice {
+    key: String,
+    category: &'static str,
+    to: String,
+    name: Option<String>,
+    subject: &'static str,
+    /// Renderings accepted for the body (the email-changed notice shows the minute of the
+    /// change: the minute before and after the call).
+    renderings: Vec<backend::templates::email::EmailTemplate>,
+    event_type: &'static str,
+}
+
+/// The five account notice enqueue points (+ the support-assisted email change), through
+/// their real code: `send_welcome_email`, `send_new_sign_in_alert`,
+/// `send_email_in_use_notice` and `email_changed_notices_on` (self-service with the undo
+/// token, support-assisted without), the last on the caller's transaction as
+/// `email_change` does. Returns the legacy emails they must record.
+async fn account_notices(
+    h: &H,
+    user: &User,
+    username: &str,
+    token: &str,
+) -> (Vec<LegacyNotice>, Vec<String>) {
+    use backend::{
+        services::email::{mask_email, sessions_link, undo_link, EMAIL_CHANGE_UNDO_WINDOW_TEXT},
+        templates::email::{
+            email_changed_new_address_email, email_changed_old_address_email,
+            email_in_use_notice_email, new_sign_in_email, welcome_email, RequestDetails,
+        },
+    };
+    let es = &h.app.state.email_service;
+    let app_url = es.app_url().to_string();
+    let details = RequestDetails {
+        client: Some("TestBrowser/1.0".into()),
+        address: Some("102.89.x.x".into()),
+        when_utc: "2026-11-17 12:00".into(),
+    };
+    let session = Uuid::new_v4();
+    let taken = format!(
+        "taken-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let new_address = format!(
+        "nadia.new-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let support_address = format!(
+        "support-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let (change, support) = (Uuid::new_v4(), Uuid::new_v4());
+
+    es.send_welcome_email(&user.email, username, user.id)
+        .await
+        .unwrap();
+    es.send_new_sign_in_alert(&user.email, username, user.id, session, &details)
+        .await
+        .unwrap();
+    es.send_email_in_use_notice(&taken).await.unwrap();
+    let before = Utc::now();
+    let txn = h.db().begin().await.unwrap();
+    backend::services::email::email_changed_notices_on(
+        &txn,
+        &user.email,
+        &new_address,
+        username,
+        user.id,
+        change,
+        &app_url,
+        Some(token),
+    )
+    .await
+    .unwrap();
+    backend::services::email::email_changed_notices_on(
+        &txn,
+        &new_address,
+        &support_address,
+        username,
+        user.id,
+        support,
+        &app_url,
+        None,
+    )
+    .await
+    .unwrap();
+    txn.commit().await.unwrap();
+    let after = Utc::now();
+    let minutes = |f: &dyn Fn(&str) -> backend::templates::email::EmailTemplate| {
+        let a = before.format("%Y-%m-%d %H:%M").to_string();
+        let b = after.format("%Y-%m-%d %H:%M").to_string();
+        if a == b {
+            vec![f(&a)]
+        } else {
+            vec![f(&a), f(&b)]
+        }
+    };
+    let undo = undo_link(&app_url, token);
+    let notices = vec![
+        LegacyNotice {
+            key: format!("welcome:{}", user.id),
+            category: "AUTH_WELCOME",
+            to: user.email.clone(),
+            name: Some(username.into()),
+            subject: "Welcome to CF Meet",
+            renderings: vec![welcome_email(username, &app_url)],
+            event_type: "account.welcome.requested",
+        },
+        LegacyNotice {
+            key: format!("new-sign-in:{session}"),
+            category: "NOTIFICATION",
+            to: user.email.clone(),
+            name: Some(username.into()),
+            subject: "New sign-in to your CF Meet account",
+            renderings: vec![new_sign_in_email(
+                username,
+                &details,
+                &sessions_link(&app_url),
+            )],
+            event_type: "account.security.new-sign-in",
+        },
+        LegacyNotice {
+            key: format!(
+                "email-in-use:{}:{}",
+                email_delivery::recipient_hash(&taken),
+                before.format("%Y%m%d%H")
+            ),
+            category: "NOTIFICATION",
+            to: taken.clone(),
+            name: None,
+            subject: "Email change attempt on CF Meet",
+            renderings: vec![email_in_use_notice_email()],
+            event_type: "account.security.email-in-use",
+        },
+        LegacyNotice {
+            key: format!("email-changed:old:{change}"),
+            category: "NOTIFICATION",
+            to: user.email.clone(),
+            name: Some(username.into()),
+            subject: "Your CF Meet email address was changed",
+            renderings: minutes(&|when| {
+                email_changed_old_address_email(
+                    username,
+                    &mask_email(&new_address),
+                    when,
+                    Some(&undo),
+                    EMAIL_CHANGE_UNDO_WINDOW_TEXT,
+                )
+            }),
+            event_type: "account.security.email-changed",
+        },
+        LegacyNotice {
+            key: format!("email-changed:new:{change}"),
+            category: "NOTIFICATION",
+            to: new_address.clone(),
+            name: Some(username.into()),
+            subject: "Your CF Meet email address was updated",
+            renderings: vec![email_changed_new_address_email(username)],
+            event_type: "account.security.email-changed",
+        },
+        LegacyNotice {
+            key: format!("email-changed:old:{support}"),
+            category: "NOTIFICATION",
+            to: new_address.clone(),
+            name: Some(username.into()),
+            subject: "Your CF Meet email address was changed",
+            renderings: minutes(&|when| {
+                email_changed_old_address_email(
+                    username,
+                    &mask_email(&support_address),
+                    when,
+                    None,
+                    EMAIL_CHANGE_UNDO_WINDOW_TEXT,
+                )
+            }),
+            event_type: "account.security.email-changed",
+        },
+        LegacyNotice {
+            key: format!("email-changed:new:{support}"),
+            category: "NOTIFICATION",
+            to: support_address.clone(),
+            name: Some(username.into()),
+            subject: "Your CF Meet email address was updated",
+            renderings: vec![email_changed_new_address_email(username)],
+            event_type: "account.security.email-changed",
+        },
+    ];
+    // What must never be readable outside the sealed parts.
+    let secrets = vec![
+        user.email.clone(),
+        taken,
+        new_address.clone(),
+        support_address,
+        mask_email(&new_address),
+        token.to_string(),
+        "TestBrowser".to_string(),
+        "102.89".to_string(),
+    ];
+    (notices, secrets)
+}
+
+/// Every account notice enqueue point (`ACCOUNT_NOTICES`): under FENCED_NEW each is decided
+/// NEW with its catalogue event and `fallback_sealed` equal to the legacy email; the undo
+/// token, the masked new address, every address and the request details appear nowhere in
+/// the envelope's clear part, in the outbox row outside `sealed` / `fallback_sealed`, or in
+/// the decision. Under LEGACY_ONLY each records exactly today's ledger row and nothing
+/// else.
+#[tokio::test]
+async fn every_account_notice_enqueue_point_is_fenced() {
+    let h = some!(H::new().await);
+    let username = "ada";
+    let token = "Undo0123456789abcdefghijklmnopqrstuvwxyzAB";
+    for mode in ["LEGACY_ONLY", "FENCED_NEW"] {
+        h.set_all(mode, "AUTO").await;
+        let user = h
+            .app
+            .user(&format!("notices-{}", mode.to_ascii_lowercase()))
+            .await;
+        let (notices, secrets) = account_notices(&h, &user, username, token).await;
+        assert_eq!(notices.len(), 7);
+        for n in &notices {
+            let key = &n.key;
+            if mode == "LEGACY_ONLY" {
+                assert_eq!(h.emails_for(key).await, 1, "{key}");
+                assert_eq!(
+                    h.count(&format!(
+                        "SELECT count(*) FROM notification_route_decisions WHERE idempotency_key = '{key}'"
+                    ))
+                    .await,
+                    0,
+                    "LEGACY_ONLY records no decision: {key}"
+                );
+                let r = h
+                    .db()
+                    .query_one(Statement::from_sql_and_values(
+                        DbBackend::Postgres,
+                        "SELECT category, recipient, recipient_name, subject, text_body, html_body
+                           FROM email_deliveries WHERE idempotency_key = $1",
+                        [key.clone().into()],
+                    ))
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(r.try_get::<String>("", "category").unwrap(), n.category);
+                assert_eq!(r.try_get::<String>("", "recipient").unwrap(), n.to);
+                assert_eq!(
+                    r.try_get::<Option<String>>("", "recipient_name").unwrap(),
+                    n.name
+                );
+                assert_eq!(r.try_get::<String>("", "subject").unwrap(), n.subject);
+                let (text, html): (String, String) = (
+                    r.try_get("", "text_body").unwrap(),
+                    r.try_get("", "html_body").unwrap(),
+                );
+                assert!(
+                    n.renderings
+                        .iter()
+                        .any(|t| t.text == text && t.html == html),
+                    "today's rendering, byte for byte: {key}"
+                );
+                continue;
+            }
+            let (id, route, reason, ..) = h.decision(key).await;
+            assert_eq!(
+                (route.as_str(), reason.as_str()),
+                ("NEW", "ROUTED"),
+                "{key}"
+            );
+            assert_eq!(h.emails_for(key).await, 0, "never both: {key}");
+            let (state, shadow, event, _, _) = h.outbox(id).await;
+            assert_eq!((state.as_str(), shadow), ("PENDING", false));
+            assert_eq!(event["eventType"], n.event_type, "{key}");
+            validate(
+                &serde_json::from_value(event.clone()).unwrap(),
+                Some(MEETING),
+            )
+            .unwrap();
+            assert_eq!(
+                event["recipients"][0]["ref"],
+                owner::email_principal_ref(&n.to),
+                "{key}"
+            );
+            assert_eq!(event["delivery"]["priority"], "CRITICAL");
+            assert_eq!(event["delivery"]["idempotencyKey"], *key);
+            assert!(event["sealed"]["ct"].is_string(), "{key}");
+            match n.event_type {
+                "account.security.email-in-use" => {
+                    assert!(event.get("subject").is_none(), "never names the account")
+                }
+                _ => assert_eq!(event["subject"]["id"], json!(user.id), "{key}"),
+            }
+            match n.event_type {
+                "account.security.new-sign-in" => {
+                    assert_eq!(
+                        event["data"],
+                        json!({ "requestedAt": "2026-11-17T12:00:00Z" })
+                    )
+                }
+                "account.security.email-changed" => {
+                    let side = if key.starts_with("email-changed:old:") {
+                        "OLD"
+                    } else {
+                        "NEW"
+                    };
+                    assert_eq!(event["data"]["side"], side);
+                    assert!(event["data"]["changedAt"]
+                        .as_str()
+                        .unwrap()
+                        .ends_with(":00Z"));
+                    assert_eq!(event["data"].as_object().unwrap().len(), 2);
+                }
+                _ => assert_eq!(event["data"], json!({})),
+            }
+            // The fallback is exactly the LEGACY_ONLY email.
+            let opened = h
+                .keys
+                .fallback
+                .as_ref()
+                .unwrap()
+                .open(id, &h.fallback_blob(id).await)
+                .unwrap();
+            assert_eq!(opened.category, n.category, "{key}");
+            assert_eq!(&opened.idempotency_key, key);
+            assert_eq!(opened.to, n.to);
+            assert_eq!(opened.to_name, n.name);
+            assert_eq!(opened.subject, n.subject);
+            assert!(
+                n.renderings
+                    .iter()
+                    .any(|t| t.text == opened.text && t.html == opened.html),
+                "{key}"
+            );
+            if key.starts_with("email-changed:old:") && opened.text.contains("undo the change") {
+                assert!(opened
+                    .text
+                    .contains(&format!("/auth/email-change/undo?token={token}")));
+            }
+            // Nothing readable outside the sealed parts: the envelope's clear part, every
+            // other column of the outbox row, the decision row.
+            let row = h
+                .db()
+                .query_one(Statement::from_sql_and_values(
+                    DbBackend::Postgres,
+                    "SELECT ((to_jsonb(o) - 'fallback_sealed' - 'event')
+                             || jsonb_build_object('event', o.event - 'sealed'))::text AS clear,
+                            (SELECT to_jsonb(d)::text FROM notification_route_decisions d
+                              WHERE d.decision_id = o.decision_id) AS decision
+                       FROM account_notification_outbox o WHERE o.decision_id = $1",
+                    [id.into()],
+                ))
+                .await
+                .unwrap()
+                .unwrap();
+            let clear: String = row.try_get("", "clear").unwrap();
+            let decision: String = row.try_get("", "decision").unwrap();
+            for secret in &secrets {
+                assert!(!clear.contains(secret.as_str()), "{key}: {secret} in clear");
+                assert!(
+                    !decision.contains(secret.as_str()),
+                    "{key}: {secret} in the decision"
+                );
+            }
+            assert!(!clear.contains("***"), "{key}: a masked address in clear");
+        }
+    }
+    // The fenced category is ACCOUNT_NOTICES; every envelope is valid at I1.
+    assert_eq!(
+        h.count("SELECT count(*) FROM notification_route_decisions WHERE category = 'ACCOUNT_NOTICES' AND route = 'NEW'")
+            .await,
+        7
+    );
+    assert_eq!(h.relay(Utc::now()).await.acked, 7);
+    assert!(h.i1.invalid().is_empty(), "{:?}", h.i1.invalid());
+}
+
+/// Account notices in FENCED_NEW / AUTO: the welcome is sent by the service under its X6
+/// lease (X7 completes it; the legacy path never sends it); the email-changed notices are
+/// never acknowledged, so AUTO fails them over after 60 s and the legacy worker sends the
+/// identical legacy emails — the undo link included — exactly once, and the service never
+/// can.
+#[tokio::test]
+async fn account_notices_go_new_and_fail_over_with_the_identical_email() {
+    use backend::services::email::{email_changed_notices_on, undo_link};
+    let h = some!(H::new().await);
+    h.set_all("FENCED_NEW", "AUTO").await;
+    let user = h.app.user("notices-fo").await;
+    let es = &h.app.state.email_service;
+    es.send_welcome_email(&user.email, "ada", user.id)
+        .await
+        .unwrap();
+    let welcome_key = format!("welcome:{}", user.id);
+    let (welcome_id, route, ..) = h.decision(&welcome_key).await;
+    assert_eq!(route, "NEW");
+    // A repeat is sticky: the same decision, nothing new.
+    es.send_welcome_email(&user.email, "ada", user.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        h.count("SELECT count(*) FROM account_notification_outbox")
+            .await,
+        1
+    );
+    assert_eq!(h.relay(Utc::now()).await.acked, 1);
+    assert_eq!(h.service_attempt(welcome_id).await, "GRANTED");
+    assert!(h.decision(&welcome_key).await.6, "completed");
+
+    // The email change: the service never acknowledges either notice.
+    h.i1.down(Some(503));
+    let new_address = format!(
+        "moved-{}@example.com",
+        &Uuid::new_v4().simple().to_string()[..8]
+    );
+    let change = Uuid::new_v4();
+    let token = "Undo0123456789abcdefghijklmnopqrstuvwxyzAB";
+    let txn = h.db().begin().await.unwrap();
+    email_changed_notices_on(
+        &txn,
+        &user.email,
+        &new_address,
+        "ada",
+        user.id,
+        change,
+        es.app_url(),
+        Some(token),
+    )
+    .await
+    .unwrap();
+    txn.commit().await.unwrap();
+    let old_key = format!("email-changed:old:{change}");
+    let new_key = format!("email-changed:new:{change}");
+    let (old_id, ..) = h.decision(&old_key).await;
+    let (new_id, ..) = h.decision(&new_key).await;
+    let key = h.keys.fallback.as_ref().unwrap();
+    let old_legacy = key.open(old_id, &h.fallback_blob(old_id).await).unwrap();
+    let new_legacy = key.open(new_id, &h.fallback_blob(new_id).await).unwrap();
+    assert_eq!(h.relay(later(30)).await.failed_over, 0);
+    assert_eq!(h.relay(later(61)).await.failed_over, 2);
+    for key in [&old_key, &new_key] {
+        let (_, route, reason, ..) = h.decision(key).await;
+        assert_eq!((route.as_str(), reason.as_str()), ("OLD", "AUTO_FAILOVER"));
+        assert_eq!(h.emails_for(key).await, 1);
+    }
+    // The secrets are erased from the settled rows.
+    for id in [old_id, new_id] {
+        let (_, _, event, len, settled) = h.outbox(id).await;
+        assert!(settled && len == 0 && event.get("sealed").is_none());
+    }
+    h.i1.down(None);
+    assert_eq!(h.service_attempt(old_id).await, "REVOKED");
+    assert_eq!(h.service_attempt(new_id).await, "REVOKED");
+    assert_eq!(h.relay(later(7200)).await.failed_over, 0);
+
+    let provider = Arc::new(RecordingProvider::default());
+    let worker = EmailWorker::new(h.app.state.db.clone(), provider.clone(), settings());
+    worker.tick(Utc::now()).await.unwrap();
+    worker.tick(Utc::now()).await.unwrap();
+    let mut sent = provider.sent();
+    sent.sort_by(|a, b| a.2.cmp(&b.2));
+    assert_eq!(
+        sent.len(),
+        2,
+        "only the failed-over notices reach the legacy path, once"
+    );
+    assert_eq!(
+        (sent[0].1.as_str(), sent[0].2.as_str()),
+        (
+            user.email.as_str(),
+            "Your CF Meet email address was changed"
+        )
+    );
+    assert_eq!(
+        sent[0].3, old_legacy.text,
+        "the legacy email, byte for byte"
+    );
+    assert!(
+        sent[0].3.contains(&undo_link(es.app_url(), token)),
+        "the same undo link"
+    );
+    assert!(sent[0].3.contains("m***@example.com"));
+    assert_eq!(
+        (sent[1].1.as_str(), sent[1].2.as_str()),
+        (
+            new_address.as_str(),
+            "Your CF Meet email address was updated"
+        )
+    );
+    assert_eq!(sent[1].3, new_legacy.text);
+    assert_eq!(h.service_sent(welcome_id), 1);
+    assert_eq!((h.service_sent(old_id), h.service_sent(new_id)), (0, 0));
+    assert_eq!(h.emails_for(&welcome_key).await, 0);
+}
+
+/// A suppressed recipient: the welcome (`AUTH_WELCOME`, suppressible today) is refused in
+/// a fenced category exactly as `LEGACY_ONLY` refuses it, and nothing is decided.
+#[tokio::test]
+async fn a_suppressed_welcome_is_refused_as_today() {
+    let h = some!(H::new().await);
+    let user = h.app.user("suppressed").await;
+    h.exec(
+        "INSERT INTO email_deliveries (id, category, idempotency_key, recipient_hash, subject, status)
+         VALUES ($1, 'NOTIFICATION', $2, $3, 's', 'COMPLAINED')",
+        vec![
+            Uuid::new_v4().into(),
+            format!("complaint:{}", user.id).into(),
+            email_delivery::recipient_hash(&user.email).into(),
+        ],
+    )
+    .await;
+    for mode in ["LEGACY_ONLY", "FENCED_NEW"] {
+        h.set_all(mode, "AUTO").await;
+        let err = h
+            .app
+            .state
+            .email_service
+            .send_welcome_email(&user.email, "ada", user.id)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(email_delivery::RECIPIENT_SUPPRESSED),
+            "{mode}: {err}"
+        );
+    }
+    assert_eq!(
+        h.count("SELECT count(*) FROM notification_route_decisions")
+            .await,
+        0
+    );
+    assert_eq!(h.emails_for(&format!("welcome:{}", user.id)).await, 0);
 }

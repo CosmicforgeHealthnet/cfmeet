@@ -45,6 +45,7 @@ mod m20261118_000002_account_mfa;
 mod m20261118_000003_account_avatars;
 mod m20261118_000004_email_calendar_invite;
 mod m20261118_000005_chat_message_edits;
+mod m20261118_000006_account_notices;
 
 pub mod phase2_backfill;
 
@@ -424,6 +425,7 @@ pub async fn lifecycle_delivery_ready<C: sea_orm_migration::sea_orm::ConnectionT
 /// startup and reports `routingProtocol` only once it is applied. Second migration (N7 /
 /// N11): Meeting's publications of its STANDARD categories to the Notification Service.
 /// Third migration (N12): the Account CRITICAL lane on `account_notification_outbox`.
+/// Fourth (N12 follow-up): the CRITICAL category `ACCOUNT_NOTICES` and its ledger mapping.
 pub struct NotificationFenceMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for NotificationFenceMigrator {
@@ -436,6 +438,9 @@ impl MigratorTrait for NotificationFenceMigrator {
             // N12: the Account CRITICAL lane (shadow copies, I1 answers, settlement and the
             // DEAD state of account_notification_outbox).
             Box::new(m20261118_000001_critical_lane::Migration),
+            // N12 follow-up (owner decision A): the CRITICAL category ACCOUNT_NOTICES
+            // (welcome, new sign-in, email-in-use and email-changed notices).
+            Box::new(m20261118_000006_account_notices::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {

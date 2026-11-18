@@ -1,5 +1,5 @@
 //! Service-side routing of the closed event catalogue (Document 4 §5.2, §7): for each of
-//! the 34 inbound types, the routing category (the unit of the cutover: one row per
+//! the 38 inbound types, the routing category (the unit of the cutover: one row per
 //! channel in `notif_routing`, and the producer-side `notification_routing_state`
 //! category), the user preference category, the channels, the template, the inbox action
 //! and the email ledger category.
@@ -536,6 +536,57 @@ pub const ROUTES: &[TypeRoute] = &[
             None,
         )
     },
+    // Account notices (contract 1.3.0, owner decision A): one routing category,
+    // ACCOUNT_NOTICES (the Meeting fence category that routes them), email only, SECURITY;
+    // the ledger categories are the ones Meeting records them under.
+    TypeRoute {
+        email_category: Some("AUTH_WELCOME"),
+        ..r(
+            "account.welcome.requested",
+            "ACCOUNT_NOTICES",
+            C::Security,
+            &[E],
+            "account.welcome",
+            "NONE",
+            None,
+        )
+    },
+    TypeRoute {
+        email_category: Some("NOTIFICATION"),
+        ..r(
+            "account.security.new-sign-in",
+            "ACCOUNT_NOTICES",
+            C::Security,
+            &[E],
+            "account.new_sign_in",
+            "NONE",
+            None,
+        )
+    },
+    TypeRoute {
+        email_category: Some("NOTIFICATION"),
+        ..r(
+            "account.security.email-in-use",
+            "ACCOUNT_NOTICES",
+            C::Security,
+            &[E],
+            "account.email_in_use",
+            "NONE",
+            None,
+        )
+    },
+    TypeRoute {
+        email_category: Some("NOTIFICATION"),
+        ..r(
+            "account.security.email-changed",
+            "ACCOUNT_NOTICES",
+            C::Security,
+            &[E],
+            "account.email_changed",
+            "NONE",
+            None,
+        )
+    },
     TypeRoute {
         email_category: Some("DEVELOPER_PLATFORM"),
         ..r(
@@ -633,7 +684,7 @@ mod tests {
             .filter(|s| !s.is_control())
             .map(|s| s.event_type)
             .collect();
-        assert_eq!(inbound.len(), 34);
+        assert_eq!(inbound.len(), 38);
         for t in &inbound {
             assert_eq!(
                 ROUTES.iter().filter(|r| r.event_type == *t).count(),
@@ -641,7 +692,7 @@ mod tests {
                 "{t}"
             );
         }
-        assert_eq!(ROUTES.len(), 34);
+        assert_eq!(ROUTES.len(), 38);
     }
 
     #[test]
@@ -671,7 +722,12 @@ mod tests {
 
     #[test]
     fn routing_rows_match_the_migration_seed() {
-        let seed = include_str!("../migration/src/m20261116_000001_notifications_foundation.rs");
+        // The foundation seed, then the rows later migrations add (ACCOUNT_NOTICES).
+        let seed = [
+            include_str!("../migration/src/m20261116_000001_notifications_foundation.rs"),
+            include_str!("../migration/src/m20261118_000001_account_notices.rs"),
+        ]
+        .concat();
         let rows = routing_rows();
         for (cat, ch) in &rows {
             assert!(
