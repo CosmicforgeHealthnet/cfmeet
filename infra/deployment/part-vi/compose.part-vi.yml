@@ -97,6 +97,9 @@ services:
       # rediss:// is required in staging / production (startup refuses redis://).
       API_GATEWAY_REDIS_URL: ${API_GATEWAY_REDIS_URL:?rediss://...}
       API_GATEWAY_REDIS_TIMEOUT_MS: "250"
+      # P7: per-token ceiling of end-user / device traffic (requests per token per minute;
+      # 0 turns it off).
+      API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE: ${API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE:-600}
       # Rollout controls (Chapter 21.2) — all off: every customer path is 404.
       API_GATEWAY_PUBLIC_ROUTING_ENABLED: "false"
       API_GATEWAY_WEBSOCKETS_ENABLED: "false"

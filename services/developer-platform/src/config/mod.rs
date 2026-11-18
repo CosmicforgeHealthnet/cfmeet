@@ -26,6 +26,7 @@
 //! | `DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_REMOTE_LIMIT` | no | ids of each kind verified at Platform Access per report (0 = local checks only, max 100000; default 1000) |
 //! | `DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE` | no | who notifies the applicant of a production-access decision: `legacy` (default: nothing is published; the operator-console email through the Meeting Service stays the only notice) or `notification-service` (`developer-platform.production-access.decided` is published to the Notification Service — switch the operator-console email off at the same time, never both). Effective only with `CF_NOTIFICATIONS_BASE_URL` |
 //! | `DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE` | no | `notification-service` (default) or `off`: the worker publishes `developer-platform.credential.expiring-soon` / `.expired` to the Notification Service (no other user notice exists for them; customer webhooks are unaffected). Effective only with `CF_NOTIFICATIONS_BASE_URL`, Platform Access and `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED` (same lead times, lookback, interval and environment bound) |
+//! | `DEVELOPER_PLATFORM_RETENTION_ENABLED` | no | worker: bounded retention purge of webhook, API usage, rejection and activity history (default `true`; per-class bounds `DEVELOPER_PLATFORM_RETENTION_*_DAYS`, see [`crate::retention`]) |
 //!
 //! Without `CF_NOTIFICATIONS_BASE_URL` nothing is published to the Notification Service,
 //! whatever the two routes say (today's behaviour). The API process enqueues production-

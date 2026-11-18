@@ -29,6 +29,9 @@ pub struct PeriodicJobs {
     /// Notification Service N7 / N11 (None: `CF_NOTIFICATIONS_BASE_URL` unset — nothing is
     /// enqueued, relayed or maintained).
     pub notifications: Option<NotificationJobs>,
+    /// P9: bounded retention purge (default here: off; the worker binary reads
+    /// `DEVELOPER_PLATFORM_RETENTION_*`, on by default).
+    pub retention: crate::retention::RetentionSettings,
 }
 
 impl Default for PeriodicJobs {
@@ -38,6 +41,7 @@ impl Default for PeriodicJobs {
             reference_reconciliation_interval: None,
             reference_reconciliation_remote_limit: 0,
             notifications: None,
+            retention: crate::retention::RetentionSettings::disabled(),
         }
     }
 }
@@ -437,6 +441,8 @@ pub async fn run_pass_with_jobs(
         }
         notification_publication_pass(db, n.sink.as_ref(), Utc::now()).await;
     }
+    // P9: bounded retention purge (at most once per hour across instances).
+    crate::retention::retention_pass(db, &jobs.retention, Utc::now()).await;
     // Section 55: approvals not activated in time.
     match crate::control::production::expire_due(db).await {
         Ok(0) => {}
