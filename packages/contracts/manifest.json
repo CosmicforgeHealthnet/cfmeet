@@ -882,14 +882,14 @@
     },
     {
       "id": "cfmeet.developer-platform.webhooks",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "json-schema",
       "path": "platform-developer/webhooks/v1.schema.json",
       "owner": "developer-platform",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Section 53 central customer webhooks: subscription requests and views (Calling's Part G §68 customer shapes, unchanged, plus the Developer Console view with environment, origin and endpoint health), the public event catalog (Part G families plus meeting, participant, artifact, number, credential and production-access), delivery records (FAILED dead letter, SHADOW in shadow mode), attempt history (status / error class only), the signed event body and the internal ingestion acknowledgement. Never a signing secret after create / rotation, never a provider, storage or content field. 1.1.0: meeting.created, conferenceId (meeting events read by meetings.read)."
+      "description": "Section 53 central customer webhooks: subscription requests and views (Calling's Part G §68 customer shapes, unchanged, plus the Developer Console view with environment, origin and endpoint health), the public event catalog (Part G families plus meeting, participant, artifact, number, credential and production-access), delivery records (FAILED dead letter, SHADOW in shadow mode), attempt history (status / error class only), the signed event body and the internal ingestion acknowledgement. Never a signing secret after create / rotation, never a provider, storage or content field. 1.1.0: meeting.created, conferenceId (meeting events read by meetings.read). 1.2.0: Calling's C11 events (call.kind_changed, call.screen_share_started / call.screen_share_stopped, call.participant_added, recording.started / recording.stopped / recording.failed) and data keys fromKind, toKind, stopReason, so the catalogue stays Calling's."
     },
     {
       "id": "cfmeet.developer-platform.http-api",
