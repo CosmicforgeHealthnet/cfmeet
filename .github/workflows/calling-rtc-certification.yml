@@ -5,8 +5,10 @@ name: Calling RTC certification
 # deterministic naming, join-only credentials, server-side admission / permission
 # updates, voice / video / group calls, hold / resume at the provider, session removal
 # and stale re-entry, room termination, forged-webhook rejection, reconciliation and
-# unknown-participant quarantine (services/calling/tests/rtc_certification.rs), plus
-# the shared provider contract (tests/common/provider_contract.rs).
+# unknown-participant quarantine, in-call collaboration — VOICE -> VIDEO upgrade, screen
+# share and adding a participant to a one-to-one Call (gap C20) —
+# (services/calling/tests/rtc_certification.rs), plus the shared provider contract
+# (tests/common/provider_contract.rs).
 #
 # Security closure (ADR 0007 §5): every client media connection goes through Calling's
 # media connection gateway. The suite captures a REAL server-refreshed privileged token
@@ -140,6 +142,11 @@ jobs:
             || { echo "::error::the enterprise transfer certification did not run"; exit 1; }
           grep -q '^enterprise failed transfer certified' "$RUNNER_TEMP/cert.log" \
             || { echo "::error::the failed-transfer certification did not run"; exit 1; }
+          # Gap C20: in-call collaboration on real media (and passed above).
+          for feature in "C5 voice -> video upgrade" "C6 screen share" "C7 add participant"; do
+            grep -q "^rtc certification: $feature certified" "$RUNNER_TEMP/cert.log" \
+              || { echo "::error::the $feature certification did not run"; exit 1; }
+          done
           grep -q 'test real_livekit_certification ... ok' "$RUNNER_TEMP/cert.log"
 
       - name: LiveKit logs

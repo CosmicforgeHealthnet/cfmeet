@@ -21,6 +21,9 @@
 //!   PATH to verify the captured audio; `CALLING_RTC_CERT_EGRESS_REQUIRED=1` makes them
 //!   mandatory.
 //!
+//! In-call collaboration (gap C20) runs on the same real media: VOICE -> VIDEO upgrade
+//! (C5), screen sharing (C6) and inviting a third participant into a one-to-one Call (C7).
+//!
 //! Without configuration the suite prints SKIPPED (never a silent pass).
 
 mod common;
@@ -451,6 +454,8 @@ async fn real_livekit_certification() {
     superseded_generation_and_terminal_call_tokens_are_refused(&cert).await;
     legitimate_reconnect_with_the_current_generation(&cert).await;
     group_call(&cert).await;
+    // Gap C20: upgrade, screen share and add participant on real media.
+    in_call_collaboration(&cert).await;
     reconciliation(&cert).await;
     unknown_participant_quarantine(&cert).await;
 }
@@ -2072,6 +2077,327 @@ async fn group_call(cert: &Cert) {
     for client in clients {
         client.quit().await;
     }
+}
+
+/// The LiveKit publish sources the server currently grants `client` (TrackSource numbers:
+/// 1 camera, 2 microphone, 3 screen share, 4 screen share audio), waited for until
+/// `wanted` holds (the grant is pushed after Calling commits).
+async fn wait_sources(
+    client: &mut RtcClient,
+    what: &str,
+    wanted: impl Fn(&[i64]) -> bool,
+) -> Vec<i64> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let sources: Vec<i64> = client.cmd(json!({ "cmd": "sources" })).await["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_i64().unwrap())
+            .collect();
+        if wanted(&sources) {
+            return sources;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for: {what} (sources {sources:?})"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// The tracks `client` subscribed to from `identity` with LiveKit source `source`.
+async fn subscribed_from(client: &mut RtcClient, identity: &str, source: i64) -> usize {
+    client.status().await["subscribed"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["from"] == identity && t["source"] == source)
+        .count()
+}
+
+async fn wait_subscribed_from(client: &mut RtcClient, identity: &str, source: i64, what: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while subscribed_from(client, identity, source).await == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for: {what} ({})",
+            client.status().await
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+async fn media_identity(cert: &Cert, session: Uuid) -> String {
+    one(
+        cert,
+        format!("SELECT media_identity FROM call_sessions WHERE id = '{session}'"),
+    )
+    .await
+}
+
+/// Gap C20: in-call collaboration on REAL media, enforced by LiveKit — a one-to-one VOICE
+/// Call is upgraded to VIDEO (C5: the camera, refused before, is granted and its frames
+/// reach the other party), one participant presents its screen (C6: only the presenter's
+/// effective grant carries the screen sources, the other party's screen publication is
+/// refused by the server, the screen track is received, stopping revokes it) and a third
+/// principal is invited into the ongoing Call (C7: the one-to-one Call becomes a group —
+/// the invited party joins the same LiveKit room with the Call's VIDEO grant and hears /
+/// sees the others, and the original callee leaving no longer ends the Call).
+async fn in_call_collaboration(cert: &Cert) {
+    let (call, caller, callee, s1, s2) = cert.answered("VOICE", "collab").await;
+    let c1 = cert.credential(call, s1).await;
+    let c2 = cert.credential(call, s2).await;
+    assert_eq!(c1["capabilities"]["canPublishVideo"], false);
+    let mut a = RtcClient::spawn(&cert.cfg).await;
+    let mut b = RtcClient::spawn(&cert.cfg).await;
+    for (client, c) in [(&mut a, &c1), (&mut b, &c2)] {
+        assert_eq!(
+            client
+                .connect(c["url"].as_str().unwrap(), c["token"].as_str().unwrap())
+                .await["ok"],
+            true
+        );
+    }
+    eventually(15, "collaboration call CONNECTED", || async {
+        cert.state(call).await == CallState::Connected
+    })
+    .await;
+    for client in [&mut a, &mut b] {
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+                .await["ok"],
+            true
+        );
+        assert_eq!(
+            client
+                .cmd(json!({ "cmd": "publish", "kind": "audio" }))
+                .await["ok"],
+            true
+        );
+    }
+    let a_identity = media_identity(cert, s1).await;
+    let b_identity = media_identity(cert, s2).await;
+    let camera = a.cmd(json!({ "cmd": "publish", "kind": "video" })).await;
+    assert_eq!(
+        camera["ok"], false,
+        "VOICE: the camera is refused: {camera}"
+    );
+
+    // --- C5: VOICE -> VIDEO ----------------------------------------------------------------
+    let (_, version) = cert.a.state(call).await;
+    let r = cert
+        .a
+        .post(
+            &format!("/v1/calls/{call}/upgrade"),
+            json!({ "kind": "VIDEO", "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["call"]["kind"], "VIDEO", "{}", r.text);
+    eventually(15, "the provider grants video to both sessions", || async {
+        let ids = cert.provider_identities(call).await;
+        ids.len() == 2
+            && ids
+                .iter()
+                .all(|(_, _, p)| p.can_publish_video && p.can_publish_audio)
+    })
+    .await;
+    wait_sources(&mut a, "the caller's camera source", |s| s.contains(&1)).await;
+    wait_sources(&mut b, "the callee's camera source", |s| s.contains(&1)).await;
+    assert_eq!(
+        a.cmd(json!({ "cmd": "publish", "kind": "video" })).await["ok"],
+        true,
+        "after the upgrade the camera is published"
+    );
+    wait_subscribed_from(&mut b, &a_identity, 1, "the callee receives the camera").await;
+    assert_eq!(
+        b.cmd(json!({ "cmd": "verify_received", "kind": "video", "timeout": 15 }))
+            .await["ok"],
+        true,
+        "real video frames reach the other party"
+    );
+    assert_eq!(cert.state(call).await, CallState::Connected);
+    println!("rtc certification: C5 voice -> video upgrade certified (camera refused before, granted and received after)");
+
+    // --- C6: screen share -------------------------------------------------------------------
+    let alice = cert.a.participant_of(call, caller.principal).await;
+    let bob = cert.a.participant_of(call, callee.principal).await;
+    // Nobody may present before a presentation starts.
+    let early = b.cmd(json!({ "cmd": "publish", "kind": "screen" })).await;
+    assert_eq!(early["ok"], false, "no presenter yet: {early}");
+    let r = cert
+        .a
+        .post(
+            &format!("/v1/calls/{call}/screen-share"),
+            json!({ "participantId": alice }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["screenShare"]["participantId"], alice.to_string());
+    eventually(
+        15,
+        "only the presenter holds the screen sources",
+        || async {
+            cert.provider_identities(call)
+                .await
+                .iter()
+                .all(|(id, _, p)| p.can_share_screen == (*id == a_identity))
+        },
+    )
+    .await;
+    wait_sources(&mut a, "the presenter's screen sources", |s| {
+        s.contains(&3) && s.contains(&4)
+    })
+    .await;
+    let other = wait_sources(&mut b, "the other party's grant", |s| s.contains(&1)).await;
+    assert!(!other.contains(&3) && !other.contains(&4), "{other:?}");
+    // A second presenter is refused by Calling, and its screen by LiveKit.
+    let r = cert
+        .a
+        .post(
+            &format!("/v1/calls/{call}/screen-share"),
+            json!({ "participantId": bob }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
+    let refused = b.cmd(json!({ "cmd": "publish", "kind": "screen" })).await;
+    assert_eq!(
+        refused["ok"], false,
+        "a non-presenter's screen is refused by the server: {refused}"
+    );
+    assert_eq!(
+        a.cmd(json!({ "cmd": "publish", "kind": "screen" })).await["ok"],
+        true,
+        "the presenter's screen is published"
+    );
+    wait_subscribed_from(&mut b, &a_identity, 3, "the screen share is received").await;
+    let r = cert
+        .a
+        .post(
+            &format!("/v1/calls/{call}/screen-share/stop"),
+            json!({ "participantId": alice }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    eventually(15, "stopping revokes the screen sources", || async {
+        cert.provider_identities(call)
+            .await
+            .iter()
+            .all(|(_, _, p)| !p.can_share_screen && p.can_publish_video)
+    })
+    .await;
+    wait_sources(&mut a, "the presenter's screen sources revoked", |s| {
+        !s.contains(&3) && !s.contains(&4) && s.contains(&1)
+    })
+    .await;
+    assert!(cert.a.call_view(call).await["screenShare"].is_null());
+    println!("rtc certification: C6 screen share certified (single presenter, server-refused for others, received, revoked on stop)");
+
+    // --- C7: a third participant joins the one-to-one Call -----------------------------------
+    let carol = cert.a.principal("collab-carol").await;
+    let carol_d = cert.a.device(&carol, "collab-carol").await;
+    let (_, version) = cert.a.state(call).await;
+    let r = cert
+        .a
+        .post(
+            &format!("/v1/calls/{call}/participants"),
+            json!({
+                "invitingParticipantId": alice,
+                "targetPrincipalIds": [carol.id().as_uuid()],
+                "expectedVersion": version,
+            }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let invitation = cert
+        .a
+        .invitation_for(call, carol_d.endpoint)
+        .await
+        .expect("the invited principal is offered the ongoing Call");
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.accept(call, invitation, &carol_d, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let s3 = cert.a.session_on(call, carol_d.endpoint).await.unwrap();
+    let c3 = cert.credential(call, s3).await;
+    assert_eq!(
+        c3["capabilities"]["canPublishVideo"], true,
+        "the invited party gets the Call's current (VIDEO) grant"
+    );
+    let mut c = RtcClient::spawn(&cert.cfg).await;
+    assert_eq!(
+        c.connect(c3["url"].as_str().unwrap(), c3["token"].as_str().unwrap())
+            .await["ok"],
+        true
+    );
+    eventually(15, "the third session admitted", || {
+        cert.session_admitted(call, s3)
+    })
+    .await;
+    assert_eq!(cert.provider_identities(call).await.len(), 3, "one room");
+    let c_identity = media_identity(cert, s3).await;
+    assert_eq!(
+        c.cmd(json!({ "cmd": "wait_permission", "publish": true, "timeout": 10 }))
+            .await["ok"],
+        true
+    );
+    assert_eq!(
+        c.cmd(json!({ "cmd": "publish", "kind": "audio" })).await["ok"],
+        true
+    );
+    // The new party receives both original parties; they receive the new party.
+    wait_subscribed_from(&mut c, &a_identity, 2, "the invited party hears the caller").await;
+    wait_subscribed_from(&mut c, &b_identity, 2, "the invited party hears the callee").await;
+    wait_subscribed_from(&mut c, &a_identity, 1, "the invited party sees the caller").await;
+    wait_subscribed_from(&mut a, &c_identity, 2, "the caller hears the invited party").await;
+    // Group rules now: the original callee leaving does not end the Call.
+    let (_, version) = cert.a.state(call).await;
+    let r = cert
+        .a
+        .post(
+            &format!("/v1/calls/{call}/sessions/{s2}/remove"),
+            json!({ "expectedVersion": version }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(
+        b.cmd(json!({ "cmd": "wait_disconnected", "timeout": 10 }))
+            .await["ok"],
+        true
+    );
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(cert.state(call).await, CallState::Connected);
+    assert_eq!(a.status().await["connected"], true);
+    assert_eq!(c.status().await["connected"], true);
+    eventually(
+        15,
+        "the provider lists the two remaining sessions",
+        || async { cert.provider_identities(call).await.len() == 2 },
+    )
+    .await;
+    assert_eq!(
+        c.cmd(json!({ "cmd": "verify_received", "kind": "audio", "timeout": 15 }))
+            .await["ok"],
+        true,
+        "real audio still flows between the remaining parties"
+    );
+    println!("rtc certification: C7 add participant certified (one-to-one -> group in the same room, survives the callee leaving)");
+
+    let (_, version) = cert.a.state(call).await;
+    let r = cert.a.command(call, "end", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(cert.state(call).await, CallState::Ended);
+    assert!(
+        !cert.lk.reconcile(&room(call)).await.unwrap().exists,
+        "room terminated"
+    );
+    for client in [a, b, c] {
+        client.quit().await;
+    }
+    println!(
+        "in-call collaboration certified: upgrade, screen share and add participant on real media"
+    );
 }
 
 async fn reconciliation(cert: &Cert) {
