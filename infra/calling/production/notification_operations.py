@@ -63,7 +63,7 @@ import re
 CHANNELS = {'email': 'EMAIL', 'push': 'PUSH', 'in-app': 'IN_APP', 'operator': 'OPERATOR'}
 MODES = {'off': 'OFF', 'shadow': 'SHADOW', 'active': 'ACTIVE'}
 CRITICAL = frozenset({'AUTH_VERIFICATION', 'AUTH_PASSWORD_RESET', 'SECURITY_DEVICE_STEP_UP',
-                      'SECURITY_PASSWORD_CHANGED', 'SECURITY_DEVICE_LINKED'})
+                      'SECURITY_PASSWORD_CHANGED', 'SECURITY_DEVICE_LINKED', 'ACCOUNT_NOTICES'})
 SOCIAL = frozenset({'CONTACT_REQUESTS', 'GROUP_INVITATIONS', 'MISSED_CALLS', 'VOICEMAIL', 'MESSAGE_WAKEUPS'})
 CATEGORY_RE = re.compile(r'[A-Z][A-Z_]{1,39}')
 
@@ -143,7 +143,10 @@ CRITICAL_FALLBACK_TARGET = '/run/secrets/account-fallback.key'
 # which need NOTIFICATIONS_APP_URL equal to the Meeting Service's APP_URL (the magic link).
 # The password categories have no producer left after PR #97.
 CRITICAL_ORDER = ('SECURITY_DEVICE_LINKED', 'SECURITY_DEVICE_STEP_UP', 'AUTH_VERIFICATION',
-                  'SECURITY_PASSWORD_CHANGED', 'AUTH_PASSWORD_RESET')
+                  'ACCOUNT_NOTICES', 'SECURITY_PASSWORD_CHANGED', 'AUTH_PASSWORD_RESET')
+# ACCOUNT_NOTICES (owner decision "A", 2026-11-18): the welcome email, the new sign-in alert, the
+# email-change attempt notice and both email-changed notices. The undo token and the masked new
+# address travel only in the sealed part; the legacy email is the sealed fallback.
 
 # N9: push. The service sends Web Push with Messaging's VAPID key (the key browser
 # subscriptions were made with); Messaging mirrors its registrations (I13); Calling's call
@@ -576,6 +579,8 @@ FENCE_ROUTABLE.update({
 # The sign-in email carries a magic link the service builds from NOTIFICATIONS_APP_URL; NEW
 # would send a different link unless it equals the Meeting Service's APP_URL.
 FENCE_ROUTABLE[('meeting-service', 'AUTH_VERIFICATION')]['same_app_url'] = True
+# The welcome link and the email-change undo link are built from the same app URL.
+FENCE_ROUTABLE[('meeting-service', 'ACCOUNT_NOTICES')]['same_app_url'] = True
 SERVICE_DEFAULT_APP_URL = 'https://cfmeet.com'
 MEETING_DEFAULT_APP_URL = 'http://localhost:3000'
 

@@ -817,6 +817,20 @@ class CriticalLane(unittest.TestCase):
         self.assertIsNone(no.fence_gate('meeting-service', 'SECURITY_DEVICE_STEP_UP', 'FENCED_NEW', 'SHADOW',
                                         dict(facts, app_urls=other)))
 
+    def test_account_notices_are_critical_and_need_the_meeting_app_url(self):
+        self.assertIn('ACCOUNT_NOTICES', no.CRITICAL)
+        self.assertIn('ACCOUNT_NOTICES', no.CRITICAL_ORDER)
+        facts = dict(email_provider='resend', resend_done=True, owners_done=True)
+        self.assertIn('critical lane', no.gate('ACCOUNT_NOTICES', 'EMAIL', 'ACTIVE', facts).lower())
+        fence = dict(protocol=1, publications_done=True, service_modes={'EMAIL': 'ACTIVE'}, done=())
+        other = {'meeting-service': 'https://cfmeet.com', 'notifications': 'https://cfmeet.com',
+                 'notifications-2': 'http://localhost:3000'}
+        self.assertIn('magic links', no.fence_gate('meeting-service', 'ACCOUNT_NOTICES', 'FENCED_NEW', 'SHADOW',
+                                                   dict(fence, app_urls=other)))
+        same = dict.fromkeys(other, 'https://cfmeet.com')
+        self.assertIsNone(no.fence_gate('meeting-service', 'ACCOUNT_NOTICES', 'FENCED_NEW', 'SHADOW',
+                                        dict(fence, app_urls=same)))
+
     def test_the_lane_gives_both_replicas_the_meeting_app_url(self):
         from unittest import mock
 
