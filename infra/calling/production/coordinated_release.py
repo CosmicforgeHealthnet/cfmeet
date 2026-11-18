@@ -53,6 +53,7 @@ import email_operations as mail_ops
 import developer_access
 import org_first_activation
 import notification_operations as notif_ops
+import key_rotation
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -2654,6 +2655,14 @@ ACTIVATIONS = {
     # P7: per-IP edge throttling (host nginx) and the gateway's per-token ceiling.
     'activate-edge-rate-limits': ((), activate_edge_rate_limits),
     'activate-token-ceiling': (('activate-gateway-routing',), activate_token_ceiling),
+    # P16: service-auth key rotation of one service (confirm: service=<name>), three steps with
+    # overlapping keys; each step journaled and undone by rollback (key_rotation.py).
+    'activate-service-key-publish': ((), lambda sha, run_id, confirm: key_rotation.publish(
+        sys.modules[__name__], sha, run_id, confirm)),
+    'activate-service-key-switch': ((), lambda sha, run_id, confirm: key_rotation.switch(
+        sys.modules[__name__], sha, run_id, confirm)),
+    'activate-service-key-retire': ((), lambda sha, run_id, confirm: key_rotation.retire(
+        sys.modules[__name__], sha, run_id, confirm)),
     'activate-developer-console': (('activate-developer-platform',), activate_developer_console),
     'activate-developer-webhooks': (('activate-developer-console',), activate_developer_webhooks),
     'activate-gateway-families': (('activate-gateway-routing', 'activate-developer-webhooks'), activate_gateway_families),
