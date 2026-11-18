@@ -519,10 +519,12 @@ class NotificationsEmail(unittest.TestCase):
         (self.dir / 'resend-api-key').write_text('re_' + 'A' * 30 + '\n')
         (self.dir / 'resend-webhook-secret').write_text('whsec_' + 'B' * 32 + '\n')
 
-    def fake(self, statuses, done=('activate-resend-email',)):
+    def fake(self, statuses, done=('activate-resend-email',), egress='404'):
         fake = FakeProducerCr([], done=done, statuses=statuses)
         written = []
         directory = self.dir
+        inner = fake.p.run
+        fake.networks_created, fake.egress_probed = [], []
 
         class P:
             NET = 'net'
@@ -533,7 +535,17 @@ class NotificationsEmail(unittest.TestCase):
                 written.append(path)
                 path.write_text(data)
 
-            run = fake.p.run
+            @staticmethod
+            def run(*args):
+                if args[:3] == ('docker', 'network', 'ls'):
+                    return 'bridge\nnet'
+                if args[:3] == ('docker', 'network', 'create'):
+                    fake.networks_created.append(args[-1])
+                    return ''
+                if args[-1] == no.RESEND_PROBE_URL:
+                    fake.egress_probed.append(args[args.index('--network') + 1])
+                    return egress
+                return inner(*args)
         fake.p = P
         fake.written = written
         return fake
@@ -564,6 +576,18 @@ class NotificationsEmail(unittest.TestCase):
         # The emitted record names no value either.
         self.assertNotIn('AAAA', json.dumps(fake.emitted))
         self.assertEqual(fake.probed, ['https://api.cfmeet.com:8456/api/v1/notifications/provider-events/resend'] * 2)
+        # Both replicas join the dedicated egress bridge and reach Resend from their own namespace.
+        self.assertEqual(fake.networks_created, [no.NOTIFICATIONS_EGRESS_NET])
+        for _, _, extra in changes:
+            self.assertEqual(extra['networks'], [no.NOTIFICATIONS_EGRESS_NET])
+        self.assertEqual(fake.egress_probed, ['container:' + cr.SERVICES[r]['container'] for r in no.REPLICAS])
+
+    def test_a_replica_that_cannot_reach_resend_fails_the_activation(self):
+        """Production 2026-11-17: the replicas were on the --internal network only; every send
+        failed with NETWORK. The activation now proves the route out (any HTTP answer)."""
+        fake = self.fake(['404', '401'], egress='000')
+        with self.assertRaisesRegex(RuntimeError, 'cannot reach its email provider'):
+            self.run_activation(fake)
 
     def test_refused_without_e1_or_when_the_callback_is_not_configured_afterwards(self):
         fake = self.fake(['404'], done=())

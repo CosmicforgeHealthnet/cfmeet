@@ -856,6 +856,45 @@ def email_changes(cr):
     return overrides, mounts
 
 
+# The replicas live on cfmeet-core-private, which is --internal (no route out). Their providers
+# (Resend, the browser push services) are public HTTPS endpoints: like the webhook worker, the
+# replicas also join a dedicated non-internal bridge without inter-container traffic. Production
+# 2026-11-17: without it every send failed with NETWORK and the leased CRITICAL codes expired.
+NOTIFICATIONS_EGRESS_NET = 'cfmeet-notifications-egress'
+RESEND_PROBE_URL = 'https://api.resend.com/'
+PUSH_PROBE_URLS = ('https://fcm.googleapis.com/', 'https://updates.push.services.mozilla.com/',
+                   'https://web.push.apple.com/')
+
+
+def egress_network(cr):
+    if NOTIFICATIONS_EGRESS_NET not in cr.p.run('docker', 'network', 'ls', '--format', '{{.Name}}').splitlines():
+        cr.p.run('docker', 'network', 'create', '--driver', 'bridge', '--opt',
+                 'com.docker.network.bridge.enable_icc=false', NOTIFICATIONS_EGRESS_NET)
+    return NOTIFICATIONS_EGRESS_NET
+
+
+def egress_status(cr, container, url):
+    """HTTP status a GET to a public provider answers from inside `container`'s network
+    namespace ('000' when unreachable). Any HTTP answer proves the route out."""
+    try:
+        out = cr.p.run('docker', 'run', '--rm', '--network', 'container:' + container, cr.PROBE_IMAGE, '-s',
+                       '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10', url)
+    except Exception:  # curl exits non-zero when it cannot connect
+        return '000'
+    return (out or '').strip() or '000'
+
+
+def require_egress(cr, urls, kind):
+    """Every replica reaches every provider URL, or the activation is restored."""
+    statuses = {replica: {url: egress_status(cr, cr.SERVICES[replica]['container'], url) for url in urls}
+                for replica in REPLICAS}
+    cr.emit('notificationsEgress', {'kind': kind, 'statuses': statuses})
+    unreachable = sorted('%s %s' % (r, u) for r, by in statuses.items() for u, code in by.items()
+                         if not re.fullmatch(r'[1-5][0-9][0-9]', code))
+    if unreachable:
+        raise RuntimeError('The Notification Service cannot reach its %s provider: %s' % (kind, ', '.join(unreachable)))
+
+
 def activate_email(cr, sha, run_id, confirm):
     cr.require_release(sha)
     if not cr.done('activate-resend-email'):
@@ -868,17 +907,20 @@ def activate_email(cr, sha, run_id, confirm):
     if before not in ('404', '401'):
         raise RuntimeError('The Notification Service provider callback answered %s before activation' % before)
     overrides, mounts = email_changes(cr)
+    network = egress_network(cr)
     cr.emit('notificationsEmail', {'provider': 'resend', 'sender': NOTIFICATIONS_EMAIL_FROM,
-                                   'webhookSigning': True, 'replicas': list(REPLICAS)})
+                                   'webhookSigning': True, 'replicas': list(REPLICAS), 'egressNetwork': network})
 
     def post():
         # The webhook secret is loaded: an unsigned event is refused (401), never 404.
         status = private_status(cr, callback)
         if status != '401':
             raise RuntimeError('The provider callback answers %s after activation (expected 401 unsigned)' % status)
+        require_egress(cr, (RESEND_PROBE_URL,), 'email')
 
     cr.apply_activation('activate-notifications-email', sha, run_id,
-                        [(replica, dict(overrides), {'mounts': list(mounts)}) for replica in REPLICAS], post=post)
+                        [(replica, dict(overrides), {'mounts': list(mounts), 'networks': [network]})
+                         for replica in REPLICAS], post=post)
 
 
 # --- N10: preference copy and the Hub facade switch ---------------------------------------------
@@ -1101,16 +1143,19 @@ def activate_push(cr, sha, run_id, confirm):
     if allowed:
         overrides['NOTIFICATIONS_PUSH_WEB_ALLOWED_HOSTS'] = allowed
 
+    network = egress_network(cr)
+
     def post():
         for replica in REPLICAS:
             key = notifications_ready(cr, replica).get('webPushApplicationServerKey')
             if not key:
                 raise RuntimeError('%s reports no Web Push application server key after activation' % replica)
-        cr.emit('notificationsPush', {'provider': 'live', 'webPushApplicationServerKey': key})
+        require_egress(cr, PUSH_PROBE_URLS, 'push')
+        cr.emit('notificationsPush', {'provider': 'live', 'webPushApplicationServerKey': key, 'egressNetwork': network})
 
     cr.apply_activation('activate-notifications-push', sha, run_id,
-                        [(replica, dict(overrides), {'mounts': [(copy, WEB_PUSH_TARGET)]}) for replica in REPLICAS],
-                        post=post)
+                        [(replica, dict(overrides), {'mounts': [(copy, WEB_PUSH_TARGET)], 'networks': [network]})
+                         for replica in REPLICAS], post=post)
 
 
 def activate_messaging_push_mirror(cr, sha, run_id, confirm):
