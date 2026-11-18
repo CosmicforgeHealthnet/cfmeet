@@ -1,8 +1,8 @@
 # Messaging — native authenticated API map
 
-Generated from the Account relay and Messaging 1.17.0 contract.
-Canonical SDK contract: **97 operations**; audience-filtered public Swagger:
-**81 operations**; native Account transports: **72 operations**.
+Generated from the Account relay and Messaging 1.18.0 contract.
+Canonical SDK contract: **98 operations**; audience-filtered public Swagger:
+**82 operations**; native Account transports: **73 operations**.
 There are no new canonical message/conversation/device endpoints.
 
 CF Meet consumer REST calls use the native path below with the existing Account bearer
@@ -214,3 +214,4 @@ required. Meetings and established permitted service contexts retain independent
 | POST | `/v1/conversations/{conversationId}/invitation/accept` | acceptInvitation | `/api/v2/messaging/relay/v1/conversations/{conversationId}/invitation/accept` | Account session |
 | POST | `/v1/conversations/{conversationId}/invitation/decline` | declineInvitation | `/api/v2/messaging/relay/v1/conversations/{conversationId}/invitation/decline` | Account session |
 | GET | `/v1/messaging/invitations` | listInvitations | `/api/v2/messaging/relay/v1/messaging/invitations` | Account session |
+| POST | `/v1/conversations/{conversationId}/owner` | transferConversationOwnership | `/api/v2/messaging/relay/v1/conversations/{conversationId}/owner` | Account session |

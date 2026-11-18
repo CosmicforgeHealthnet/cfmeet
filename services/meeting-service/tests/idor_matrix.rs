@@ -216,6 +216,7 @@ fn body_for(method: &str, path: &str) -> Option<Value> {
         "answer" => json!({ "answer": "x" }),
         "translations" => json!({ "targetLanguage": "fr" }),
         "{memberId}" => json!({ "role": "HOST", "version": 1 }),
+        "{messageId}" => json!({ "body": "edited" }),
         _ => json!({}),
     })
 }

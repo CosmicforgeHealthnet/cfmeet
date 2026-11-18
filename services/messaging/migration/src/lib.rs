@@ -160,7 +160,7 @@ pub struct GapClosureMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for GapClosureMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20261205_000033_client_session_binding::Migration)]
+        vec![Box::new(self::m20261205_000033_client_session_binding::Migration)]
     }
     fn migration_table_name() -> DynIden {
         Alias::new(GAP_CLOSURE_MIGRATION_TABLE).into_iden()
