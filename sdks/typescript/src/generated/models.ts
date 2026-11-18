@@ -429,6 +429,64 @@ export namespace Calling {
   export type ConsentDecision = "GRANTED" | "DECLINED";
   /** Who must consent: NONE, every participant, or every participant other than the one requesting the recording (a system / administrator request: everyone). */
   export type ConsentParticipants = "NONE" | "ALL_PARTICIPANTS" | "OTHER_PARTICIPANTS";
+  /** C14: an attended transfer's consultation: the original Call, the consultation Call the transferring participant placed to the target, and its state. CONSULTING (the consultation Call is going on; the original Call is held) -> COMPLETING (the canonical transfer of the original Call to the target is ringing) -> COMPLETED (the target joined the original Call, the transferring participant was … */
+  export type Consultation = {
+    consultationId: Uuid;
+    /** The original Call. */
+    callId: Uuid;
+    /** The consultation Call (an ordinary canonical Call). */
+    consultationCallId: Uuid;
+    transferringParticipantId: Uuid;
+    targetPrincipalId: Uuid;
+    state: "CONSULTING" | "COMPLETING" | "COMPLETED" | "CANCELLED";
+    /** The consultation put the original Call on hold (it was CONNECTED); cancelling resumes it. */
+    heldOriginal: boolean;
+    /** The latest transfer of the original Call that completes (or completed) this consultation. */
+    transferId: Uuid | null;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    endedAt: string | null;
+  };
+  /** C14: result of cancelling a consultation: the consultation (CANCELLED), the original Call and whether it was resumed. */
+  export type ConsultationCancelResult = {
+    consultation: Consultation;
+    call: CommonCallSummary;
+    /** The original Call was resumed (it was held by this consultation and resuming succeeded). */
+    resumed: boolean;
+  };
+  /** C14: body of POST /v1/calls/{call_id}/consultations/{consultation_id}/complete: the original Call's version. */
+  export type ConsultationCompleteRequest = {
+    /** The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION. */
+    expectedVersion: number;
+  };
+  /** C14: result of completing a consultation: the consultation (COMPLETING), the original Call (TRANSFERRING) and its transfer to the target. A repeat after the transfer started returns the consultation and the Call without the transfer. */
+  export type ConsultationCompletion = {
+    consultation: Consultation;
+    call: CommonCallSummary;
+    transfer?: CallTransfer;
+  };
+  /** C14: body of POST /v1/calls/{call_id}/consultations (Idempotency-Key required): the participant who consults, the target (exactly one of a principal, an enterprise extension or a typed enterprise destination, resolved like a transfer target) and the participant's own endpoint the consultation Call is placed from. A CONNECTED Call is held first; an enterprise Call's policy must permit transfers … */
+  export type ConsultationRequest = ({
+    transferringParticipantId: Uuid;
+    targetPrincipalId?: Uuid;
+    /** Part F: an enterprise extension number resolved in the credential's scope (requires enterprise.calls.use). It is followed to ONE principal: a member directly, a ring group's first eligible member, a queue's first available agent, a schedule's current route. */
+    targetExtension?: ExtensionNumber;
+    /** Part F: a typed enterprise destination (ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE or SCHEDULE of the same scope; requires enterprise.calls.use), resolved like targetExtension. A PUBLIC_CONTACT is refused: 403 when the enterprise policy forbids public forwarding, 422 CAPABILITY_UNAVAILABLE otherwise (public transfer of an established call is not offered by this deployment). */
+    targetDestination?: Destination;
+    /** The transferring participant's own ACTIVE endpoint the consultation Call is placed from. */
+    initiatorEndpointId: Uuid;
+    /** The consultation Call's kind (default VOICE). */
+    kind?: "VOICE" | "VIDEO";
+    /** The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION. */
+    expectedVersion: number;
+  }) & ({ targetPrincipalId: Uuid } | { targetExtension: ExtensionNumber } | { targetDestination: Destination });
+  /** C14: result of POST /v1/calls/{call_id}/consultations: the consultation, the original Call (HELD) and the consultation Call as created by POST /v1/calls. */
+  export type ConsultationResult = {
+    consultation: Consultation;
+    call: CommonCallSummary;
+    consultationCall: CreateCallResult;
+  };
   /** Opaque, server-generated ContactReference (UUID) of a protected contact, scoped to one tenant / application / environment. It never encodes a number, country, provider or user; knowing it grants nothing. */
   export type ContactReference = Uuid;
   /** Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged. */
@@ -1764,6 +1822,16 @@ export namespace Calling {
       params: { path: { call_id: string }; body: CommandRequest; idempotencyKey?: string };
       response: ControlResult;
     };
+    /** POST /v1/calls/{call_id}/consultations/{consultation_id}/cancel — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    cancelConsultation: {
+      params: { path: { call_id: string; consultation_id: string }; body: EmptyRequest };
+      response: ConsultationCancelResult;
+    };
+    /** POST /v1/calls/{call_id}/consultations/{consultation_id}/complete — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
+    completeConsultation: {
+      params: { path: { call_id: string; consultation_id: string }; body: ConsultationCompleteRequest };
+      response: ConsultationCompletion;
+    };
     /** POST /v1/calls/{call_id}/abuse-reports — scope calls.write; auth PLATFORM_CREDENTIAL; retry NO_RETRY */
     createAbuseReport: {
       params: { path: { call_id: string }; body: {
@@ -2345,6 +2413,11 @@ export namespace Calling {
     setVoicemailReadState: {
       params: { path: { message_id: string }; body: SetVoicemailReadStateRequest };
       response: VoicemailMessage;
+    };
+    /** POST /v1/calls/{call_id}/consultations — scope calls.write; auth PLATFORM_CREDENTIAL; retry IDEMPOTENT */
+    startConsultation: {
+      params: { path: { call_id: string }; body: ConsultationRequest; idempotencyKey?: string };
+      response: ConsultationResult;
     };
     /** POST /v1/calls/{call_id}/recordings — scope enterprise.recording.manage; auth PLATFORM_CREDENTIAL; retry NEVER; paid telecom */
     startRecording: {

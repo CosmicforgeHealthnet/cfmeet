@@ -22,7 +22,7 @@
   ],
   "$defs": {
     "SignalType": {
-      "description": "Semantic signal category.",
+      "description": "Semantic signal category. C14: call.consultation_transfer (on a consultation Call, to its parties: the original Call is being transferred to the consulted target; data consultationId, originalCallId, transferId).",
       "type": "string",
       "enum": [
         "call.incoming",
@@ -55,7 +55,8 @@
         "call.kind_changed",
         "call.screen_share_started",
         "call.screen_share_stopped",
-        "call.participants_changed"
+        "call.participants_changed",
+        "call.consultation_transfer"
       ]
     },
     "SignalInvitation": {

@@ -1516,6 +1516,161 @@ typedef ConsentDecision = String;
 /// One of: NONE, ALL_PARTICIPANTS, OTHER_PARTICIPANTS.
 typedef ConsentParticipants = String;
 
+/// C14: an attended transfer's consultation: the original Call, the consultation Call the transferring participant placed to the target, and its state. CONSULTING (the consultation Call is going on; the original Call is held) -› COMPLETING (the canonical transfer of the original Call to the target is ringing) -› COMPLETED (the target joined the original Call, the transferring participant was …
+class Consultation {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const Consultation.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory Consultation.create({required Uuid callId, required Uuid consultationCallId, required Uuid consultationId, required String createdAt, required String? endedAt, required bool heldOriginal, required String state, required Uuid targetPrincipalId, required Uuid? transferId, required Uuid transferringParticipantId, required String updatedAt, required int version}) =>
+      Consultation.fromJson(<String, Object?>{
+        'callId': callId,
+        'consultationCallId': consultationCallId,
+        'consultationId': consultationId,
+        'createdAt': createdAt,
+        'endedAt': endedAt,
+        'heldOriginal': heldOriginal,
+        'state': state,
+        'targetPrincipalId': targetPrincipalId,
+        'transferId': transferId,
+        'transferringParticipantId': transferringParticipantId,
+        'updatedAt': updatedAt,
+        'version': version,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The original Call.
+  Uuid get callId => json['callId']! as String;
+
+  /// The consultation Call (an ordinary canonical Call).
+  Uuid get consultationCallId => json['consultationCallId']! as String;
+
+  Uuid get consultationId => json['consultationId']! as String;
+
+  String get createdAt => json['createdAt']! as String;
+
+  String? get endedAt => json['endedAt'] as String?;
+
+  /// The consultation put the original Call on hold (it was CONNECTED); cancelling resumes it.
+  bool get heldOriginal => json['heldOriginal']! as bool;
+
+  String get state => json['state']! as String;
+
+  Uuid get targetPrincipalId => json['targetPrincipalId']! as String;
+
+  /// The latest transfer of the original Call that completes (or completed) this consultation.
+  Uuid? get transferId => json['transferId'] as String?;
+
+  Uuid get transferringParticipantId => json['transferringParticipantId']! as String;
+
+  String get updatedAt => json['updatedAt']! as String;
+
+  int get version => (json['version']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C14: result of cancelling a consultation: the consultation (CANCELLED), the original Call and whether it was resumed.
+class ConsultationCancelResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConsultationCancelResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConsultationCancelResult.create({required CommonCallSummary call, required Consultation consultation, required bool resumed}) =>
+      ConsultationCancelResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'consultation': consultation.toJson(),
+        'resumed': resumed,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  Consultation get consultation => Consultation.fromJson(json['consultation']! as Map<String, Object?>);
+
+  /// The original Call was resumed (it was held by this consultation and resuming succeeded).
+  bool get resumed => json['resumed']! as bool;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C14: body of POST /v1/calls/{call_id}/consultations/{consultation_id}/complete: the original Call's version.
+class ConsultationCompleteRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConsultationCompleteRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConsultationCompleteRequest.create({required int expectedVersion}) =>
+      ConsultationCompleteRequest.fromJson(<String, Object?>{
+        'expectedVersion': expectedVersion,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.
+  int get expectedVersion => (json['expectedVersion']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C14: result of completing a consultation: the consultation (COMPLETING), the original Call (TRANSFERRING) and its transfer to the target. A repeat after the transfer started returns the consultation and the Call without the transfer.
+class ConsultationCompletion {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConsultationCompletion.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConsultationCompletion.create({required CommonCallSummary call, required Consultation consultation, CallTransfer? transfer}) =>
+      ConsultationCompletion.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'consultation': consultation.toJson(),
+        if (transfer != null) 'transfer': transfer.toJson(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  Consultation get consultation => Consultation.fromJson(json['consultation']! as Map<String, Object?>);
+
+  CallTransfer? get transfer => json['transfer'] == null ? null : CallTransfer.fromJson(json['transfer']! as Map<String, Object?>);
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// C14: body of POST /v1/calls/{call_id}/consultations (Idempotency-Key required): the participant who consults, the target (exactly one of a principal, an enterprise extension or a typed enterprise destination, resolved like a transfer target) and the participant's own endpoint the consultation Call is placed from. A CONNECTED Call is held first; an enterprise Call's policy must permit transfers …
+typedef ConsultationRequest = Object;
+
+/// C14: result of POST /v1/calls/{call_id}/consultations: the consultation, the original Call (HELD) and the consultation Call as created by POST /v1/calls.
+class ConsultationResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConsultationResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConsultationResult.create({required CommonCallSummary call, required Consultation consultation, required CreateCallResult consultationCall}) =>
+      ConsultationResult.fromJson(<String, Object?>{
+        'call': call.toJson(),
+        'consultation': consultation.toJson(),
+        'consultationCall': consultationCall.toJson(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  CommonCallSummary get call => CommonCallSummary.fromJson(json['call']! as Map<String, Object?>);
+
+  Consultation get consultation => Consultation.fromJson(json['consultation']! as Map<String, Object?>);
+
+  CreateCallResult get consultationCall => CreateCallResult.fromJson(json['consultationCall']! as Map<String, Object?>);
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Opaque, server-generated ContactReference (UUID) of a protected contact, scoped to one tenant / application / environment. It never encodes a number, country, provider or user; knowing it grants nothing.
 typedef ContactReference = Uuid;
 
