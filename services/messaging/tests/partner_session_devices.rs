@@ -1268,3 +1268,44 @@ async fn partner_meeting_chat_is_synchronised_in_the_partner_scope() {
         .await;
     assert_eq!(r.code(), "DELEGATED_CONTEXT_INVALID", "{}", r.text);
 }
+
+/// The additive migration rolls back and re-applies cleanly (it is the newest of the
+/// gap-closure history), and widens the baseline CHECK without touching existing rows.
+#[tokio::test]
+async fn the_partner_migration_rolls_back_and_reapplies() {
+    use messaging_migration::{MigrationName, MigratorTrait};
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let last = messaging_migration::GapClosureMigrator::migrations()
+        .last()
+        .unwrap()
+        .name()
+        .to_string();
+    assert_eq!(last, "m20261208_000036_partner_session_devices");
+    messaging_migration::GapClosureMigrator::down(&db.conn, Some(1))
+        .await
+        .unwrap();
+    let present = |t: &'static str| {
+        let conn = db.conn.clone();
+        async move {
+            use sea_orm::ConnectionTrait;
+            conn.query_one(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Postgres,
+                format!("SELECT to_regclass('{t}') IS NOT NULL AS p"),
+            ))
+            .await
+            .unwrap()
+            .unwrap()
+            .try_get::<bool>("", "p")
+            .unwrap()
+        }
+    };
+    assert!(!present("messaging_message_sent_facts").await);
+    assert!(!present("messaging_partner_push_publications").await);
+    messaging_migration::GapClosureMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(present("messaging_message_sent_facts").await);
+    assert!(present("messaging_partner_push_registrations").await);
+}

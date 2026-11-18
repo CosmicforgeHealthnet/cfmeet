@@ -324,10 +324,9 @@ async fn the_vault_stores_lists_verifies_and_deletes_and_never_gives_the_secret_
     for secret in [
         pem_body(&key),
         pem_body(
-            &serde_json::from_str::<Value>(&fcm).unwrap()["private_key"]
+            serde_json::from_str::<Value>(&fcm).unwrap()["private_key"]
                 .as_str()
-                .unwrap()
-                .to_string(),
+                .unwrap(),
         ),
     ] {
         assert!(!everything.contains(&secret));

@@ -172,6 +172,9 @@ class GatewayEdge(unittest.TestCase):
             journal(work, 'activate-gateway-families', po.USERS, po.CALLING_EDGE)
             self.assertEqual(cr.edge_prefixes(), cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES + po.USERS_EDGE
                              + po.CALLING_EDGE_PREFIXES)
+            journal(work, 'activate-gateway-families', po.USERS, po.MEETINGS, po.CALLING_EDGE)
+            self.assertEqual(cr.edge_prefixes(), cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES + po.USERS_EDGE
+                             + po.CALLING_EDGE_PREFIXES + po.MEETINGS_EDGE)
         src = (REPO / 'infra/calling/production/coordinated_release.py').read_text()
         # Re-running the families step keeps the platform prefixes.
         self.assertIn('GATEWAY_PREFIXES + FAMILY_PREFIXES + platform_ops.edge_prefixes(done)', src)
@@ -195,7 +198,8 @@ class GatewayEdge(unittest.TestCase):
             path = url[len(cr.PUBLIC):]
             text = snippet.read_text()
             routed = any(('location ^~ %s/' % p in text or 'location = %s ' % p in text)
-                         and (path == p or path.startswith(p + '/')) for p in po.CALLING_EDGE_PREFIXES + po.USERS_EDGE)
+                         and (path == p or path.startswith(p + '/'))
+                         for p in po.CALLING_EDGE_PREFIXES + po.USERS_EDGE + po.MEETINGS_EDGE)
             code = statuses.get(path, 401)
             return code, ({'X-Correlation-Id': 'c'} if routed else {})
 
@@ -444,11 +448,13 @@ class Push(unittest.TestCase):
 
 
 class Meetings(unittest.TestCase):
-    def test_plan_flags_grants_upstream_and_no_edge_change(self):
+    def test_plan_flags_grants_upstream_and_the_partner_edge(self):
         values = envs(meeting_service={'CF_SERVICE_TRUST_BUNDLE_FILE': '/t'})
         apply = Capture()
+        refused = []
         with plan_env(values), patch.object(cr, 'apply_activation', apply), \
-                contextlib.redirect_stdout(io.StringIO()) as out:
+                patch.object(po, 'require_gateway_edge', lambda c: None), \
+                patch.object(po, 'refuse_collisions', lambda c, p: refused.append(p)):
             po.activate_meetings(cr, SHA, '6-1', '')
         plan = apply.plan
         self.assertEqual(plan['platform-access'][1], {'PLATFORM_ACCESS_MEETING_PLATFORM_ENABLED': 'true'})
@@ -458,14 +464,141 @@ class Meetings(unittest.TestCase):
         self.assertEqual(meeting['CF_PLATFORM_ACCESS_BASE_URL'], cr.private_url(8443))
         self.assertEqual(meeting['CF_MESSAGING_BASE_URL'], cr.private_url(8444))
         self.assertEqual(plan['api-gateway'][1], {'CF_MEETING_SERVICE_BASE_URL': cr.private_url(8448)})
-        self.assertNotIn(po.MEETINGS, po.EDGE)
-        self.assertIn('"routed": false', out.getvalue())
+        self.assertEqual(po.EDGE[po.MEETINGS], ('/v1/meetings',))
+        self.assertEqual(refused, [po.MEETINGS_EDGE])
 
     def test_refused_without_a_receiver_trust_bundle(self):
         with plan_env(envs(meeting_service={})), \
                 patch.object(cr, 'apply_activation', side_effect=AssertionError('must not apply')):
             with self.assertRaisesRegex(RuntimeError, 'trust bundle'):
                 po.activate_meetings(cr, SHA, '6-1', '')
+
+    def test_refused_before_the_gateway_edge(self):
+        with isolated_work() as work, plan_env(), \
+                patch.object(cr, 'GATEWAY_SNIPPET', work / 'missing.conf'), \
+                patch.object(cr, 'apply_activation', side_effect=AssertionError('must not apply')):
+            with self.assertRaisesRegex(RuntimeError, 'activate-gateway-routing'):
+                po.activate_meetings(cr, SHA, '6-1', '')
+
+    def test_the_edge_moves_only_the_partner_family_never_first_party_api_v2(self):
+        snippet = cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES + po.MEETINGS_EDGE)
+        locations = [p for _, p in re.findall(r'location (=|\^~) (\S+) \{', snippet)]
+        self.assertIn('/v1/meetings', locations)
+        self.assertIn('/v1/meetings/', locations)
+        self.assertFalse([p for p in locations if p.startswith('/api/')])
+        self.assertFalse(set(po.MEETINGS_EDGE) & set(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES + po.USERS_EDGE
+                                                     + po.CALLING_EDGE_PREFIXES))
+        # The probes: the partner route and its first-party twin (a platform-credential
+        # Meeting Service route); every gateway route under /v1/meetings is such an alias.
+        method, path = po.MEETINGS_DIRECT_PROBE
+        twin = next(r for r in MANIFEST['routes'] if (r['method'], r['pattern']) == (method, path))
+        self.assertIn('PLATFORM_CREDENTIAL', twin['auth'])
+        self.assertEqual(po.MEETINGS_EDGE_PROBE, (method, '/v1/meetings' + path[len('/api/v2'):]))
+        for r in MANIFEST['routes']:
+            if r['pattern'] == '/v1/meetings' or r['pattern'].startswith('/v1/meetings/'):
+                self.assertEqual((r['upstream'], r['auth']), ('cfmeet.meeting-service', ['PLATFORM_CREDENTIAL']), r['id'])
+                self.assertEqual(r['upstreamPath'], '/api/v2' + r['pattern'][len('/v1/meetings'):], r['id'])
+
+    def run_post(self, work, statuses, acceptance_ok=True, smoke=None):
+        apply = Capture(run_post=True)
+        stages = []
+
+        def acceptance(c, run_id, op):
+            stages.append(po.enabled_stages(c, op))
+            if not acceptance_ok:
+                raise RuntimeError('Platform acceptance failed')
+
+        reloads = []
+        with GatewayEdge().edge(work, statuses, smoke, reloads) as snippet, \
+                patch.object(cr, 'apply_activation', apply), patch.object(po, 'run_acceptance', acceptance), \
+                patch.object(cr, 'has_signing_identity', lambda n: None), \
+                patch.object(cr, 'tls_route_present', lambda p: None), \
+                patch.object(cr, 'env_of', lambda n: envs()[n]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            before = snippet.read_text()
+            error = None
+            try:
+                po.activate_meetings(cr, SHA, '6-1', '')
+            except RuntimeError as e:
+                error = e
+            after = snippet.read_text()
+        return before, after, error, stages, reloads, out.getvalue()
+
+    def test_post_routes_v1_meetings_proves_api_v2_is_direct_and_runs_the_acceptance(self):
+        with isolated_work() as work:
+            journal(work, 'activate-gateway-families', po.USERS, po.TOKENS, po.CHAT)
+            before, after, error, stages, reloads, out = self.run_post(work, {})
+            self.assertIsNone(error)
+            self.assertNotIn('/v1/meetings', before)
+            self.assertIn('location ^~ /v1/meetings/ {', after)
+            self.assertIn('location = /v1/meetings {', after)
+            self.assertNotIn('/api/v2', after)
+            self.assertEqual(after, cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES + po.USERS_EDGE
+                                                       + po.MEETINGS_EDGE))
+            self.assertEqual(stages, [('users', 'tokens', 'chat', 'meetings')])
+            self.assertEqual(len(reloads), 1)
+            self.assertIn('platformMeetingsEdge', out)
+            self.assertIn('answered by the gateway', out)
+            self.assertIn('still direct', out)
+
+    def test_a_failed_meetings_edge_check_or_acceptance_restores_the_snippet(self):
+        cases = [dict(statuses={'/v1/meetings/meeting-spaces': 404}),
+                 dict(statuses={'/v1/meetings/meeting-spaces': 200}),
+                 dict(statuses={'/api/v2/meeting-spaces': 404}),
+                 dict(statuses={}, smoke={'public_swagger': 'FAIL'}),
+                 dict(statuses={}, acceptance_ok=False)]
+        for case in cases:
+            with isolated_work() as work:
+                journal(work, 'activate-gateway-families', po.USERS, po.TOKENS, po.CHAT)
+                before, after, error, stages, reloads, _ = self.run_post(
+                    work, case['statuses'], case.get('acceptance_ok', True), case.get('smoke'))
+                self.assertIsNotNone(error, case)
+                self.assertRegex(str(error), 'edge checks failed' if case.get('acceptance_ok', True)
+                                 else 'acceptance failed')
+                self.assertEqual(after, before, case)
+                self.assertEqual(len(reloads), 2, case)
+
+    def test_a_first_party_api_v2_answer_from_the_gateway_fails_the_check(self):
+        calls = []
+
+        def served(c, method, path):
+            calls.append((method, path))
+            return 401, True  # both answered by the gateway: /api/v2 moved by mistake
+        with patch.object(po, 'served_by_gateway', served), patch.object(cr, 'public_smoke', lambda: {}):
+            checks = po.meetings_edge_checks(cr)
+        self.assertEqual(calls, [po.MEETINGS_EDGE_PROBE, po.MEETINGS_DIRECT_PROBE])
+        self.assertEqual(sorted(checks.values()), ['FAIL 401 (gateway)', 'PASS'])
+
+    def test_refuses_an_explicit_existing_v1_meetings_location(self):
+        with isolated_work() as work, GatewayEdge().edge(work, {}) as snippet, \
+                patch.object(cr, 'has_signing_identity', lambda n: None), \
+                patch.object(cr, 'tls_route_present', lambda p: None), \
+                patch.object(cr, 'apply_activation', side_effect=AssertionError('must not apply')):
+            (work / 'snippets' / 'cfmeet-calling-routes.conf').write_text('location ^~ /v1/meetings/ { }')
+            with self.assertRaisesRegex(RuntimeError, 'already serve: /v1/meetings'):
+                po.activate_meetings(cr, SHA, '6-1', '')
+            self.assertNotIn('/v1/meetings', snippet.read_text())
+
+    def test_rollback_removes_v1_meetings_before_the_containers(self):
+        order = []
+        with isolated_work() as work:
+            (work / 'journal.json').write_text(json.dumps([
+                dict(id='f:0', operation='activate-gateway-families', sha=SHA, status='done', components=[]),
+                dict(id='u:1', operation=po.USERS, sha=SHA, status='done', components=[]),
+                dict(id='m:2', operation=po.MEETINGS, sha=SHA, runId='6-1', status='done', components=[
+                    dict(service='meeting-service', name='cfmeet-meeting-service', previous=None,
+                         status='released', created=False)])]))
+            snippet = work / 'gateway.conf'
+            snippet.write_text(cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES + po.USERS_EDGE
+                                                  + po.MEETINGS_EDGE))
+            with patch.object(cr, 'GATEWAY_SNIPPET', snippet), \
+                    patch.object(cr.p, 'reload_host_nginx', lambda: order.append('edge')), \
+                    patch.object(cr, 'restore', lambda component, run_id: order.append('restore')), \
+                    patch.object(cr, 'container_names', lambda: []), patch.object(cr.p, 'regression', lambda: None):
+                cr.rollback(SHA, '7-1')
+            self.assertEqual(snippet.read_text(),
+                             cr.gateway_snippet(cr.GATEWAY_PREFIXES + cr.FAMILY_PREFIXES + po.USERS_EDGE))
+        self.assertEqual(order, ['edge', 'restore'])
 
 
 class AcceptanceWiring(unittest.TestCase):
