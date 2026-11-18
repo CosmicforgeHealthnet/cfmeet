@@ -2,7 +2,10 @@
 //!
 //! Minted by Calling for one endpoint of one principal, at the request of the
 //! application's backend (authenticated by its API credential). The application hands the
-//! credential to its browser / mobile app, which never sees the API credential.
+//! credential to its browser / mobile app, which never sees the API credential. A partner
+//! user's device may also obtain one by exchanging a CF Meet user token
+//! (`POST /v1/calling/user-sessions`, ADR 0062): it then records the token's minting
+//! credential and service account and expires no later than the token.
 //!
 //! * Format: `cfsig_` + an HS256 JWS signed with Calling's dedicated signaling key
 //!   (`CALLING_SIGNALING_SIGNING_KEY`), separate from API credential verifiers, internal

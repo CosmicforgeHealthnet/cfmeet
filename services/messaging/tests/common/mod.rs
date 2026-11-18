@@ -371,6 +371,8 @@ pub const MEETING_PERMISSIONS: &[&str] = &[
     "messaging-application.delegate",
     "messaging-meeting.sync",
     "messaging-organization.govern",
+    // ADR 0062 §8 partner meeting chat (engaged only with the partner flag on).
+    "messaging-meeting.sync-platform",
 ];
 
 fn peer_keys() -> &'static (ServiceSigningKey, ServiceSigningKey, ServiceSigningKey) {

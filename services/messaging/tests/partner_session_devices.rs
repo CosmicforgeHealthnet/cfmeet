@@ -1185,3 +1185,86 @@ async fn partner_push_registrations_and_wakeups_reach_the_notification_service()
         1
     );
 }
+
+/// ADR 0062 §8: the Meeting Service (`messaging-meeting.sync-platform`) synchronises a
+/// partner meeting's MANAGED chat in the EXTERNAL environment's own scope; partner users
+/// read it with their partner session devices. Off with the partner flag off; never
+/// PRIVATE_E2EE.
+#[tokio::test]
+async fn partner_meeting_chat_is_synchronised_in_the_partner_scope() {
+    let Some((rt, peers)) = start(all_on()).await else {
+        return;
+    };
+    let h = &rt.h;
+    let meeting = common::peers().meeting;
+    let c = environment(h, false);
+    let system = h.principal_of_kind(&c, "BOT_OR_SERVICE");
+    let alice = h.principal(&c);
+    let scope = c.context.scope.delegated();
+    let resolve = |profile: &'static str| {
+        let (meeting, scope) = (meeting.clone(), scope.clone());
+        async move {
+            h.call_internal(
+                &meeting,
+                Method::POST,
+                "/internal/v1/meeting-conversations",
+                Some(json!({ "meetingRef": "conf:partner-1", "ownerPrincipalId": system, "securityProfile": profile })),
+                Some(scope),
+                &[],
+            )
+            .await
+        }
+    };
+    let r = resolve("PRIVATE_E2EE").await;
+    assert_eq!(
+        r.reason(),
+        "PARTNER_MEETING_CHAT_MANAGED_ONLY",
+        "{}",
+        r.text
+    );
+    let r = resolve("MANAGED").await;
+    assert!(r.status.is_success(), "{}", r.text);
+    let conv = r.json["conversation"].clone();
+    let id = cid(&conv);
+    let r = h
+        .call_internal(
+            &meeting,
+            Method::PUT,
+            &format!("/internal/v1/meeting-conversations/{id}/members/{alice}"),
+            Some(json!({ "state": "ACTIVE", "sourceVersion": 1 })),
+            Some(scope.clone()),
+            &[],
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.text);
+    let (client, _) = session(h, &peers, &c, alice).await;
+    let r = with_client(
+        h,
+        &client,
+        Method::GET,
+        &format!("/v1/conversations/{id}"),
+        None,
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["securityProfile"], "MANAGED");
+
+    // The partner flag off: an EXTERNAL scope is refused exactly as before.
+    let Some((off, _)) = start(PartnerSettings::default()).await else {
+        return;
+    };
+    let c2 = environment(&off.h, false);
+    let system2 = off.h.principal_of_kind(&c2, "BOT_OR_SERVICE");
+    let r = off
+        .h
+        .call_internal(
+            &meeting,
+            Method::POST,
+            "/internal/v1/meeting-conversations",
+            Some(json!({ "meetingRef": "conf:partner-2", "ownerPrincipalId": system2, "securityProfile": "MANAGED" })),
+            Some(c2.context.scope.delegated()),
+            &[],
+        )
+        .await;
+    assert_eq!(r.code(), "DELEGATED_CONTEXT_INVALID", "{}", r.text);
+}

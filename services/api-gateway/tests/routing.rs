@@ -207,8 +207,12 @@ fn the_generated_catalogue_is_in_parity_with_the_contracts() {
             other => panic!("unknown class {other}"),
         }
     }
-    assert_eq!(public, table.len());
-    assert_eq!(public, manifest["routes"].as_array().unwrap().len());
+    // The partner /v1/meetings aliases are the only routes without a catalogue row of
+    // their own: each serves a PUBLIC_CUSTOMER /api/v2 operation (`aliasOf`).
+    let routes = manifest["routes"].as_array().unwrap();
+    let aliases = routes.iter().filter(|r| r.get("aliasOf").is_some()).count();
+    assert_eq!(public + aliases, table.len());
+    assert_eq!(public + aliases, routes.len());
     // Platform Access, Telephony and internal / admin / provider paths never appear.
     for r in table.definitions() {
         assert!(
@@ -227,6 +231,7 @@ fn the_generated_catalogue_is_in_parity_with_the_contracts() {
     // The approved families are all present.
     for (domain, sample) in [
         ("meetings", "/api/v2/meeting-spaces"),
+        ("meetings", "/v1/meetings/meeting-spaces"),
         ("calling", "/v1/calls"),
         ("privacy-relay", "/v1/privacy-relay/contexts"),
         ("messaging", "/v1/conversations"),
@@ -310,5 +315,70 @@ fn meetings_platform_routes_take_platform_credentials_with_meetings_scopes() {
         let d = find(m.clone(), p);
         assert!(!d.auth.contains(&AuthMode::PlatformCredential), "{m} {p}");
         assert!(d.required_scope.is_none(), "{m} {p}");
+        let alias = format!("/v1/meetings{}", &p["/api/v2".len()..]);
+        assert!(
+            !table.definitions().any(|d| d.pattern == alias),
+            "{alias} must not exist"
+        );
     }
+}
+
+/// Partner servers reach the machine meeting operations at `/v1/meetings/...` (the edge
+/// keeps first-party `/api/v2` direct): every platform-credential `/api/v2` meetings
+/// route has exactly one PLATFORM_CREDENTIAL-only alias forwarded to the same upstream
+/// path, and nothing else is aliased.
+#[test]
+fn the_partner_meetings_family_aliases_every_machine_operation_and_nothing_else() {
+    let table = catalogue::table_for(true, true, &RoutingControls::default()).unwrap();
+    let machine: Vec<_> = table
+        .definitions()
+        .filter(|d| d.domain == "meetings" && d.pattern.starts_with("/api/v2/"))
+        .filter(|d| d.auth.contains(&AuthMode::PlatformCredential))
+        .collect();
+    assert_eq!(machine.len(), 21);
+    let aliases: Vec<_> = table
+        .definitions()
+        .filter(|d| d.pattern.starts_with("/v1/meetings/"))
+        .collect();
+    assert_eq!(aliases.len(), machine.len());
+    for m in &machine {
+        let pattern = format!("/v1/meetings{}", &m.pattern["/api/v2".len()..]);
+        let a = aliases
+            .iter()
+            .find(|a| a.method == m.method && a.pattern == pattern)
+            .unwrap_or_else(|| panic!("{} {pattern} missing", m.method));
+        assert_eq!(a.auth, [AuthMode::PlatformCredential], "{}", a.id);
+        assert_eq!(a.upstream, services::MEETING_SERVICE);
+        assert_eq!(a.upstream_path, m.pattern);
+        assert_eq!(a.required_scope, m.required_scope);
+        assert_eq!(
+            a.id,
+            format!("meetings.platform.{}", &m.id["meetings.".len()..])
+        );
+        let sample = a
+            .pattern
+            .replace("{id}", "c-1")
+            .replace("{participantId}", "p-2")
+            .replace("{invitationId}", "i-3");
+        match table.lookup(&a.method, &sample) {
+            Lookup::Matched(r) => {
+                assert_eq!(r.definition.id, a.id);
+                assert_eq!(
+                    r.upstream_path,
+                    m.pattern
+                        .replace("{id}", "c-1")
+                        .replace("{participantId}", "p-2")
+                        .replace("{invitationId}", "i-3")
+                );
+            }
+            other => panic!("{sample}: {other:?}"),
+        }
+    }
+    // Disabling the meetings family removes the aliases with it.
+    let mut c = RoutingControls::default();
+    c.disabled_domains.insert("meetings".into());
+    let off = catalogue::table_for(true, true, &c).unwrap();
+    assert!(!off
+        .definitions()
+        .any(|d| d.pattern.starts_with("/v1/meetings/")));
 }

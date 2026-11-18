@@ -143,8 +143,14 @@ const MIRROR: &[(&str, &str)] = &[
 /// them through the delegated router.
 const NOT_MIRRORED: &[(&str, &str)] = &[
     ("POST", "/internal/v1/delegated/v1/messaging/user-sessions"),
-    ("PUT", "/internal/v1/delegated/v1/messaging/user-push-registrations/{installationId}"),
-    ("DELETE", "/internal/v1/delegated/v1/messaging/user-push-registrations/{installationId}"),
+    (
+        "PUT",
+        "/internal/v1/delegated/v1/messaging/user-push-registrations/{installationId}",
+    ),
+    (
+        "DELETE",
+        "/internal/v1/delegated/v1/messaging/user-push-registrations/{installationId}",
+    ),
 ];
 
 fn user_token_operation(op: &Value) -> bool {
@@ -267,7 +273,9 @@ async fn user_token_operations_are_never_mirrored() {
     };
     let peers = peers();
     let first_party = h.first_party(true);
-    let acting = h.principal_of_kind(&first_party, "NATIVE_CF_USER").to_string();
+    let acting = h
+        .principal_of_kind(&first_party, "NATIVE_CF_USER")
+        .to_string();
     for (method, template) in NOT_MIRRORED {
         let method = Method::from_bytes(method.as_bytes()).unwrap();
         let r = h
@@ -280,7 +288,12 @@ async fn user_token_operations_are_never_mirrored() {
                 &[("cf-acting-principal", &acting)],
             )
             .await;
-        assert!(is_router_fallback(&r), "{method} {template}: {} {}", r.status, r.text);
+        assert!(
+            is_router_fallback(&r),
+            "{method} {template}: {} {}",
+            r.status,
+            r.text
+        );
     }
 }
 
