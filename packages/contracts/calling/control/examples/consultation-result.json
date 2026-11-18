@@ -1,0 +1,69 @@
+{
+  "consultation": {
+    "consultationId": "c0a1b2c3-d4e5-46f7-8899-aabbccddeeff",
+    "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "consultationCallId": "8a2d3c4b-5e6f-4071-9b82-a3c4d5e6f708",
+    "transferringParticipantId": "1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+    "targetPrincipalId": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+    "state": "CONSULTING",
+    "heldOriginal": true,
+    "transferId": null,
+    "version": 1,
+    "createdAt": "2026-10-07T09:02:00.000Z",
+    "updatedAt": "2026-10-07T09:02:00.000Z",
+    "endedAt": null
+  },
+  "call": {
+    "callId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "kind": "VOICE",
+    "state": "HELD",
+    "version": 9,
+    "initiatorPrincipalId": "11111111-2222-4333-8444-555555555555",
+    "terminalReason": null,
+    "failureCategory": null,
+    "requestedAt": "2026-10-07T09:00:00.000000Z",
+    "authorizedAt": "2026-10-07T09:00:00.010000Z",
+    "ringingAt": "2026-10-07T09:00:00.120000Z",
+    "answeredAt": "2026-10-07T09:00:04.500000Z",
+    "connectedAt": "2026-10-07T09:00:05.900000Z",
+    "endingAt": null,
+    "endedAt": null,
+    "createdAt": "2026-10-07T09:00:00.000000Z",
+    "updatedAt": "2026-10-07T09:02:00.000000Z"
+  },
+  "consultationCall": {
+    "call": {
+      "callId": "8a2d3c4b-5e6f-4071-9b82-a3c4d5e6f708",
+      "kind": "VOICE",
+      "state": "DIALING",
+      "version": 6,
+      "initiatorPrincipalId": "66666666-7777-4888-9999-aaaaaaaaaaaa",
+      "terminalReason": null,
+      "failureCategory": null,
+      "requestedAt": "2026-10-07T09:00:00.000000Z",
+      "authorizedAt": "2026-10-07T09:00:00.010000Z",
+      "ringingAt": "2026-10-07T09:00:00.120000Z",
+      "answeredAt": null,
+      "connectedAt": null,
+      "endingAt": null,
+      "endedAt": null,
+      "createdAt": "2026-10-07T09:00:00.000000Z",
+      "updatedAt": "2026-10-07T09:00:00.120000Z"
+    },
+    "initiatorParticipantId": "4c5d6e7f-8091-42a3-b4c5-d6e7f8091a2b",
+    "initiatorSessionId": "3c4d5e6f-7081-4293-a4b5-c6d7e8f9a0b1",
+    "participants": [
+      {
+        "participantId": "4c5d6e7f-8091-42a3-b4c5-d6e7f8091a2b",
+        "principalId": "66666666-7777-4888-9999-aaaaaaaaaaaa",
+        "role": "INITIATOR"
+      },
+      {
+        "participantId": "5d6e7f80-91a2-43b4-85d6-e7f8091a2b3c",
+        "principalId": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+        "role": "RECIPIENT"
+      }
+    ],
+    "liveInvitationCount": 1
+  }
+}

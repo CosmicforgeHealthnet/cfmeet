@@ -392,6 +392,44 @@ async fn seed(d: &Deployment) {
         .await;
     d.voicemail(vm.secret.expose_once(), &owner.0, &caller, "4400")
         .await;
+    // A queue with an agent and a call answered from it (queue entry, offers).
+    let agent = d.desk("upgrade-agent").await;
+    let queue =
+        d.e.create(
+            "/v1/enterprise/queues",
+            json!({ "name": "Upgrade queue", "maxWaitSeconds": 600, "offerTimeoutSeconds": 20,
+                    "capacity": 10 }),
+        )
+        .await;
+    let queue_id = queue["queueId"].as_str().unwrap();
+    let r =
+        d.e.admin(
+            Method::PUT,
+            &format!("/v1/enterprise/queues/{queue_id}/members"),
+            Some(json!({ "expectedVersion": queue["version"],
+                         "members": [{ "principalId": agent.0.id().to_string() }] })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    d.e.extension("4410", "QUEUE", queue_id).await;
+    let r =
+        d.e.call_extension(
+            "VOICE",
+            &caller.0,
+            &caller.1,
+            "4410",
+            &Uuid::new_v4().to_string(),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let queued: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let offer = a
+        .invitation_for(queued, agent.1.endpoint)
+        .await
+        .expect("the agent is offered the queued call");
+    let (_, v) = a.state(queued).await;
+    let r = a.accept(queued, offer, &agent.1, v).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
     // Blocks and abuse reports.
     let r = a
         .post(

@@ -946,8 +946,9 @@ impl AppCallService {
     }
 
     /// Available agents of the queue, least recently offered first: ACTIVE members whose
-    /// principal is ACTIVE, without a pending offer (of any queue) and not on an answered
-    /// Call.
+    /// principal is ACTIVE, without a pending offer (of any queue), not on an answered
+    /// Call and not in wrap-up (C15: the queue's `wrap_up_seconds` have not yet passed
+    /// since the agent left the last call it answered from this queue).
     pub(crate) async fn available_agents(
         &self,
         txn: &DatabaseTransaction,
@@ -971,10 +972,17 @@ impl AppCallService {
                                                    'TRANSFERRING', 'ENDING') \
                            AND (cp.role = 'INITIATOR' OR EXISTS (SELECT 1 FROM call_answer_claims a \
                                 WHERE a.call_id = cp.call_id AND a.participant_id = cp.id))) \
+                    AND NOT EXISTS (SELECT 1 FROM enterprise_call_queues q \
+                         JOIN enterprise_queue_entries e ON e.queue_id = q.id \
+                          AND e.state = 'ANSWERED' AND e.assigned_principal_id = m.principal_id \
+                         JOIN call_participants wp ON wp.call_id = e.call_id \
+                          AND wp.principal_id = m.principal_id \
+                         WHERE q.id = m.queue_id AND q.wrap_up_seconds > 0 \
+                           AND wp.ended_at > $2 - make_interval(secs => q.wrap_up_seconds)) \
                   ORDER BY (SELECT max(o.offered_at) FROM enterprise_queue_offers o \
                              WHERE o.queue_id = m.queue_id AND o.principal_id = m.principal_id) \
                            ASC NULLS FIRST, m.position",
-                vec![queue_id.into()],
+                vec![queue_id.into(), self.calls.now().into()],
             ))
             .await?;
         rows.into_iter()

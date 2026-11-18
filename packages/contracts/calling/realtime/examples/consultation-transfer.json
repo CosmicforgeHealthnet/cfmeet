@@ -1,0 +1,22 @@
+{
+  "schema": "cfmeet.calling.realtime-signal",
+  "schemaVersion": 1,
+  "eventId": "sig_0000000000000000000000000014c001",
+  "type": "call.consultation_transfer",
+  "callId": "8a2d3c4b-5e6f-4071-9b82-a3c4d5e6f708",
+  "callKind": "VOICE",
+  "callState": "CONNECTED",
+  "callVersion": 8,
+  "sequence": 24,
+  "issuedAt": "2026-10-07T09:00:00.130Z",
+  "correlationId": "corr_33333333333333333333333333333333",
+  "data": {
+    "consultationId": "c0a1b2c3-d4e5-46f7-8899-aabbccddeeff",
+    "originalCallId": "7f1c2b3a-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "transferId": "708192a3-b4c5-46d7-88f9-a0b1c2d3e4f5"
+  },
+  "target": {
+    "endpointId": "f6f6f6f6-0707-4818-9929-3a3a3a3a3a3a",
+    "principalId": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+  }
+}

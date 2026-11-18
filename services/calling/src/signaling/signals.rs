@@ -71,6 +71,10 @@ pub enum SignalType {
     /// C7: participants were invited into the ongoing Call (data: participantsAdded,
     /// activeParticipants). Clients refresh the Call.
     ParticipantsChanged,
+    /// C14: on a consultation Call, the consultation is being completed: the original Call
+    /// is transferred to the consulted target (data: consultationId, originalCallId,
+    /// transferId). The target's client answers its ring offer of the original Call.
+    ConsultationTransfer,
 }
 
 impl SignalType {
@@ -106,6 +110,7 @@ impl SignalType {
         SignalType::ScreenShareStarted,
         SignalType::ScreenShareStopped,
         SignalType::ParticipantsChanged,
+        SignalType::ConsultationTransfer,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -141,6 +146,7 @@ impl SignalType {
             SignalType::ScreenShareStarted => "call.screen_share_started",
             SignalType::ScreenShareStopped => "call.screen_share_stopped",
             SignalType::ParticipantsChanged => "call.participants_changed",
+            SignalType::ConsultationTransfer => "call.consultation_transfer",
         }
     }
 }

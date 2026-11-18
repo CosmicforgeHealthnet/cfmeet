@@ -82,6 +82,15 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /v1/calls/{call_id}/hold", Probe::Body),
     ("POST /v1/calls/{call_id}/resume", Probe::Body),
     ("POST /v1/calls/{call_id}/transfer", Probe::Body),
+    ("POST /v1/calls/{call_id}/consultations", Probe::Body),
+    (
+        "POST /v1/calls/{call_id}/consultations/{consultation_id}/complete",
+        Probe::Body,
+    ),
+    (
+        "POST /v1/calls/{call_id}/consultations/{consultation_id}/cancel",
+        Probe::Body,
+    ),
     ("POST /v1/calls/{call_id}/upgrade", Probe::Body),
     ("POST /v1/calls/{call_id}/screen-share", Probe::Body),
     ("POST /v1/calls/{call_id}/screen-share/stop", Probe::Body),
@@ -638,6 +647,33 @@ async fn provision() -> Option<Provisioned> {
     )
     .await;
     ids.insert("abuse_report_id", id_of(&report, "abuseReportId"));
+    // An attended-transfer consultation (C14) on that call, cancelled again (the call
+    // resumes).
+    let consulted = a.principal("matrix-consulted").await;
+    a.device(&consulted, "matrix-consulted").await;
+    let callee_main = a.device(&a.w.recipient, "callee-main").await;
+    let recipient = a
+        .participant_of(reported, a.w.recipient.id().as_uuid())
+        .await;
+    let (_, version) = a.state(reported).await;
+    let r = a
+        .post_with(
+            &format!("/v1/calls/{reported}/consultations"),
+            json!({ "transferringParticipantId": recipient, "targetPrincipalId": consulted.id(),
+                    "initiatorEndpointId": callee_main.endpoint, "expectedVersion": version }),
+            &[("idempotency-key", "matrix-consultation")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let consultation = id_of(&r.json["consultation"], "consultationId");
+    let r = a
+        .post(
+            &format!("/v1/calls/{reported}/consultations/{consultation}/cancel"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    ids.insert("consultation_id", consultation);
     // Last (its ring window is fresh): a ringing application call — invitation,
     // sessions, endpoints, signaling credentials.
     let (call, caller_device, callee_device) = a.ringing_call("VOICE").await;

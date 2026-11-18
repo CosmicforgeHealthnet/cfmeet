@@ -60,6 +60,15 @@ pub fn routes() -> Router<AppState> {
         .route("/v1/calls/:call_id/hold", post(hold))
         .route("/v1/calls/:call_id/resume", post(resume))
         .route("/v1/calls/:call_id/transfer", post(transfer))
+        .route("/v1/calls/:call_id/consultations", post(start_consultation))
+        .route(
+            "/v1/calls/:call_id/consultations/:consultation_id/complete",
+            post(complete_consultation),
+        )
+        .route(
+            "/v1/calls/:call_id/consultations/:consultation_id/cancel",
+            post(cancel_consultation),
+        )
         .route("/v1/calls/:call_id/upgrade", post(upgrade))
         .route("/v1/calls/:call_id/screen-share", post(start_screen_share))
         .route(
@@ -861,6 +870,139 @@ async fn transfer(
                 enterprise_destination: resolved.destination,
             },
         )
+        .await?;
+    Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
+}
+
+fn one_transfer_target(
+    principal: Option<Uuid>,
+    extension: Option<String>,
+    destination: Option<crate::enterprise::destinations::Destination>,
+) -> Result<TransferTarget, CallingError> {
+    match (principal, extension, destination) {
+        (Some(p), None, None) => Ok(TransferTarget::Principal(PrincipalId::from_uuid(p))),
+        (None, Some(number), None) => Ok(TransferTarget::Extension(number)),
+        (None, None, Some(d)) => Ok(TransferTarget::Destination(d)),
+        _ => Err(CallingError::Validation(
+            "exactly one of targetPrincipalId, targetExtension or targetDestination is required.",
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ConsultationBody {
+    transferring_participant_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_principal_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_extension: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    target_destination: Option<crate::enterprise::destinations::Destination>,
+    /// The transferring participant's own endpoint the consultation Call is placed from.
+    initiator_endpoint_id: Uuid,
+    /// The consultation Call's kind (default VOICE).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kind: Option<CallKind>,
+    expected_version: i64,
+}
+
+/// `POST /v1/calls/:call_id/consultations` (C14): hold the Call and place a consultation
+/// Call from the transferring participant to the target (calls.write; Idempotency-Key
+/// required; enterprise targets need enterprise.calls.use).
+async fn start_consultation(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    headers: HeaderMap,
+    Path(call_id): Path<String>,
+    body: Result<Json<ConsultationBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let body = parse_body(body)?;
+    let key = command_key(
+        &headers,
+        CommandOperation::CreateCall,
+        Some(call_uuid),
+        &body,
+        true,
+    )?
+    .ok_or(CallingError::Internal)?;
+    let target = one_transfer_target(
+        body.target_principal_id,
+        body.target_extension.clone(),
+        body.target_destination,
+    )?;
+    if !matches!(target, TransferTarget::Principal(_)) {
+        ctx.require_scope(names::ENTERPRISE_CALLS_USE)?;
+    }
+    let started = state
+        .app
+        .start_consultation(
+            &ctx,
+            CallId::from_uuid(call_uuid),
+            super::ConsultationRequest {
+                transferring_participant: CallParticipantId::from_uuid(
+                    body.transferring_participant_id,
+                ),
+                target,
+                initiator_endpoint: CallEndpointId::from_uuid(body.initiator_endpoint_id),
+                kind: body.kind.unwrap_or(CallKind::Voice),
+                expected_version: body.expected_version,
+                key,
+            },
+        )
+        .await?;
+    let status = StatusCode::from_u16(started.status).unwrap_or(StatusCode::CREATED);
+    Ok(respond(status, started.body, started.replayed))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompleteConsultationBody {
+    /// The original Call's version.
+    expected_version: i64,
+}
+
+/// `POST /v1/calls/:call_id/consultations/:consultation_id/complete` (C14): transfer the
+/// original Call to the consulted target (calls.write; idempotent per consultation).
+async fn complete_consultation(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path((call_id, consultation_id)): Path<(String, String)>,
+    body: Result<Json<CompleteConsultationBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let consultation = uuid_path(&consultation_id)?;
+    let body = parse_body(body)?;
+    let outcome = state
+        .app
+        .complete_consultation(
+            &ctx,
+            CallId::from_uuid(call_uuid),
+            consultation,
+            body.expected_version,
+        )
+        .await?;
+    Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
+}
+
+/// `POST /v1/calls/:call_id/consultations/:consultation_id/cancel` (C14): end the
+/// consultation Call and resume the original (calls.write; idempotent).
+async fn cancel_consultation(
+    State(state): State<AppState>,
+    ctx: PlatformAuthContext,
+    Path((call_id, consultation_id)): Path<(String, String)>,
+    body: Result<Json<EmptyBody>, JsonRejection>,
+) -> Result<Response, CallingError> {
+    ctx.require_scope(names::CALLS_WRITE)?;
+    let call_uuid = uuid_path(&call_id)?;
+    let consultation = uuid_path(&consultation_id)?;
+    parse_body(body)?;
+    let outcome = state
+        .app
+        .cancel_consultation(&ctx, CallId::from_uuid(call_uuid), consultation)
         .await?;
     Ok(respond(StatusCode::OK, outcome.body, outcome.replayed))
 }

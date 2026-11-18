@@ -1459,11 +1459,28 @@
             }
           ],
           "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        },
+        "wrapUpSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600,
+          "description": "C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up."
+        },
+        "holdMusic": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HoldMusicRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment."
         }
       }
     },
     "UpdateQueueRequest": {
-      "description": "Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline.",
+      "description": "Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline. holdMusic null removes the hold music.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1506,6 +1523,23 @@
             }
           ],
           "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        },
+        "wrapUpSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600,
+          "description": "C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up."
+        },
+        "holdMusic": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HoldMusicRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment."
         }
       }
     },
@@ -1582,6 +1616,8 @@
         "offerTimeoutSeconds",
         "capacity",
         "overflow",
+        "wrapUpSeconds",
+        "holdMusic",
         "members",
         "waiting",
         "status",
@@ -1625,6 +1661,23 @@
             }
           ],
           "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+        },
+        "wrapUpSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600,
+          "description": "C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up."
+        },
+        "holdMusic": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HoldMusicRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment."
         },
         "members": {
           "type": "array",
@@ -1794,6 +1847,17 @@
         "enteredAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "holdMusic": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HoldMusicRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "C15: the queue's built-in hold music the caller's application plays while it waits (null = none)."
         }
       }
     },
@@ -1823,6 +1887,28 @@
       "properties": {
         "builtin": {
           "$ref": "#/$defs/BuiltinPrompt"
+        }
+      }
+    },
+    "BuiltinHoldMusic": {
+      "description": "C15: the controlled built-in hold-music catalogue. The media plane / application client plays its own copy of each; never a URL, path or file name.",
+      "type": "string",
+      "enum": [
+        "DEFAULT",
+        "CALM",
+        "BRIGHT"
+      ]
+    },
+    "HoldMusicRef": {
+      "description": "C15: a queue's hold music: a built-in choice (customer audio artifacts are not accepted by this deployment).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "builtin"
+      ],
+      "properties": {
+        "builtin": {
+          "$ref": "#/$defs/BuiltinHoldMusic"
         }
       }
     },
