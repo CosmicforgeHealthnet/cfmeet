@@ -1309,3 +1309,256 @@ async fn retention_expiry_and_erasure_run_cleanly() {
         0
     );
 }
+
+/// An account notice (contract 1.3.0) to one email principal with its address sealed, on
+/// behalf of Alice when `subject` (the email-in-use notice names no account).
+fn notice(
+    h: &Harness,
+    event_type: &str,
+    key: &str,
+    data: &[(&str, Value)],
+    subject: bool,
+    secret: SealedPlaintext,
+) -> Value {
+    let alice_id = Uuid::parse_str(&alice()["cfmeet-user:".len()..]).unwrap();
+    let principal = format!("meeting-email-principal:{}", Uuid::new_v4());
+    let mut b = cf_notification_client::EnvelopeBuilder::new(
+        Producer::MeetingService,
+        event_type,
+        NOW,
+        route(),
+    )
+    .unwrap()
+    .dedupe_key(key)
+    .idempotency_key(key)
+    .recipient(principal);
+    if subject {
+        b = b.subject(alice_id, None);
+    }
+    for (k, v) in data {
+        b = b.data(k, v.clone());
+    }
+    serde_json::to_value(b.secret(secret).build_sealed(&h.sealing).unwrap()).unwrap()
+}
+
+/// The account notices of owner decision A (`ACCOUNT_NOTICES`, CRITICAL): welcome, new
+/// sign-in alert, email-change attempt, and the email-changed notices to the previous
+/// address (masked new address and undo token sealed) and to the new one. Each is sent
+/// once, only under its X6 lease, completed with X7, rendered exactly as Meeting renders
+/// it (the undo and sessions links rebuilt from NOTIFICATIONS_APP_URL), and nothing sealed
+/// is ever at rest in clear.
+#[tokio::test]
+async fn account_notices_are_sent_under_their_lease_as_meeting_renders_them() {
+    use notifications::templates::email::{
+        email_changed_new_address_email, email_changed_old_address_email,
+        email_in_use_notice_email, new_sign_in_email, welcome_email, RequestDetails,
+    };
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    h.set_mode("ACCOUNT_NOTICES", "EMAIL", "ACTIVE").await;
+    let meeting = h.peers.meeting.clone();
+    let change = Uuid::new_v4();
+    let token = "Undo0123456789abcdefghijklmnopqrstuvwxyzAB";
+    let address = |a: &str| SealedPlaintext::default().with_address(a);
+    let events = vec![
+        notice(
+            &h,
+            "account.welcome.requested",
+            &format!("welcome:{U}"),
+            &[],
+            true,
+            address("welcome.alice@example.com"),
+        ),
+        notice(
+            &h,
+            "account.security.new-sign-in",
+            &format!("new-sign-in:{}", Uuid::new_v4()),
+            &[("requestedAt", json!("2026-11-17T12:00:00Z"))],
+            true,
+            address("signin.alice@example.com")
+                .with_request_client("TestBrowser/1.0")
+                .with_request_network("102.89.x.x"),
+        ),
+        notice(
+            &h,
+            "account.security.email-in-use",
+            "email-in-use:6b86b273ff34fce1:2026111712",
+            &[],
+            false,
+            address("taken.owner@example.com"),
+        ),
+        notice(
+            &h,
+            "account.security.email-changed",
+            &format!("email-changed:old:{change}"),
+            &[
+                ("changedAt", json!("2026-11-17T12:00:00Z")),
+                ("side", json!("OLD")),
+            ],
+            true,
+            address("previous.alice@example.com")
+                .with_masked_address("n***@example.com")
+                .with_token(token),
+        ),
+        notice(
+            &h,
+            "account.security.email-changed",
+            &format!("email-changed:new:{change}"),
+            &[
+                ("changedAt", json!("2026-11-17T12:00:00Z")),
+                ("side", json!("NEW")),
+            ],
+            true,
+            address("nadia.new@example.com"),
+        ),
+    ];
+    let decisions: Vec<Uuid> = events
+        .iter()
+        .map(|ev| Uuid::parse_str(ev["route"]["decisionId"].as_str().unwrap()).unwrap())
+        .collect();
+    let r = h.ingest(&meeting, events.clone()).await;
+    for i in 0..events.len() {
+        assert_eq!(r.expect(200)["results"][i]["outcome"], "ACCEPTED", "{i}");
+    }
+    // The undo token in clear data is refused at I1.
+    let mut clear = events[3].clone();
+    clear["eventId"] = json!(format!("evt_{}", Uuid::new_v4().simple()));
+    clear["route"]["decisionId"] = json!(Uuid::new_v4());
+    clear["data"]["undoToken"] = json!(token);
+    let r = h.ingest(&meeting, vec![clear]).await;
+    assert_eq!(r.expect(200)["results"][0]["outcome"], "REJECTED");
+
+    h.process_all().await;
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_email_messages WHERE lane = 'CRITICAL' AND status = 'QUEUED'")
+            .await,
+        5
+    );
+    // Nothing sealed at rest in clear.
+    for secret in [
+        token,
+        "n***",
+        "TestBrowser",
+        "102.89",
+        "welcome.alice",
+        "signin.alice",
+        "taken.owner",
+        "previous.alice",
+        "nadia.new",
+    ] {
+        assert_eq!(
+            h.count(&format!("SELECT count(*)::bigint FROM notif_email_messages WHERE concat_ws(' ', recipient_sealed, subject_sealed, body_sealed) LIKE '%{secret}%'")).await,
+            0,
+            "{secret}"
+        );
+        assert_eq!(
+            h.count(&format!(
+                "SELECT count(*)::bigint FROM notif_notifications WHERE params::text LIKE '%{secret}%'"
+            ))
+            .await,
+            0,
+            "{secret}"
+        );
+        assert_eq!(
+            h.count(&format!(
+                "SELECT count(*)::bigint FROM notif_event_inbox WHERE (envelope - 'sealed')::text LIKE '%{secret}%'"
+            ))
+            .await,
+            0,
+            "{secret}"
+        );
+    }
+    // The CRITICAL worker claims at most 4 messages per pass.
+    let mut accepted = Vec::new();
+    for _ in 0..3 {
+        accepted.push(
+            h.email_worker("CRITICAL")
+                .tick(Utc::now())
+                .await
+                .unwrap()
+                .accepted,
+        );
+    }
+    assert_eq!(accepted, vec![4, 1, 0], "each notice sent once");
+    let mut sent = h.provider.sent();
+    sent.sort_by(|a, b| a.1.cmp(&b.1));
+    let to: Vec<&str> = sent.iter().map(|s| s.1.as_str()).collect();
+    assert_eq!(
+        to,
+        vec![
+            "nadia.new@example.com",
+            "previous.alice@example.com",
+            "signin.alice@example.com",
+            "taken.owner@example.com",
+            "welcome.alice@example.com",
+        ],
+        "each to its sealed address, once"
+    );
+    let app = "https://cfmeet.com";
+    // Greeted with the subject account's name (X1), like the email-change code.
+    let legacy = [
+        (
+            "Your CF Meet email address was updated",
+            email_changed_new_address_email("Alice").text,
+        ),
+        (
+            "Your CF Meet email address was changed",
+            email_changed_old_address_email(
+                "Alice",
+                "n***@example.com",
+                "2026-11-17 12:00",
+                Some(&format!("{app}/auth/email-change/undo?token={token}")),
+                "7 days",
+            )
+            .text,
+        ),
+        (
+            "New sign-in to your CF Meet account",
+            new_sign_in_email(
+                "Alice",
+                &RequestDetails {
+                    client: Some("TestBrowser/1.0".into()),
+                    address: Some("102.89.x.x".into()),
+                    when_utc: "2026-11-17 12:00".into(),
+                },
+                &format!("{app}/settings/sessions"),
+            )
+            .text,
+        ),
+        (
+            "Email change attempt on CF Meet",
+            email_in_use_notice_email().text,
+        ),
+        ("Welcome to CF Meet", welcome_email("Alice", app).text),
+    ];
+    for (s, (subject, text)) in sent.iter().zip(legacy) {
+        assert_eq!(s.2, subject, "{}", s.1);
+        assert_eq!(s.3, text, "{}", s.1);
+    }
+    let mut claimed = h.owners.leases_claimed.lock().unwrap().clone();
+    let mut completed = h.owners.completed.lock().unwrap().clone();
+    let mut want = decisions.clone();
+    claimed.sort();
+    completed.sort();
+    want.sort();
+    assert_eq!((claimed, completed), (want.clone(), want));
+    assert_eq!(
+        h.count("SELECT count(*)::bigint FROM notif_email_messages WHERE body_sealed IS NOT NULL")
+            .await,
+        0
+    );
+    // The ledger keys and categories are Meeting's.
+    assert_eq!(
+        h.count(&format!("SELECT count(*)::bigint FROM notif_email_messages WHERE idempotency_key IN ('welcome:{U}', 'email-changed:old:{change}', 'email-changed:new:{change}') OR idempotency_key LIKE 'new-sign-in:%' OR idempotency_key LIKE 'email-in-use:%'"))
+            .await,
+        5
+    );
+    assert_eq!(
+        h.count(
+            "SELECT count(*)::bigint FROM notif_email_messages WHERE category = 'AUTH_WELCOME'"
+        )
+        .await,
+        1
+    );
+}

@@ -1,5 +1,8 @@
 //! Sealing codes, invitation tokens and invitee addresses to the Notification Service
-//! (Document 4 §5.1, P4, S-19).
+//! (Document 4 §5.1, P4, S-19), and (contract `cfmeet.notifications.common` 1.2.0) the
+//! account-notice facts an email shows but no event may carry in clear: a masked address
+//! (`maskedAddress`) and the request's client label and masked network (`requestClient`,
+//! `requestNetwork`).
 //!
 //! HPKE (RFC 9180) base mode with DHKEM(X25519, HKDF-SHA256), HKDF-SHA256 and
 //! AES-256-GCM. `info` is fixed ([`HPKE_INFO`]); the AAD binds the sealed part to its
@@ -118,14 +121,40 @@ pub struct SealedPlaintext {
     pub token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
+    /// A masked address as Meeting shows it (`n***@example.com`): the new address in the
+    /// notice to the previous address of an email change.
+    #[serde(
+        rename = "maskedAddress",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub masked_address: Option<String>,
+    /// The shortened client label of the request an account notice reports.
+    #[serde(
+        rename = "requestClient",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub request_client: Option<String>,
+    /// The masked network prefix of that request (`102.89.x.x`, `2001:db8:x:x`).
+    #[serde(
+        rename = "requestNetwork",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub request_network: Option<String>,
 }
 
 impl std::fmt::Debug for SealedPlaintext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let r = |v: &Option<String>| v.as_ref().map(|_| "[REDACTED]");
         f.debug_struct("SealedPlaintext")
-            .field("code", &self.code.as_ref().map(|_| "[REDACTED]"))
-            .field("token", &self.token.as_ref().map(|_| "[REDACTED]"))
-            .field("address", &self.address.as_ref().map(|_| "[REDACTED]"))
+            .field("code", &r(&self.code))
+            .field("token", &r(&self.token))
+            .field("address", &r(&self.address))
+            .field("masked_address", &r(&self.masked_address))
+            .field("request_client", &r(&self.request_client))
+            .field("request_network", &r(&self.request_network))
             .finish()
     }
 }
@@ -153,6 +182,37 @@ fn address_ok(s: &str) -> bool {
     }
 }
 
+/// `n***@example.com` (Meeting `services::email::mask_email`): at most one character of
+/// the local part, then `***@` and the domain; never a full address.
+pub fn masked_address_ok(s: &str) -> bool {
+    let Some((local, domain)) = s.split_once('@') else {
+        return false;
+    };
+    let Some(first) = local.strip_suffix("***") else {
+        return false;
+    };
+    s.len() <= 260
+        && first.chars().count() <= 1
+        && !first.contains(['@', '*'])
+        && (1..=253).contains(&domain.len())
+        && !domain.contains('@')
+        && !s.chars().any(|c| c.is_whitespace() || c.is_control())
+}
+
+/// A client label: 1–80 characters, no control characters.
+pub fn request_client_ok(s: &str) -> bool {
+    (1..=80).contains(&s.chars().count()) && !s.chars().any(char::is_control)
+}
+
+/// A masked network prefix (`passwordless::mask_address`): hex digits, `.`, `:` and at
+/// least one `x`, 3–64 bytes; never a full address.
+pub fn request_network_ok(s: &str) -> bool {
+    (3..=64).contains(&s.len())
+        && s.contains('x')
+        && s.bytes()
+            .all(|b| b.is_ascii_hexdigit() || matches!(b, b'.' | b':' | b'x'))
+}
+
 impl SealedPlaintext {
     pub fn with_code(mut self, code: impl Into<String>) -> Self {
         self.code = Some(code.into());
@@ -169,6 +229,21 @@ impl SealedPlaintext {
         self
     }
 
+    pub fn with_masked_address(mut self, masked: impl Into<String>) -> Self {
+        self.masked_address = Some(masked.into());
+        self
+    }
+
+    pub fn with_request_client(mut self, client: impl Into<String>) -> Self {
+        self.request_client = Some(client.into());
+        self
+    }
+
+    pub fn with_request_network(mut self, network: impl Into<String>) -> Self {
+        self.request_network = Some(network.into());
+        self
+    }
+
     /// The fields present (for the catalogue's sealed allowance check).
     pub fn fields(&self) -> Vec<crate::catalogue::SealedField> {
         use crate::catalogue::SealedField::*;
@@ -182,6 +257,15 @@ impl SealedPlaintext {
         if self.address.is_some() {
             out.push(Address);
         }
+        if self.masked_address.is_some() {
+            out.push(MaskedAddress);
+        }
+        if self.request_client.is_some() {
+            out.push(RequestClient);
+        }
+        if self.request_network.is_some() {
+            out.push(RequestNetwork);
+        }
         out
     }
 
@@ -190,7 +274,13 @@ impl SealedPlaintext {
         let ok = !self.fields().is_empty()
             && self.code.as_deref().is_none_or(code_ok)
             && self.token.as_deref().is_none_or(token_ok)
-            && self.address.as_deref().is_none_or(address_ok);
+            && self.address.as_deref().is_none_or(address_ok)
+            && self.masked_address.as_deref().is_none_or(masked_address_ok)
+            && self.request_client.as_deref().is_none_or(request_client_ok)
+            && self
+                .request_network
+                .as_deref()
+                .is_none_or(request_network_ok);
         if ok {
             Ok(())
         } else {

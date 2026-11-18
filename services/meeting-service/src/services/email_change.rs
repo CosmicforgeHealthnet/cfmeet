@@ -142,10 +142,6 @@ pub async fn confirm(
     let old_email = user.email.clone();
     let change_id = Uuid::new_v4();
     let undo_token = generate_link_token();
-    let undo_url = format!(
-        "{}/auth/email-change/undo?token={undo_token}",
-        state.email_service.app_url().trim_end_matches('/')
-    );
 
     let txn = state.db.begin().await?;
     lock_address(&txn, &new_email).await?;
@@ -179,8 +175,10 @@ pub async fn confirm(
             &old_email,
             &new_email,
             &user.username,
+            user.id,
             change_id,
-            Some(&undo_url),
+            state.email_service.app_url(),
+            Some(&undo_token),
         )
         .await
         .map(|_| Uuid::nil()),
@@ -309,9 +307,18 @@ pub async fn admin_change(
     let updated = active.update(&txn).await?;
     let change_id = Uuid::new_v4();
     crate::services::email::tolerate_unsendable(
-        email_changed_notices_on(&txn, &old_email, &new_email, &username, change_id, None)
-            .await
-            .map(|_| Uuid::nil()),
+        email_changed_notices_on(
+            &txn,
+            &old_email,
+            &new_email,
+            &username,
+            user_id,
+            change_id,
+            state.email_service.app_url(),
+            None,
+        )
+        .await
+        .map(|_| Uuid::nil()),
         user_id,
         "email-changed-by-support",
     )?;

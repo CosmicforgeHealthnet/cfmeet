@@ -1397,7 +1397,176 @@ async fn fence_history_down_requires_legacy_only() {
             "SELECT count(*) FROM notification_routing_state WHERE mode = 'LEGACY_ONLY'"
         )
         .await,
-        8
+        9
     );
     assert!(migration::notification_fence_ready(&db.conn).await.unwrap());
+}
+
+/// ACCOUNT_NOTICES (N12 follow-up): inert in LEGACY_ONLY; once fenced, the welcome
+/// (`AUTH_WELCOME`) and the `NOTIFICATION` notices keyed `new-sign-in:`, `email-in-use:` and
+/// `email-changed:` need a decision, while device notices stay with SECURITY_DEVICE_LINKED
+/// and every other notice stays unfenced. `down` refuses while the category is fenced or a
+/// decision uses it, and restores the previous mapping.
+#[tokio::test]
+async fn account_notices_are_fenced_only_outside_legacy_only() {
+    let db = db!();
+    let notices = [
+        (
+            "AUTH_WELCOME",
+            "welcome:5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607",
+        ),
+        (
+            "NOTIFICATION",
+            "new-sign-in:5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607",
+        ),
+        ("NOTIFICATION", "email-in-use:abc:2026111812"),
+        (
+            "NOTIFICATION",
+            "email-changed:old:5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607",
+        ),
+        (
+            "NOTIFICATION",
+            "email-changed:new:5e2a1b3c-4d5e-4f60-8a71-b2c3d4e5f607",
+        ),
+    ];
+    assert_eq!(
+        text(
+            &db.conn,
+            "SELECT mode FROM notification_routing_state WHERE category = 'ACCOUNT_NOTICES'"
+        )
+        .await,
+        "LEGACY_ONLY"
+    );
+    for (ledger, key) in notices {
+        assert_eq!(
+            fence_category(&db.conn, ledger, key).await.as_deref(),
+            Some("ACCOUNT_NOTICES"),
+            "{key}"
+        );
+        // Inert in LEGACY_ONLY: today's rows are written as today.
+        assert_eq!(
+            insert_email(&db.conn, ledger, &format!("{key}:legacy"))
+                .await
+                .unwrap(),
+            1
+        );
+    }
+    set_mode(
+        &db.conn,
+        MeetingCategory::AccountNotices,
+        "FENCED_OLD",
+        0,
+        "AUTO",
+        2,
+    )
+    .await;
+    for (ledger, key) in notices {
+        refused(insert_email(&db.conn, ledger, key).await);
+        // With an OLD decision the row is allowed (the decision already expired, so the
+        // test can purge it below).
+        let txn = db.conn.begin().await.unwrap();
+        let r = fence::route_message(
+            &txn,
+            key,
+            MeetingCategory::AccountNotices,
+            Utc::now() - Duration::seconds(1),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.route, Route::Old);
+        assert_eq!(insert_email(&txn, ledger, key).await.unwrap(), 1);
+        txn.commit().await.unwrap();
+    }
+    // Device notices keep their own category (LEGACY_ONLY here); other notices are never
+    // fenced.
+    for (ledger, key) in [
+        ("NOTIFICATION", "device-linked:l9"),
+        ("NOTIFICATION", "security-notice:mfa-enabled:x"),
+        ("NOTIFICATION", "register-existing:u:2026111812"),
+        ("OPERATIONS_ACCEPTANCE", "acceptance:r9"),
+    ] {
+        assert_eq!(
+            insert_email(&db.conn, ledger, key).await.unwrap(),
+            1,
+            "{key}"
+        );
+    }
+    assert_eq!(
+        fence_category(&db.conn, "NOTIFICATION", "device-linked:x")
+            .await
+            .as_deref(),
+        Some("SECURITY_DEVICE_LINKED")
+    );
+
+    // down: refused while fenced, refused while a decision uses the category.
+    assert!(
+        migration::NotificationFenceMigrator::down(&db.conn, Some(1))
+            .await
+            .is_err()
+    );
+    set_mode(
+        &db.conn,
+        MeetingCategory::AccountNotices,
+        "LEGACY_ONLY",
+        0,
+        "AUTO",
+        3,
+    )
+    .await;
+    assert!(
+        migration::NotificationFenceMigrator::down(&db.conn, Some(1))
+            .await
+            .is_err(),
+        "decisions use ACCOUNT_NOTICES"
+    );
+    exec(
+        &db.conn,
+        "DELETE FROM notification_route_decisions WHERE category = 'ACCOUNT_NOTICES'",
+    )
+    .await
+    .unwrap();
+    migration::NotificationFenceMigrator::down(&db.conn, Some(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        scalar_i64(
+            &db.conn,
+            "SELECT count(*) FROM notification_routing_state WHERE category = 'ACCOUNT_NOTICES'"
+        )
+        .await,
+        0
+    );
+    for (ledger, key) in notices {
+        assert_eq!(fence_category(&db.conn, ledger, key).await, None, "{key}");
+    }
+    assert_eq!(
+        fence_category(&db.conn, "NOTIFICATION", "device-linked:x")
+            .await
+            .as_deref(),
+        Some("SECURITY_DEVICE_LINKED")
+    );
+    migration::NotificationFenceMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(migration::notification_fence_ready(&db.conn).await.unwrap());
+    assert_eq!(
+        fence_category(&db.conn, "AUTH_WELCOME", "welcome:x")
+            .await
+            .as_deref(),
+        Some("ACCOUNT_NOTICES")
+    );
+}
+
+/// The routing category the `email_deliveries` guard trigger maps a ledger row to.
+async fn fence_category(conn: &DatabaseConnection, ledger: &str, key: &str) -> Option<String> {
+    conn.query_one(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT notification_fence_email_category($1, $2) AS c",
+        [ledger.into(), key.into()],
+    ))
+    .await
+    .unwrap()
+    .unwrap()
+    .try_get::<Option<String>>("", "c")
+    .unwrap()
 }

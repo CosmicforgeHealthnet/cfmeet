@@ -1,9 +1,11 @@
 //! Account and security emails (verification code, password reset code, passwordless
 //! sign-in code, step-up code, email-change code, welcome, password-changed security
-//! notice, generic notification). Every interpolated value is escaped; codes are shown
-//! large and nothing beyond the display name is disclosed. The sign-in, step-up and
-//! email-change codes (and [`RequestDetails`]) are ported verbatim from PR #97's Meeting
-//! templates.
+//! notice, generic notification, and the account notices: new sign-in alert, email-change
+//! attempt, email-changed notices to the previous and the new address). Every interpolated
+//! value is escaped; codes are shown large and nothing beyond the display name is
+//! disclosed. The sign-in, step-up and email-change codes (and [`RequestDetails`]) are
+//! ported verbatim from PR #97's Meeting templates, the account notices verbatim from
+//! Meeting's `templates/email/account.rs` (owner decision A, the N12 follow-up).
 
 use super::base::{button, code_block, escape_html, note, paragraph, plain, wrap_html, wrap_text};
 use super::EmailTemplate;
@@ -173,6 +175,107 @@ pub fn email_change_code_email(username: &str, code: &str, ttl: &str) -> EmailTe
     EmailTemplate {
         html: wrap_html("Confirm your new email address", &html),
         text: wrap_text(&format!("Confirm your new email address\n\n{text}")),
+    }
+}
+
+/// Sent to an address that already belongs to an account when someone tries to move
+/// another account to it (no code: the change cannot happen).
+pub fn email_in_use_notice_email() -> EmailTemplate {
+    let html = format!(
+        "{}{}",
+        paragraph("Someone tried to change the email address of a CF Meet account to this address. This address already has a CF Meet account, so nothing was changed."),
+        note("You don't need to do anything. If you keep receiving these emails, contact CF Meet support."),
+    );
+    let text = "Someone tried to change the email address of a CF Meet account to this address. This address already has a CF Meet account, so nothing was changed.\n\nYou don't need to do anything. If you keep receiving these emails, contact CF Meet support.";
+    EmailTemplate {
+        html: wrap_html("Email change attempt", &html),
+        text: wrap_text(&format!("Email change attempt\n\n{text}")),
+    }
+}
+
+/// Sent to the PREVIOUS address after an email change, with a single-use undo link
+/// (`undo_url`, valid `window`). `None` (support-assisted change): no undo link.
+pub fn email_changed_old_address_email(
+    username: &str,
+    new_email_masked: &str,
+    when_utc: &str,
+    undo_url: Option<&str>,
+    window: &str,
+) -> EmailTemplate {
+    let (hi_html, hi_text) = greeting(username);
+    let what = format!(
+        "The email address of your CF Meet account was changed to {new_email_masked} on {when_utc} (UTC). Other signed-in devices were signed out."
+    );
+    let (undo_html, undo_text) = match undo_url {
+        Some(url) => (
+            format!(
+                "{}{}",
+                paragraph(&format!(
+                    "If this wasn't you, undo the change within {}. This signs out every device and gives the account back to this address:",
+                    escape_html(window)
+                )),
+                button("Undo this change", &escape_html(url))
+            ),
+            format!(
+                "\n\nIf this wasn't you, undo the change within {}. This signs out every device and gives the account back to this address:\n{}",
+                plain(window),
+                plain(url)
+            ),
+        ),
+        None => (
+            note("This change was made by CF Meet support after verifying the account owner. If you did not ask for it, contact CF Meet support immediately."),
+            "\n\nThis change was made by CF Meet support after verifying the account owner. If you did not ask for it, contact CF Meet support immediately.".to_string(),
+        ),
+    };
+    let html = format!("{hi_html}{}{undo_html}", paragraph(&escape_html(&what)));
+    let text = format!("{hi_text}\n\n{}{undo_text}", plain(&what));
+    EmailTemplate {
+        html: wrap_html("Your email address was changed", &html),
+        text: wrap_text(&format!("Your email address was changed\n\n{text}")),
+    }
+}
+
+/// Sent to the NEW address once it is the account's address.
+pub fn email_changed_new_address_email(username: &str) -> EmailTemplate {
+    let (hi_html, hi_text) = greeting(username);
+    let msg =
+        "This is now the email address of your CF Meet account. Use it to sign in from now on.";
+    EmailTemplate {
+        html: wrap_html(
+            "Email address updated",
+            &format!("{hi_html}{}", paragraph(msg)),
+        ),
+        text: wrap_text(&format!("Email address updated\n\n{hi_text}\n\n{msg}")),
+    }
+}
+
+/// Security alert: a sign-in from a device not seen on this account recently.
+pub fn new_sign_in_email(
+    username: &str,
+    details: &RequestDetails,
+    sessions_url: &str,
+) -> EmailTemplate {
+    let (hi_html, hi_text) = greeting(username);
+    let what = format!(
+        "Your CF Meet account was just signed in to from a new device. {}",
+        details
+            .sentence()
+            .replacen("Requested on", "Signed in on", 1)
+    );
+    let html = format!(
+        "{hi_html}{}{}{}",
+        paragraph(&escape_html(&what)),
+        paragraph("If this was you, there is nothing to do. If not, sign out every device now:"),
+        button("Review signed-in devices", &escape_html(sessions_url)),
+    );
+    let text = format!(
+        "{hi_text}\n\n{}\n\nIf this was you, there is nothing to do. If not, sign out every device now:\n{}",
+        plain(&what),
+        plain(sessions_url)
+    );
+    EmailTemplate {
+        html: wrap_html("New sign-in to your account", &html),
+        text: wrap_text(&format!("New sign-in to your account\n\n{text}")),
     }
 }
 

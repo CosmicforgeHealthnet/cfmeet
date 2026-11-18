@@ -54,9 +54,19 @@ fn sealed_plaintext_never_prints_its_secrets() {
         code: Some("482913".into()),
         token: Some("tok_0123456789abcdefghij".into()),
         address: Some("invitee@example.com".into()),
+        masked_address: Some("i***@example.com".into()),
+        request_client: Some("TestBrowser/1.0".into()),
+        request_network: Some("102.89.x.x".into()),
     };
     let shown = format!("{p:?}");
-    for secret in ["482913", "tok_0123456789abcdefghij", "invitee@example.com"] {
+    for secret in [
+        "482913",
+        "tok_0123456789abcdefghij",
+        "invitee@example.com",
+        "i***@example.com",
+        "TestBrowser",
+        "102.89.x.x",
+    ] {
         assert!(!shown.contains(secret), "{shown}");
     }
     assert!(shown.contains("[REDACTED]"));
@@ -112,6 +122,9 @@ mod open {
             code: None,
             token: Some("tok_0123456789abcdefghij".into()),
             address: Some("invitee@example.com".into()),
+            masked_address: Some("n***@example.com".into()),
+            request_client: Some("TestBrowser/1.0".into()),
+            request_network: Some("2001:db8:x:x".into()),
         };
         let sealed = seal(&pk, P, "evt_abc", T, &full).unwrap();
         assert_eq!(open(&sk, P, "evt_abc", T, &sealed).unwrap(), full);
