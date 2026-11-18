@@ -135,6 +135,15 @@ pub fn clamp_granted_role(granted: Role, ctx: &PermissionContext) -> Role {
     .unwrap_or(Role::Viewer)
 }
 
+/// ADR 0062: a participant that a partner user holds (identity `principal:<id>`; an
+/// invitation's identity is always an email address, so it can never look like this).
+pub fn is_platform_participant(p: &conference_participants::Model) -> bool {
+    p.external_ref
+        .as_deref()
+        .and_then(|r| r.strip_prefix("principal:"))
+        .is_some_and(|id| Uuid::parse_str(id).is_ok())
+}
+
 /// ADR 0062: the generic name a partner user without a profile display name joins under
 /// (never the partner's `externalId`).
 pub const PLATFORM_USER_FALLBACK_NAME: &str = "Participant";
@@ -728,6 +737,18 @@ impl AdmissionService {
         }
         if matches!(ctx.kind, ActorKind::System(_)) {
             return Err(permission_denied("System actors cannot join conferences"));
+        }
+        // ADR 0062: a partner user's participant (re)joins only with its user token, so
+        // Platform Access re-verifies the user (suspension, revoked sessions, revoked
+        // minting key) and its grant on every join. Its participant token serves every
+        // other participant operation.
+        if matches!(ctx.kind, ActorKind::ParticipantCredential(_))
+            && existing.as_ref().is_some_and(is_platform_participant)
+        {
+            return Err(ApiError::domain(
+                ErrorCode::AuthenticationRequired,
+                "Join this conference with your user token",
+            ));
         }
         // 3./4. Lifecycle and space status.
         if conference.status != ConferenceStatus::Live {

@@ -492,6 +492,9 @@ pub fn valid_origin(origin: &str) -> bool {
 
 // ---------------------------------------------------------------------------- runtime
 
+/// A cached positive verification: the token's digest, the answer and when it was given.
+type CachedVerification = ([u8; 32], VerifiedUserToken, Instant);
+
 /// The partner runtime of this instance.
 pub struct Partner {
     pub settings: PartnerSettings,
@@ -500,7 +503,7 @@ pub struct Partner {
     pub registrations: Arc<dyn push::PartnerRegistrationSink>,
     /// N-P4: metadata-only partner wake-ups towards the Notification Service (I1).
     pub wakeups: Arc<dyn crate::notification_publications::NotificationEventSink>,
-    verified: Mutex<HashMap<Uuid, ([u8; 32], VerifiedUserToken, Instant)>>,
+    verified: Mutex<HashMap<Uuid, CachedVerification>>,
     credentials: Mutex<HashMap<Uuid, Instant>>,
     origins: Mutex<HashMap<Uuid, (Vec<String>, Instant)>>,
     baselines: Mutex<HashSet<Uuid>>,

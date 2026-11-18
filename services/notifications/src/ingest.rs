@@ -185,9 +185,10 @@ pub async fn ingest_with(
         if !SUPPORTED_PROTOCOLS.contains(&env.route.protocol) {
             return Err(IngestError::ProtocolUnsupported);
         }
-        let partner = env.recipients.iter().any(|r| {
-            cf_notification_client::parse_platform_principal(&r.reference).is_some()
-        });
+        let partner = env
+            .recipients
+            .iter()
+            .any(|r| cf_notification_client::parse_platform_principal(&r.reference).is_some());
         match validate(&env, Some(issuer)) {
             Ok(_) if partner && !partner_push => {
                 let ident = identity();
@@ -302,15 +303,15 @@ pub async fn ingest_with(
                     || partner
                     || env.event_type == cf_notification_client::CONTROL_EVENT
                 {
-                        "PENDING"
+                    "PENDING"
+                } else {
+                    let modes = routing::category(&txn, category).await?;
+                    if routing::highest(&modes) == routing::Mode::Off {
+                        "HELD"
                     } else {
-                        let modes = routing::category(&txn, category).await?;
-                        if routing::highest(&modes) == routing::Mode::Off {
-                            "HELD"
-                        } else {
-                            "PENDING"
-                        }
-                    };
+                        "PENDING"
+                    }
+                };
                 let envelope = serde_json::to_value(&*env).expect("envelope serializes");
                 let inserted = db::exec(
                     &txn,

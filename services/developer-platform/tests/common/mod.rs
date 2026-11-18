@@ -539,6 +539,10 @@ pub const FAKE_REGISTRY: &[(&str, &str)] = &[
     ("projects.read", "STANDARD"),
     ("production_access.request", "STANDARD"),
     ("organizations.read", "STANDARD"),
+    // ADR 0062: the partner Users API.
+    ("principals.read", "STANDARD"),
+    ("principals.write", "STANDARD"),
+    ("user_tokens.issue", "STANDARD"),
     ("events.private_delivery", "FIRST_PARTY_ONLY"),
     ("numbers.admin", "PRIVILEGED_OPERATOR"),
 ];

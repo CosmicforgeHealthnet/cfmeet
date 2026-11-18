@@ -178,7 +178,9 @@ impl ProviderMetadata {
                     || self.bundle_id.is_some()
                     || self.apns_host.is_some()
                 {
-                    return Err("teamId, keyId, bundleId and apnsHost are for APNs credentials only");
+                    return Err(
+                        "teamId, keyId, bundleId and apnsHost are for APNs credentials only",
+                    );
                 }
                 if self.project_id.as_deref().is_some_and(|p| !project_ok(p)) {
                     return Err("projectId is a Firebase project id");
@@ -482,7 +484,8 @@ impl PartnerTransport for RecordingPartnerTransport {
         match cred.provider {
             "APNS" | "APNS_VOIP" => {
                 let s = cred.secret();
-                if s.contains("-----BEGIN PRIVATE KEY-----") && s.contains("-----END PRIVATE KEY-----")
+                if s.contains("-----BEGIN PRIVATE KEY-----")
+                    && s.contains("-----END PRIVATE KEY-----")
                 {
                     Ok(())
                 } else {
@@ -596,7 +599,12 @@ async fn stored<C: ConnectionTrait>(
         "SELECT secret_sealed, fingerprint, metadata, status, updated_at
            FROM notif_push_providers
           WHERE tenant_id = $1 AND application_id = $2 AND environment_id = $3 AND provider = $4",
-        vec![scope.tenant_id.into(), scope.application_id.into(), scope.environment_id.into(), provider.into()],
+        vec![
+            scope.tenant_id.into(),
+            scope.application_id.into(),
+            scope.environment_id.into(),
+            provider.into(),
+        ],
     )
     .await
 }
@@ -718,13 +726,16 @@ pub async fn put_provider(
 ) -> Result<Value, VaultError> {
     let fingerprint = req.fingerprint.trim().to_ascii_lowercase();
     if fingerprint.len() != 64 || !fingerprint.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(VaultError::Invalid("fingerprint is the SHA-256 of the secret, 64 hex"));
+        return Err(VaultError::Invalid(
+            "fingerprint is the SHA-256 of the secret, 64 hex",
+        ));
     }
     req.metadata
         .validate(provider)
         .map_err(VaultError::Invalid)?;
-    let sealed = parse_sealed(&req.sealed)
-        .ok_or(VaultError::Invalid("sealed is not a notification-client seal"))?;
+    let sealed = parse_sealed(&req.sealed).ok_or(VaultError::Invalid(
+        "sealed is not a notification-client seal",
+    ))?;
     let opening = opening.ok_or(VaultError::Unavailable)?;
     let secret = open_push_credential(
         opening,
@@ -735,7 +746,9 @@ pub async fn put_provider(
     )
     .map_err(|_| VaultError::Invalid("sealed does not open for this scope"))?;
     if fingerprint_of(&secret) != fingerprint && fingerprint_of(secret.trim()) != fingerprint {
-        return Err(VaultError::Invalid("fingerprint does not match the sealed credential"));
+        return Err(VaultError::Invalid(
+            "fingerprint does not match the sealed credential",
+        ));
     }
     if provider == "FCM" && req.metadata.project_id.is_none() {
         // The project of the service account (non-secret) is kept as metadata.
@@ -859,7 +872,10 @@ pub async fn delete_provider<C: ConnectionTrait>(
     if n > 0 {
         metrics.inc(
             "notif_partner_push_providers_total",
-            format!("{},provider=\"{provider}\",action=\"DELETE\"", scope.label()),
+            format!(
+                "{},provider=\"{provider}\",action=\"DELETE\"",
+                scope.label()
+            ),
         );
         tracing::info!(environment = %scope.environment_id, provider, "partner push credential deleted");
     }
@@ -1164,7 +1180,12 @@ pub async fn register<C: ConnectionTrait>(
         conn,
         "DELETE FROM notif_push_endpoints WHERE handle_digest = $1
             AND NOT (environment_id = $2 AND account_device_ref = $3 AND platform = $4)",
-        vec![digest.clone().into(), s.environment_id.into(), device.into(), platform.into()],
+        vec![
+            digest.clone().into(),
+            s.environment_id.into(),
+            device.into(),
+            platform.into(),
+        ],
     )
     .await?;
     let row = conn
@@ -1242,7 +1263,11 @@ pub struct PartnerCallPushRequest {
 fn sent_metric(metrics: &Metrics, scope: &Scope, lane: &str, platform: &str) {
     metrics.inc(
         "notif_partner_push_sent_total",
-        format!("{},lane=\"{lane}\",platform=\"{}\"", scope.label(), label(platform)),
+        format!(
+            "{},lane=\"{lane}\",platform=\"{}\"",
+            scope.label(),
+            label(platform)
+        ),
     );
 }
 
@@ -1289,7 +1314,12 @@ pub async fn call_push(
           WHERE subject_kind = 'platform-principal' AND tenant_id = $1 AND application_id = $2
             AND environment_id = $3 AND principal_id = $4 AND platform IN ('APNS_VOIP', 'FCM')
           ORDER BY id",
-        vec![scope.tenant_id.into(), scope.application_id.into(), scope.environment_id.into(), r.principal_id.into()],
+        vec![
+            scope.tenant_id.into(),
+            scope.application_id.into(),
+            scope.environment_id.into(),
+            r.principal_id.into(),
+        ],
     )
     .await?;
     let mut results = Vec::new();
@@ -1530,51 +1560,65 @@ impl PartnerPushWorker {
                 environment_id: row.environment_id,
             };
             // Defence in depth: the endpoint must belong to the notification's recipient.
-            let owner = row.principal_id.map(|p| {
-                cf_notification_client::platform_principal_ref(row.environment_id, p)
-            });
+            let owner = row
+                .principal_id
+                .map(|p| cf_notification_client::platform_principal_ref(row.environment_id, p));
             if owner.as_deref() != Some(job.recipient_ref.as_str()) {
                 self.finish(&job, "FAILED", Some("RECIPIENT_MISMATCH"), "PERMANENT")
                     .await?;
-                failed_metric(&self.metrics, &scope, "message", &row.platform, "RECIPIENT_MISMATCH");
+                failed_metric(
+                    &self.metrics,
+                    &scope,
+                    "message",
+                    &row.platform,
+                    "RECIPIENT_MISMATCH",
+                );
                 t.failed += 1;
                 continue;
             }
             if !row.enabled {
                 self.finish(&job, "CANCELLED", Some("ENDPOINT_DISABLED"), "PERMANENT")
                     .await?;
-                failed_metric(&self.metrics, &scope, "message", &row.platform, "ENDPOINT_DISABLED");
+                failed_metric(
+                    &self.metrics,
+                    &scope,
+                    "message",
+                    &row.platform,
+                    "ENDPOINT_DISABLED",
+                );
                 t.failed += 1;
                 continue;
             }
-            let sender = match load_credential(
-                &self.db,
-                &self.keys,
-                &self.partner,
-                &scope,
-                &row.platform,
-            )
-            .await?
-            {
-                Ok(s) => s,
-                Err(e) => {
-                    let class = match e {
-                        CredentialError::Missing => "NO_CREDENTIAL",
-                        CredentialError::Unusable(_) => "CREDENTIAL_UNUSABLE",
-                    };
-                    self.finish(&job, "FAILED", Some(class), "PERMANENT").await?;
-                    failed_metric(&self.metrics, &scope, "message", &row.platform, class);
-                    t.failed += 1;
-                    continue;
-                }
-            };
+            let sender =
+                match load_credential(&self.db, &self.keys, &self.partner, &scope, &row.platform)
+                    .await?
+                {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let class = match e {
+                            CredentialError::Missing => "NO_CREDENTIAL",
+                            CredentialError::Unusable(_) => "CREDENTIAL_UNUSABLE",
+                        };
+                        self.finish(&job, "FAILED", Some(class), "PERMANENT")
+                            .await?;
+                        failed_metric(&self.metrics, &scope, "message", &row.platform, class);
+                        t.failed += 1;
+                        continue;
+                    }
+                };
             let Ok(handle) = self
                 .keys
                 .open(&row.handle_sealed, &format!("push:{endpoint}"))
             else {
                 self.finish(&job, "FAILED", Some("HANDLE_UNAVAILABLE"), "PERMANENT")
                     .await?;
-                failed_metric(&self.metrics, &scope, "message", &row.platform, "HANDLE_UNAVAILABLE");
+                failed_metric(
+                    &self.metrics,
+                    &scope,
+                    "message",
+                    &row.platform,
+                    "HANDLE_UNAVAILABLE",
+                );
                 t.failed += 1;
                 continue;
             };
@@ -1615,7 +1659,13 @@ impl PartnerPushWorker {
                     disable_endpoint(&self.db, endpoint).await?;
                     self.finish(&job, "FAILED", Some("INVALID_HANDLE"), "PERMANENT")
                         .await?;
-                    failed_metric(&self.metrics, &scope, "message", &row.platform, "INVALID_HANDLE");
+                    failed_metric(
+                        &self.metrics,
+                        &scope,
+                        "message",
+                        &row.platform,
+                        "INVALID_HANDLE",
+                    );
                     t.failed += 1;
                 }
                 PushOutcome::Permanent(_) => {
@@ -1648,7 +1698,10 @@ impl PartnerPushWorker {
         heartbeats: Arc<Heartbeats>,
         mut shutdown: watch::Receiver<bool>,
     ) {
-        tracing::info!(transport = self.partner.transport.name(), "partner push dispatcher started");
+        tracing::info!(
+            transport = self.partner.transport.name(),
+            "partner push dispatcher started"
+        );
         loop {
             if *shutdown.borrow() {
                 break;
@@ -1755,12 +1808,16 @@ mod tests {
         let s = scope();
         let sealed = keys.seal("secret", &credential_owner(&s, "APNS"));
         assert!(keys.open(&sealed, &credential_owner(&s, "APNS")).is_ok());
-        assert!(keys.open(&sealed, &credential_owner(&s, "APNS_VOIP")).is_err());
+        assert!(keys
+            .open(&sealed, &credential_owner(&s, "APNS_VOIP"))
+            .is_err());
         let other = Scope {
             environment_id: Uuid::from_u128(4),
             ..s
         };
-        assert!(keys.open(&sealed, &credential_owner(&other, "APNS")).is_err());
+        assert!(keys
+            .open(&sealed, &credential_owner(&other, "APNS"))
+            .is_err());
     }
 
     #[test]
@@ -1771,7 +1828,10 @@ mod tests {
             ct: "def".into(),
         };
         assert_eq!(parse_sealed(&json!(s.to_compact())), Some(s.clone()));
-        assert_eq!(parse_sealed(&serde_json::to_value(&s).unwrap()), Some(s.clone()));
+        assert_eq!(
+            parse_sealed(&serde_json::to_value(&s).unwrap()),
+            Some(s.clone())
+        );
         assert_eq!(
             parse_sealed(&json!(serde_json::to_string(&s).unwrap())),
             Some(s.clone())
@@ -1783,7 +1843,10 @@ mod tests {
     #[test]
     fn provider_answers_to_the_placeholder_classify_the_credential() {
         use PushOutcome::*;
-        assert_eq!(classify_verify("APNS", &InvalidHandle), VerifyOutcome::Verified);
+        assert_eq!(
+            classify_verify("APNS", &InvalidHandle),
+            VerifyOutcome::Verified
+        );
         assert_eq!(
             classify_verify("APNS", &Retryable("apns 403 InvalidProviderToken".into())),
             VerifyOutcome::Failed("PROVIDER_TOKEN_REFUSED")
@@ -1804,7 +1867,10 @@ mod tests {
             classify_verify("FCM", &Permanent("fcm 400 INVALID_ARGUMENT".into())),
             VerifyOutcome::Verified
         );
-        assert_eq!(classify_verify("FCM", &InvalidHandle), VerifyOutcome::Verified);
+        assert_eq!(
+            classify_verify("FCM", &InvalidHandle),
+            VerifyOutcome::Verified
+        );
         assert_eq!(
             classify_verify("FCM", &Permanent("fcm 403 PERMISSION_DENIED".into())),
             VerifyOutcome::Failed("PROVIDER_REFUSED")
@@ -1860,7 +1926,10 @@ mod tests {
             live.check(&fcm(&account, Some("other"))).unwrap_err(),
             "PROJECT_MISMATCH"
         );
-        assert_eq!(live.check(&fcm(&account, Some("demo"))).unwrap_err(), "INVALID_KEY");
+        assert_eq!(
+            live.check(&fcm(&account, Some("demo"))).unwrap_err(),
+            "INVALID_KEY"
+        );
     }
 
     #[test]

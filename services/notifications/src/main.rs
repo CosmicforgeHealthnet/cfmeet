@@ -66,13 +66,14 @@ async fn main() -> anyhow::Result<()> {
     };
     // ADR 0063: partner push only while NOTIFICATIONS_PARTNER_PUSH_ENABLED is on.
     let partner = config.partner_push_enabled.then(|| {
-        let transport: Arc<dyn notifications::partner::PartnerTransport> =
-            match config.partner_push_transport {
-                PartnerTransportKind::Live => Arc::new(notifications::partner::LivePartnerTransport),
-                PartnerTransportKind::LocalTest => {
-                    Arc::new(notifications::partner::RecordingPartnerTransport::default())
-                }
-            };
+        let transport: Arc<dyn notifications::partner::PartnerTransport> = match config
+            .partner_push_transport
+        {
+            PartnerTransportKind::Live => Arc::new(notifications::partner::LivePartnerTransport),
+            PartnerTransportKind::LocalTest => {
+                Arc::new(notifications::partner::RecordingPartnerTransport::default())
+            }
+        };
         Arc::new(notifications::partner::PartnerPush::new(transport))
     });
     let http_authorities = match HttpAuthorities::from_config(&config, clock.clone()) {

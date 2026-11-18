@@ -24,6 +24,12 @@
 //!
 //! Enabling session devices (`MESSAGING_SESSION_DEVICES_ENABLED`) is independent of, and
 //! never implies, E2EE device registration, which production keeps refusing.
+//!
+//! ADR 0062: a session device is bound either to a first-party account session
+//! (`binding_kind = ACCOUNT_SESSION`, everything above, unchanged) or to a partner user's
+//! CF Meet user token (`PLATFORM_USER_TOKEN`, [`crate::partner`]): the same MANAGED-only
+//! identity, issued by `POST /v1/messaging/user-sessions`, usable on a closed REST
+//! allowlist as well, and ended with its minting credential.
 
 use chrono::{DateTime, Utc};
 use sea_orm::{FromQueryResult, TransactionTrait};

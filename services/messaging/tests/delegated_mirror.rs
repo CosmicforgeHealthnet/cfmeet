@@ -138,6 +138,21 @@ const MIRROR: &[(&str, &str)] = &[
     ("POST", "/internal/v1/delegated/v1/messaging/session-devices/revoke"),
 ];
 
+/// ADR 0062 / 0063: the partner device operations authenticate a CF Meet user token
+/// themselves (security `userToken`) and are NOT mirrored: a peer service can never reach
+/// them through the delegated router.
+const NOT_MIRRORED: &[(&str, &str)] = &[
+    ("POST", "/internal/v1/delegated/v1/messaging/user-sessions"),
+    ("PUT", "/internal/v1/delegated/v1/messaging/user-push-registrations/{installationId}"),
+    ("DELETE", "/internal/v1/delegated/v1/messaging/user-push-registrations/{installationId}"),
+];
+
+fn user_token_operation(op: &Value) -> bool {
+    op["security"]
+        .as_array()
+        .is_some_and(|s| s.iter().any(|r| r.get("userToken").is_some()))
+}
+
 /// The contract's customer operations that the delegated router mirrors.
 fn mirrored_contract_operations() -> BTreeSet<(String, String)> {
     let doc: Value = serde_json::from_str(messaging::http::OPENAPI).unwrap();
@@ -147,7 +162,7 @@ fn mirrored_contract_operations() -> BTreeSet<(String, String)> {
             continue;
         }
         for method in ["get", "put", "post", "delete", "patch"] {
-            if item.get(method).is_some() {
+            if item.get(method).is_some_and(|op| !user_token_operation(op)) {
                 out.insert((method.to_ascii_uppercase(), format!("{PREFIX}{path}")));
             }
         }
@@ -226,6 +241,47 @@ fn the_mirror_table_lists_exactly_the_mirrored_contract_operations() {
         missing.is_empty() && extra.is_empty(),
         "MIRROR drifted from cfmeet.messaging.http-api: missing {missing:?}, not in the contract {extra:?}"
     );
+}
+
+/// The user-token operations of the contract are exactly [`NOT_MIRRORED`], and the
+/// delegated router does not serve them (the router fallback, even for a valid
+/// first-party delegated call).
+#[tokio::test]
+async fn user_token_operations_are_never_mirrored() {
+    let doc: Value = serde_json::from_str(messaging::http::OPENAPI).unwrap();
+    let mut user_token = BTreeSet::new();
+    for (path, item) in doc["paths"].as_object().unwrap() {
+        for (method, op) in item.as_object().unwrap() {
+            if user_token_operation(op) {
+                user_token.insert((method.to_ascii_uppercase(), format!("{PREFIX}{path}")));
+            }
+        }
+    }
+    let listed: BTreeSet<(String, String)> = NOT_MIRRORED
+        .iter()
+        .map(|(m, p)| (m.to_string(), p.to_string()))
+        .collect();
+    assert_eq!(user_token, listed);
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let peers = peers();
+    let first_party = h.first_party(true);
+    let acting = h.principal_of_kind(&first_party, "NATIVE_CF_USER").to_string();
+    for (method, template) in NOT_MIRRORED {
+        let method = Method::from_bytes(method.as_bytes()).unwrap();
+        let r = h
+            .call_internal(
+                &peers.meeting,
+                method.clone(),
+                &concrete(template),
+                Some(json!({ "installationId": "installation-1" })),
+                Some(first_party.context.scope.delegated()),
+                &[("cf-acting-principal", &acting)],
+            )
+            .await;
+        assert!(is_router_fallback(&r), "{method} {template}: {} {}", r.status, r.text);
+    }
 }
 
 #[tokio::test]

@@ -16,7 +16,7 @@
 //!
 //! ## The `sealed` value
 //!
-//! A sealed part holds at most 512 base64url characters (`SealedPlaintext.token`), which
+//! A sealed part holds at most 512 base64url characters (the `token` of a sealed part), which
 //! an FCM service-account JSON exceeds. So the secret is base64url-encoded (no padding),
 //! split into `n` near-equal chunks of at most 512 characters, and each chunk is sealed
 //! as the `token` of its own part. `sealed` is the compact JSON string
@@ -31,10 +31,7 @@
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
-use cf_notification_client::{
-    seal::{seal, SealError},
-    SealedPlaintext, SealingKey,
-};
+use cf_notification_client::{seal::seal, SealingKey};
 use cf_service_auth::{
     client::{InternalCallError, InternalServiceClient},
     CorrelationId, OutboundServiceRequest, ServiceId,
@@ -79,15 +76,20 @@ pub fn seal_event_type(index: usize, count: usize) -> String {
     format!("push-provider.secret.{index}-of-{count}")
 }
 
+/// A secret that could not be sealed (empty, too large, or a key failure).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the push secret could not be sealed")]
+pub struct SealFailure;
+
 /// Seals `secret` for `(scope, provider)`: the `sealed` string of the N-P1 PUT body.
 pub fn seal_secret(
     key: &SealingKey,
     scope: &PushScope,
     provider: &str,
     secret: &[u8],
-) -> Result<String, SealError> {
+) -> Result<String, SealFailure> {
     if secret.is_empty() || secret.len() > MAX_SECRET_BYTES {
-        return Err(SealError::InvalidPlaintext);
+        return Err(SealFailure);
     }
     let encoded = B64.encode(secret);
     let count = encoded.len().div_ceil(MAX_PART_CHARS);
@@ -96,19 +98,21 @@ pub fn seal_secret(
     let mut parts = Vec::with_capacity(count);
     for (index, chunk) in encoded.as_bytes().chunks(size).enumerate() {
         // base64url is ASCII: every chunk is valid UTF-8.
-        let chunk = std::str::from_utf8(chunk).map_err(|_| SealError::InvalidPlaintext)?;
-        let plaintext = SealedPlaintext::default().with_token(chunk);
+        let chunk = std::str::from_utf8(chunk).map_err(|_| SealFailure)?;
+        // The part carries only `token` (the notification-client's sealed part type).
+        let part = serde_json::from_value(json!({ "token": chunk })).map_err(|_| SealFailure)?;
         let sealed = seal(
             key,
             SEAL_PRODUCER,
             &event_id,
             &seal_event_type(index, count),
-            &plaintext,
-        )?;
+            &part,
+        )
+        .map_err(|_| SealFailure)?;
         parts.push(sealed);
     }
     if parts.len() != count {
-        return Err(SealError::InvalidPlaintext);
+        return Err(SealFailure);
     }
     Ok(json!({ "v": 1, "parts": parts }).to_string())
 }

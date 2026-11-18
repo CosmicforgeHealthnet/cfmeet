@@ -129,10 +129,13 @@ fn grant(conference: Uuid, role: &str) -> Value {
     json!([{ "conferenceId": conference, "role": role }])
 }
 
+/// One recorded partner chat call: peer, signed scope, method, path, body.
+type ChatCall = (Peer, PartnerScope, Method, String, Value);
+
 /// Scripted Platform Access (ensure-meeting-platform) and Messaging (meeting
 /// conversations) in the partner scope.
 struct FakeChat {
-    calls: Mutex<Vec<(Peer, PartnerScope, Method, String, Value)>>,
+    calls: Mutex<Vec<ChatCall>>,
     conversation: Uuid,
     system_principal: Uuid,
     fail: AtomicBool,
@@ -295,6 +298,13 @@ async fn a_partner_user_joins_under_its_identity_and_a_rejoin_keeps_the_particip
         )
         .await;
     assert_eq!(s, StatusCode::OK, "{me}");
+    // A partner participant re-joins only with its user token (re-verified live).
+    let (s, v) = h
+        .app
+        .join(conference, Auth::Participant(&first_pt), json!({}))
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
+    assert_eq!(v["error"]["code"], "AUTHENTICATION_REQUIRED");
     // Only the join accepts a user token.
     let (s, v) = h
         .app

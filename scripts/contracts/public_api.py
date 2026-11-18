@@ -20,6 +20,13 @@ allow-list FAILS the build, so a new contract operation can never become routabl
 silently ignored) without an explicit decision. An allow-list entry can never make an
 internal / admin / provider operation public (the build fails).
 
+Partner meetings family (``/v1/meetings``): every Meeting Service operation that accepts a
+platform credential (the machine operations, ``x-cfmeet-required-scope`` meetings.*) is ALSO
+routed as ``/v1/meetings/<rest>`` -> upstream ``/api/v2/<rest>``, PLATFORM_CREDENTIAL only
+(route id ``meetings.platform.<operationId>``, ``aliasOf`` the ``/api/v2`` route, which stays
+unchanged). Production edge cannot send ``/api/v2`` to the gateway: the CF Meet apps call
+those paths directly. The public meetings document lists the alias paths too.
+
 Outputs (generated, checked by CI with ``--check``):
   * ``infra/api-gateway/route-manifest.json`` — the full classified catalogue plus the
     routing data of every PUBLIC_CUSTOMER operation (consumed by services/api-gateway);
@@ -155,6 +162,64 @@ def pattern_of(path: str) -> str:
     return re.sub(r"\{([^}]+)\}", lambda m: "{" + m.group(1) + "}", path)
 
 
+# Partner meetings family: the public alias prefix and the Meeting Service prefix it maps to.
+MEETINGS_ALIAS_PREFIX = "/v1/meetings"
+MEETINGS_UPSTREAM_PREFIX = "/api/v2"
+MEETINGS_ALIAS_ID = "meetings.platform."
+MEETINGS_ALIAS_OPERATION = "platform_"
+
+
+def meetings_platform_alias(route: dict, operation_id: str):
+    """The ``/v1/meetings`` partner alias of a meetings route, or None.
+
+    Only a REST Meeting Service ``/api/v2/...`` route that accepts PLATFORM_CREDENTIAL gets
+    one; the alias accepts PLATFORM_CREDENTIAL only and keeps the scope, forwarded headers
+    and timeout. The gateway refuses any other rewrite shape (services/api-gateway routing)."""
+    if route["domain"] != "meetings" or route["protocol"] != "REST" or "PLATFORM_CREDENTIAL" not in route["auth"]:
+        return None
+    if route["upstream"] != "cfmeet.meeting-service" or route["upstreamPath"] != route["pattern"]:
+        return None
+    if not route["pattern"].startswith(MEETINGS_UPSTREAM_PREFIX + "/"):
+        return None
+    rest = route["pattern"][len(MEETINGS_UPSTREAM_PREFIX):]
+    alias = {
+        "id": MEETINGS_ALIAS_ID + operation_id,
+        "domain": route["domain"],
+        "method": route["method"],
+        "pattern": MEETINGS_ALIAS_PREFIX + rest,
+        "protocol": "REST",
+        "upstream": route["upstream"],
+        "upstreamPath": route["upstreamPath"],
+        "auth": ["PLATFORM_CREDENTIAL"],
+        "forwardHeaders": list(route["forwardHeaders"]),
+        "aliasOf": route["id"],
+    }
+    for key in ("requiredScope", "timeoutMs", "deprecated", "replacedBy"):
+        if key in route:
+            alias[key] = route[key]
+    return alias
+
+
+def check_aliases(routes):
+    """Every alias names a live route with the same method and upstream, is exactly the
+    ``/v1/meetings/<rest>`` -> ``/api/v2/<rest>`` shape and accepts a platform credential only."""
+    by_id = {r["id"]: r for r in routes}
+    for r in routes:
+        if "aliasOf" not in r:
+            continue
+        target = by_id.get(r["aliasOf"])
+        if target is None or "aliasOf" in target:
+            raise CatalogueError(f"{r['id']}: alias of {r['aliasOf']}, which is not a public (non-alias) route")
+        if (r["method"], r["upstream"], r["upstreamPath"]) != (target["method"], target["upstream"], target["pattern"]):
+            raise CatalogueError(f"{r['id']}: alias differs from {target['id']} in method or upstream")
+        rest = r["upstreamPath"][len(MEETINGS_UPSTREAM_PREFIX):]
+        if (r["domain"] != "meetings" or not r["id"].startswith(MEETINGS_ALIAS_ID)
+                or r["upstream"] != "cfmeet.meeting-service" or r["protocol"] != "REST"
+                or not r["upstreamPath"].startswith(MEETINGS_UPSTREAM_PREFIX + "/")
+                or r["pattern"] != MEETINGS_ALIAS_PREFIX + rest or r["auth"] != ["PLATFORM_CREDENTIAL"]):
+            raise CatalogueError(f"{r['id']}: an alias is a PLATFORM_CREDENTIAL-only /v1/meetings/<rest> -> /api/v2/<rest> Meeting Service route")
+
+
 def check_replacements(routes):
     """Every deprecated route names an existing, NOT deprecated public route as its
     replacement (no dangling, self or chained replacements)."""
@@ -207,6 +272,7 @@ def build():
     routes = []
     keys = set()
     route_ids = set()
+    alias_routes = []
     registry = registered_scopes()
     if len(registry) < 10:
         raise CatalogueError(f"scope registry {SCOPE_REGISTRY.relative_to(ROOT)} parsed to {len(registry)} scopes")
@@ -272,9 +338,30 @@ def build():
         elif replaced_by is not None:
             raise CatalogueError(f"{route_id}: x-cfmeet-replaced-by on an operation that is not deprecated")
         routes.append(route)
+        alias = meetings_platform_alias(route, op["operationId"])
+        if alias is not None:
+            akey = (alias["method"], alias["pattern"])
+            if akey in keys:
+                raise CatalogueError(f"{key}: alias route collision {akey}")
+            keys.add(akey)
+            if alias["id"] in route_ids:
+                raise CatalogueError(f"{key}: duplicate route id {alias['id']}")
+            route_ids.add(alias["id"])
+            alias_routes.append(alias)
     stale = set(entries) - seen
     if stale:
         raise CatalogueError(f"allow-list entries without a contract operation: {sorted(stale)[:5]}")
+    # Aliases are checked against routes collected so far; a later source route with an
+    # alias's (method, pattern) would already have failed the collision check above.
+    alias_ids = {a["id"] for a in alias_routes}
+    for a in alias_routes:
+        # A deprecated machine operation's alias points at the replacement's alias when it has one.
+        if a.get("deprecated"):
+            candidate = MEETINGS_ALIAS_ID + a["replacedBy"].split(".", 1)[-1]
+            if candidate in alias_ids:
+                a["replacedBy"] = candidate
+    routes.extend(alias_routes)
+    check_aliases(routes)
     check_replacements(routes)
     # Leakage guard (belt and braces): nothing routable is internal / admin / provider.
     for r in routes:
@@ -356,15 +443,47 @@ def prune_components(doc):
             del comps[kind]
 
 
+def alias_operation(op, alias, op_ids):
+    """The documented ``/v1/meetings`` alias of a public operation: platform credential only."""
+    out = copy.deepcopy(op)
+    operation_id = MEETINGS_ALIAS_OPERATION + op["operationId"]
+    if operation_id in op_ids:
+        raise CatalogueError(f"{alias['id']}: alias operationId {operation_id} is already a contract operationId")
+    op_ids.add(operation_id)
+    out["operationId"] = operation_id
+    note = (f"Partner server route (platform credential only) of `{alias['method']} {alias['upstreamPath']}`; "
+            "the CF Meet apps call that path directly.")
+    out["description"] = note + ("\n\n" + out["description"] if out.get("description") else "")
+    out["x-cfmeet-route-id"] = alias["id"]
+    out["x-cfmeet-auth"] = alias["auth"]
+    out["x-cfmeet-alias-of"] = alias["aliasOf"]
+    security = [alt for alt in out.get("security", []) or []
+                if alt and all(AUTH_MODES.get(k) == "PLATFORM_CREDENTIAL" for k in alt)]
+    if not security:
+        raise CatalogueError(f"{alias['id']}: the operation has no platform credential security requirement")
+    out["security"] = security
+    if alias.get("deprecated"):
+        out["x-cfmeet-replaced-by"] = alias["replacedBy"]
+    return out
+
+
 def public_doc(domain, manifest):
     rel = next(r for d, _, r, _ in SOURCES if d == domain)
     src = load(rel)
     bundled = bundle_openapi.Bundler().bundle_doc(copy.deepcopy(src), rel)
-    routes = {(r["method"].lower(), r["pattern"]): r for r in manifest["routes"] if r["domain"] == domain}
+    domain_routes = [r for r in manifest["routes"] if r["domain"] == domain]
+    routes = {(r["method"].lower(), r["pattern"]): r for r in domain_routes if "aliasOf" not in r}
+    # Alias routes (/v1/meetings partner family) by the (method, contract path) they serve.
+    aliases = {(r["method"].lower(), r["upstreamPath"]): r for r in domain_routes if "aliasOf" in r}
     paths = {}
+    alias_paths = {}
+    documented_aliases = set()
     used_schemes = set()
+    op_ids = {op.get("operationId") for item in bundled["paths"].values() for m, op in item.items() if m in METHODS}
     for path, item in bundled["paths"].items():
         kept = {}
+        alias_item = {}
+        alias_path = None
         for method, op in item.items():
             if method not in METHODS:
                 if method == "parameters":
@@ -383,8 +502,24 @@ def public_doc(domain, manifest):
             for alt in op.get("security", []) or []:
                 used_schemes.update(alt.keys())
             kept[method] = op
+            alias = aliases.get((method, pattern_of(path)))
+            if alias:
+                alias_item[method] = alias_operation(op, alias, op_ids)
+                alias_path = alias["pattern"]
+                documented_aliases.add(alias["id"])
         if any(m in kept for m in METHODS):
             paths[path] = kept
+        if alias_item:
+            if "parameters" in kept:
+                alias_item = {"parameters": kept["parameters"], **alias_item}
+            alias_paths[alias_path] = alias_item
+    undocumented = sorted(r["id"] for r in aliases.values() if r["id"] not in documented_aliases)
+    if undocumented:
+        raise CatalogueError(f"{domain}: alias routes without a public contract operation: {undocumented[:5]}")
+    for path, item in alias_paths.items():
+        if path in paths:
+            raise CatalogueError(f"{domain}: alias path {path} collides with a contract path")
+        paths[path] = item
     if "security" in bundled and not any("security" in o for p in paths.values() for o in p.values() if isinstance(o, dict)):
         for alt in bundled["security"]:
             used_schemes.update(alt.keys())

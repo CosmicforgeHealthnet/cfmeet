@@ -1122,13 +1122,23 @@ impl Processor {
                 continue;
             }
             if let Some(key) = &coalesce {
+                // A newer message of the conversation replaces older undelivered ones (never
+                // the reverse, whatever order the events are processed in).
+                let sequence = job
+                    .data
+                    .get("eventSequence")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(i64::MAX);
                 db::exec(
                     &txn,
                     "UPDATE notif_deliveries SET status = 'CANCELLED', last_error_class = 'COLLAPSED', completed_at = now()
                       WHERE status IN ('PENDING', 'DEFERRED') AND channel = 'PUSH' AND target_ref LIKE 'partner:%'
-                        AND notification_id IN (SELECT id FROM notif_notifications
-                                                 WHERE recipient_ref = $1 AND coalesce_key = $2 AND id <> $3)",
-                    vec![recipient.clone().into(), key.clone().into(), notification_id.into()],
+                        AND notification_id IN (
+                            SELECT id FROM notif_notifications
+                             WHERE recipient_ref = $1 AND coalesce_key = $2 AND id <> $3
+                               AND CASE WHEN params->>'eventSequence' ~ '^[0-9]{1,18}$'
+                                        THEN (params->>'eventSequence')::bigint ELSE 0 END <= $4)",
+                    vec![recipient.clone().into(), key.clone().into(), notification_id.into(), sequence.into()],
                 )
                 .await?;
             }
@@ -1160,7 +1170,11 @@ impl Processor {
                     Channel::Push,
                     job.lane,
                     &format!("{}{}", crate::partner::TARGET_PREFIX, ep.id),
-                    if defer.is_some() { "DEFERRED" } else { "PENDING" },
+                    if defer.is_some() {
+                        "DEFERRED"
+                    } else {
+                        "PENDING"
+                    },
                     None,
                     1,
                     defer,
@@ -1173,7 +1187,11 @@ impl Processor {
                 format!(
                     "category=\"{}\",state=\"{}\"",
                     job.route.route_category,
-                    if endpoints.is_empty() { "SUPPRESSED" } else { "ROUTED" }
+                    if endpoints.is_empty() {
+                        "SUPPRESSED"
+                    } else {
+                        "ROUTED"
+                    }
                 ),
             );
         }

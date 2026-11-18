@@ -12,7 +12,10 @@
 //! * public patterns outside `/v1/` and `/api/v2/`, or naming `internal`, `admin`,
 //!   `operator`, `provider-callbacks`, `callbacks` or `metrics`;
 //! * upstream paths that are not the public pattern itself, except the Developer
-//!   Platform's `/internal/v1/` gateway routes (never an administration namespace);
+//!   Platform's `/internal/v1/` gateway routes (never an administration namespace) and
+//!   the partner meetings family: a PLATFORM_CREDENTIAL-only REST route
+//!   `/v1/meetings/<rest>` served by the Meeting Service at `/api/v2/<rest>` (the same
+//!   segments and parameters; production edge keeps first-party `/api/v2` direct);
 //! * duplicate ids or (method, pattern) pairs, unknown authentication modes, and
 //!   WebSocket routes while `API_GATEWAY_WEBSOCKETS_ENABLED` is off.
 
@@ -165,7 +168,7 @@ pub enum RouteError {
     ForbiddenUpstream(String, String),
     #[error("route {0}: the public pattern must be a normalized /v1/ or /api/v2/ path without internal, administrative or callback segments")]
     ForbiddenPattern(String),
-    #[error("route {0}: the upstream path must be the public pattern (or a Developer Platform /internal/v1/ gateway path) with the pattern's parameters")]
+    #[error("route {0}: the upstream path must be the public pattern (or a Developer Platform /internal/v1/ gateway path, or the Meeting Service /api/v2/ path of a platform-credential /v1/meetings/ route) with the pattern's parameters")]
     ForbiddenUpstreamPath(String),
     #[error("route {0} is defined twice")]
     Duplicate(String),
@@ -182,6 +185,35 @@ enum Segment {
 }
 
 const PUBLIC_PREFIXES: &[&str] = &["/v1/", "/api/v2/"];
+
+/// Partner meetings family: public `/v1/meetings/<rest>` is the Meeting Service's
+/// machine operation `/api/v2/<rest>` (the edge cannot send `/api/v2` to the gateway
+/// because the CF Meet apps use those paths directly).
+const MEETINGS_ALIAS_PREFIX: &str = "/v1/meetings/";
+const MEETINGS_UPSTREAM_PREFIX: &str = "/api/v2/";
+
+/// The upstream segments of the one allowed meetings rewrite, or `None` when `d` is not
+/// exactly that shape: Meeting Service upstream, REST, PLATFORM_CREDENTIAL only, and
+/// an upstream path that is `/api/v2/` followed by the public pattern's own remainder
+/// (identical literal segments and parameters), never naming a forbidden segment.
+fn meetings_alias_upstream(d: &RouteDefinition) -> Option<Vec<Segment>> {
+    if d.upstream != services::MEETING_SERVICE
+        || d.protocol != Protocol::Rest
+        || d.auth.is_empty()
+        || d.auth.iter().any(|m| *m != AuthMode::PlatformCredential)
+    {
+        return None;
+    }
+    let rest = d.pattern.strip_prefix(MEETINGS_ALIAS_PREFIX)?;
+    if d.upstream_path.strip_prefix(MEETINGS_UPSTREAM_PREFIX)? != rest {
+        return None;
+    }
+    parse_pattern(&d.upstream_path, MEETINGS_UPSTREAM_PREFIX).filter(|segments| {
+        segments
+            .iter()
+            .all(|s| !matches!(s, Segment::Literal(l) if FORBIDDEN_SEGMENTS.contains(&l.as_str())))
+    })
+}
 
 fn parse_pattern(pattern: &str, prefix: &str) -> Option<Vec<Segment>> {
     let rest = pattern.strip_prefix(prefix)?;
@@ -330,6 +362,7 @@ impl RouteTable {
                             !matches!(s, Segment::Literal(l) if l == "admin" || l == "operator")
                         })
                     })
+                    .or_else(|| meetings_alias_upstream(&d))
                     .ok_or_else(|| RouteError::ForbiddenUpstreamPath(id.clone()))?
             };
             if params(&upstream) != params(&public) {
@@ -486,6 +519,151 @@ pub fn is_webhook_route(definition: &RouteDefinition) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn alias(pattern: &str, upstream_path: &str) -> RouteDefinition {
+        RouteDefinition {
+            id: "meetings.platform.x".into(),
+            domain: "meetings".into(),
+            method: Method::GET,
+            pattern: pattern.into(),
+            protocol: Protocol::Rest,
+            upstream: services::MEETING_SERVICE.into(),
+            upstream_path: upstream_path.into(),
+            auth: vec![AuthMode::PlatformCredential],
+            required_scope: Some("meetings.read".into()),
+            forward_headers: Vec::new(),
+            timeout: None,
+        }
+    }
+
+    fn refused(d: RouteDefinition) -> bool {
+        matches!(
+            RouteTable::new(vec![d], true),
+            Err(RouteError::ForbiddenUpstreamPath(_) | RouteError::ForbiddenPattern(_))
+        )
+    }
+
+    #[test]
+    fn the_partner_meetings_family_rewrites_to_the_meeting_service_api_v2_path() {
+        let table = RouteTable::new(
+            vec![
+                alias("/v1/meetings/meeting-spaces", "/api/v2/meeting-spaces"),
+                RouteDefinition {
+                    id: "meetings.platform.y".into(),
+                    method: Method::POST,
+                    ..alias(
+                        "/v1/meetings/meeting-spaces/{id}/invitations/{invitationId}/revoke",
+                        "/api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke",
+                    )
+                },
+            ],
+            true,
+        )
+        .unwrap();
+        match table.lookup(&Method::GET, "/v1/meetings/meeting-spaces") {
+            Lookup::Matched(m) => {
+                assert_eq!(m.upstream_path, "/api/v2/meeting-spaces");
+                assert_eq!(m.upstream.as_str(), services::MEETING_SERVICE);
+            }
+            other => panic!("{other:?}"),
+        }
+        match table.lookup(
+            &Method::POST,
+            "/v1/meetings/meeting-spaces/s-1/invitations/i-2/revoke",
+        ) {
+            Lookup::Matched(m) => assert_eq!(
+                m.upstream_path,
+                "/api/v2/meeting-spaces/s-1/invitations/i-2/revoke"
+            ),
+            other => panic!("{other:?}"),
+        }
+        // The alias table never answers the first-party /api/v2 path itself.
+        assert!(matches!(
+            table.lookup(&Method::GET, "/api/v2/meeting-spaces"),
+            Lookup::NoRoute
+        ));
+    }
+
+    #[test]
+    fn every_other_meetings_rewrite_shape_is_refused() {
+        // (a) PLATFORM_CREDENTIAL only.
+        for auth in [
+            vec![AuthMode::PlatformCredential, AuthMode::MeetingSession],
+            vec![AuthMode::MeetingSession],
+            vec![AuthMode::ParticipantToken],
+            vec![AuthMode::UserToken],
+            vec![AuthMode::Anonymous],
+        ] {
+            let d = RouteDefinition {
+                auth: auth.clone(),
+                ..alias("/v1/meetings/meeting-spaces", "/api/v2/meeting-spaces")
+            };
+            assert!(refused(d), "{auth:?}");
+        }
+        // (b) identical segments and parameters.
+        for (pattern, upstream_path) in [
+            (
+                "/v1/meetings/meeting-spaces/{id}",
+                "/api/v2/meeting-spaces/{spaceId}",
+            ),
+            (
+                "/v1/meetings/meeting-spaces/{id}",
+                "/api/v2/meeting-spaces/{id}/archive",
+            ),
+            ("/v1/meetings/meeting-spaces", "/api/v2/conferences"),
+            ("/v1/meetings/meeting-spaces", "/api/v2/meeting-spaces/"),
+            ("/v1/meetings/meeting-spaces", "/api/v1/meeting-spaces"),
+            ("/v1/meetings/meeting-spaces", "/api/v2/../meeting-spaces"),
+            ("/v1/meetings/meeting-spaces", "/internal/v1/meeting-spaces"),
+            ("/v1/meetings/meeting-spaces", "/v1/meeting-spaces"),
+            // Only the /v1/meetings family is rewritten, and only that way round.
+            ("/v1/conferences/{id}", "/api/v2/conferences/{id}"),
+            ("/v1/meetingsx/meeting-spaces", "/api/v2/meeting-spaces"),
+            ("/api/v2/meeting-spaces", "/v1/meetings/meeting-spaces"),
+        ] {
+            assert!(
+                refused(alias(pattern, upstream_path)),
+                "{pattern} -> {upstream_path}"
+            );
+        }
+        // (c) never an internal, administrative or callback segment.
+        for rest in [
+            "admin/spaces",
+            "x/operator",
+            "internal/x",
+            "metrics",
+            "callbacks",
+        ] {
+            assert!(
+                refused(alias(
+                    &format!("/v1/meetings/{rest}"),
+                    &format!("/api/v2/{rest}")
+                )),
+                "{rest}"
+            );
+        }
+        // (d) the Meeting Service only.
+        for upstream in [
+            services::CALLING,
+            services::MESSAGING,
+            services::DEVELOPER_PLATFORM,
+        ] {
+            let d = RouteDefinition {
+                upstream: upstream.into(),
+                ..alias("/v1/meetings/meeting-spaces", "/api/v2/meeting-spaces")
+            };
+            assert!(refused(d), "{upstream}");
+        }
+        // REST only.
+        let ws = RouteDefinition {
+            protocol: Protocol::WebSocket,
+            ..alias(
+                "/v1/meetings/conferences/{id}/realtime",
+                "/api/v2/conferences/{id}/realtime",
+            )
+        };
+        assert!(refused(ws));
+    }
 
     #[test]
     fn parameter_values_never_carry_a_path() {

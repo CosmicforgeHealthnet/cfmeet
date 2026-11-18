@@ -359,3 +359,56 @@ async fn real_responses_conform_to_the_identity_contract() {
         conforms("Error", &reply.body);
     }
 }
+
+/// ADR 0062: the new refusals (user tokens, scopes, caps) keep the identity contract's
+/// error envelope.
+#[tokio::test]
+async fn platform_build_errors_conform_to_the_identity_contract() {
+    use std::sync::Arc;
+
+    use platform_access::{
+        config::platform_build::PlatformBuildConfig, identity::user_tokens::UserTokenKeys,
+    };
+    let Some(h) = Harness::with_build(PlatformBuildConfig {
+        end_users_enabled: true,
+        user_tokens_enabled: true,
+        environment_origins_enabled: true,
+        meeting_platform_enabled: true,
+        user_token_keys: Some(Arc::new(UserTokenKeys::generate())),
+        ..PlatformBuildConfig::default()
+    })
+    .await
+    else {
+        return;
+    };
+    let c = h.consumer("acme", "EXTERNAL", &["principals.read"]).await;
+    let (credential, _) = h.issue(c.sa("SANDBOX"), &["principals.read"]).await;
+    let invalid = h
+        .call(
+            &h.peers.messaging,
+            Method::POST,
+            "/internal/v1/user-tokens/verify",
+            Some(json!({ "token": "cfut_sbx_a.b.c" })),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(invalid.code(), "USER_TOKEN_INVALID");
+    conforms("Error", &invalid.body);
+    let scope = h
+        .call_with_headers(
+            &h.peers.developer_platform,
+            Method::POST,
+            "/internal/v1/end-users",
+            Some(json!({ "externalId": "u-1" })),
+            None,
+            None,
+            &[(
+                "cf-forwarded-credential-id",
+                credential["id"].as_str().unwrap().to_string(),
+            )],
+        )
+        .await;
+    assert_eq!(scope.code(), "SCOPE_REQUIRED");
+    conforms("Error", &scope.body);
+}

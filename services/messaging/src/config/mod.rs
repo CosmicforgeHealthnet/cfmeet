@@ -34,6 +34,9 @@
 //! | `MESSAGING_CLIENT_TOKEN_TTL_SECONDS` / `MESSAGING_REALTIME_TICKET_TTL_SECONDS` | no | token lifetime (60–86400, default 900) / single-use ticket lifetime (5–300, default 30) |
 //! | `MESSAGING_SESSION_DEVICES_ENABLED` | no | `true` / `false`: first-party MANAGED-realtime session devices (Blueprint Section 13, ADR 0049 amendment A1). Default `true` only in `local` / `test`; permitted in `production` because a session device can never acquire E2EE privileges (it never enables `MESSAGING_E2EE_DEVICES_ENABLED`) |
 //! | `MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS` | no | session-device token lifetime (60–900, default 300); renewals go back through the first-party relay |
+//! | `MESSAGING_PARTNER_SESSION_DEVICES_ENABLED` | no | `true` / `false` (default `false`): ADR 0062 partner session devices (`POST /v1/messaging/user-sessions` with a CF Meet user token, the MANAGED-only REST allowlist, environment origins, the `CFMEET_PLATFORM_PARTNER` baseline, MESSAGE_SENT facts); parsed by `crate::partner::PartnerSettings` |
+//! | `MESSAGING_PARTNER_PUSH_ENABLED` | no | `true` / `false` (default `false`): ADR 0063 partner push registrations and wake-ups through the Notification Service (requires `CF_NOTIFICATIONS_BASE_URL`) |
+//! | `MESSAGING_MESSAGE_SENT_EXPORT_ENABLED` | no | `true` / `false` (default `false`): export `MESSAGE_SENT` usage facts (with `CFMEET_USAGE_EXPORT_ENABLED`, and only once the usage catalogue knows the type) |
 //! | `MESSAGING_REALTIME_ALLOWED_ORIGINS` | no | comma-separated exact browser origins allowed to connect (default: none; native clients send no Origin) |
 //! | `MESSAGING_REALTIME_REQUIRE_TLS` | no | refuse handshakes not forwarded as `https` (default `true` outside local / test) |
 //! | `MESSAGING_REALTIME_REDIS_URL` | no | self-hosted Redis for cross-instance fan-out and presence (secret; default: single-instance in-process broker) |
