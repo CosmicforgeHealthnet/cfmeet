@@ -46,7 +46,7 @@
     },
     {
       "name": "communications",
-      "description": "cfmeet.communications.http-api 1.6.0"
+      "description": "cfmeet.communications.http-api 1.7.0"
     }
   ],
   "paths": {
@@ -63623,6 +63623,14 @@
           "version": {
             "type": "integer",
             "minimum": 1
+          },
+          "principalId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The contact's calling principal id while the relationship is CONNECTED (null otherwise). Lets a client match a contact to a call participant, for example to hide people already in a call from \"Add people\"."
           }
         },
         "required": [

@@ -610,7 +610,7 @@ class Contact {
   const Contact.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Contact.create({required String? alias, required String? avatarReference, required String cfMeetId, required String contactId, required String displayName, required bool favorite, required String notifications, required RelationshipState relationship, required int relationshipVersion, required int schemaVersion, required int version}) =>
+  factory Contact.create({required String? alias, required String? avatarReference, required String cfMeetId, required String contactId, required String displayName, required bool favorite, required String notifications, String? principalId, required RelationshipState relationship, required int relationshipVersion, required int schemaVersion, required int version}) =>
       Contact.fromJson(<String, Object?>{
         'alias': alias,
         'avatarReference': avatarReference,
@@ -619,6 +619,7 @@ class Contact {
         'displayName': displayName,
         'favorite': favorite,
         'notifications': notifications,
+        if (principalId != null) 'principalId': principalId,
         'relationship': relationship,
         'relationshipVersion': relationshipVersion,
         'schemaVersion': schemaVersion,
@@ -641,6 +642,9 @@ class Contact {
   bool get favorite => json['favorite']! as bool;
 
   String get notifications => json['notifications']! as String;
+
+  /// The contact's calling principal id while the relationship is CONNECTED (null otherwise). Lets a client match a contact to a call participant, for example to hide people already in a call from "Add people".
+  String? get principalId => json['principalId'] as String?;
 
   RelationshipState get relationship => json['relationship']! as String;
 

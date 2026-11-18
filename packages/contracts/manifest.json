@@ -1034,18 +1034,18 @@
     },
     {
       "id": "cfmeet.communications.http-api",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "kind": "openapi",
       "path": "communications/http/v1.openapi.json",
       "owner": "communications",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy. Sections 9-23: unified Chats/Calls/Contacts/Meetings/Settings facades, timeline cards, chat controls, collections, devices and change feed. 1.4.0 (CF Meet chat remediation): capabilities messaging.attachments (effective attachment availability, maxBytes, allowedKinds, per-context switch); CommonGroup carries securityProfile, title / avatarRef (MANAGED only) and memberCount for groups both people currently belong to; MediaItem carries securityProfile, kind / fileName / mediaType (MANAGED only), metadataLocation and download / thumbnail grant references (relative relay paths, never URLs). 1.5.0 POST /api/v2/communications/calls/{callId}/participants adds connected personal contacts to a running call by contact id (resolved server-side; no principal id is exposed). 1.6.0 (gap audit S9): privacy groupInvitationPolicy."
+      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy. Sections 9-23: unified Chats/Calls/Contacts/Meetings/Settings facades, timeline cards, chat controls, collections, devices and change feed. 1.4.0 (CF Meet chat remediation): capabilities messaging.attachments (effective attachment availability, maxBytes, allowedKinds, per-context switch); CommonGroup carries securityProfile, title / avatarRef (MANAGED only) and memberCount for groups both people currently belong to; MediaItem carries securityProfile, kind / fileName / mediaType (MANAGED only), metadataLocation and download / thumbnail grant references (relative relay paths, never URLs). 1.5.0 POST /api/v2/communications/calls/{callId}/participants adds connected personal contacts to a running call by contact id (resolved server-side; no principal id is exposed). 1.6.0 (gap audit S9): privacy groupInvitationPolicy. 1.7.0: Contact.principalId (the calling principal of a CONNECTED contact) so clients can tell which contacts are already in a call."
     },
     {
       "id": "cfmeet.communications.public-api",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "kind": "openapi",
       "path": "bundled/public/communications/v1.openapi.json",
       "owner": "communications",
@@ -1101,7 +1101,7 @@
     },
     {
       "id": "cfmeet.communications.swagger-api",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "kind": "openapi",
       "path": "bundled/communications/http/v1.openapi.json",
       "owner": "communications",

@@ -312,9 +312,18 @@ impl State {
     pub async fn contact_view(&self, p: &Profile, id: Uuid) -> Result<Value> {
         let (alias, pair, other) = self.contact(p, id).await?;
         let state = self.store.relationship(&self.store.db, p, &other).await?;
+        // The contact's calling principal, only while CONNECTED: lets a client match the
+        // contact to a call participant (for example to hide people already in a call
+        // from "Add people"). Never for blocked or ended relationships.
+        let principal = if state == "CONNECTED" {
+            json!(other.principal_id)
+        } else {
+            Value::Null
+        };
         Ok(
             json!({"schemaVersion":1,"contactId":id,"cfMeetId":self.store.current_public_id(&self.store.db,other.id).await?,"displayName":other.display_name,"avatarReference":other.avatar_reference,
-            "relationship":state,"relationshipVersion":pair.version,"alias":alias["alias"],"favorite":alias["favorite"],"notifications":alias["notifications"],"version":alias["version"]}),
+            "relationship":state,"relationshipVersion":pair.version,"alias":alias["alias"],"favorite":alias["favorite"],"notifications":alias["notifications"],"version":alias["version"],
+            "principalId":principal}),
         )
     }
     pub async fn list_contacts(&self, p: &Profile, limit: i64, cursor: Uuid) -> Result<Value> {
