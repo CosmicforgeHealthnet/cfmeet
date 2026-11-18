@@ -19,13 +19,20 @@
 //! | `CF_DEVELOPER_PLATFORM_BASE_URL` | — | Developer Platform (`developer-platform` destination, usage export) |
 //! | `CFMEET_USAGE_EXPORT_ENABLED` | `false` | Part VI §55: export usage facts of environment-owned meetings to the Developer Platform (see [`usage_export`]; `CFMEET_USAGE_EXPORT_*` tuning) |
 //! | `MEETING_SERVICE_PUBLIC_EVENTS_INTERVAL_MS` | `1000` | publisher poll interval (100–60000) |
+//! | `MEETING_PLATFORM_USER_JOIN_ENABLED` | `false` | ADR 0062: partner users join environment-owned meetings with their CF Meet user token (`Authorization: Bearer cfut_…`, join only; see [`user_token`]); requires `CF_PLATFORM_ACCESS_BASE_URL` and the `platform-build-migration` history |
+//! | `MEETING_PLATFORM_USER_TOKEN_CACHE_SECONDS` | `30` | positive verification cache (0–30; 0 disables) |
+//! | `MEETING_PLATFORM_CHAT_ENABLED` | `false` | ADR 0062: partner meeting chat in the partner environment's scope (see [`partner_chat`]); requires `MEETING_PLATFORM_USER_JOIN_ENABLED` and `CF_MESSAGING_BASE_URL` |
+//! | `MEETING_PLATFORM_CHAT_SYNC_INTERVAL_MS` | `2000` | partner chat background pass interval (200–60000) |
+//! | `CF_MESSAGING_BASE_URL` | — | Messaging (partner meeting chat) |
 //!
 //! An enabled but misconfigured feature stops startup (fail closed).
 
 pub mod authority;
 pub mod events;
 pub mod operations;
+pub mod partner_chat;
 pub mod usage_export;
+pub mod user_token;
 
 use std::{future::Future, path::PathBuf, sync::Arc, time::Duration};
 
@@ -44,6 +51,15 @@ pub use events::PublicEventsDestination;
 pub mod scopes {
     pub const MEETINGS_READ: &str = "meetings.read";
     pub const MEETINGS_WRITE: &str = "meetings.write";
+}
+
+/// ADR 0062: partner users (CF Meet user tokens) and, optionally, partner meeting chat.
+#[derive(Clone)]
+pub struct PlatformUsers {
+    /// Platform Access's live verification (behind the ≤30 s positive cache).
+    pub verifier: user_token::SharedUserTokenVerifier,
+    /// Partner meeting chat (`MEETING_PLATFORM_CHAT_ENABLED`).
+    pub chat: Option<partner_chat::SharedPartnerChat>,
 }
 
 /// The receiver side of gateway-forwarded platform credential requests.
@@ -85,6 +101,13 @@ pub struct PlatformConfig {
     pub publish_interval: Duration,
     /// Part VI §55 usage export settings (`None`: off).
     pub usage_export: Option<cf_usage_facts::exporter::ExportSettings>,
+    /// ADR 0062: `MEETING_PLATFORM_USER_JOIN_ENABLED`.
+    pub user_join_enabled: bool,
+    /// ADR 0062: `MEETING_PLATFORM_CHAT_ENABLED` (implies user join).
+    pub chat_enabled: bool,
+    pub user_token_cache: Duration,
+    pub messaging_url: Option<String>,
+    pub chat_sync_interval: Duration,
 }
 
 fn var(name: &str, why: &str) -> Result<String, String> {
@@ -129,12 +152,21 @@ impl PlatformConfig {
         let usage_export =
             cf_usage_facts::exporter::ExportSettings::from_env(|k| std::env::var(k).ok())?;
         let usage_export = usage_export.enabled.then_some(usage_export);
-        if !access_enabled && destination == PublicEventsDestination::None && usage_export.is_none()
+        let user_join_enabled = env_bool("MEETING_PLATFORM_USER_JOIN_ENABLED", false);
+        let chat_enabled = env_bool("MEETING_PLATFORM_CHAT_ENABLED", false);
+        if chat_enabled && !user_join_enabled {
+            return Err(
+                "MEETING_PLATFORM_CHAT_ENABLED requires MEETING_PLATFORM_USER_JOIN_ENABLED".into(),
+            );
+        }
+        if !access_enabled
+            && destination == PublicEventsDestination::None
+            && usage_export.is_none()
+            && !user_join_enabled
         {
             return Ok(None);
         }
-        let why =
-            "MEETING_PLATFORM_ACCESS_ENABLED, a public events destination or usage export is set";
+        let why = "MEETING_PLATFORM_ACCESS_ENABLED, MEETING_PLATFORM_USER_JOIN_ENABLED, a public events destination or usage export is set";
         let runtime = RuntimeEnvironment::parse(&var("CF_RUNTIME_ENVIRONMENT", why)?)
             .map_err(|_| "CF_RUNTIME_ENVIRONMENT must be local, test, staging or production")?;
         let key_id = KeyId::parse(&var("CF_SERVICE_AUTH_KEY_ID", why)?)
@@ -148,8 +180,24 @@ impl PlatformConfig {
                 )?)),
                 Some(var("CF_PLATFORM_ACCESS_BASE_URL", access_why)?),
             )
+        } else if user_join_enabled {
+            (
+                None,
+                Some(var(
+                    "CF_PLATFORM_ACCESS_BASE_URL",
+                    "MEETING_PLATFORM_USER_JOIN_ENABLED is on",
+                )?),
+            )
         } else {
             (None, None)
+        };
+        let messaging_url = if chat_enabled {
+            Some(var(
+                "CF_MESSAGING_BASE_URL",
+                "MEETING_PLATFORM_CHAT_ENABLED is on",
+            )?)
+        } else {
+            None
         };
         let developer_platform_url = match (destination, &usage_export) {
             (PublicEventsDestination::DeveloperPlatform, _) => Some(var(
@@ -185,6 +233,21 @@ impl PlatformConfig {
                 60_000,
             )?),
             usage_export,
+            user_join_enabled,
+            chat_enabled,
+            user_token_cache: Duration::from_secs(bounded(
+                "MEETING_PLATFORM_USER_TOKEN_CACHE_SECONDS",
+                user_token::MAX_CACHE_SECONDS,
+                0,
+                user_token::MAX_CACHE_SECONDS,
+            )?),
+            messaging_url,
+            chat_sync_interval: Duration::from_millis(bounded(
+                "MEETING_PLATFORM_CHAT_SYNC_INTERVAL_MS",
+                2000,
+                200,
+                60_000,
+            )?),
         }))
     }
 
@@ -212,10 +275,37 @@ impl PlatformConfig {
                 .insert(ServiceId::developer_platform(), url)
                 .map_err(|e| format!("CF_DEVELOPER_PLATFORM_BASE_URL: {e}"))?;
         }
+        if let Some(url) = &self.messaging_url {
+            targets
+                .insert(ServiceId::messaging(), url)
+                .map_err(|e| format!("CF_MESSAGING_BASE_URL: {e}"))?;
+        }
         Ok(Arc::new(
             InternalServiceClient::new(signer, targets, self.timeout)
                 .map_err(|e| format!("internal client: {e}"))?,
         ))
+    }
+
+    /// ADR 0062: partner-user joins (and partner meeting chat), when enabled.
+    pub fn platform_users(
+        &self,
+        db: &sea_orm::DatabaseConnection,
+        client: Arc<InternalServiceClient>,
+    ) -> Option<PlatformUsers> {
+        if !self.user_join_enabled {
+            return None;
+        }
+        let verifier = Arc::new(user_token::CachedUserTokens::new(
+            Arc::new(user_token::PlatformAccessUserTokens::new(client.clone())),
+            self.user_token_cache,
+        ));
+        let chat = self.chat_enabled.then(|| {
+            Arc::new(partner_chat::PartnerChat::new(
+                db.clone(),
+                Arc::new(partner_chat::ServiceAuthPartnerChatGateway::new(client)),
+            ))
+        });
+        Some(PlatformUsers { verifier, chat })
     }
 
     /// The receiver (verifier + Platform Access authority), when platform access is on.

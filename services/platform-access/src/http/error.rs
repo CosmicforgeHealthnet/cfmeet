@@ -56,6 +56,13 @@ error_codes! {
     InvalidState = "INVALID_STATE" => CONFLICT, "The resource is not in a state that allows the operation.";
     ServiceUnavailable = "SERVICE_UNAVAILABLE" => SERVICE_UNAVAILABLE, "The service is temporarily unavailable.";
     InternalError = "INTERNAL_ERROR" => INTERNAL_SERVER_ERROR, "An internal error occurred.";
+    // ADR 0062 (CF Meet Platform "Build"): partner users, user tokens.
+    ScopeRequired = "SCOPE_REQUIRED" => FORBIDDEN, "The credential lacks a scope the operation requires.";
+    LimitExceeded = "LIMIT_EXCEEDED" => CONFLICT, "An environment limit has been reached.";
+    RateLimited = "RATE_LIMITED" => TOO_MANY_REQUESTS, "Too many requests; retry later.";
+    UserTokenInvalid = "USER_TOKEN_INVALID" => UNAUTHORIZED, "The user token is invalid.";
+    UserTokenExpired = "USER_TOKEN_EXPIRED" => UNAUTHORIZED, "The user token has expired.";
+    UserTokenRevoked = "USER_TOKEN_REVOKED" => UNAUTHORIZED, "The user token is no longer valid.";
 }
 
 #[derive(Debug, thiserror::Error)]

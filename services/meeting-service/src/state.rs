@@ -45,6 +45,10 @@ pub struct AppState {
     /// Part VI §51: receiver of API Gateway–forwarded platform credential requests
     /// (`None`: platform access off — every service token on `/api/v2` is refused).
     pub platform: Option<crate::services::platform::PlatformReceiver>,
+    /// ADR 0062: partner users joining with a CF Meet user token
+    /// (`None`: `MEETING_PLATFORM_USER_JOIN_ENABLED` off — a `cfut_` bearer is refused
+    /// exactly like any unknown bearer token).
+    pub platform_users: Option<crate::services::platform::PlatformUsers>,
     /// Unified email delivery: provider webhook verification secret (Resend, Svix).
     pub email_webhook_secret: Option<String>,
     /// Blueprint Section 11: notification transport (the unified email ledger) and the
@@ -118,6 +122,7 @@ impl AppState {
             organization_directory,
             realtime,
             platform: None,
+            platform_users: None,
             email_webhook_secret: email_config.resend_webhook_secret.clone(),
             notifier,
             notifications: None,
@@ -127,6 +132,12 @@ impl AppState {
     /// Enables the platform credential receiver (Part VI §51).
     pub fn with_platform(mut self, receiver: crate::services::platform::PlatformReceiver) -> Self {
         self.platform = Some(receiver);
+        self
+    }
+
+    /// Enables partner-user joins (and, when configured, partner meeting chat) — ADR 0062.
+    pub fn with_platform_users(mut self, users: crate::services::platform::PlatformUsers) -> Self {
+        self.platform_users = Some(users);
         self
     }
 

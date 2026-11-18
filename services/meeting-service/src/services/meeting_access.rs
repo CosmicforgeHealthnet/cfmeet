@@ -37,6 +37,9 @@ pub enum AccessGrant {
     Organization,
     Domain,
     Adapter,
+    /// ADR 0062: a partner user whose verified user token grants this conference
+    /// (environment-scoped; the role comes from the grant, clamped by the space).
+    PlatformUser,
 }
 
 #[derive(Debug, Clone)]

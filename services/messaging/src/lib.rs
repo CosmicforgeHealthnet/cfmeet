@@ -40,6 +40,7 @@ pub mod notification_fence;
 pub mod notification_publications;
 pub mod notifications;
 pub mod operations;
+pub mod partner;
 pub mod push_mirror;
 pub mod realtime;
 pub mod reference_reconciliation;

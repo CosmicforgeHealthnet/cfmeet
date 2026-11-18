@@ -7,8 +7,10 @@ use api_gateway::{
     config::{service_auth::ServiceAuthSettings, ApiGatewayConfig, LogFormat},
     http,
     identity::PlatformAccessAuthority,
+    origins::{OriginIndex, PlatformAccessOriginFeed},
     quota::{DeveloperPlatformQuotas, QuotaEngine},
     state::AppState,
+    user_tokens::{PlatformAccessUserTokenKeys, UserTokenVerifier},
 };
 use tracing_subscriber::EnvFilter;
 
@@ -83,6 +85,8 @@ async fn main() -> anyhow::Result<()> {
                 "controls": {
                     "API_GATEWAY_PUBLIC_ROUTING_ENABLED": config.flags.public_routing,
                     "API_GATEWAY_WEBSOCKETS_ENABLED": config.flags.websockets,
+                    "API_GATEWAY_USER_TOKENS_ENABLED": config.flags.user_tokens,
+                    "API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED": config.flags.environment_origins,
                     "API_GATEWAY_CENTRAL_WEBHOOKS_ENABLED": config.controls.central_webhooks,
                     "API_GATEWAY_CENTRAL_USAGE_ENABLED": config.controls.central_usage,
                     "API_GATEWAY_DISABLED_DOMAINS": config.controls.disabled_domains.iter().collect::<Vec<_>>(),
@@ -99,6 +103,8 @@ async fn main() -> anyhow::Result<()> {
         runtime_environment = %service_auth.signer().runtime_environment(),
         public_routing = config.flags.public_routing,
         websockets = config.flags.websockets,
+        user_tokens = config.flags.user_tokens,
+        environment_origins = config.flags.environment_origins,
         routes = routes.len(),
         quotas = config.quotas.configured(),
         token_rate_limit_per_minute = config.token_rate_limit_per_minute,
@@ -133,7 +139,33 @@ async fn main() -> anyhow::Result<()> {
     }
     tokio::spawn(quota.clone().run_store_reconnector());
     tokio::spawn(quota.clone().run_flusher(config.quota_flush_interval));
-    let state = AppState::new(authority, service_auth, routes)
+    // ADR 0062 (flags default off): user-token signing keys and partner-website origins
+    // from Platform Access, refreshed in the background (first fetch before serving).
+    let user_tokens = if config.flags.user_tokens {
+        let verifier = Arc::new(UserTokenVerifier::new(Arc::new(
+            PlatformAccessUserTokenKeys::new(service_auth.client()),
+        )));
+        if !verifier.refresh().await {
+            tracing::warn!("user-token signing keys unavailable at startup: user tokens are refused until they load");
+        }
+        tokio::spawn(verifier.clone().run_refresher());
+        Some(verifier)
+    } else {
+        None
+    };
+    let origins = if config.flags.environment_origins {
+        let index = Arc::new(OriginIndex::new(Arc::new(PlatformAccessOriginFeed::new(
+            service_auth.client(),
+        ))));
+        if let Err(e) = index.sync().await {
+            tracing::warn!(error = %e, "environment origins unavailable at startup: partner websites are refused until they load");
+        }
+        tokio::spawn(index.clone().run_poller());
+        Some(index)
+    } else {
+        None
+    };
+    let mut state = AppState::new(authority, service_auth, routes)
         .with_flags(config.flags)
         .with_controls(config.controls.clone())
         .with_quotas(config.quotas.clone())
@@ -144,6 +176,12 @@ async fn main() -> anyhow::Result<()> {
         .with_header_limits(config.max_header_bytes, config.max_headers)
         .with_ws_max_message_bytes(config.ws_max_message_bytes)
         .with_cors_allowed_origins(config.cors_allowed_origins.clone());
+    if let Some(verifier) = user_tokens {
+        state = state.with_user_token_verifier(verifier);
+    }
+    if let Some(index) = origins {
+        state = state.with_origin_index(index);
+    }
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "api gateway listening");
     axum::serve(listener, http::app(state))

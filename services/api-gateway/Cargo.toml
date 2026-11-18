@@ -44,6 +44,8 @@ redis = { version = "0.27", default-features = false, features = ["tokio-comp", 
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 sha2 = "0.10"
 base64 = "0.22"
+# Stateless CF Meet user-token signature pre-check (ADR 0062; keys from Platform Access).
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
 
 [dev-dependencies]
 jsonschema = { version = "0.58", default-features = false }

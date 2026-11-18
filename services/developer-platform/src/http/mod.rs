@@ -46,6 +46,7 @@ pub fn app(state: AppState) -> Router {
         .nest(
             "/v1",
             public::routes()
+                .merge(public::build_routes(state.build))
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

@@ -771,6 +771,11 @@ pub(crate) async fn record_created_notify<C: ConnectionTrait>(
             now,
         )
         .await?;
+        // ADR 0062 / build contract §5: the MESSAGE_SENT fact of an EXTERNAL environment
+        // (ids, context class and security profile only).
+        if !ctx.first_party && crate::partner::message_sent_recording() {
+            crate::usage::record_message_sent(db, ctx, row, now).await?;
+        }
     }
     crate::metrics::inc(
         "messaging_messages_accepted_total",

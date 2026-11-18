@@ -68,7 +68,10 @@ pub struct GapClosureMigrator;
 #[async_trait::async_trait]
 impl MigratorTrait for GapClosureMigrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(gap::m20261206_000001_retention_purge::Migration)]
+        vec![
+            Box::new(gap::m20261206_000001_retention_purge::Migration),
+            Box::new(gap::m20261207_000002_platform_build::Migration),
+        ]
     }
 
     fn migration_table_name() -> DynIden {

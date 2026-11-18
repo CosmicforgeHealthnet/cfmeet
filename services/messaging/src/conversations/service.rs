@@ -966,6 +966,10 @@ pub struct ListQuery {
     /// (latest application message first; the inbox order).
     #[serde(default)]
     pub order_by: Option<String>,
+    /// ADR 0062: a partner session device sees MANAGED conversations only (set by the
+    /// handler from the request's authentication, never from the query).
+    #[serde(skip)]
+    pub managed_only: bool,
 }
 
 pub(crate) fn encode_cursor(t: DateTime<Utc>, id: Uuid) -> String {
@@ -1174,6 +1178,7 @@ pub async fn list(
                AND ($5::text IS NULL OR c.lifecycle_state = $5) \
                AND ($6::text IS NULL OR c.context_class = $6) \
                AND ($7::timestamptz IS NULL OR ({order_key}, c.id) < ($7, $8)) \
+               AND ($10::bool IS NOT TRUE OR c.security_profile = 'MANAGED') \
              ORDER BY {order_key} DESC, c.id DESC LIMIT $9"
         ),
         vec![
@@ -1186,6 +1191,7 @@ pub async fn list(
             cursor_t.into(),
             cursor_id.into(),
             ((limit + 1) as i64).into(),
+            q.managed_only.into(),
         ],
     )
     .await?;

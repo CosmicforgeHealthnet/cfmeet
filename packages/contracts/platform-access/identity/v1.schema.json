@@ -1534,7 +1534,7 @@
       }
     },
     "ErrorCode": {
-      "description": "Stable error codes of the Platform Access envelope.",
+      "description": "Stable error codes of the Platform Access envelope. ADR 0062 (CF Meet Platform \"Build\") adds SCOPE_REQUIRED (403: the forwarded credential lacks a required scope), LIMIT_EXCEEDED (409: an environment partner-user cap is reached), RATE_LIMITED (429: more than 120 user-token mints per user per hour) and USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED (401: user-token verification).",
       "type": "string",
       "enum": [
         "VALIDATION_ERROR",
@@ -1550,7 +1550,13 @@
         "POLICY_VIOLATION",
         "INVALID_STATE",
         "SERVICE_UNAVAILABLE",
-        "INTERNAL_ERROR"
+        "INTERNAL_ERROR",
+        "SCOPE_REQUIRED",
+        "LIMIT_EXCEEDED",
+        "RATE_LIMITED",
+        "USER_TOKEN_INVALID",
+        "USER_TOKEN_EXPIRED",
+        "USER_TOKEN_REVOKED"
       ]
     },
     "Error": {

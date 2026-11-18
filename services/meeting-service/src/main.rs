@@ -107,6 +107,26 @@ async fn main() -> anyhow::Result<()> {
             state = state.with_platform(receiver);
             tracing::info!("Part VI: platform credential access to /api/v2 enabled");
         }
+        // ADR 0062: partner users join with their CF Meet user token (and partner meeting
+        // chat). Their tables live in an additive history (`platform-build-migration up`);
+        // refuse to start without it rather than failing joins.
+        if let Some(users) = config.platform_users(&db, client.clone()) {
+            if !migration::platform_build_ready(&db)
+                .await
+                .expect("Platform-build migration readiness")
+            {
+                panic!("Platform-build migration is required while MEETING_PLATFORM_USER_JOIN_ENABLED is on (platform-build-migration up)");
+            }
+            if let Some(chat) = users.chat.clone() {
+                backend::services::platform::partner_chat::spawn_partner_chat_sync(
+                    chat,
+                    config.chat_sync_interval,
+                );
+                tracing::info!("ADR 0062: partner meeting chat enabled");
+            }
+            state = state.with_platform_users(users);
+            tracing::info!("ADR 0062: partner user join (CF Meet user tokens) enabled");
+        }
         // Part VI §55: usage facts of environment-owned meetings -> unified usage ledger.
         if let Some(s) = config.usage_export.clone() {
             use backend::services::platform::usage_export;

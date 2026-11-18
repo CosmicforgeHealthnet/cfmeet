@@ -220,6 +220,22 @@ impl EndpointService {
         Ok((endpoint.into(), true))
     }
 
+    /// The ACTIVE endpoint holding `key` in `scope`, whoever its principal is (used only
+    /// by the user-session exchange to hand an app installation over to the user now
+    /// signed in on it).
+    pub async fn active_by_key(
+        &self,
+        scope: CallScope,
+        key: &EndpointKey,
+    ) -> CallResult<Option<CallEndpoint>> {
+        Ok(scoped(scope)
+            .filter(call_endpoints::Column::EndpointKey.eq(key.as_str()))
+            .filter(call_endpoints::Column::Status.eq(EndpointStatus::Active))
+            .one(&self.db)
+            .await?
+            .map(Into::into))
+    }
+
     /// The ACTIVE endpoint `id` of `principal_id` in `scope`, or not found.
     pub async fn active_endpoint(
         &self,

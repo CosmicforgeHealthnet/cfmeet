@@ -215,6 +215,12 @@ fn the_rust_catalogue_equals_the_contract_catalogue() {
             json!(s.recipient.map(RecipientKind::as_str)),
             "{what}"
         );
+        // 1.4.0 (ADR 0063 N-P4): the types that may address partner end users.
+        assert_eq!(
+            e.get("partnerRecipients").and_then(Value::as_bool).unwrap_or(false),
+            cf_notification_client::PARTNER_EVENT_TYPES.contains(&s.event_type),
+            "{what}"
+        );
     }
     // Closed data values agree with the per-type schema enums.
     let rules = contract["allOf"].as_array().unwrap();
@@ -532,6 +538,7 @@ fn counter_examples_are_refused_for_their_intended_reason() {
         ("missing-route.json", None),
         ("no-recipients.json", Some(Invalid("recipients"))),
         ("operator-alert-to-user.json", Some(Invalid("recipients"))),
+        ("partner-recipient-mixed.json", Some(Invalid("recipients"))),
         (
             "request-network-in-data.json",
             Some(DataKey("requestNetwork".into())),
@@ -855,4 +862,69 @@ fn account_notices_follow_their_catalogue_rules() {
     for secret in ["ada@", "n***", "tok_", "TestBrowser", "102.89"] {
         assert!(!shown.contains(secret), "{secret}");
     }
+}
+
+/// ADR 0063 N-P4 (contract 1.4.0): partner end users `platform-principal:<env>:<principal>`
+/// are accepted only for the partner event types, never mixed with other recipient kinds,
+/// and only in the envelope's scope; the schema accepts the reference form too.
+#[test]
+fn partner_recipients_follow_their_rules_in_rust_and_in_the_schema() {
+    use cf_notification_client::{parse_platform_principal, platform_principal_ref};
+    let env_id = Uuid::parse_str("5e1f3a4b-6c7d-4e8f-90a1-b2c3d4e5f607").unwrap();
+    let principal = Uuid::parse_str("7a3b5c6d-8e9f-4a01-b2c3-d4e5f6071829").unwrap();
+    let r = platform_principal_ref(env_id, principal);
+    assert_eq!(parse_platform_principal(&r), Some((env_id, principal)));
+    assert!(RecipientKind::PlatformPrincipal.matches(&r));
+    // The single-id form stays what it was (not a partner reference).
+    assert_eq!(parse_platform_principal(&format!("platform-principal:{U}")), None);
+    assert_eq!(
+        parse_platform_principal(&r.to_ascii_uppercase().replace("PLATFORM-PRINCIPAL", "platform-principal")),
+        None
+    );
+    let example: Value = read("notifications/events/examples/partner-message-created.json");
+    let v = validator();
+    assert!(v.is_valid(&example));
+    let base: Envelope = serde_json::from_value(example.clone()).unwrap();
+    validate(&base, Some("cfmeet.messaging")).unwrap();
+
+    // Another environment than the envelope's scope.
+    let mut other = base.clone();
+    other.recipients[0].reference = platform_principal_ref(Uuid::new_v4(), principal);
+    assert_eq!(validate(&other, None).unwrap_err(), EnvelopeError::Invalid("recipients"));
+    // Without a scope, any environment is acceptable.
+    other.scope = None;
+    validate(&other, None).unwrap();
+    // Several partner recipients of one environment.
+    let mut many = base.clone();
+    many.recipients
+        .push(cf_notification_client::envelope::Recipient { reference: platform_principal_ref(env_id, Uuid::new_v4()) });
+    validate(&many, None).unwrap();
+    // Not a partner event type: refused (Rust).
+    let mut wrong = serde_json::from_value::<Envelope>(read(
+        "notifications/events/examples/missed-call.json",
+    ))
+    .unwrap();
+    wrong.recipients = vec![cf_notification_client::envelope::Recipient { reference: r.clone() }];
+    assert_eq!(validate(&wrong, None).unwrap_err(), EnvelopeError::Invalid("recipients"));
+}
+
+/// Partner push credentials (ADR 0063 N-P1) are sealed to the service for exactly one
+/// (tenant, application, environment) and round-trip through the compact wire form.
+#[test]
+fn push_credentials_are_sealed_per_scope() {
+    use cf_notification_client::seal::{push_credential_fingerprint, seal_push_credential, Sealed};
+    let key = key();
+    let (t, a, e) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let secret = "-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY-----\n";
+    let sealed = seal_push_credential(&key, t, a, e, secret).unwrap();
+    let compact = sealed.to_compact();
+    assert!(!compact.contains("BEGIN"));
+    assert_eq!(Sealed::parse_compact(&compact).unwrap(), sealed);
+    assert!(Sealed::parse_compact("a.b").is_err());
+    assert!(Sealed::parse_compact("notif-hpke-2026-11.a+b.c").is_err());
+    assert!(seal_push_credential(&key, t, a, e, "  ").is_err());
+    assert!(seal_push_credential(&key, t, a, e, &"x".repeat(16 * 1024 + 1)).is_err());
+    let fp = push_credential_fingerprint(secret);
+    assert_eq!(fp.len(), 64);
+    assert!(fp.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
 }

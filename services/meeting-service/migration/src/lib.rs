@@ -46,6 +46,7 @@ mod m20261118_000003_account_avatars;
 mod m20261118_000004_email_calendar_invite;
 mod m20261118_000005_chat_message_edits;
 mod m20261118_000006_account_notices;
+mod m20261118_000007_platform_user_participants;
 
 pub mod phase2_backfill;
 
@@ -484,6 +485,34 @@ pub async fn gap_closure_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<GapClosureMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// ADR 0062 (CF Meet Platform "Build"): partner users joining meetings with their CF Meet
+/// user token (`meeting_platform_participants`) and partner meeting chat links. A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Required at startup only while `MEETING_PLATFORM_USER_JOIN_ENABLED` or
+/// `MEETING_PLATFORM_CHAT_ENABLED` is on.
+pub struct PlatformBuildMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for PlatformBuildMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            m20261118_000007_platform_user_participants::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_platform_build_migrations").into_iden()
+    }
+}
+
+/// The platform-build history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn platform_build_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<PlatformBuildMigrator, _>(db)
         .await?
         .is_empty())
 }

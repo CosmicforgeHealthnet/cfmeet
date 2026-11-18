@@ -64,6 +64,11 @@ pub enum AuthMode {
     SignalingCredential,
     MeetingSession,
     ParticipantToken,
+    /// A CF Meet user token (`Authorization: Bearer cfut_…`, ADR 0062): signature and
+    /// expiry pre-checked HERE with Platform Access's published keys
+    /// (`API_GATEWAY_USER_TOKENS_ENABLED`), then transported unchanged; the owning
+    /// service verifies it live.
+    UserToken,
     /// No credential (the owning service decides what an anonymous caller may do).
     Anonymous,
 }
@@ -78,6 +83,7 @@ impl AuthMode {
             "SIGNALING_CREDENTIAL" => AuthMode::SignalingCredential,
             "MEETING_SESSION" => AuthMode::MeetingSession,
             "PARTICIPANT_TOKEN" => AuthMode::ParticipantToken,
+            "USER_TOKEN" => AuthMode::UserToken,
             "ANONYMOUS" => AuthMode::Anonymous,
             _ => return None,
         })
@@ -92,6 +98,7 @@ impl AuthMode {
             AuthMode::SignalingCredential => "SIGNALING_CREDENTIAL",
             AuthMode::MeetingSession => "MEETING_SESSION",
             AuthMode::ParticipantToken => "PARTICIPANT_TOKEN",
+            AuthMode::UserToken => "USER_TOKEN",
             AuthMode::Anonymous => "ANONYMOUS",
         }
     }
@@ -101,6 +108,19 @@ impl AuthMode {
         !matches!(
             self,
             AuthMode::PlatformCredential | AuthMode::DeveloperSession
+        )
+    }
+
+    /// Device authentication modes (build contract §9): routes accepting one of them may
+    /// be called from a partner website registered for an environment.
+    pub fn is_device(&self) -> bool {
+        matches!(
+            self,
+            AuthMode::UserToken
+                | AuthMode::ClientToken
+                | AuthMode::RealtimeTicket
+                | AuthMode::SignalingCredential
+                | AuthMode::ParticipantToken
         )
     }
 }
@@ -131,6 +151,11 @@ pub struct RouteDefinition {
 impl RouteDefinition {
     pub fn allows(&self, mode: AuthMode) -> bool {
         self.auth.contains(&mode)
+    }
+
+    /// Whether the route accepts a device authentication mode ([`AuthMode::is_device`]).
+    pub fn accepts_device(&self) -> bool {
+        self.auth.iter().any(AuthMode::is_device)
     }
 }
 
@@ -349,6 +374,20 @@ impl RouteTable {
             methods = ms;
         }
         methods
+    }
+
+    /// The methods of `path` whose route accepts a device authentication mode (partner
+    /// website CORS preflight; never a PLATFORM_CREDENTIAL-only route).
+    pub fn device_methods(&self, path: &str) -> Vec<Method> {
+        let mut candidates = self.path_exists(path);
+        candidates.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        candidates.dedup();
+        candidates
+            .into_iter()
+            .filter(|m| {
+                matches!(self.lookup(m, path), Lookup::Matched(r) if r.definition.accepts_device())
+            })
+            .collect()
     }
 
     pub fn lookup(&self, method: &Method, path: &str) -> Lookup<'_> {

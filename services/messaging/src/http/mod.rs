@@ -72,6 +72,8 @@ pub fn app(state: AppState) -> Router {
         .route("/ready", get(ready))
         .route("/openapi.json", get(openapi))
         .merge(crate::realtime::http::device_routes())
+        // ADR 0062 partner device routes (user token; they authenticate themselves).
+        .merge(crate::partner::http::routes())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
         .with_state(state.clone())

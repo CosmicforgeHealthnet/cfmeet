@@ -82,6 +82,7 @@ AUTH_MODES = {
     "bearer_auth": "MEETING_SESSION",
     "participant_token": "PARTICIPANT_TOKEN",
     "userSession": "DEVELOPER_SESSION",
+    "userToken": "USER_TOKEN",
 }
 # Security schemes that never appear in customer documents.
 INTERNAL_SCHEMES = {"cfServiceAuth", "serviceToken", "mediaProviderSignature", "providerSignature",

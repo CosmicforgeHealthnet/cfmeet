@@ -19,6 +19,14 @@
 //!   `notifications-call-push.dispatch`) in a background task bounded by
 //!   `CALLING_PUSH_TIMEOUT_MS`: ringing is never delayed and never fails because of push.
 //!   One alert per (call, push target): repeats are dropped until the invitation expires.
+//!
+//! Partner push (ADR 0063, `CALLING_PARTNER_PUSH_ENABLED`, default off): a ring offer to
+//! an ACTIVE EXTERNAL_APPLICATION_PRINCIPAL of an EXTERNAL tenant is also handed to the
+//! transport as a [`PartnerPushOffer`] — the Notification Service's `platform-principal`
+//! recipient (§6 N-P3), whose push registrations the partner's app made through Messaging
+//! and which are sent with the partner's own APNs VoIP / FCM keys. The `notifications`
+//! transport sends it to the same I3 with the same rules (background, bounded, no retry),
+//! one alert per (call, principal). The first-party path above is unchanged.
 
 use std::{
     collections::HashMap,
@@ -54,6 +62,45 @@ pub trait PushDispatcher: Send + Sync + 'static {
     async fn dispatch_offer(&self, offer: PushOffer) {
         self.dispatch(offer.push_target_ref, offer.payload).await
     }
+
+    /// Delivers one partner offer (ADR 0063; only produced while
+    /// `CALLING_PARTNER_PUSH_ENABLED`). Default: not sent.
+    async fn dispatch_partner_offer(&self, _offer: PartnerPushOffer) {
+        tracing::debug!("partner push offer not dispatched: the transport has no partner lane");
+    }
+}
+
+/// The Notification Service `platform-principal` recipient of a partner's user
+/// (contract §6 N-P3): the scope triple and the principal, nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlatformPrincipalRecipient {
+    pub tenant_id: Uuid,
+    pub application_id: Uuid,
+    pub environment_id: Uuid,
+    pub principal_id: Uuid,
+}
+
+impl PlatformPrincipalRecipient {
+    /// The wire shape `{kind: "platform-principal", tenantId, applicationId,
+    /// environmentId, principalId}`.
+    pub fn to_json(&self) -> Value {
+        json!({
+            "kind": "platform-principal",
+            "tenantId": self.tenant_id,
+            "applicationId": self.application_id,
+            "environmentId": self.environment_id,
+            "principalId": self.principal_id,
+        })
+    }
+}
+
+/// One ring offer to a partner's user (EXTERNAL tenant).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartnerPushOffer {
+    pub recipient: PlatformPrincipalRecipient,
+    /// The `cfmeet.calling.push-invitation` payload.
+    pub payload: Value,
+    pub call_id: Uuid,
 }
 
 /// No push transport configured: offers reach endpoints through signaling and recovery.
@@ -174,6 +221,34 @@ impl NotificationsPushTransport {
             "recipientAccountRef": account,
         })
     }
+
+    /// The I3 body of a partner offer (§6 N-P3): the `platform-principal` recipient
+    /// instead of push target references (the Notification Service wakes the principal's
+    /// own registrations in that scope).
+    pub fn partner_body(offer: &PartnerPushOffer) -> Value {
+        json!({
+            "recipient": offer.recipient.to_json(),
+            "payload": offer.payload,
+            "expiresAt": offer.payload["expiresAt"],
+        })
+    }
+
+    /// When the offer's invitation expires (`None`: invalid or already expired), with
+    /// the bounded outcome to count otherwise.
+    fn until(payload: &Value) -> Result<Instant, &'static str> {
+        let expires = payload["expiresAt"]
+            .as_str()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|t| t.with_timezone(&chrono::Utc))
+            .ok_or("invalid")?;
+        let left = (expires - chrono::Utc::now())
+            .to_std()
+            .unwrap_or(StdDuration::ZERO);
+        if left.is_zero() {
+            return Err("expired");
+        }
+        Ok(Instant::now() + left)
+    }
 }
 
 #[async_trait]
@@ -229,6 +304,41 @@ impl PushDispatcher for NotificationsPushTransport {
                 tracing::debug!(
                     outcome,
                     "call push not dispatched (recoverable via signaling)"
+                );
+            }
+        });
+    }
+
+    async fn dispatch_partner_offer(&self, offer: PartnerPushOffer) {
+        let until = match Self::until(&offer.payload) {
+            Ok(until) => until,
+            Err(outcome) => {
+                crate::metrics::inc("calling_partner_push_offers_total", &[("outcome", outcome)]);
+                return;
+            }
+        };
+        // One alert per (call, principal): every ringing endpoint of the user shares it.
+        if !self.first_alert(offer.call_id, offer.recipient.principal_id, until) {
+            crate::metrics::inc(
+                "calling_partner_push_offers_total",
+                &[("outcome", "duplicate")],
+            );
+            return;
+        }
+        let body = Self::partner_body(&offer);
+        let sink = self.sink.clone();
+        let timeout = self.timeout;
+        tokio::spawn(async move {
+            let outcome = match tokio::time::timeout(timeout, sink.call_push(body)).await {
+                Ok(Ok(_)) => "dispatched",
+                Ok(Err(_)) => "failed",
+                Err(_) => "timeout",
+            };
+            crate::metrics::inc("calling_partner_push_offers_total", &[("outcome", outcome)]);
+            if outcome != "dispatched" {
+                tracing::debug!(
+                    outcome,
+                    "partner call push not dispatched (recoverable via signaling)"
                 );
             }
         });

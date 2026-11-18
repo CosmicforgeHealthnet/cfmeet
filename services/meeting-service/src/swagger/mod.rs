@@ -864,6 +864,20 @@ impl utoipa::Modify for SecurityAddon {
                     ),
                 ),
             );
+            // ADR 0062: a partner user's CF Meet user token (device credential). Accepted
+            // only by the operations that list it (the conference join).
+            components.add_security_scheme(
+                "userToken",
+                utoipa::openapi::security::SecurityScheme::Http(
+                    utoipa::openapi::security::HttpBuilder::new()
+                        .scheme(utoipa::openapi::security::HttpAuthScheme::Bearer)
+                        .bearer_format("cfut")
+                        .description(Some(
+                            "CF Meet user token of a partner user (`cfut_<sbx|test|live>_<JWS>`), minted by the partner's server for one user of its application environment and sent by the device as `Authorization: Bearer cfut_…`. Platform Access verifies it live on every use (a successful answer is cached for at most 30 seconds): the user must be ACTIVE and the minting credential, environment, application and tenant active. Only the conference join accepts it; the join returns the participant token the device uses afterwards.",
+                        ))
+                        .build(),
+                ),
+            );
             components.add_security_scheme(
                 "api_key_auth",
                 utoipa::openapi::security::SecurityScheme::ApiKey(

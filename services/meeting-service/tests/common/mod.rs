@@ -176,6 +176,10 @@ async fn template(admin: &str) -> String {
             migration::GapClosureMigrator::up(&tmpl, None)
                 .await
                 .expect("gap-closure migrations apply");
+            // ADR 0062: partner user participants and partner meeting chat links.
+            migration::PlatformBuildMigrator::up(&tmpl, None)
+                .await
+                .expect("platform-build migrations apply");
             tmpl.close().await.ok();
             name
         })

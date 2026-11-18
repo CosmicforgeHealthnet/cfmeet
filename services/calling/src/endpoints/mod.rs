@@ -15,6 +15,7 @@
 
 pub mod http;
 pub mod service;
+pub mod user_sessions;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;

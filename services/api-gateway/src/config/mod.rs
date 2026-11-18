@@ -12,6 +12,8 @@
 //! | `API_GATEWAY_REDIS_KEY_PREFIX` | no | key namespace (default `cfgw:`) |
 //! | `API_GATEWAY_REDIS_TIMEOUT_MS` | no | bound of one quota-store call and of one connection attempt (20–5000, default 250); past it the request is counted per instance (`quotas: degraded`) |
 //! | `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` | no | per-token request ceiling of end-user / device traffic (meeting sessions, participant tokens, developer sessions, client tokens, signaling credentials, realtime tickets): `0` (default) off, else 10–100000 requests per token per minute, counted in the same quota store; anonymous requests carry no token and stay with the services and the edge |
+//! | `API_GATEWAY_USER_TOKENS_ENABLED` | no | feature flag (default `false`): accept CF Meet user tokens (`Authorization: Bearer cfut_…`) on `USER_TOKEN` routes — signature and expiry pre-checked with Platform Access's published keys (`platform-user-token.verify`, refreshed every 5 minutes or less; no keys: refused), `Authorization` forwarded unchanged for the owning service's live verification |
+//! | `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED` | no | feature flag (default `false`): CORS for partner websites registered per environment in Platform Access (`platform-environment-origins.read` change feed, polled every 30 s or less) on routes accepting a device authentication mode; `Origin` forwarded on WebSocket upgrades |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`]. The gateway has NO
@@ -53,6 +55,10 @@ pub enum LogFormat {
 pub struct FeatureFlags {
     pub public_routing: bool,
     pub websockets: bool,
+    /// `API_GATEWAY_USER_TOKENS_ENABLED` (ADR 0062): the `USER_TOKEN` mode.
+    pub user_tokens: bool,
+    /// `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED` (ADR 0062): partner-website CORS.
+    pub environment_origins: bool,
 }
 
 /// The quota store shared by every gateway instance. With `API_GATEWAY_REDIS_URL` the
@@ -235,6 +241,8 @@ impl ApiGatewayConfig {
         let flags = FeatureFlags {
             public_routing: flag(&get, "API_GATEWAY_PUBLIC_ROUTING_ENABLED")?,
             websockets: flag(&get, "API_GATEWAY_WEBSOCKETS_ENABLED")?,
+            user_tokens: flag(&get, "API_GATEWAY_USER_TOKENS_ENABLED")?,
+            environment_origins: flag(&get, "API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED")?,
         };
         let upstream_timeout = Duration::from_millis(bounded(
             &get,
@@ -417,6 +425,24 @@ mod tests {
         assert!(
             ApiGatewayConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")])).is_err()
         );
+    }
+
+    #[test]
+    fn platform_build_flags_default_off_and_parse() {
+        let cfg = ApiGatewayConfig::from_lookup(lookup(&[])).unwrap();
+        assert!(!cfg.flags.user_tokens && !cfg.flags.environment_origins);
+        let on = ApiGatewayConfig::from_lookup(lookup(&[
+            ("API_GATEWAY_USER_TOKENS_ENABLED", "true"),
+            ("API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED", "1"),
+        ]))
+        .unwrap();
+        assert!(on.flags.user_tokens && on.flags.environment_origins);
+        for var in [
+            "API_GATEWAY_USER_TOKENS_ENABLED",
+            "API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED",
+        ] {
+            assert!(ApiGatewayConfig::from_lookup(lookup(&[(var, "maybe")])).is_err());
+        }
     }
 
     #[test]

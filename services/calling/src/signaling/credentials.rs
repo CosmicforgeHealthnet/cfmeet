@@ -177,7 +177,35 @@ impl SignalingKeys {
         minted_by_credential_id: CredentialId,
         now: DateTime<Utc>,
     ) -> Result<MintedSignalingCredential, SignalingCredentialError> {
-        let expires_at = now + self.ttl;
+        self.mint_until(
+            scope,
+            principal_id,
+            endpoint_id,
+            minted_by_service_account_id,
+            minted_by_credential_id,
+            now,
+            now + self.ttl,
+        )
+    }
+
+    /// Mints a credential that expires at the earlier of the configured lifetime and
+    /// `not_after` (a derived credential never outlives what it was exchanged for, e.g.
+    /// a CF Meet user token). `not_after` must be after `now`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn mint_until(
+        &self,
+        scope: CallScope,
+        principal_id: PrincipalId,
+        endpoint_id: CallEndpointId,
+        minted_by_service_account_id: ServiceAccountId,
+        minted_by_credential_id: CredentialId,
+        now: DateTime<Utc>,
+        not_after: DateTime<Utc>,
+    ) -> Result<MintedSignalingCredential, SignalingCredentialError> {
+        let expires_at = (now + self.ttl).min(not_after);
+        if expires_at.timestamp() <= now.timestamp() {
+            return Err(SignalingCredentialError::Expired);
+        }
         let mut jti = [0u8; 16];
         rand::rngs::OsRng.fill_bytes(&mut jti);
         let claims = Claims {

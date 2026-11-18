@@ -21,6 +21,15 @@ class RouteChecks(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)), "route ids are unique")
         self.assertTrue(all(not r["pattern"].startswith("/internal") for r in manifest["routes"]))
 
+    def test_the_user_token_scheme_maps_to_the_gateway_user_token_mode(self):
+        # ADR 0062 / build contract §9: devices present `Authorization: Bearer cfut_…`.
+        self.assertEqual(public_api.AUTH_MODES["userToken"], "USER_TOKEN")
+        doc = {"security": [{"platformCredential": []}]}
+        op = {"operationId": "joinConference",
+              "security": [{"userToken": []}, {"bearer_auth": []}, {"userToken": []}]}
+        self.assertEqual(public_api.auth_modes("meetings", op, doc), ["USER_TOKEN", "MEETING_SESSION"])
+        self.assertNotIn("userToken", public_api.INTERNAL_SCHEMES)
+
     def test_a_gate_scope_must_be_a_platform_access_registry_scope(self):
         registry = public_api.registered_scopes()
         self.assertIn("privacy.contacts.write", registry)

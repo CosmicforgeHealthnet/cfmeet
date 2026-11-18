@@ -91,6 +91,22 @@ pub enum Action {
     ProductionAccessRead,
     /// §57: update the support profile's contact references — OWNER, ADMIN.
     SupportProfileManage,
+    /// ADR 0062: read an environment's partner users — OWNER, ADMIN, DEVELOPER.
+    EndUsersRead,
+    /// ADR 0062: create / update / delete partner users, revoke their sessions (machine
+    /// Users API) — OWNER, ADMIN, DEVELOPER.
+    EndUsersManage,
+    /// ADR 0062: mint CF Meet user tokens (machine) or SANDBOX development tokens
+    /// (console) — OWNER, ADMIN, DEVELOPER.
+    UserTokensIssue,
+    /// ADR 0062: read an environment's allowed websites — every member.
+    AllowedOriginsRead,
+    /// ADR 0062: replace an environment's allowed websites — OWNER, ADMIN.
+    AllowedOriginsManage,
+    /// ADR 0063: read push credential metadata (never a secret) — OWNER, ADMIN.
+    PushCredentialsRead,
+    /// ADR 0063: upload, verify and delete push credentials — OWNER, ADMIN.
+    PushCredentialsManage,
 }
 
 impl Action {
@@ -121,6 +137,13 @@ impl Action {
         Action::CredentialsRevoke,
         Action::ProductionAccessRead,
         Action::SupportProfileManage,
+        Action::EndUsersRead,
+        Action::EndUsersManage,
+        Action::UserTokensIssue,
+        Action::AllowedOriginsRead,
+        Action::AllowedOriginsManage,
+        Action::PushCredentialsRead,
+        Action::PushCredentialsManage,
     ];
 
     /// Whether the action changes state (refused for RESTRICTED organizations unless
@@ -140,6 +163,9 @@ impl Action {
                 | Action::ServiceAccountsRead
                 | Action::CredentialsRead
                 | Action::ProductionAccessRead
+                | Action::EndUsersRead
+                | Action::AllowedOriginsRead
+                | Action::PushCredentialsRead
         )
     }
 
@@ -179,6 +205,16 @@ pub fn allows(role: Role, action: Action) -> bool {
         CredentialsRead | CredentialsRevoke => matches!(role, Owner | Admin | Developer),
         ProductionAccessRead => true,
         SupportProfileManage => matches!(role, Owner | Admin),
+        // ADR 0062 / 0063: partner users and tokens follow credentials (OWNER, ADMIN,
+        // DEVELOPER); allowed websites are visible to every member and changed by OWNER /
+        // ADMIN; push credentials are OWNER / ADMIN only.
+        EndUsersRead | EndUsersManage | UserTokensIssue => {
+            matches!(role, Owner | Admin | Developer)
+        }
+        AllowedOriginsRead => true,
+        AllowedOriginsManage | PushCredentialsRead | PushCredentialsManage => {
+            matches!(role, Owner | Admin)
+        }
         WebhooksRead | LimitsRead => matches!(role, Owner | Admin | Developer | Analyst),
         UsageRead | UsageExport => true,
         ActivityRead => matches!(role, Owner | Admin | Analyst),
@@ -326,6 +362,26 @@ mod tests {
             }
         }
         assert!(allows(Analyst, ProductionAccessRead));
+        // ADR 0062 / 0063.
+        for r in [Owner, Admin, Developer] {
+            for a in [EndUsersRead, EndUsersManage, UserTokensIssue] {
+                assert!(allows(r, a), "{r:?} {a:?}");
+            }
+        }
+        for r in [Analyst, Billing] {
+            for a in [EndUsersRead, EndUsersManage, UserTokensIssue] {
+                assert!(!allows(r, a), "{r:?} {a:?}");
+            }
+        }
+        for r in Role::ALL {
+            assert!(allows(*r, AllowedOriginsRead), "{r:?}");
+        }
+        for a in [AllowedOriginsManage, PushCredentialsRead, PushCredentialsManage] {
+            assert!(allows(Owner, a) && allows(Admin, a), "{a:?}");
+            for r in [Developer, Analyst, Billing] {
+                assert!(!allows(r, a), "{r:?} {a:?}");
+            }
+        }
         assert!(!allows(Developer, SupportProfileManage));
         // ANALYST is read-only.
         for a in Action::ALL.iter().filter(|a| a.is_mutation()) {

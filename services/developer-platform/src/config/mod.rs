@@ -26,6 +26,14 @@
 //! | `DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_REMOTE_LIMIT` | no | ids of each kind verified at Platform Access per report (0 = local checks only, max 100000; default 1000) |
 //! | `DEVELOPER_PLATFORM_NOTIFICATIONS_PRODUCTION_ACCESS_ROUTE` | no | who notifies the applicant of a production-access decision: `legacy` (default: nothing is published; the operator-console email through the Meeting Service stays the only notice) or `notification-service` (`developer-platform.production-access.decided` is published to the Notification Service — switch the operator-console email off at the same time, never both). Effective only with `CF_NOTIFICATIONS_BASE_URL` |
 //! | `DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE` | no | `notification-service` (default) or `off`: the worker publishes `developer-platform.credential.expiring-soon` / `.expired` to the Notification Service (no other user notice exists for them; customer webhooks are unaffected). Effective only with `CF_NOTIFICATIONS_BASE_URL`, Platform Access and `DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_ENABLED` (same lead times, lookback, interval and environment bound) |
+//! | `DEVELOPER_PLATFORM_USERS_API_ENABLED` | no | feature flag (default `false`, ADR 0062): the partner Users API (`/v1/users*`, machine credentials, delegated to Platform Access) and the console read `GET /v1/environments/{id}/users`; off, they are 404 |
+//! | `DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED` | no | feature flag (default `false`, ADR 0062): `GET` / `PUT /v1/environments/{id}/allowed-origins` (delegated to Platform Access); off, 404 |
+//! | `DEVELOPER_PLATFORM_TEST_TOKENS_ENABLED` | no | feature flag (default `false`, ADR 0062): the console development token generator `POST /v1/environments/{id}/test-user-tokens` (SANDBOX only); off, 404 |
+//! | `DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED` | no | feature flag (default `false`, ADR 0063): partner push credentials `/v1/environments/{id}/push-credentials*` (sealed to the Notification Service, metadata only here); off, 404. Needs `CF_NOTIFICATIONS_BASE_URL` and `CF_NOTIFICATIONS_SEALING_KEY`, else 503 `CAPABILITY_UNAVAILABLE` |
+//! | `CF_NOTIFICATIONS_SEALING_KEY` | no | the Notification Service's public HPKE key `<kid>:<base64url>` that push secrets are sealed to on receipt |
+//! | `DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED` | no | feature flag (default `false`): enforce the workspace / project creation caps below (409 `LIMIT_EXCEEDED`) |
+//! | `DEVELOPER_PLATFORM_MAX_WORKSPACES_PER_OWNER` | no | workspaces (not CLOSED) a CF Meet account may OWN (0 = unlimited, max 1000, default 3) |
+//! | `DEVELOPER_PLATFORM_MAX_PROJECTS_PER_WORKSPACE` | no | projects (not ARCHIVED) per workspace (0 = unlimited, max 10000, default 10) |
 //! | `DEVELOPER_PLATFORM_RETENTION_ENABLED` | no | worker: bounded retention purge of webhook, API usage, rejection and activity history (default `true`; per-class bounds `DEVELOPER_PLATFORM_RETENTION_*_DAYS`, see [`crate::retention`]) |
 //!
 //! Without `CF_NOTIFICATIONS_BASE_URL` nothing is published to the Notification Service,
@@ -83,6 +91,82 @@ pub struct FeatureFlags {
     pub production_access_workflow: bool,
 }
 
+/// ADR 0062 / 0063 "Build" features of the Developer Console, each default-off (kept out
+/// of [`FeatureFlags`] so its existing shape is unchanged).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildFeatures {
+    /// `DEVELOPER_PLATFORM_USERS_API_ENABLED`: `/v1/users*` and the console user list.
+    pub users_api: bool,
+    /// `DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED`.
+    pub allowed_origins: bool,
+    /// `DEVELOPER_PLATFORM_TEST_TOKENS_ENABLED`: the SANDBOX token generator.
+    pub test_tokens: bool,
+    /// `DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED`.
+    pub push_credentials: bool,
+    /// `DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED`: enforce the two caps below.
+    pub creation_caps: bool,
+    /// Workspaces one CF Meet account may own (0 = unlimited).
+    pub max_workspaces_per_owner: u32,
+    /// Projects per workspace (0 = unlimited).
+    pub max_projects_per_workspace: u32,
+}
+
+impl Default for BuildFeatures {
+    fn default() -> Self {
+        Self {
+            users_api: false,
+            allowed_origins: false,
+            test_tokens: false,
+            push_credentials: false,
+            creation_caps: false,
+            max_workspaces_per_owner: 3,
+            max_projects_per_workspace: 10,
+        }
+    }
+}
+
+fn build_features(get: &impl Fn(&str) -> Option<String>) -> Result<BuildFeatures, ConfigError> {
+    Ok(BuildFeatures {
+        users_api: flag(get, "DEVELOPER_PLATFORM_USERS_API_ENABLED")?,
+        allowed_origins: flag(get, "DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED")?,
+        test_tokens: flag(get, "DEVELOPER_PLATFORM_TEST_TOKENS_ENABLED")?,
+        push_credentials: flag(get, "DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED")?,
+        creation_caps: flag(get, "DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED")?,
+        max_workspaces_per_owner: bounded(
+            get,
+            "DEVELOPER_PLATFORM_MAX_WORKSPACES_PER_OWNER",
+            3,
+            0,
+            1_000,
+        )? as u32,
+        max_projects_per_workspace: bounded(
+            get,
+            "DEVELOPER_PLATFORM_MAX_PROJECTS_PER_WORKSPACE",
+            10,
+            0,
+            10_000,
+        )? as u32,
+    })
+}
+
+/// The Notification Service's public sealing key (`CF_NOTIFICATIONS_SEALING_KEY`,
+/// `<kid>:<base64url public key>`); push secrets are sealed to it on receipt.
+fn notifications_sealing_key(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<cf_notification_client::SealingKey>, ConfigError> {
+    match get("CF_NOTIFICATIONS_SEALING_KEY") {
+        None => Ok(None),
+        Some(v) => cf_notification_client::SealingKey::parse(&v)
+            .map(Some)
+            .map_err(|_| {
+                ConfigError::invalid(
+                    "CF_NOTIFICATIONS_SEALING_KEY",
+                    "must be <kid>:<base64url public key>",
+                )
+            }),
+    }
+}
+
 pub struct DeveloperPlatformConfig {
     /// Final completion (production-access workflow): the named operators allowed to
     /// review, approve or reject production-access requests
@@ -113,6 +197,10 @@ pub struct DeveloperPlatformConfig {
     /// Notification Service N7 / N11: which events are routed to the Notification Service
     /// (requested; effective only with `CF_NOTIFICATIONS_BASE_URL`).
     pub notification_routes: NotificationRoutes,
+    /// ADR 0062 / 0063 Developer Console features (all default off).
+    pub build: BuildFeatures,
+    /// `CF_NOTIFICATIONS_SEALING_KEY` (push credentials are sealed to it).
+    pub notifications_sealing_key: Option<cf_notification_client::SealingKey>,
 }
 
 /// The per-event routes to the Notification Service (requested in configuration).
@@ -180,6 +268,11 @@ impl fmt::Debug for DeveloperPlatformConfig {
             .field("webhooks", &self.webhooks)
             .field("credential_lifecycle", &self.credential_lifecycle)
             .field("notification_routes", &self.notification_routes)
+            .field("build", &self.build)
+            .field(
+                "notifications_sealing_key",
+                &self.notifications_sealing_key.as_ref().map(|k| k.kid()),
+            )
             .field(
                 "reference_reconciliation_interval",
                 &self.reference_reconciliation_interval,
@@ -385,6 +478,8 @@ impl DeveloperPlatformConfig {
         let webhooks = webhooks::from_lookup(&get)?;
         let credential_lifecycle = credential_lifecycle(&get)?;
         let notification_routes = notification_routes(&get)?;
+        let build = build_features(&get)?;
+        let notifications_sealing_key = notifications_sealing_key(&get)?;
         let reference_reconciliation_interval = match bounded(
             &get,
             "DEVELOPER_PLATFORM_REFERENCE_RECONCILIATION_INTERVAL_SECS",
@@ -424,6 +519,8 @@ impl DeveloperPlatformConfig {
             reference_reconciliation_interval,
             reference_reconciliation_remote_limit,
             notification_routes,
+            build,
+            notifications_sealing_key,
         })
     }
 
@@ -571,6 +668,52 @@ mod tests {
             ),
         ] {
             let err = with(&[(var, value)]).unwrap_err();
+            assert!(!err.to_string().contains(value), "{var}");
+        }
+    }
+
+    #[test]
+    fn build_features_are_off_by_default_and_caps_are_bounded() {
+        let cfg = DeveloperPlatformConfig::from_lookup(lookup(BASE)).unwrap();
+        assert_eq!(cfg.build, BuildFeatures::default());
+        assert!(!cfg.build.users_api && !cfg.build.allowed_origins);
+        assert!(!cfg.build.test_tokens && !cfg.build.push_credentials);
+        assert!(!cfg.build.creation_caps);
+        assert_eq!(cfg.build.max_workspaces_per_owner, 3);
+        assert_eq!(cfg.build.max_projects_per_workspace, 10);
+        assert!(cfg.notifications_sealing_key.is_none());
+        let (public, _) =
+            cf_notification_client::seal::generate_keypair("notif-hpke-2026-11").unwrap();
+        let mut pairs = BASE.to_vec();
+        pairs.extend([
+            ("DEVELOPER_PLATFORM_USERS_API_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_TEST_TOKENS_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED", "true"),
+            ("DEVELOPER_PLATFORM_MAX_WORKSPACES_PER_OWNER", "0"),
+            ("DEVELOPER_PLATFORM_MAX_PROJECTS_PER_WORKSPACE", "25"),
+            ("CF_NOTIFICATIONS_SEALING_KEY", public.as_str()),
+        ]);
+        let cfg = DeveloperPlatformConfig::from_lookup(lookup(&pairs)).unwrap();
+        let b = cfg.build;
+        assert!(b.users_api && b.allowed_origins && b.test_tokens && b.push_credentials);
+        assert!(b.creation_caps);
+        assert_eq!(b.max_workspaces_per_owner, 0);
+        assert_eq!(b.max_projects_per_workspace, 25);
+        assert_eq!(
+            cfg.notifications_sealing_key.as_ref().map(|k| k.kid()),
+            Some("notif-hpke-2026-11")
+        );
+        for (var, value) in [
+            ("DEVELOPER_PLATFORM_USERS_API_ENABLED", "kind-of"),
+            ("DEVELOPER_PLATFORM_MAX_WORKSPACES_PER_OWNER", "-1"),
+            ("DEVELOPER_PLATFORM_MAX_PROJECTS_PER_WORKSPACE", "99999999"),
+            ("CF_NOTIFICATIONS_SEALING_KEY", "not-a-key-zz"),
+        ] {
+            let mut pairs = BASE.to_vec();
+            pairs.push((var, value));
+            let err = DeveloperPlatformConfig::from_lookup(lookup(&pairs)).unwrap_err();
             assert!(!err.to_string().contains(value), "{var}");
         }
     }

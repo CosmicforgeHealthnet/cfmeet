@@ -96,7 +96,15 @@ async fn main() -> anyhow::Result<()> {
     );
     let authenticator = CredentialAuthenticator::new(db, keyring, registry, clock.clone())
         .with_failure_policy(config.auth_failure_policy);
-    let state = AppState::new(platform, authenticator, service_auth);
+    tracing::info!(
+        end_users = config.build.end_users_enabled,
+        user_tokens = config.build.user_tokens_enabled,
+        environment_origins = config.build.environment_origins_enabled,
+        meeting_platform = config.build.meeting_platform_enabled,
+        user_token_kid = config.build.user_token_keys.as_ref().map(|k| k.kid()).unwrap_or(""),
+        "platform build features"
+    );
+    let state = AppState::new(platform, authenticator, service_auth).with_build(config.build);
 
     // Failed-authentication windows are bounded: prune windows older than an hour.
     {
@@ -108,6 +116,16 @@ async fn main() -> anyhow::Result<()> {
                 let before = clock.now() - chrono::Duration::hours(1);
                 if let Err(e) = state.authenticator.prune_failure_windows(before).await {
                     tracing::warn!(summary = %summarize_db_error(&e), "failure-window pruning failed");
+                }
+                // ADR 0062: user-token mint windows are hourly; keep the last two.
+                let mint_before = clock.now() - chrono::Duration::hours(2);
+                if let Err(e) = platform_access::identity::end_users::prune_mint_windows(
+                    state.platform.db(),
+                    mint_before,
+                )
+                .await
+                {
+                    tracing::warn!(summary = %summarize_db_error(&e), "mint-window pruning failed");
                 }
             }
         });

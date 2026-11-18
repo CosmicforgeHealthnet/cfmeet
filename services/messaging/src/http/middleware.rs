@@ -175,6 +175,55 @@ const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
     ("POST", "/v1/messaging/backups/*/download-grants"),
 ];
 
+/// ADR 0062 / build contract §5: the CLOSED allowlist of a partner session device (a
+/// MANAGED-only session device exchanged from a CF Meet user token): conversations and
+/// members (read), messages (list, get, send, edit, delete), reactions, the read cursor,
+/// unread, events, attachments (create, finalize, get, download grants), search within a
+/// conversation and reports. Never MLS, KeyPackages, Welcomes, backups, history
+/// transfer, key transparency or device registration. Every route is also a
+/// [`CLIENT_TOKEN_ROUTES`] member route; a PRIVATE_E2EE conversation is `NOT_FOUND`.
+pub const PARTNER_SESSION_DEVICE_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/v1/conversations"),
+    ("GET", "/v1/conversations/*"),
+    ("GET", "/v1/conversations/*/members"),
+    ("GET", "/v1/conversations/*/messages"),
+    ("POST", "/v1/conversations/*/messages"),
+    ("GET", "/v1/conversations/*/messages/*"),
+    ("PATCH", "/v1/conversations/*/messages/*"),
+    ("DELETE", "/v1/conversations/*/messages/*"),
+    ("GET", "/v1/conversations/*/messages/*/reactions"),
+    ("PUT", "/v1/conversations/*/messages/*/reactions/*"),
+    ("DELETE", "/v1/conversations/*/messages/*/reactions/*"),
+    ("PUT", "/v1/conversations/*/read-cursor"),
+    ("GET", "/v1/conversations/*/unread"),
+    ("GET", "/v1/conversations/*/events"),
+    ("POST", "/v1/conversations/*/attachments"),
+    ("GET", "/v1/conversations/*/attachments/*"),
+    ("POST", "/v1/conversations/*/attachments/*/finalize"),
+    ("POST", "/v1/conversations/*/attachments/*/download-grants"),
+    ("GET", "/v1/conversations/*/search"),
+    ("POST", "/v1/conversations/*/reports"),
+];
+
+/// Whether a partner session device may call `method path`.
+pub fn partner_session_device_route(method: &Method, path: &str) -> bool {
+    let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+    PARTNER_SESSION_DEVICE_ROUTES.iter().any(|(m, pattern)| {
+        let want: Vec<&str> = pattern.split('/').collect();
+        *m == method.as_str()
+            && want.len() == segments.len()
+            && want
+                .iter()
+                .zip(&segments)
+                .all(|(w, got)| (*w == "*" && !got.is_empty()) || w == got)
+    })
+}
+
+/// Request extension set ONLY by the client-token path for a partner session device
+/// (ADR 0062): handlers restrict what it sees to MANAGED conversations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartnerSessionDevice;
+
 /// Whether a client token may call `method path`; `Some(Some(device))` when the route
 /// names a device that must be the session's own.
 pub fn client_token_route(method: &Method, path: &str) -> Option<Option<String>> {
@@ -346,6 +395,15 @@ async fn authenticated_customer(
 ) -> Response {
     match authentication {
         Ok(Authentication::Authenticated(ctx)) if ctx.full_authority => {
+            // ADR 0062 / build contract §5: with partner session devices on, an EXTERNAL
+            // environment gets the CFMEET_PLATFORM_PARTNER baseline (once; never
+            // replacing another baseline; its own application policy still wins).
+            if !ctx.first_party && state.partner.settings.session_devices_enabled {
+                state
+                    .partner
+                    .ensure_baseline(&state.db, &ctx.scope, state.now())
+                    .await;
+            }
             let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
             request.extensions_mut().insert(CustomerCaller(*ctx));
             let response = next.run(request).await;
@@ -408,10 +466,45 @@ async fn client_token_request(
             return e.into_response();
         }
     };
+    // ADR 0062: a partner session device reaches its closed MANAGED-only allowlist.
+    let partner = if session.is_session_device() && state.partner.settings.session_devices_enabled
+    {
+        match crate::realtime::session_devices::active_device(
+            &state.db,
+            session.device_id,
+            session.principal_id,
+            session.environment_id,
+            state.now(),
+        )
+        .await
+        {
+            Ok(d) => d.is_some_and(|d| d.is_partner()),
+            Err(e) => return e.into_response(),
+        }
+    } else {
+        false
+    };
+    if partner {
+        if !partner_session_device_route(request.method(), request.uri().path()) {
+            crate::metrics::inc(
+                "messaging_client_token_rest_total",
+                &[("outcome", "partner_route_refused")],
+            );
+            return ApiError::reason(
+                ErrorCode::ClientTokensNotEnabled,
+                "PARTNER_ROUTE_NOT_ALLOWED",
+            )
+            .into_response();
+        }
+        if let Err(e) = require_managed_target(state, &session, request.uri().path()).await {
+            return e.into_response();
+        }
+        request.extensions_mut().insert(PartnerSessionDevice);
+    }
     // Section 13: a session device is accepted only by the realtime gateway; it never
     // reaches a device-direct REST operation (KeyPackages, Welcomes, MLS commits,
     // ciphertext, push registration, ...).
-    if session.is_session_device() {
+    if session.is_session_device() && !partner {
         crate::metrics::inc(
             "messaging_client_token_rest_total",
             &[("outcome", "session_device_refused")],
@@ -456,6 +549,39 @@ async fn client_token_request(
         state.wake_outbox();
     }
     response
+}
+
+/// A partner session device is MANAGED-only: a conversation route whose conversation is
+/// PRIVATE_E2EE answers `NOT_FOUND` (indistinguishable from a foreign conversation).
+async fn require_managed_target(
+    state: &AppState,
+    session: &crate::realtime::sessions::SessionRow,
+    path: &str,
+) -> Result<(), ApiError> {
+    let Some(id) = path
+        .strip_prefix("/v1/conversations/")
+        .and_then(|rest| rest.split('/').next())
+    else {
+        return Ok(());
+    };
+    let Ok(id) = Uuid::parse_str(id) else {
+        return Ok(()); // the handler refuses a malformed id
+    };
+    let e2ee = crate::db::scalar_i64(
+        &state.db,
+        "SELECT count(*) FROM messaging_conversations WHERE id = $1 AND environment_id = $2 \
+           AND security_profile <> 'MANAGED'",
+        vec![id.into(), session.environment_id.into()],
+    )
+    .await?;
+    if e2ee > 0 {
+        crate::metrics::inc(
+            "messaging_client_token_rest_total",
+            &[("outcome", "partner_e2ee_refused")],
+        );
+        return Err(ApiError::code(ErrorCode::NotFound));
+    }
+    Ok(())
 }
 
 /// The principal an authenticated application backend acts for, verified now.

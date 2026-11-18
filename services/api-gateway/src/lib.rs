@@ -8,6 +8,10 @@
 //! * [`http`]: probes and the ingress pipeline, which forwards with a short-lived signed
 //!   delegated context (`packages/service-auth`). Domain services keep final resource
 //!   authorization.
+//! * [`user_tokens`]: the stateless pre-check of CF Meet user tokens (ADR 0062); the
+//!   owning service verifies them live.
+//! * [`origins`]: partner-website origins per environment (ADR 0062), from Platform
+//!   Access's change feed, for CORS.
 //! * [`config`]: typed configuration, feature flags (default off) and the Redis settings
 //!   of future shared quotas.
 //!
@@ -21,7 +25,9 @@ pub mod docs;
 pub mod headers;
 pub mod http;
 pub mod identity;
+pub mod origins;
 pub mod quota;
 pub mod routing;
 pub mod state;
+pub mod user_tokens;
 pub mod ws;

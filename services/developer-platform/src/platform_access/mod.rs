@@ -121,6 +121,131 @@ pub trait PlatformAccessPort: Send + Sync {
         let _ = (call, correlation);
         Err(AuthorityUnavailable("not supported".into()))
     }
+
+    /// One Partner Users API operation (build contract §2.1, `platform-end-users.delegate`)
+    /// on behalf of the gateway-forwarded credential: Platform Access re-verifies it live
+    /// and takes the environment from it.
+    async fn end_users(
+        &self,
+        call: EndUserCall,
+        forwarded: &ForwardedCredential,
+        correlation: &CorrelationId,
+    ) -> Result<EndUsersReply, AuthorityUnavailable> {
+        let _ = (call, forwarded, correlation);
+        Err(AuthorityUnavailable("not supported".into()))
+    }
+}
+
+/// The API credential the API Gateway authenticated, as carried by the signed delegated
+/// context (build contract §2.1: `CF-Forwarded-Credential-Id`).
+#[derive(Debug, Clone)]
+pub struct ForwardedCredential {
+    pub delegated: DelegatedPlatformContext,
+    pub credential_id: Uuid,
+}
+
+/// The request header naming the forwarded credential (build contract §2.1).
+pub const FORWARDED_CREDENTIAL_HEADER: &str = "cf-forwarded-credential-id";
+
+/// A Partner Users API operation (build contract §2.1). Bodies are validated by the
+/// caller ([`crate::control::users`]) and forwarded as built there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EndUserCall {
+    /// `POST /internal/v1/end-users` (`principals.write`; idempotent on `externalId`).
+    Create { body: Value },
+    /// `GET /internal/v1/end-users` (`principals.read`).
+    List {
+        external_id: Option<String>,
+        cursor: Option<String>,
+        limit: Option<u32>,
+    },
+    /// `GET /internal/v1/end-users/{userId}` (`principals.read`).
+    Get { user_id: Uuid },
+    /// `PATCH /internal/v1/end-users/{userId}` (`principals.write`).
+    Update { user_id: Uuid, body: Value },
+    /// `DELETE /internal/v1/end-users/{userId}` (`principals.write`; tombstone).
+    Delete { user_id: Uuid },
+    /// `POST /internal/v1/end-users/{userId}/revoke-sessions` (`principals.write`).
+    RevokeSessions { user_id: Uuid },
+    /// `POST /internal/v1/end-users/{userId}/tokens` (`user_tokens.issue`).
+    IssueToken { user_id: Uuid, body: Value },
+    /// `POST /internal/v1/end-users/tokens` (`principals.write` + `user_tokens.issue`).
+    UpsertToken { body: Value },
+}
+
+impl EndUserCall {
+    /// `(method, path, query, body)` of the Platform Access request.
+    pub fn request(
+        &self,
+    ) -> (
+        axum::http::Method,
+        String,
+        Vec<(&'static str, String)>,
+        Option<Value>,
+    ) {
+        use axum::http::Method;
+        const BASE: &str = "/internal/v1/end-users";
+        match self {
+            EndUserCall::Create { body } => (Method::POST, BASE.into(), vec![], Some(body.clone())),
+            EndUserCall::List {
+                external_id,
+                cursor,
+                limit,
+            } => {
+                let mut query = Vec::new();
+                if let Some(e) = external_id {
+                    query.push(("externalId", e.clone()));
+                }
+                if let Some(c) = cursor {
+                    query.push(("cursor", c.clone()));
+                }
+                if let Some(l) = limit {
+                    query.push(("limit", l.to_string()));
+                }
+                (Method::GET, BASE.into(), query, None)
+            }
+            EndUserCall::Get { user_id } => {
+                (Method::GET, format!("{BASE}/{user_id}"), vec![], None)
+            }
+            EndUserCall::Update { user_id, body } => (
+                Method::PATCH,
+                format!("{BASE}/{user_id}"),
+                vec![],
+                Some(body.clone()),
+            ),
+            EndUserCall::Delete { user_id } => {
+                (Method::DELETE, format!("{BASE}/{user_id}"), vec![], None)
+            }
+            EndUserCall::RevokeSessions { user_id } => (
+                Method::POST,
+                format!("{BASE}/{user_id}/revoke-sessions"),
+                vec![],
+                None,
+            ),
+            EndUserCall::IssueToken { user_id, body } => (
+                Method::POST,
+                format!("{BASE}/{user_id}/tokens"),
+                vec![],
+                Some(body.clone()),
+            ),
+            EndUserCall::UpsertToken { body } => (
+                Method::POST,
+                format!("{BASE}/tokens"),
+                vec![],
+                Some(body.clone()),
+            ),
+        }
+    }
+}
+
+/// The outcome of a Partner Users API operation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EndUsersReply {
+    /// 2xx with its status (`201` created / minted, `200` existing, `204` deleted: body
+    /// `null`).
+    Ok { status: u16, body: Value },
+    /// Platform Access refused (stable code).
+    Refused { status: u16, code: String },
 }
 
 /// The acting party of a delegated mutation: a human member (`u-…`), the service
@@ -291,6 +416,28 @@ pub enum DelegationCall {
         actor: DelegationActor,
         environment_id: Uuid,
         allowed: bool,
+    },
+    /// ADR 0062 (build contract §2.1, console read): the partner users of an environment.
+    ListEnvironmentEndUsers {
+        environment_id: Uuid,
+        cursor: Option<String>,
+        limit: Option<u32>,
+    },
+    /// ADR 0062 (build contract §2.3): the environment's allowed websites.
+    GetAllowedOrigins { environment_id: Uuid },
+    /// ADR 0062 (build contract §2.3): replaces the environment's allowed websites.
+    PutAllowedOrigins {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        origins: Vec<String>,
+    },
+    /// ADR 0062: a SANDBOX development token for the console's test token generator
+    /// (`POST /internal/v1/delegation/environments/{id}/test-user-tokens`, the body of
+    /// `/v1/users/tokens`; requested from Platform Access — see `control::users`).
+    IssueTestUserToken {
+        actor: DelegationActor,
+        environment_id: Uuid,
+        body: Value,
     },
 }
 
@@ -582,6 +729,55 @@ impl DelegationCall {
                 Some(json!({ "allowed": allowed })),
                 Some(*actor),
             ),
+            DelegationCall::ListEnvironmentEndUsers { environment_id, .. } => (
+                Method::GET,
+                format!("/internal/v1/delegation/environments/{environment_id}/end-users"),
+                None,
+                None,
+            ),
+            DelegationCall::GetAllowedOrigins { environment_id } => (
+                Method::GET,
+                format!("/internal/v1/delegation/environments/{environment_id}/allowed-origins"),
+                None,
+                None,
+            ),
+            DelegationCall::PutAllowedOrigins {
+                actor,
+                environment_id,
+                origins,
+            } => (
+                Method::PUT,
+                format!("/internal/v1/delegation/environments/{environment_id}/allowed-origins"),
+                Some(json!({ "origins": origins })),
+                Some(*actor),
+            ),
+            DelegationCall::IssueTestUserToken {
+                actor,
+                environment_id,
+                body,
+            } => (
+                Method::POST,
+                format!("/internal/v1/delegation/environments/{environment_id}/test-user-tokens"),
+                Some(body.clone()),
+                Some(*actor),
+            ),
+        }
+    }
+
+    /// The query string of the Platform Access request (list pagination).
+    pub fn query(&self) -> Vec<(&'static str, String)> {
+        match self {
+            DelegationCall::ListEnvironmentEndUsers { cursor, limit, .. } => {
+                let mut q = Vec::new();
+                if let Some(c) = cursor {
+                    q.push(("cursor", c.clone()));
+                }
+                if let Some(l) = limit {
+                    q.push(("limit", l.to_string()));
+                }
+                q
+            }
+            _ => Vec::new(),
         }
     }
 }
@@ -670,6 +866,15 @@ impl PlatformAccessPort for HttpPlatformAccess {
         correlation: &CorrelationId,
     ) -> Result<Delegated, AuthorityUnavailable> {
         self.delegate_http(call, correlation).await
+    }
+
+    async fn end_users(
+        &self,
+        call: EndUserCall,
+        forwarded: &ForwardedCredential,
+        correlation: &CorrelationId,
+    ) -> Result<EndUsersReply, AuthorityUnavailable> {
+        self.end_users_http(call, forwarded, correlation).await
     }
 
     async fn scope_registry(&self) -> Result<Vec<Value>, AuthorityUnavailable> {
@@ -761,6 +966,8 @@ impl HttpPlatformAccess {
         correlation: &CorrelationId,
     ) -> Result<Delegated, AuthorityUnavailable> {
         let (method, path, body, actor) = call.request();
+        let owned_query = call.query();
+        let query: Vec<(&str, &str)> = owned_query.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let request = OutboundServiceRequest::continuing(ServiceId::platform_access(), correlation);
         let actor_value = actor.map(|a| a.header_value());
         let headers: Vec<(&str, &str)> = actor_value
@@ -769,7 +976,14 @@ impl HttpPlatformAccess {
             .unwrap_or_default();
         let response = self
             .client
-            .exchange_json_query_with_headers(&request, method, &path, &[], &headers, body.as_ref())
+            .exchange_json_query_with_headers(
+                &request,
+                method,
+                &path,
+                &query,
+                &headers,
+                body.as_ref(),
+            )
             .await
             .map_err(unavailable)?;
         match response.status() {
@@ -778,6 +992,63 @@ impl HttpPlatformAccess {
                 .map(Delegated::Ok)
                 .map_err(|_| AuthorityUnavailable("malformed delegation response".into())),
             status @ (400 | 403 | 404 | 409 | 422) => Ok(Delegated::Refused {
+                status,
+                code: response
+                    .error_code()
+                    .unwrap_or_else(|| "REFUSED".into())
+                    .chars()
+                    .take(64)
+                    .collect(),
+            }),
+            status => Err(AuthorityUnavailable(format!("HTTP {status}"))),
+        }
+    }
+}
+
+impl HttpPlatformAccess {
+    /// Build contract §2.1: the signed delegated context (which carries the initiating
+    /// credential id) rides on the service token; `CF-Forwarded-Credential-Id` is added
+    /// as soon as the shared client allows forwarding it (`FORWARDABLE_REQUEST_HEADERS`).
+    async fn end_users_http(
+        &self,
+        call: EndUserCall,
+        forwarded: &ForwardedCredential,
+        correlation: &CorrelationId,
+    ) -> Result<EndUsersReply, AuthorityUnavailable> {
+        let (method, path, owned_query, body) = call.request();
+        let query: Vec<(&str, &str)> = owned_query.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let request = OutboundServiceRequest::continuing(ServiceId::platform_access(), correlation)
+            .with_delegated_context(forwarded.delegated.clone());
+        let credential = forwarded.credential_id.to_string();
+        let headers: Vec<(&str, &str)> = if cf_service_auth::client::FORWARDABLE_REQUEST_HEADERS
+            .contains(&FORWARDED_CREDENTIAL_HEADER)
+        {
+            vec![(FORWARDED_CREDENTIAL_HEADER, credential.as_str())]
+        } else {
+            Vec::new()
+        };
+        let response = self
+            .client
+            .exchange_json_query_with_headers(
+                &request,
+                method,
+                &path,
+                &query,
+                &headers,
+                body.as_ref(),
+            )
+            .await
+            .map_err(unavailable)?;
+        match response.status() {
+            204 => Ok(EndUsersReply::Ok {
+                status: 204,
+                body: Value::Null,
+            }),
+            status @ 200..=299 => response
+                .json::<Value>()
+                .map(|body| EndUsersReply::Ok { status, body })
+                .map_err(|_| AuthorityUnavailable("malformed end-user response".into())),
+            status @ (400 | 403 | 404 | 409 | 422 | 429) => Ok(EndUsersReply::Refused {
                 status,
                 code: response
                     .error_code()
@@ -818,6 +1089,55 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn end_user_calls_address_the_partner_users_router() {
+        use axum::http::Method;
+        let id = Uuid::new_v4();
+        let (m, p, q, b) = EndUserCall::List {
+            external_id: Some("rider-1".into()),
+            cursor: None,
+            limit: Some(20),
+        }
+        .request();
+        assert_eq!((m, p.as_str()), (Method::GET, "/internal/v1/end-users"));
+        assert_eq!(q, vec![("externalId", "rider-1".to_string()), ("limit", "20".to_string())]);
+        assert!(b.is_none());
+        let (m, p, _, _) = EndUserCall::RevokeSessions { user_id: id }.request();
+        assert_eq!(m, Method::POST);
+        assert_eq!(p, format!("/internal/v1/end-users/{id}/revoke-sessions"));
+        let (m, p, _, b) = EndUserCall::UpsertToken { body: json!({}) }.request();
+        assert_eq!((m, p.as_str()), (Method::POST, "/internal/v1/end-users/tokens"));
+        assert_eq!(b, Some(json!({})));
+        let (m, p, _, _) = EndUserCall::Delete { user_id: id }.request();
+        assert_eq!((m, p), (Method::DELETE, format!("/internal/v1/end-users/{id}")));
+        // Console delegations (platform-identity.delegate).
+        let env = Uuid::new_v4();
+        let list = DelegationCall::ListEnvironmentEndUsers {
+            environment_id: env,
+            cursor: Some("c1".into()),
+            limit: None,
+        };
+        assert_eq!(
+            list.request().1,
+            format!("/internal/v1/delegation/environments/{env}/end-users")
+        );
+        assert_eq!(list.query(), vec![("cursor", "c1".to_string())]);
+        let put = DelegationCall::PutAllowedOrigins {
+            actor: DelegationActor::Human(id),
+            environment_id: env,
+            origins: vec!["https://app.example.com".into()],
+        };
+        let (m, p, b, a) = put.request();
+        assert_eq!(m, Method::PUT);
+        assert_eq!(
+            p,
+            format!("/internal/v1/delegation/environments/{env}/allowed-origins")
+        );
+        assert_eq!(b, Some(json!({ "origins": ["https://app.example.com"] })));
+        assert!(a.is_some());
+        assert!(put.query().is_empty());
+    }
 
     #[test]
     fn only_a_well_formed_trusted_context_is_canonical() {

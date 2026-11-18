@@ -111,6 +111,39 @@ fn ticket_origin(
     Ok(Some(origin.clone()))
 }
 
+/// ADR 0062: an `Origin` outside the static allow-list that may still be one of a
+/// partner environment's allowed websites (partner flag on, exactly one well-formed
+/// origin). It is accepted only once the session is known to be a partner session
+/// device of an environment that lists it ([`partner_origin_allowed`]).
+fn partner_origin_candidate(state: &AppState, headers: &HeaderMap) -> Option<String> {
+    if !state.partner.settings.session_devices_enabled {
+        return None;
+    }
+    let mut values = headers.get_all(header::ORIGIN).iter();
+    let origin = values.next()?.to_str().ok()?.to_string();
+    (values.next().is_none() && crate::partner::valid_origin(&origin)).then_some(origin)
+}
+
+/// Whether `origin` is an allowed website of the environment of `session`, a partner
+/// session device (contract §2.3; static allow-list ∪ environment origins).
+async fn partner_origin_allowed(state: &AppState, session: &sessions::SessionRow, origin: &str) -> bool {
+    if !session.is_session_device() {
+        return false;
+    }
+    let partner = super::session_devices::active_device(
+        &state.db,
+        session.device_id,
+        session.principal_id,
+        session.environment_id,
+        state.now(),
+    )
+    .await
+    .ok()
+    .flatten()
+    .is_some_and(|d| d.is_partner());
+    partner && state.partner.origin_allowed(session.environment_id, origin).await
+}
+
 fn allow_ticket_cors(response: &mut Response, origin: HeaderValue) {
     let headers = response.headers_mut();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
@@ -149,12 +182,29 @@ async fn ticket_preflight(State(state): State<AppState>, headers: HeaderMap) -> 
 }
 
 async fn ticket(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
-    let origin = ticket_origin(&state.realtime.settings, &headers)?;
+    let (origin, partner_origin) = match ticket_origin(&state.realtime.settings, &headers) {
+        Ok(origin) => (origin, None),
+        Err(e) => match partner_origin_candidate(&state, &headers) {
+            Some(candidate) => (None, Some(candidate)),
+            None => return Err(e),
+        },
+    };
     let token = zeroize::Zeroizing::new(
         client_token(&headers).ok_or(ApiError::code(ErrorCode::AuthenticationFailed))?,
     );
     let session = sessions::authenticate(&state, &token).await?;
     drop(token);
+    // A partner website's origin answers no CORS headers here: the API Gateway answers
+    // CORS for partner origins (contract §9).
+    if let Some(candidate) = partner_origin {
+        if !partner_origin_allowed(&state, &session, &candidate).await {
+            crate::metrics::inc("messaging_realtime_origin_refused_total", &[]);
+            return Err(ApiError::reason(
+                ErrorCode::AuthenticationFailed,
+                "ORIGIN_NOT_ALLOWED",
+            ));
+        }
+    }
     if !session.has_scope(MESSAGES_READ) {
         return Err(ApiError::code(ErrorCode::InsufficientScope));
     }
@@ -200,18 +250,25 @@ async fn connect(
         );
     }
     // Cross-site WebSocket hijacking: a browser always sends Origin; only listed origins
-    // may connect. Native clients send none.
+    // may connect. Native clients send none. ADR 0062: a partner website's origin is
+    // decided once the ticket names a partner session device of its environment.
+    let mut partner_origin = None;
     if let Some(origin) = headers.get(header::ORIGIN) {
         let allowed = origin
             .to_str()
             .is_ok_and(|o| settings.allowed_origins.iter().any(|a| a == o));
         if !allowed {
-            crate::metrics::inc("messaging_realtime_origin_refused_total", &[]);
-            return refuse(
-                StatusCode::FORBIDDEN,
-                ErrorCode::AuthenticationFailed,
-                "ORIGIN_NOT_ALLOWED",
-            );
+            match partner_origin_candidate(&state, &headers) {
+                Some(candidate) => partner_origin = Some(candidate),
+                None => {
+                    crate::metrics::inc("messaging_realtime_origin_refused_total", &[]);
+                    return refuse(
+                        StatusCode::FORBIDDEN,
+                        ErrorCode::AuthenticationFailed,
+                        "ORIGIN_NOT_ALLOWED",
+                    );
+                }
+            }
         }
     }
     let offered: Vec<String> = headers
@@ -252,6 +309,16 @@ async fn connect(
         Ok(s) => s,
         Err(e) => return e.into_response(),
     };
+    if let Some(candidate) = partner_origin {
+        if !partner_origin_allowed(&state, &session, &candidate).await {
+            crate::metrics::inc("messaging_realtime_origin_refused_total", &[]);
+            return refuse(
+                StatusCode::FORBIDDEN,
+                ErrorCode::AuthenticationFailed,
+                "ORIGIN_NOT_ALLOWED",
+            );
+        }
+    }
     if !session.has_scope(MESSAGES_READ) {
         return ApiError::code(ErrorCode::InsufficientScope).into_response();
     }

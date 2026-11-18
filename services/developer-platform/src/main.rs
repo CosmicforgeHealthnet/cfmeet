@@ -58,7 +58,15 @@ async fn main() -> anyhow::Result<()> {
                         if config.notification_routes.production_access { "notification-service" } else { "legacy" },
                     "DEVELOPER_PLATFORM_NOTIFICATIONS_CREDENTIAL_ROUTE":
                         if config.notification_routes.credential_lifecycle { "notification-service" } else { "off" },
+                    "DEVELOPER_PLATFORM_USERS_API_ENABLED": config.build.users_api,
+                    "DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED": config.build.allowed_origins,
+                    "DEVELOPER_PLATFORM_TEST_TOKENS_ENABLED": config.build.test_tokens,
+                    "DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED": config.build.push_credentials,
+                    "DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED": config.build.creation_caps,
+                    "DEVELOPER_PLATFORM_MAX_WORKSPACES_PER_OWNER": config.build.max_workspaces_per_owner,
+                    "DEVELOPER_PLATFORM_MAX_PROJECTS_PER_WORKSPACE": config.build.max_projects_per_workspace,
                 },
+                "notificationsSealingKeyConfigured": config.notifications_sealing_key.is_some(),
                 "notificationServiceConfigured": settings.has_target(cf_service_auth::services::NOTIFICATIONS),
                 "webhookMigrationTransferKeyConfigured": config.webhooks.transfer_key.is_some(),
             })
@@ -84,6 +92,7 @@ async fn main() -> anyhow::Result<()> {
     let mut state = AppState::new(db, service_auth.clone())
         .with_platform_access(Arc::new(HttpPlatformAccess::new(service_auth.client())))
         .with_flags(config.flags)
+        .with_build(config.build)
         .with_production_reviewers(config.production_reviewers.clone());
     if config.webhooks.enabled {
         developer_platform::webhooks::require_signable(&state.db, &config.webhooks)
@@ -105,6 +114,27 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!(
             "CF_MEETING_SERVICE_BASE_URL is not set: Developer Console sessions are refused"
         );
+    }
+    // ADR 0063 N-P1: push credential uploads need the Notification Service AND its public
+    // sealing key (secrets are sealed on receipt); otherwise they answer 503.
+    if config.build.push_credentials {
+        match (
+            settings.has_target(cf_service_auth::services::NOTIFICATIONS),
+            config.notifications_sealing_key.clone(),
+        ) {
+            (true, Some(sealing_key)) => {
+                state = state.with_push(developer_platform::push_providers::PushProviders {
+                    port: Arc::new(developer_platform::push_providers::HttpPushProviders::new(
+                        service_auth.client(),
+                    )),
+                    sealing_key,
+                });
+            }
+            _ => tracing::warn!(
+                "DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED needs CF_NOTIFICATIONS_BASE_URL and \
+                 CF_NOTIFICATIONS_SEALING_KEY: push credential uploads are unavailable"
+            ),
+        }
     }
     // Notification Service N7 / N11: production-access decisions are enqueued for the
     // Notification Service only on the explicit route AND with CF_NOTIFICATIONS_BASE_URL.

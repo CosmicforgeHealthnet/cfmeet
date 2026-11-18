@@ -267,6 +267,33 @@ pub enum RecipientKind {
     Account,
     /// `meeting-email-principal:<id>`: an address, sealed in the event or resolved by Meeting.
     EmailPrincipal,
+    /// `platform-principal:<environmentId>:<principalId>` (contract 1.4.0, ADR 0063 N-P4): a
+    /// partner's end user, reached only through the partner's own push credentials and
+    /// only for the metadata-only [`PARTNER_EVENT_TYPES`].
+    PlatformPrincipal,
+}
+
+/// Event types that may address `platform-principal:<environmentId>:<principalId>`
+/// recipients (metadata-only partner pushes, ADR 0063 N-P4).
+pub const PARTNER_EVENT_TYPES: &[&str] = &["messaging.message.created"];
+
+/// The recipient reference of a partner end user (`platform-principal:<env>:<principal>`).
+pub fn platform_principal_ref(environment_id: uuid::Uuid, principal_id: uuid::Uuid) -> String {
+    format!("platform-principal:{environment_id}:{principal_id}")
+}
+
+/// `(environmentId, principalId)` of a partner recipient reference
+/// (`platform-principal:<env>:<principal>`, lowercase hyphenated UUIDs); `None` for any
+/// other reference, including the single-id `platform-principal:<id>` form.
+pub fn parse_platform_principal(reference: &str) -> Option<(uuid::Uuid, uuid::Uuid)> {
+    let rest = reference.strip_prefix("platform-principal:")?;
+    let (env, principal) = rest.split_once(':')?;
+    let parse = |s: &str| {
+        uuid::Uuid::parse_str(s)
+            .ok()
+            .filter(|u| u.hyphenated().to_string() == s)
+    };
+    Some((parse(env)?, parse(principal)?))
 }
 
 impl RecipientKind {
@@ -274,6 +301,7 @@ impl RecipientKind {
         match self {
             RecipientKind::Account => "cfmeet-user",
             RecipientKind::EmailPrincipal => "meeting-email-principal",
+            RecipientKind::PlatformPrincipal => "platform-principal",
         }
     }
 

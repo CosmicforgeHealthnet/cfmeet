@@ -30,6 +30,8 @@ pub mod authentication;
 pub mod changes;
 pub mod credential_format;
 pub mod credentials;
+pub mod end_users;
+pub mod environment_origins;
 pub mod environments;
 pub mod error;
 pub mod handoff;
@@ -42,6 +44,7 @@ pub mod scopes;
 pub mod service_accounts;
 pub mod snapshots;
 pub mod tenants;
+pub mod user_tokens;
 pub mod verifier;
 
 use std::sync::Arc;
