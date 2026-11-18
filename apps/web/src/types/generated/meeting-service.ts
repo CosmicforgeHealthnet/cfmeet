@@ -4072,6 +4072,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}/meeting-profile-policy": "v2_get_organization_meeting_profile_policy",
   "GET /api/v2/organizations/{id}/meeting-spaces": "v2_list_organization_meeting_spaces",
   "GET /api/v2/organizations/{id}/members": "v2_list_organization_members",
+  "GET /api/v2/organizations/{id}/messaging/moderation/{path}": "v2_organization_messaging_moderation_get",
   "GET /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_get",
   "GET /api/v2/organizations/{id}/policies": "v2_get_organization_policy",
   "GET /api/v2/organizations/{id}/provisioning": "v2_get_organization_provisioning",
@@ -4254,6 +4255,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/organizations/{id}/invitations/{invitationId}/revoke": "v2_revoke_organization_invitation",
   "POST /api/v2/organizations/{id}/members/me/leave": "v2_leave_organization",
   "POST /api/v2/organizations/{id}/messaging/members/resolve": "v2_organization_messaging_resolve_members",
+  "POST /api/v2/organizations/{id}/messaging/moderation/{path}": "v2_organization_messaging_moderation_post",
   "POST /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_post",
   "POST /api/v2/organizations/{id}/messaging/session-tokens": "v2_organization_messaging_session_token",
   "POST /api/v2/organizations/{id}/ownership-transfer": "v2_transfer_organization_ownership",
@@ -4274,6 +4276,7 @@ export const CONTRACT_OPERATIONS = {
   "PUT /api/v2/organizations/{id}/meeting-profile-policy": "v2_put_organization_meeting_profile_policy",
   "PUT /api/v2/organizations/{id}/members/{userId}": "v2_upsert_organization_member",
   "PUT /api/v2/organizations/{id}/messaging/relay/{path}": "v2_organization_messaging_put",
+  "PUT /api/v2/organizations/{id}/teams/{teamId}/messaging-channel": "v2_organization_team_messaging_channel",
 } as const;
 
 export type ContractOperation = keyof typeof CONTRACT_OPERATIONS;

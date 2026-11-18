@@ -402,8 +402,9 @@ async fn moderation_operation(
     Ok(respond(status, value))
 }
 
-/// Organization moderation read (gap audit G6): `reports`, `reports/{reportId}` or
-/// `moderation/actions`.
+/// Read the organization's Messaging moderation queue, a report or the actions.
+///
+/// Gap audit G6: `{path}` is `reports`, `reports/{reportId}` or `moderation/actions`.
 ///
 /// Lists the reported content of the organization's conversations (the moderation queue,
 /// `status` / `limit`), reads one report with its evidence (audited with the caller as

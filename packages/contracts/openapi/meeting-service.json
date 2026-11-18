@@ -20026,8 +20026,8 @@
         "tags": [
           "Organizations (v2)"
         ],
-        "summary": "Organization moderation read (gap audit G6): `reports`, `reports/{reportId}` or",
-        "description": "`moderation/actions`.\n\nLists the reported content of the organization's conversations (the moderation queue,\n`status` / `limit`), reads one report with its evidence (audited with the caller as\nthe viewer) or lists the organization's moderation actions (`limit`). The caller must be\nan active member of an active organization whose policy allows Messaging and whose\norganization grants `messaging.organization.moderate` (OWNER / ADMIN by default); the\nOrganizations Service decides this on every request. Only the organization's own\nMessaging scope is visible. Messaging's status and JSON body are returned.",
+        "summary": "Read the organization's Messaging moderation queue, a report or the actions.",
+        "description": "Gap audit G6: `{path}` is `reports`, `reports/{reportId}` or `moderation/actions`.\n\nLists the reported content of the organization's conversations (the moderation queue,\n`status` / `limit`), reads one report with its evidence (audited with the caller as\nthe viewer) or lists the organization's moderation actions (`limit`). The caller must be\nan active member of an active organization whose policy allows Messaging and whose\norganization grants `messaging.organization.moderate` (OWNER / ADMIN by default); the\nOrganizations Service decides this on every request. Only the organization's own\nMessaging scope is visible. Messaging's status and JSON body are returned.",
         "operationId": "v2_organization_messaging_moderation_get",
         "parameters": [
           {

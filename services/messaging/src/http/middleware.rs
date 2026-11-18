@@ -124,6 +124,9 @@ const CLIENT_TOKEN_ROUTES: &[(&str, &str)] = &[
     ("GET", "/v1/conversations/*/messages/*"),
     ("PATCH", "/v1/conversations/*/messages/*"),
     ("DELETE", "/v1/conversations/*/messages/*"),
+    // Gap audit S11 / S12: a member forwards a message and joins with an invite link.
+    ("POST", "/v1/conversations/*/messages/*/forward"),
+    ("POST", "/v1/messaging/invite-links/join"),
     ("GET", "/v1/conversations/*/messages/*/revisions"),
     ("GET", "/v1/conversations/*/messages/*/reactions"),
     ("GET", "/v1/conversations/*/messages/*/thread"),

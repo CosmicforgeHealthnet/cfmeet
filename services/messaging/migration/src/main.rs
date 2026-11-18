@@ -31,5 +31,20 @@ async fn main() {
         println!("Messaging migrations applied");
         return;
     }
+    // The gap-closure history depends on the main one: the destructive subcommands roll
+    // it back first (the SEC-015 guard above already refused them outside a non-production
+    // APP_ENV).
+    if matches!(
+        args.first().map(String::as_str),
+        Some("down" | "fresh" | "refresh" | "reset")
+    ) {
+        let url = std::env::var("DATABASE_URL").expect("DATABASE_URL is set");
+        let db = sea_orm_migration::sea_orm::Database::connect(url)
+            .await
+            .expect("Messaging migration database connection failed");
+        messaging_migration::GapClosureMigrator::reset(&db)
+            .await
+            .expect("Messaging gap-closure rollback failed");
+    }
     cli::run_cli(messaging_migration::Migrator).await;
 }
