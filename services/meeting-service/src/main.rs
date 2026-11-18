@@ -541,10 +541,31 @@ async fn main() -> anyhow::Result<()> {
             Some(port) => {
                 backend::services::organization_access::spawn(
                     state.db.clone(),
-                    port,
+                    port.clone(),
                     std::time::Duration::from_secs(5),
                 );
                 tracing::info!("organization access worker started");
+                // Team chats follow team membership (team.* events mark them due).
+                match state
+                    .meeting
+                    .core
+                    .organization_authority
+                    .clone()
+                    .filter(|a| a.is_authoritative())
+                {
+                    Some(authority) => {
+                        backend::services::team_channels::spawn(
+                            state.db.clone(),
+                            port,
+                            authority,
+                            std::time::Duration::from_secs(5),
+                        );
+                        tracing::info!("team chat worker started");
+                    }
+                    None => tracing::info!(
+                        "team chat worker not started: Organizations is not authoritative"
+                    ),
+                }
             }
             None => tracing::warn!(
                 "organization events are enabled but the organization relay is not configured: \

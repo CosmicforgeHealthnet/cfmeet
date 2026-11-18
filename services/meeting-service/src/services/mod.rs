@@ -16,6 +16,7 @@ pub mod passwordless;
 pub mod rate_limiter;
 pub mod redis;
 pub mod step_up;
+pub mod team_channels;
 pub mod token_blacklist;
 
 // Phase 2 meeting domain (spec v1.1 Parts A–D)

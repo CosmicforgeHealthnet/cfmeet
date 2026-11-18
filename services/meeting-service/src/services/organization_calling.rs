@@ -750,23 +750,41 @@ impl OrganizationCalling {
                 "Your session cannot be verified right now; retry shortly",
             ));
         }
+        self.messaging_scope_for(db, authority, &ActingUser::of(user), organization)
+            .await
+    }
+
+    /// [`Self::messaging_scope`] for an acting user resolved elsewhere (a signed-in
+    /// caller, or the stored manager of a team chat in the background).
+    async fn messaging_scope_for(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        acting: &ActingUser,
+        organization: Uuid,
+    ) -> ApiResult<(
+        url::Url,
+        ResolvedOrganizationScope,
+        CallingServiceBinding,
+        Uuid,
+        Uuid,
+    )> {
         let Some(messaging) = self.messaging.clone() else {
             return Err(messaging_not_set_up());
         };
-        let acting = ActingUser::of(user);
         // Membership, organization status and policy (`features.messaging`) are decided by
         // Organizations on every request: a removed or suspended member, or a suspended
         // organization, is refused here before anything reaches Messaging.
         workspaces::require_organization_capability(
             authority,
-            &acting,
+            acting,
             organization,
             OrganizationFeature::Messaging,
             None,
         )
         .await?;
         let scope = authority
-            .resolve_scope(organization, &acting)
+            .resolve_scope(organization, acting)
             .await
             .map_err(|e| match e {
                 AuthorityError::Refused(reply) => relayed_error(&reply),
@@ -778,9 +796,9 @@ impl OrganizationCalling {
         self.ensure_messaging_policy(&messaging, &scope, binding)
             .await;
         let principal = self
-            .principal_for(db, &scope, binding, user.user_id)
+            .principal_for(db, &scope, binding, acting.user_id())
             .await?;
-        Ok((messaging, scope, binding, principal, user.user_id))
+        Ok((messaging, scope, binding, principal, acting.user_id()))
     }
 
     /// ADR 0058 Amendment A2: an automatically provisioned organization environment starts
@@ -1169,25 +1187,74 @@ impl OrganizationCalling {
         title: Option<String>,
     ) -> ApiResult<(u16, Value)> {
         let user = actor.require_registered()?;
-        let acting = ActingUser::of(user);
+        if !user.revocation_checked {
+            return Err(ApiError::domain(
+                ErrorCode::ServiceUnavailable,
+                "Your session cannot be verified right now; retry shortly",
+            ));
+        }
+        let (status, value) = self
+            .team_channel_sync(
+                db,
+                authority,
+                &ActingUser::of(user),
+                organization,
+                team,
+                title.clone(),
+                false,
+            )
+            .await?;
+        if (200..300).contains(&status) {
+            // The chat now follows its team: team events make it due for a resync, run
+            // as this manager (see `crate::services::team_channels`).
+            crate::services::team_channels::remember(
+                db,
+                organization,
+                team,
+                user.user_id,
+                title.as_deref(),
+            )
+            .await?;
+        }
+        Ok((status, value))
+    }
+
+    /// The team chat sync itself, for `acting` (who must hold
+    /// `organization.teams.manage`): the team's ACTIVE members (none once the team is
+    /// archived) become the chat's team members in Messaging.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn team_channel_sync(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        acting: &ActingUser,
+        organization: Uuid,
+        team: Uuid,
+        title: Option<String>,
+        archived: bool,
+    ) -> ApiResult<(u16, Value)> {
         workspaces::require_organization_capability(
             authority,
-            &acting,
+            acting,
             organization,
             OrganizationFeature::Messaging,
             Some(ORGANIZATION_TEAMS_MANAGE),
         )
         .await?;
         let (messaging, scope, binding, owner, _) = self
-            .messaging_scope(db, authority, actor, organization)
+            .messaging_scope_for(db, authority, acting, organization)
             .await?;
-        let users = authority
-            .team_member_users(organization, team, &acting)
-            .await
-            .map_err(|e| match e {
-                AuthorityError::Refused(reply) => relayed_error(&reply),
-                AuthorityError::Unavailable(_) => unavailable(),
-            })?;
+        let users = if archived {
+            Vec::new()
+        } else {
+            authority
+                .team_member_users(organization, team, acting)
+                .await
+                .map_err(|e| match e {
+                    AuthorityError::Refused(reply) => relayed_error(&reply),
+                    AuthorityError::Unavailable(_) => unavailable(),
+                })?
+        };
         let mut members = Vec::with_capacity(users.len());
         let mut seen = HashSet::new();
         for u in users.into_iter().filter(|u| seen.insert(*u)) {

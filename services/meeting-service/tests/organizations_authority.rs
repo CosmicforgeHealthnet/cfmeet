@@ -5218,3 +5218,174 @@ async fn g11_the_organization_export_is_relayed_for_the_owner() {
     let sent = fake.last("GET", &format!("/internal/v1/organizations/{org}/export"));
     assert_eq!(sent.acting_user, Some(owner.id.to_string()));
 }
+
+/// Team chats follow their team: `team.member_added` / `team.member_removed` /
+/// `team.archived` from Organizations re-run the chat sync as the manager who created it.
+#[tokio::test]
+async fn team_chats_follow_team_membership_events() {
+    use backend::services::{organization_events, team_channels};
+    if !require_test_redis() {
+        return;
+    }
+    let w = some!(messaging_world(true).await);
+    let state = &w.app.state;
+    let relay = state.meeting.core.organization_calling.clone().unwrap();
+    let authority = state.meeting.core.organization_authority.clone().unwrap();
+    let team = Uuid::new_v4();
+    let members_path = format!("/internal/v1/organizations/{}/teams/{team}/members", w.org);
+    let members = |users: &[Uuid]| {
+        json!({ "items": users.iter().map(|u| json!({ "id": Uuid::new_v4(), "teamId": team,
+            "userId": u, "role": "MEMBER", "status": "ACTIVE", "version": 1 })).collect::<Vec<_>>(),
+            "nextCursor": null })
+    };
+    let syncs = |w: &CallingWorld| {
+        w.peers
+            .records()
+            .into_iter()
+            .filter(|r| r.path == "/internal/v1/team-channels")
+            .collect::<Vec<_>>()
+    };
+    let deliver = |event_type: &str, payload: Value, version: i64| {
+        let envelope = organization_events::Envelope {
+            event_id: Uuid::new_v4(),
+            event_type: event_type.into(),
+            schema_version: 1,
+            organization_id: w.org,
+            aggregate_type: "team_member".into(),
+            aggregate_id: Uuid::new_v4(),
+            aggregate_version: version,
+            payload,
+        };
+        async move {
+            let effect = organization_events::effect_of(&envelope).unwrap();
+            let digest = organization_events::digest(
+                &json!({ "eventId": envelope.event_id, "type": envelope.event_type, "payload": envelope.payload }),
+            );
+            organization_events::apply(state, &envelope, &effect, &digest)
+                .await
+                .unwrap()
+        }
+    };
+    let pass = || async {
+        team_channels::run_once(&state.db, &relay, &authority, 20)
+            .await
+            .unwrap()
+    };
+
+    // An event for a team without a chat is only recorded; nothing is synced.
+    let outcome = deliver(
+        "team.member_added",
+        json!({ "teamId": team, "userId": w.member.id, "role": "MEMBER", "teamMemberVersion": 1 }),
+        1,
+    )
+    .await;
+    assert_eq!(format!("{outcome:?}"), "Recorded");
+    assert_eq!(pass().await, team_channels::TeamChannelPass::default());
+    assert!(syncs(&w).is_empty());
+
+    // The owner creates the team chat with just themselves in the team.
+    w.fake
+        .script("GET", &members_path, 200, members(&[w.owner.id]));
+    let (s, v) = w
+        .app
+        .call(
+            Method::PUT,
+            &format!(
+                "/api/v2/organizations/{}/teams/{team}/messaging-channel",
+                w.org
+            ),
+            Auth::Bearer(&w.owner.token),
+            Some(json!({ "title": "Night shift" })),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(syncs(&w).len(), 1);
+    assert_eq!(
+        syncs(&w)[0].body["memberPrincipalIds"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // The member joins the team: the chat follows without anyone pressing "Team chat".
+    w.fake.script(
+        "GET",
+        &members_path,
+        200,
+        members(&[w.owner.id, w.member.id]),
+    );
+    let outcome = deliver(
+        "team.member_added",
+        json!({ "teamId": team, "userId": w.member.id, "role": "MEMBER", "teamMemberVersion": 2 }),
+        2,
+    )
+    .await;
+    assert_eq!(format!("{outcome:?}"), "Applied");
+    let p = pass().await;
+    assert_eq!((p.synced, p.retried, p.stopped), (1, 0, 0));
+    let sync = syncs(&w).pop().unwrap();
+    assert_eq!(sync.body["memberPrincipalIds"].as_array().unwrap().len(), 2);
+    assert_eq!(sync.body["title"], "Night shift");
+    assert_eq!(
+        sync.body["ownerPrincipalId"],
+        json!(w.peers.state.principal)
+    );
+    // Settled: a second pass does nothing.
+    assert_eq!(pass().await, team_channels::TeamChannelPass::default());
+    assert_eq!(syncs(&w).len(), 2);
+
+    // The member leaves the team.
+    w.fake
+        .script("GET", &members_path, 200, members(&[w.owner.id]));
+    deliver(
+        "team.member_removed",
+        json!({ "teamId": team, "userId": w.member.id, "reason": "REMOVED", "teamMemberVersion": 3 }),
+        3,
+    )
+    .await;
+    assert_eq!(pass().await.synced, 1);
+    assert_eq!(
+        syncs(&w).pop().unwrap().body["memberPrincipalIds"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // The team is archived: the chat loses its team members and stops following.
+    deliver(
+        "team.archived",
+        json!({ "teamId": team, "teamVersion": 4 }),
+        4,
+    )
+    .await;
+    assert_eq!(pass().await.synced, 1);
+    let sync = syncs(&w).pop().unwrap();
+    assert!(sync.body["memberPrincipalIds"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
+    let row = state
+        .db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT state, sync_due FROM organization_team_channels WHERE organization_id = $1 AND team_id = $2",
+            vec![w.org.into(), team.into()],
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.try_get::<String>("", "state").unwrap(), "ARCHIVED");
+    assert!(!row.try_get::<bool>("", "sync_due").unwrap());
+    // Later team events no longer touch an archived team's chat.
+    let outcome = deliver(
+        "team.member_added",
+        json!({ "teamId": team, "userId": w.member.id, "role": "MEMBER", "teamMemberVersion": 5 }),
+        5,
+    )
+    .await;
+    assert_eq!(format!("{outcome:?}"), "Recorded");
+    assert_eq!(syncs(&w).len(), 4);
+}
