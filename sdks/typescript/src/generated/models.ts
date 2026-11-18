@@ -4620,6 +4620,18 @@ export namespace Meetings {
     /** Registered CF Meet user. Exactly one of `userId` / `email`. */
     userId?: string | null;
   };
+  /** Gap audit G7: add every active member of one of the space's organization teams. */
+  export type AddTeamMembersRequest = {
+    role: Role;
+    teamId: string;
+  };
+  /** Result of adding a team (gap audit G7). */
+  export type AddTeamMembersResponse = {
+    /** Members added now. */
+    added: Array<MemberResponse>;
+    /** Team members skipped: already members, the owner, you, or not an active account. */
+    skipped: number;
+  };
   export type AdmissionState = "WAITING" | "ADMITTED" | "DENIED" | "REMOVED" | "BANNED";
   export type AdmitRequest = {
     /** Admit every participant currently WAITING. */
@@ -6192,6 +6204,11 @@ export namespace Meetings {
     v2AddMember: {
       params: { path: { id: string }; body: AddMemberRequest };
       response: MemberResponse;
+    };
+    /** POST /api/v2/meeting-spaces/{id}/members/team; auth MEETING_SESSION; retry NO_RETRY */
+    v2AddTeamMembers: {
+      params: { path: { id: string }; body: AddTeamMembersRequest };
+      response: AddTeamMembersResponse;
     };
     /** POST /api/v2/conferences/{id}/waiting-room/admit — scope meetings.write; auth MEETING_SESSION | PARTICIPANT_TOKEN | PLATFORM_CREDENTIAL; retry NO_RETRY */
     v2Admit: {

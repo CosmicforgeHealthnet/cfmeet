@@ -14,12 +14,12 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 289 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.6.0 | 291 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.6.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.26.0 | 142 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.18.0 | 100 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
-| **Total** | | | **678** |
+| **Total** | | | **680** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -285,6 +285,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/meeting-spaces/{id}/members` | account session | List members (owner / host / co-host members). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_members` |
 | POST | `/api/v2/meeting-spaces/{id}/members` | account session | Add a member. The granted role is bounded by the caller's grant authority. | 201, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_add_member` |
+| POST | `/api/v2/meeting-spaces/{id}/members/team` | account session | Add a team of the organization. | 200, 400, 403, 404, 503 | FEATURE_DISABLED, MEETING_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE, TEAM_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_add_team_members` |
 | DELETE | `/api/v2/meeting-spaces/{id}/members/{memberId}` | account session | Revoke a membership. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_revoke_member` |
 | PATCH | `/api/v2/meeting-spaces/{id}/members/{memberId}` | account session | Change a member's role. | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_update_member` |
 
@@ -345,6 +346,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.6.0**; ba
 | PATCH | `/api/v2/organizations/{id}/calling/{path}` | account session | Organization Enterprise Calling partial update (allowlisted path). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_calling_patch` |
 | POST | `/api/v2/organizations/{id}/calling/{path}` | account session | Organization Enterprise Calling create / action (allowlisted path). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_calling_post` |
 | PUT | `/api/v2/organizations/{id}/calling/{path}` | account session | Organization Enterprise Calling replace (allowlisted path, e.g. members or schedules). | 200, 401, 403, 404, 409, 503 | AUTHENTICATION_REQUIRED, ENDPOINT_NOT_FOUND, ORGANIZATION_CALLING_DISABLED, ORGANIZATION_NOT_FOUND, ORGANIZATION_POLICY_RESTRICTED, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, PROVISIONING_PENDING, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_organization_calling_put` |
+| GET | `/api/v2/organizations/{id}/export` | account session | Export the organization's data. | 200, 401, 403, 404, 503 | AUTHENTICATION_REQUIRED, FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_export_organization` |
 | GET | `/api/v2/organizations/{id}/invitations` | account session | List an organization's invitations. | 200, 403, 404, 503 | FEATURE_DISABLED, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_list_organization_invitations` |
 | POST | `/api/v2/organizations/{id}/invitations` | account session | Invite someone to an organization by email or CF Meet ID. | 201, 400, 403, 404, 409, 429, 503 | ALREADY_MEMBER, CF_MEET_ID, FEATURE_DISABLED, IDEMPOTENCY_CONFLICT, INVITEE_NOT_FOUND, ORGANIZATION_NOT_FOUND, ORGANIZATION_SUSPENDED, PERMISSION_DENIED, RATE_LIMITED, SERVICE_UNAVAILABLE, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_organization_invitation` |
 | POST | `/api/v2/organizations/{id}/invitations/{invitationId}/revoke` | account session | Revoke an organization invitation. | 200, 403, 404, 503 | FEATURE_DISABLED, INVITATION_INVALID, ORGANIZATION_NOT_FOUND, PERMISSION_DENIED, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_revoke_organization_invitation` |

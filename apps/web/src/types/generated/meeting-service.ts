@@ -100,6 +100,20 @@ export interface AddOrganizationTeamMemberRequest {
   userId?: string | null;
 }
 
+/** Gap audit G7: add every active member of one of the space's organization teams. */
+export interface AddTeamMembersRequest {
+  role: Role;
+  teamId: string;
+}
+
+/** Result of adding a team (gap audit G7). */
+export interface AddTeamMembersResponse {
+  /** Members added now. */
+  added: Array<MemberResponse>;
+  /** Team members skipped: already members, the owner, you, or not an active account. */
+  skipped: number;
+}
+
 /**
  * Support-assisted email change (admin only): the owner lost access to the old address
  * and was verified by support outside the product.
@@ -4053,6 +4067,7 @@ export const CONTRACT_OPERATIONS = {
   "GET /api/v2/organizations/{id}": "v2_get_business_organization",
   "GET /api/v2/organizations/{id}/audit-events": "v2_list_organization_audit_events",
   "GET /api/v2/organizations/{id}/calling/{path}": "v2_organization_calling_get",
+  "GET /api/v2/organizations/{id}/export": "v2_export_organization",
   "GET /api/v2/organizations/{id}/invitations": "v2_list_organization_invitations",
   "GET /api/v2/organizations/{id}/meeting-profile-policy": "v2_get_organization_meeting_profile_policy",
   "GET /api/v2/organizations/{id}/meeting-spaces": "v2_list_organization_meeting_spaces",
@@ -4213,6 +4228,7 @@ export const CONTRACT_OPERATIONS = {
   "POST /api/v2/meeting-spaces/{id}/invitations": "v2_create_invitation",
   "POST /api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke": "v2_revoke_invitation",
   "POST /api/v2/meeting-spaces/{id}/members": "v2_add_member",
+  "POST /api/v2/meeting-spaces/{id}/members/team": "v2_add_team_members",
   "POST /api/v2/meeting-spaces/{id}/owner-transfer": "v2_transfer_owner",
   "POST /api/v2/meeting-spaces/{id}/registrations": "v2_register",
   "POST /api/v2/messaging/client-sessions/revoke-all": "v2_messaging_revoke_all_sessions",

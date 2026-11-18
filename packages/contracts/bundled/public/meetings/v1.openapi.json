@@ -9718,6 +9718,100 @@
         ]
       }
     },
+    "/api/v2/meeting-spaces/{id}/members/team": {
+      "post": {
+        "tags": [
+          "Members (v2)"
+        ],
+        "summary": "Add a team of the organization.",
+        "description": "Gap audit G7: for a meeting space of an organization, adds every active member of one of\nthe organization's teams with the given role, under the same rules as adding one member\n(managers only; a role you may grant). The Organizations Service decides whether you may see\nthe team. Team members who already belong, the owner, you and inactive accounts are skipped.\nAt most 500 team members.",
+        "operationId": "v2_add_team_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddTeamMembersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddTeamMembersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND / TEAM_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_add_team_members",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION"
+        ]
+      }
+    },
     "/api/v2/meeting-spaces/{id}/members/{memberId}": {
       "delete": {
         "tags": [
@@ -10949,6 +11043,46 @@
           }
         },
         "additionalProperties": false
+      },
+      "AddTeamMembersRequest": {
+        "type": "object",
+        "description": "Gap audit G7: add every active member of one of the space's organization teams.",
+        "required": [
+          "teamId",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "teamId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AddTeamMembersResponse": {
+        "type": "object",
+        "description": "Result of adding a team (gap audit G7).",
+        "required": [
+          "added",
+          "skipped"
+        ],
+        "properties": {
+          "added": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberResponse"
+            },
+            "description": "Members added now."
+          },
+          "skipped": {
+            "type": "integer",
+            "description": "Team members skipped: already members, the owner, you, or not an active account.",
+            "minimum": 0
+          }
+        }
       },
       "AdmissionState": {
         "type": "string",

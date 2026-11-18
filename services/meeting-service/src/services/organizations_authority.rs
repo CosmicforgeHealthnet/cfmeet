@@ -137,6 +137,8 @@ pub const RELAY_ROUTES: &[(&str, &str)] = &[
     // teams, team members and the organization policy (compare-and-swap), relayed with
     // the acting user; Organizations enforces organization.teams.manage /
     // organization.policies.manage and every team-role rule.
+    // Gap audit G11: the OWNER's export of the organization's data.
+    ("GET", "/internal/v1/organizations/{}/export"),
     ("GET", "/internal/v1/organizations/{}/teams"),
     ("POST", "/internal/v1/organizations/{}/teams"),
     ("GET", "/internal/v1/organizations/{}/teams/{}"),
@@ -1071,6 +1073,58 @@ impl OrganizationsAuthority {
         tracing::error!(%organization, "organization member list exceeds the supported size");
         Err(AuthorityError::Unavailable(Unavailable(
             "organization member list exceeds the supported size",
+        )))
+    }
+
+    /// Gap audit G7: the user ids of a team's ACTIVE members, read for the acting user
+    /// (Organizations decides whether they may see the team). At most 500 members.
+    pub async fn team_member_users(
+        &self,
+        organization: Uuid,
+        team: Uuid,
+        actor: &ActingUser,
+    ) -> Result<Vec<Uuid>, AuthorityError> {
+        let mut out = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..3 {
+            let mut query = vec![("limit".to_string(), "200".to_string())];
+            if let Some(c) = &cursor {
+                query.push(("cursor".to_string(), c.clone()));
+            }
+            let body = self
+                .read(
+                    &Call::new(
+                        Method::GET,
+                        format!("/internal/v1/organizations/{organization}/teams/{team}/members"),
+                    )
+                    .query(query)
+                    .actor(actor),
+                )
+                .await?;
+            let items =
+                body["items"]
+                    .as_array()
+                    .ok_or(AuthorityError::Unavailable(Unavailable(
+                        "malformed team member list",
+                    )))?;
+            for item in items {
+                if item["status"].as_str().is_some_and(|s| s != "ACTIVE") {
+                    continue;
+                }
+                if let Some(u) = item["userId"]
+                    .as_str()
+                    .and_then(|u| Uuid::parse_str(u).ok())
+                {
+                    out.push(u);
+                }
+            }
+            match body["nextCursor"].as_str() {
+                Some(next) if !next.is_empty() => cursor = Some(next.to_string()),
+                _ => return Ok(out),
+            }
+        }
+        Err(AuthorityError::Unavailable(Unavailable(
+            "team is larger than a meeting invitation supports",
         )))
     }
 
