@@ -926,7 +926,7 @@
     },
     {
       "id": "cfmeet.meeting-service.public-api",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "kind": "openapi",
       "path": "bundled/public/meetings/v1.openapi.json",
       "owner": "meeting-service",
