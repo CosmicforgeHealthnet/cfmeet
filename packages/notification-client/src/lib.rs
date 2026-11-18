@@ -3,12 +3,12 @@
 //!
 //! Keeps every producer integration identical:
 //!
-//! * [`catalogue`] — the closed catalogue of the 34 inbound event types and the control
+//! * [`catalogue`] — the closed catalogue of the 38 inbound event types and the control
 //!   event (mirrors `x-cfmeet-catalogue` in `cfmeet.notifications.event`);
 //! * [`envelope`] — the `cfmeet.notifications.event` v1 builder and validator (forbidden
 //!   data keys, sealed allowance, legacy idempotency-key formats, CRITICAL rules, size);
-//! * [`seal`] — HPKE (RFC 9180) sealing of codes, tokens and invitee addresses to the
-//!   service key (`open` feature: the service renderer only);
+//! * [`seal`] — HPKE (RFC 9180) sealing of codes, tokens, addresses and account-notice
+//!   facts to the service key (`open` feature: the service renderer only);
 //! * [`routing`] — the routing fence protocol v1 decision helper (§9.3), the guard-trigger
 //!   rule (§9.4) and the CRITICAL reroute rules (§9.8).
 //!
@@ -22,7 +22,7 @@ pub mod seal;
 
 pub use catalogue::{
     spec, EventSpec, Lane, LegacyKey, Priority, Producer, RecipientKind, CATALOGUE, CONTROL_EVENT,
-    STEP_UP_PURPOSES,
+    EMAIL_CHANGED_SIDES, STEP_UP_PURPOSES,
 };
 pub use envelope::{validate, Envelope, EnvelopeBuilder, EnvelopeError};
 pub use routing::{decide, Decision, Route, RouteRef, RoutingMode, RoutingState, ROUTING_PROTOCOL};
