@@ -716,7 +716,7 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
             .values()
             .map(|v| v.as_object().unwrap().len())
             .sum::<usize>(),
-        73
+        74
     );
     assert!(swagger["paths"]
         .as_object()
