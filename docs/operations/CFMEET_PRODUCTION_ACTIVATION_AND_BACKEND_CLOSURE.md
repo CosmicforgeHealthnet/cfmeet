@@ -20,7 +20,7 @@
   * delivery of Resend email to a real human inbox (E1 was proven against Resend's delivery test inbox);
   * any external telecom, APNs or FCM delivery;
   * an independent cryptographic assessment;
-  * Notification Service cutovers or operational acceptance;
+  * Notification Service operational acceptance (the 30/60-day windows have not elapsed), Web Push delivery evidence (no browser registration exists), APNs/FCM;
   * any time-based observation that has not elapsed.
 
 ## 1. Services and production status
@@ -42,7 +42,7 @@ All 15 service containers are certified by `certify` (§5). Each one:
 | Messaging | `cfmeet-messaging` | ACTIVE | personal E2EE (owner release record), organization MANAGED, realtime, Web Push |
 | Developer Platform | `cfmeet-developer-platform`, `cfmeet-developer-platform-worker` | ACTIVE | console, credentials, webhooks (active delivery), usage |
 | API Gateway | `cfmeet-api-gateway` | ACTIVE | public routing for the Developer Platform, Calling and Messaging families, central webhooks, documentation |
-| Notification Service | `cfmeet-notifications`, `cfmeet-notifications-2` | **DEPLOYED DARK** (in development, §6) | no traffic: routing OFF, providers `none` |
+| Notification Service | `cfmeet-notifications`, `cfmeet-notifications-2` | **PRODUCTION ACTIVE** (in-app and email; Document 10 §8) | delivers sign-in and security codes (CRITICAL lane), meeting and organization invitations, meeting notifications, organization updates (in-app) and message wake-ups (Web Push); preference authority `SERVICE` |
 | Numbering | `cfmeet-numbering` | DEPLOYED, provider-disabled | needs number providers (§4) |
 | Telephony | `cfmeet-telephony` | DEPLOYED, provider-disabled | needs a SIP/PSTN carrier (§4) |
 | SMS Gateway | `cfmeet-sms-gateway` | DEPLOYED, provider-disabled | needs an SMS carrier (§4) |
@@ -196,7 +196,7 @@ Earlier evidence that still applies (code unchanged since): server-bug fixes C1 
 
 | Work | Owner | State |
 |---|---|---|
-| Unified Notification Service N3–N15 | Notification Service track (Document 10) | deployed dark: N2 foundation, N6 owner APIs and the N8 relay are verified. Still to come:<ul><li>N7 producer publications (only the fence foundation is built);</li><li>client integrations FE2–FE5;</li><li>N9 to N12 cutovers;</li><li>N13 monitoring deployment;</li><li>N14 canary.</li></ul>Routing is OFF and providers are `none`. **No notification migration is complete, and no operational acceptance window has passed.** |
+| Unified Notification Service | Notification Service track (Document 10) | N2–N15 engineered and released; categories on the service as in Document 10 §4.4. Still open: APNs/FCM credentials, alert receivers (D-9), multi-envelope events, the non-critical account notices, the 30/60-day acceptance windows. |
 | Notification inbox UI (web and mobile) | frontend | not built |
 | Mobile calling client (offer acknowledgement, upgrade, screen share, add people) | mobile | not built; the server APIs are live |
 | Mobile attachment upload, groups in common, shared-media screens | mobile | not built |

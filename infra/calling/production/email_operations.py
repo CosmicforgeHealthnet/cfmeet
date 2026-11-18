@@ -493,6 +493,14 @@ def fallback_drill(cr, run_id):
     return result
 
 
+# Recorded with the checks, never judged: where the fence sent the code (NEW / OLD ...).
+OTP_INFO_KEYS = ('sign_in_route',)
+
+
+def journey_passed(checks):
+    return all(v.startswith(('PASS', 'MANUAL')) for k, v in checks.items() if k not in OTP_INFO_KEYS)
+
+
 def email_acceptance(cr, sha, run_id, confirm):
     require_ledger(cr)
     env = p.env_of(p.inspect(cr.MEETING))
@@ -504,5 +512,5 @@ def email_acceptance(cr, sha, run_id, confirm):
     if 'otp' in (confirm or '').split(','):
         checks = otp_journey(cr, run_id)
         emit('otpJourney', checks)
-        if any(not v.startswith(('PASS', 'MANUAL')) for v in checks.values()):
+        if not journey_passed(checks):
             raise RuntimeError('Passwordless sign-in journey failed')

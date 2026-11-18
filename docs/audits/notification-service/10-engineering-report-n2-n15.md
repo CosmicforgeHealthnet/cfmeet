@@ -20,14 +20,14 @@ Statuses are kept separate, as the mission requires:
 | **E-track E1** (Resend on the Meeting path) | `ENGINEERING_COMPLETE` (PR #88) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: `activate-resend-email` 43963096642, `email-acceptance otp` 43968733391; after the passwordless sign-in (PR #97) again 44145668186 (OTP journey 10/10) | E1 complete (Resend ACCEPTED plus signed DELIVERED) | §3 |
 | **N2** service foundation | `ENGINEERING_COMPLETE` | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: both replicas released by 44150771996, certify 44170126155 `CERTIFIED_READ_ONLY` | — | §2.1, §4 |
 | **N3** ingest, routing, preferences, shadow | `ENGINEERING_COMPLETE` | **live**: I1 accepts events from all five producers (§4.4) | — | §2.2 |
-| **N5** email channel | `ENGINEERING_COMPLETE` | **live**: `activate-notifications-email` 44172839707 (provider `resend`, both replicas, signed webhook) | — | §2.3, §4.4 |
+| **N5** email channel | `ENGINEERING_COMPLETE` | **live**: `activate-notifications-email` 44172839707, again with egress 44217118248 (provider `resend`, both replicas reach Resend, signed webhook); real email DELIVERED (§4.4) | — | §2.3, §4.4 |
 | **N6** owner APIs X1–X7 | `ENGINEERING_COMPLETE` (X6/X7 on Account: PR #96) | **`PRODUCTION_DEPLOYED_AND_VERIFIED`**: owners 43922950325; X6/X7 `activate-critical-lane` 44174010149, public denial of the lease routes proven | — | §2.4, §2.10 |
 | **N7** producer publications + routing fence | `ENGINEERING_COMPLETE`: Messaging, Organizations, Hub, Developer Platform, Meeting (sealed, fenced), Calling | **live**: publications activated for all six producers; fences `FENCED_NEW` for `MESSAGE_WAKEUPS`, `ORGANIZATION_INVITATION`, `MEETING_INVITATION`, `MEETING_NOTIFICATION`, `SECURITY_DEVICE_LINKED`, `SECURITY_DEVICE_STEP_UP` | — | §2.9, §2.10, §4.4 |
 | **N8** inbox | `ENGINEERING_COMPLETE` (backend; the web/mobile inbox UI is client work, FE2) | **live**: `ORGANIZATION_UPDATES` and `MEETING_NOTIFICATION` IN_APP `ACTIVE`; relay U1–U9 live | — | §4.4 |
 | **N9** push + call fast lane | `ENGINEERING_COMPLETE` (Web Push, registration mirror, I3; APNs/FCM adapters need credentials) | **live**: `activate-notifications-push` 44176266362, `activate-messaging-push-mirror` 44177553529, `activate-calling-push` 44177899990; `MESSAGE_WAKEUPS` PUSH `ACTIVE` + `FENCED_NEW` | — | §2.10, §4.4 |
 | **N10** preferences authority | `ENGINEERING_COMPLETE` | **live, authority `SERVICE`**: `activate-preference-copy` 44178337597, `activate-preference-authority` 44178664093 (account 7/7, contact 70/70, conversation 0/0, 0 different) | — | §4.4 |
 | **N11** standard / invitation email | `ENGINEERING_COMPLETE` | **live**: Meeting `ORGANIZATION_INVITATION`, `MEETING_INVITATION`, `MEETING_NOTIFICATION` `FENCED_NEW` with EMAIL `ACTIVE` | — | §4.4 |
-| **N12** critical lane | `ENGINEERING_COMPLETE` (X6/X7, PW1 relay, AUTO/FORCED failover, fallback key; passwordless codes in the catalogue: PR #99) | **live** for `SECURITY_DEVICE_LINKED` and `SECURITY_DEVICE_STEP_UP` (`FENCED_NEW`); fallback drill 44175510575 DELIVERED; `AUTH_VERIFICATION`: §4.4 | — | §2.10, §4.4 |
+| **N12** critical lane | `ENGINEERING_COMPLETE` (X6/X7, PW1 relay, AUTO/FORCED failover, fallback key; passwordless codes in the catalogue: PR #99) | **live**: `AUTH_VERIFICATION`, `SECURITY_DEVICE_STEP_UP`, `SECURITY_DEVICE_LINKED` `FENCED_NEW`; real sign-in codes sent under X6/X7 and DELIVERED; fallback drill 44175510575 DELIVERED; one incident (no egress) handled by rollback (§4.4) | — | §2.10, §4.4 |
 | **N13** monitoring | `ENGINEERING_COMPLETE` (rules, promtool tests, runbook, metrics) | rules not deployed: Prometheus/Alertmanager with receivers is owner decision D-9 | — | §2.6 |
 | **N14** canary governance | `ENGINEERING_COMPLETE` | used for every move in §4.4 (one row per run, journaled, reversible) | — | §2.7 |
 | **N15** retirement | not started by design: the legacy paths stay as the failover and rollback target | — | — | §6 |
@@ -294,6 +294,101 @@ With E1 recorded, the N14 gate no longer refuses email `ACTIVE` for lack of E1. 
 - **Not yet evidenced:** acknowledged shadow publications in production (rows `ACKED` with outcome `HELD`/`ACCEPTED`), and the shadow comparison of Document 6 N7. This needs a read-only check after real traffic: `diagnose` now emits `notificationDiagnostics` (counts only) for exactly this. Until then N7b is not `PRODUCTION_DEPLOYED_AND_VERIFIED`.
 - **Delivery:** unchanged. Legacy Messaging push delivers every wake-up. The Notification Service delivers nothing (every `notif_routing` row `OFF`, shadow events are never delivered). No category is `FENCED_*`.
 
+### 4.4 Waves 2–3 in production (2026-11-17 / 18)
+
+**Releases and certification**
+
+| Step | Evidence |
+|---|---|
+| Release `506bff4` (PR #96, waves 2–3 + PR #97) | run [44150771996](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/44150771996): verification 35/35 PASS, regression PASS |
+| Certify `d5eb1ea` (tooling only on top) | run [44170126155](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/44170126155): `CERTIFIED_READ_ONLY` |
+| Release `21c90c4` (PR #99, passwordless catalogue) | run [44191575507](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/44191575507): success |
+| Certify `e6cd140` (tooling only on top) | run [44199057880](https://github.com/CosmicforgeHealthnet/cfmeet/actions/runs/44199057880): `CERTIFIED_READ_ONLY` |
+
+Every activation below ran on a certified head and proved that no image build input had changed since the release (`activationBase`, 62 inputs).
+
+**Activations**
+
+| Operation | Run | Result |
+|---|---|---|
+| `activate-communications-publications` | 44171231077 | Hub → I1 grant, both replicas |
+| `activate-developer-publications` | 44171595691 | Developer Platform (+ worker) → I1 |
+| `activate-calling-publications` | 44172022550 | Calling → I1 |
+| `activate-meeting-publications` | 44172332777 | HPKE key `notif-hpke-2026-11-1` generated once, both replicas; Meeting → I1 |
+| `activate-notifications-email` | 44172839707 | provider `resend` on both replicas, signed webhook, service-owned 0400 copies of the VPS files |
+| `activate-critical-lane` | 44174010149, again 44201470852 | X6/X7 grant, lease routes publicly denied, fallback key mounted (`criticalFallbackKey: true`); the second run gave both replicas Meeting's `APP_URL` |
+| `email-acceptance confirm=fallback` | 44175510575 | fallback drill sealed with the Account fallback key, sent through the legacy ledger: Resend ACCEPTED, then a signed DELIVERED 2 s later |
+| `activate-notifications-push` | 44176266362 | live Web Push with Messaging's VAPID key, both replicas |
+| `activate-messaging-push-mirror` | 44177553529 | I13 grant; Messaging mirrors registrations |
+| `activate-calling-push` | 44177899990 | `CALLING_PUSH_TRANSPORT=notifications` (before: no call push at all) |
+| `activate-preference-copy` | 44178337597 | copy running |
+| `activate-preference-authority` | 44178664093 | **authority `SERVICE`**: account 7/7, contact 70/70, conversation 0/0 equal, 0 different |
+
+**Real production delivery**
+
+- **In-app (`ORGANIZATION_UPDATES`, routing `ACTIVE` in 44173220256).** `notifications-acceptance` 44200593365 ran through the public API, with real Organizations events and the real Meeting relay. Six checks passed:
+  - the inviter is told the invitation was accepted;
+  - a role change reaches the member exactly once;
+  - the unread count rises by one;
+  - another account sees nothing and cannot mark it read;
+  - read and dismiss are idempotent.
+
+  The seventh check expected a category switched off to record no item at all. The service implements Document 4 §7.2 rule 7: the item is recorded silently. The check was corrected in PR #102, and the re-run 44218552131 passed **7/7**, preference included. `diagnose` counted 7 IN_APP deliveries `SENT` and 7 inbox items.
+- **Email through the service: delivered (after the incident below).** `diagnose` 44221066781 (02:05 UTC), by Notification Service email ledger:
+  - 7 `AUTH_VERIFICATION` sign-in codes went through the CRITICAL lane, each under one X6 lease and completed with X7 (Meeting `criticalOutbox`: 7 `ACKED`, completed, `ROUTED`), with no failover and no duplicate. One was the acceptance run 44218158768: every check PASS, decided NEW, Resend ACCEPTED, then a signed DELIVERED. Six were real users signing in between 01:49 and 02:01.
+  - Resend statuses: 1 `DELIVERED`, 1 `ACCEPTED`, 5 `DELAYED` (Resend's "delivery delayed" from the receiving server; the legacy path shows the same status at times).
+  - 16 signed Resend webhook events reached the service's callback through Meeting's byte-for-byte forwarding, so the single-webhook design works.
+- **Push through the service: not yet.** Production has 0 enabled Web Push registrations (`diagnose`), so there is nothing to deliver to. APNs and FCM are not configured (§5).
+
+**Incident: the replicas had no route to Resend (2026-11-17, 23:48–23:58 UTC).**
+
+The fence moves before the incident:
+- `MESSAGE_WAKEUPS`, `ORGANIZATION_INVITATION`, `MEETING_INVITATION`, `MEETING_NOTIFICATION`, `SECURITY_DEVICE_LINKED` and `SECURITY_DEVICE_STEP_UP` were moved to `FENCED_NEW` on `d5eb1ea` (runs 44179499440 … 44184530567).
+- `AUTH_VERIFICATION` was moved on `e6cd140` (44202419165).
+
+What happened:
+- The OTP acceptance 44202682130 still signed in, because it reads the code directly. But the service's email for the `NEW` decision was never accepted by Resend.
+- `diagnose` 44210281972 showed:
+  - Meeting granted X6 leases (3 per message);
+  - the service tried 8 times per message and failed with provider class `NETWORK`;
+  - both CRITICAL messages expired.
+
+  As designed, a leased decision is never failed over automatically, so neither message was sent twice; neither was sent at all.
+
+Cause: the replicas were attached only to `cfmeet-core-private`, which is `--internal`. `activate-notifications-email` and `activate-notifications-push` gave them no route out.
+
+Response, all through journaled fence runs:
+- `AUTH_VERIFICATION`, `SECURITY_DEVICE_STEP_UP` and `SECURITY_DEVICE_LINKED` back to `LEGACY_ONLY` (44203245321, 44203766252, and the device-linked run);
+- the three Meeting email categories and `MESSAGE_WAKEUPS` back to `SHADOW` (44210580209, 44210836107, 44211121354, 44211365483).
+
+Meeting's own Resend path delivered throughout. One acceptance-run sign-in code and one acceptance step-up code were lost; both went to the acceptance test inbox.
+
+Fix: PR #103. Both replicas join a dedicated non-internal bridge, `cfmeet-notifications-egress` (inter-container traffic disabled). The email and push activations fail and restore unless every replica gets an HTTP answer from its providers.
+
+**Re-promotion with egress (2026-11-18, on `3089351`).**
+- `activate-notifications-email` 44217118248: both replicas get HTTP 200 from `api.resend.com`.
+- `activate-notifications-push` 44217393745: both replicas get HTTP answers from FCM, Mozilla and Apple Web Push.
+- Fence runs:
+  - `AUTH_VERIFICATION` `LEGACY_ONLY` → `SHADOW` → `FENCED_NEW` (44217687361, 44217926339);
+  - `SECURITY_DEVICE_STEP_UP` (44219091457, 44219274443) and `SECURITY_DEVICE_LINKED` (44219540724, 44219759322), the same way;
+  - `MEETING_INVITATION`, `ORGANIZATION_INVITATION`, `MEETING_NOTIFICATION` `SHADOW` → `FENCED_NEW` (44219978159, 44220275628, 44220521719);
+  - `MESSAGE_WAKEUPS` `SHADOW` → `FENCED_NEW` (44220764318).
+- OTP acceptance 44218158768: every check PASS through the NEW path. The run was marked failed only because the informational `sign_in_route` was judged like a check; fixed in PR #104.
+
+**Production state after the re-promotion**
+
+| Category | Producer fence | Service routing `ACTIVE` | Delivered by |
+|---|---|---|---|
+| `AUTH_VERIFICATION` (sign-in, email-change codes) | `FENCED_NEW` | EMAIL | Notification Service, CRITICAL lane (X6/X7), fallback key on Meeting |
+| `SECURITY_DEVICE_STEP_UP`, `SECURITY_DEVICE_LINKED` | `FENCED_NEW` | EMAIL | Notification Service, CRITICAL lane |
+| `MEETING_INVITATION`, `ORGANIZATION_INVITATION` | `FENCED_NEW` | EMAIL | Notification Service |
+| `MEETING_NOTIFICATION` | `FENCED_NEW` | EMAIL, IN_APP | Notification Service |
+| `MESSAGE_WAKEUPS` | `FENCED_NEW` | PUSH | Notification Service (Web Push; audiences over 40 stay OLD) |
+| `ORGANIZATION_UPDATES` | (Organizations publishes directly) | IN_APP | Notification Service |
+| incoming calls | Calling I3 | — | Notification Service fast lane (first-party, Web Push) |
+| `AUTH_PASSWORD_RESET`, `SECURITY_PASSWORD_CHANGED` | `LEGACY_ONLY` | — | no producer since PR #97 |
+| preferences | Hub authority `SERVICE` | — | Notification Service (U6/U7) |
+
 ---
 
 ## 5. What is not done, and why
@@ -315,3 +410,31 @@ The legacy paths are not retired: they are the failover and rollback target of e
 ## 7. Baselines Q1–Q18
 
 Q11, Q14 and Q15 remain COMPLETED as recorded in Document 9 §7.8 (verified: the certify evidence of run 43792702821 and the activation runs 43788212474 / 43788404790 are unchanged). Q1–Q4 and Q17–Q18 need E1 (email baselines on a working transport). Q16 (7-day memory minimum) is still a single sample; the dark release adds 512 MiB of limits (§4).
+
+**Final record (2026-11-18 02:58 UTC, `diagnose` 44227694037, after the clean OTP acceptance 44227457993 on `d4ec628`).**
+
+| Category / channel | Through the service | Outcome |
+|---|---|---|
+| `AUTH_VERIFICATION` email (CRITICAL) | 8 sign-in codes, each under one X6 lease and completed with X7 | Resend: 2 `DELIVERED`, 1 `ACCEPTED`, 5 `DELAYED` |
+| `SECURITY_DEVICE_STEP_UP` email (CRITICAL) | 1 step-up code (the acceptance's account deletion), leased and completed | `DELIVERED` |
+| `ORGANIZATION_UPDATES` in-app | 7 deliveries, 7 inbox items | `SENT` |
+| Resend webhooks | 25 signed events forwarded by Meeting to the service callback | accepted |
+| Web Push | 0 registrations in production | nothing to deliver |
+
+The OTP acceptance 44227457993 passed every check with the code decided `NEW`. The two codes lost in the incident remain `EXPIRED`; there is no other failure.
+
+## 8. Verdict
+
+**`CFMEET_UNIFIED_NOTIFICATION_SERVICE_PRODUCTION_ACTIVE` — for in-app and email.** The basis:
+- every section N2–N15 is engineered, merged and tested;
+- the service is released and certified, and every activation of §4.4 is recorded;
+- real production delivery has been accepted:
+  - in-app: `notifications-acceptance` 7/7;
+  - email: real sign-in and step-up codes through the CRITICAL lane, Resend DELIVERED with signed webhooks, and the fallback drill DELIVERED.
+
+**Qualified, and not claimed beyond this:**
+- **Web Push is live but has no delivery evidence.** Production has no browser push registration to deliver to.
+- **APNs and FCM are not configured.** Their credentials do not exist (§5).
+- **No delivery is evidenced yet for meeting invitations, organization invitations, meeting notifications or the device-linked notice.** They run on the service, but no real one has occurred since the re-promotion. Sign-in and step-up codes are evidenced.
+- **No time-based acceptance window has passed (§6).** `OPERATIONALLY_ACCEPTED` and `LEGACY_RETIRED` are not claimed.
+
