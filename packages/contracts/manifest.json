@@ -826,7 +826,7 @@
     },
     {
       "id": "cfmeet.developer-platform.internal-api-bundled",
-      "version": "1.9.0",
+      "version": "1.10.0",
       "kind": "openapi",
       "path": "bundled/platform-developer/internal/v1.openapi.json",
       "owner": "developer-platform",
@@ -849,14 +849,14 @@
     },
     {
       "id": "cfmeet.developer-platform.internal-api",
-      "version": "1.9.0",
+      "version": "1.10.0",
       "kind": "openapi",
       "path": "platform-developer/internal/v1.openapi.json",
       "owner": "developer-platform",
       "visibility": "internal",
       "lifecycle": "experimental",
       "authority": "contract-first",
-      "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) durable API request accounting (developer-usage.record, API Gateway) and operator administration (developer-platform.administer, operator console only). 1.3.0: Section 53 event ingestion POST /internal/v1/platform/events (developer-event.publish; the envelope's producer is the authenticated caller; deduplicated on producer + source event id) and the gateway-forwarded machine webhook API at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay; webhooks.read / webhooks.manage plus each event type's read scope), served once the API Gateway re-points those routes. 1.5.0 the Section 53 webhook migration operator routes (/internal/v1/operator/webhook-migration/**). 1.6.0: usage ingestion / reconciliation, operator production-access decisions, overrides, first-party grants, cost-centre usage, support profiles, forwarded /v1/usage and /v1/limits. 1.7.0: conflicting event replays refused (CONFLICTING_REPLAY) and the operator ingestion health view. 1.8.0 forwardedListUsage / forwardedGetLimits keep Calling's published /v1/usage and /v1/limits contract (§19.4). 1.9.0 (Blueprint Section 15, PLT-009): operator-only GET /internal/v1/operator/organizations and GET /internal/v1/operator/activity; platform-level operator commands audited."
+      "description": "Internal HTTP surface of services/developer-platform, served at /openapi.json: probes, GET /internal/v1/gateway/context (developer-request.forward), effective entitlements (developer-entitlement.read, API Gateway) durable API request accounting (developer-usage.record, API Gateway) and operator administration (developer-platform.administer, operator console only). 1.3.0: Section 53 event ingestion POST /internal/v1/platform/events (developer-event.publish; the envelope's producer is the authenticated caller; deduplicated on producer + source event id) and the gateway-forwarded machine webhook API at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay; webhooks.read / webhooks.manage plus each event type's read scope), served once the API Gateway re-points those routes. 1.5.0 the Section 53 webhook migration operator routes (/internal/v1/operator/webhook-migration/**). 1.6.0: usage ingestion / reconciliation, operator production-access decisions, overrides, first-party grants, cost-centre usage, support profiles, forwarded /v1/usage and /v1/limits. 1.7.0: conflicting event replays refused (CONFLICTING_REPLAY) and the operator ingestion health view. 1.8.0 forwardedListUsage / forwardedGetLimits keep Calling's published /v1/usage and /v1/limits contract (§19.4). 1.9.0 (Blueprint Section 15, PLT-009): operator-only GET /internal/v1/operator/organizations and GET /internal/v1/operator/activity; platform-level operator commands audited. 1.10.0 (P6): developer-usage.record is also granted to cfmeet.calling, which flushes the API request counts of its direct routes (never gateway-forwarded ones)."
     },
     {
       "id": "cfmeet.organizations.internal-api",

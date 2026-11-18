@@ -41,8 +41,9 @@
 //! # Rollout
 //!
 //! Receivers ship first in [`RequestBindingMode::Accept`] (verify the claims when present),
-//! then signers emit them ([`RequestBindingEmission::Emit`]), then receivers move to
-//! [`RequestBindingMode::Require`]. See `docs/operations/service-token-request-binding.md`.
+//! then signers emit them ([`RequestBindingEmission::Emit`], the default since P8), then
+//! receivers move to [`RequestBindingMode::Require`] (an explicit per-receiver decision; the
+//! receiver default stays `accept`). See `docs/operations/service-token-request-binding.md`.
 
 use std::fmt;
 
@@ -325,13 +326,17 @@ impl fmt::Display for RequestBindingMode {
 }
 
 /// Whether a signer emits the binding claims (env [`ENV_SIGNER_EMISSION`]).
+///
+/// Default: [`RequestBindingEmission::Emit`] (rollout step 2, P8). Every receiver has run
+/// a binding-aware verifier in [`RequestBindingMode::Accept`] since SEC-012, so bound
+/// tokens are accepted everywhere and verified where the claims are present. The explicit
+/// opt-out is `SERVICE_AUTH_REQUEST_BINDING=off` (tokens are then unbound, as before).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RequestBindingEmission {
-    /// Default for this release: tokens are unbound (as before SEC-012).
-    #[default]
+    /// Explicit opt-out: tokens are unbound (as before SEC-012).
     Off,
-    /// Tokens signed through `sign_request` carry `bnd` / `htm` / `htu`. Turn on only
-    /// after every receiver of this service runs a binding-aware verifier.
+    /// Tokens signed through `sign_request` carry `bnd` / `htm` / `htu`. Default.
+    #[default]
     Emit,
 }
 
@@ -346,7 +351,7 @@ impl RequestBindingEmission {
         }
     }
 
-    /// From [`ENV_SIGNER_EMISSION`]; unset or empty = [`RequestBindingEmission::Off`].
+    /// From [`ENV_SIGNER_EMISSION`]; unset or empty = [`RequestBindingEmission::Emit`].
     pub fn from_env() -> Result<Self, BindingConfigError> {
         from_env_value(Self::ENV, "off|emit", Self::parse)
     }
@@ -485,7 +490,11 @@ mod tests {
         assert_eq!(RequestBindingMode::parse("strict"), None);
         assert_eq!(
             RequestBindingEmission::default(),
-            RequestBindingEmission::Off
+            RequestBindingEmission::Emit
+        );
+        assert_eq!(
+            RequestBindingEmission::parse("OFF"),
+            Some(RequestBindingEmission::Off)
         );
         assert_eq!(
             RequestBindingEmission::parse("emit"),

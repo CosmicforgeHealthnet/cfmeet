@@ -32,7 +32,7 @@ use cf_service_auth::{InternalPermission, OutboundServiceRequest, ServiceId};
 let hop = OutboundServiceRequest::new_operation(ServiceId::privacy_relay());
 signer.sign(&hop)?.apply_to(&mut headers);
 
-// outbound, bound to the HTTP request (htm / htu when SERVICE_AUTH_REQUEST_BINDING=emit)
+// outbound, bound to the HTTP request (htm / htu unless SERVICE_AUTH_REQUEST_BINDING=off)
 signer.sign_request(&hop, &Method::POST, "/internal/v1/x")?.apply_to(&mut headers);
 
 // inbound (HTTP receivers): request binding per SERVICE_AUTH_REQUEST_BINDING_MODE and

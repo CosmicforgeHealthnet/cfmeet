@@ -591,7 +591,9 @@ GRANTS = (
      ('developer-platform.administer',)),
     # Customer webhooks: every first-party producer publishes to the central ingestion.
     ('activate-developer-webhooks', 'developer-platform', 'meeting-service', ('developer-event.publish',)),
-    ('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish',)),
+    # P6: Calling also counts the API requests of its direct routes (the gateway counts the
+    # forwarded ones) as soon as it has the Developer Platform target set below.
+    ('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish', 'developer-usage.record')),
     ('activate-developer-webhooks', 'developer-platform', 'messaging', ('developer-event.publish',)),
     # Customer API families through the gateway (receivers authorize the gateway's forwards).
     ('activate-gateway-families', 'calling', 'api-gateway', ('calling-request.forward',)),
@@ -1172,7 +1174,11 @@ def template_env(name):
     env = {'CF_RUNTIME_ENVIRONMENT': 'production', 'LOG_FORMAT': 'json',
            'CF_SERVICE_AUTH_KEY_ID': identity + '-production-1',
            'CF_SERVICE_AUTH_PRIVATE_KEY_FILE': '/run/secrets/service-auth.pem',
-           'CF_PLATFORM_ACCESS_BASE_URL': private_url(SERVICES['platform-access']['tls'])}
+           'CF_PLATFORM_ACCESS_BASE_URL': private_url(SERVICES['platform-access']['tls']),
+           # SEC-012 / P8: signers bind tokens to the request; receivers verify bound tokens
+           # and still accept unbound ones (require is a per-receiver decision).
+           'SERVICE_AUTH_REQUEST_BINDING': 'emit',
+           'SERVICE_AUTH_REQUEST_BINDING_MODE': 'accept'}
     if name != 'api-gateway':
         env['CF_SERVICE_TRUST_BUNDLE_FILE'] = '/run/secrets/trust.json'
     if s['db']:
