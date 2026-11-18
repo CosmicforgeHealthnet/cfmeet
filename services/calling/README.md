@@ -370,7 +370,7 @@ S3-compatible store; it certifies internal enterprise SIP only. Results:
   (not gateway-forwarded) are counted into the Developer Platform's API request accounting
   (`src/usage/direct.rs`; daily totals and API_OPERATION counts, flushed every 30 s in
   idempotent batches; `developer-usage.record`). On when `CF_DEVELOPER_PLATFORM_BASE_URL` is
-  set; `CALLING_DIRECT_USAGE_ACCOUNTING=off` disables it.
+  set and `CALLING_DIRECT_USAGE_ACCOUNTING=on` (off by default; production turns it on in `activate-usage-export`, which grants `developer-usage.record`).
 * **Configuration** — `CALLING_WEBHOOK_SECRET_KEY` (32 bytes, base64, from the secret
   manager; without it webhook creation is refused) and
   `CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` (honoured only when `CF_RUNTIME_ENVIRONMENT=local`).

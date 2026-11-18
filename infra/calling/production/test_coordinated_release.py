@@ -94,7 +94,9 @@ class Grants(unittest.TestCase):
     def test_every_grant_exists_in_the_permission_registry_for_that_receiver_and_issuer(self):
         registry = permission_registry()
         text = (REPO / 'packages/service-auth/src/permissions.rs').read_text()
-        all_permissions = re.findall(r'    InternalPermission::([A-Za-z]+),\n', text[text.index('pub const ALL'):])
+        all_block = text[text.index('pub const ALL'):]
+        all_block = all_block[:all_block.index('];')]
+        all_permissions = re.findall(r'    InternalPermission::([A-Za-z]+),\n', all_block)
         self.assertEqual(len(registry), len(all_permissions))
         self.assertGreater(len(registry), 60)
         self.assertEqual(cr.validate_grants(registry), [])

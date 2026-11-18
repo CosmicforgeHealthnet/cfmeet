@@ -592,10 +592,11 @@ GRANTS = (
      ('developer-platform.administer',)),
     # Customer webhooks: every first-party producer publishes to the central ingestion.
     ('activate-developer-webhooks', 'developer-platform', 'meeting-service', ('developer-event.publish',)),
-    # P6: Calling also counts the API requests of its direct routes (the gateway counts the
-    # forwarded ones) as soon as it has the Developer Platform target set below.
-    ('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish', 'developer-usage.record')),
+    ('activate-developer-webhooks', 'developer-platform', 'calling', ('developer-event.publish',)),
     ('activate-developer-webhooks', 'developer-platform', 'messaging', ('developer-event.publish',)),
+    # P6: Calling counts the API requests of its direct routes (the gateway counts the
+    # forwarded ones) once usage export is activated (CALLING_DIRECT_USAGE_ACCOUNTING=on).
+    ('activate-usage-export', 'developer-platform', 'calling', ('developer-usage.record',)),
     # Customer API families through the gateway (receivers authorize the gateway's forwards).
     ('activate-gateway-families', 'calling', 'api-gateway', ('calling-request.forward',)),
     ('activate-gateway-families', 'messaging', 'api-gateway', ('messaging-request.forward',)),
@@ -2280,8 +2281,11 @@ def activate_usage_export(sha, run_id, confirm):
         streams = json.loads(release.db_sql('cfmeet_developer_platform', USAGE_STREAMS_SQL) or '[]')
         emit('usageStreams', {'acknowledgedStreams': streams})
 
+    # P6: Calling also counts its direct-route API requests (grant developer-usage.record).
+    direct = {'calling': {'CALLING_DIRECT_USAGE_ACCOUNTING': 'on'}}
     apply_activation('activate-usage-export', sha, run_id, [
-        (name, {'CFMEET_USAGE_EXPORT_ENABLED': 'true'}) for name in ('calling', 'messaging', 'meeting-service')], post=post)
+        (name, dict({'CFMEET_USAGE_EXPORT_ENABLED': 'true'}, **direct.get(name, {})))
+        for name in ('calling', 'messaging', 'meeting-service')], post=post)
 
 
 # --- API Gateway public routing (host nginx, api.cfmeet.com) -----------------------------------
