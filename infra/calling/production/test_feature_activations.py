@@ -482,3 +482,91 @@ class OrganizationBindingsActivationTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EdgeRateLimits(unittest.TestCase):
+    """P7: per-IP edge throttling at the public site and the gateway's per-token ceiling."""
+
+    def test_zones_and_limits_are_sane_for_the_web_app_websockets_and_uploads(self):
+        zones, snippet = cr.edge_zones(), cr.edge_snippet()
+        self.assertIn('limit_req_zone $binary_remote_addr zone=cfmeet_edge_req:20m rate=50r/s;', zones)
+        self.assertIn('limit_conn_zone $binary_remote_addr zone=cfmeet_edge_conn:20m;', zones)
+        self.assertIn('limit_req_status 429;', zones)
+        self.assertIn('limit_req zone=cfmeet_edge_req burst=200 nodelay;', snippet)
+        self.assertIn('limit_conn cfmeet_edge_conn 300;', snippet)
+        # Never a body size cap (uploads) or a location of its own (inherited everywhere).
+        for text in (zones, snippet):
+            self.assertNotIn('client_max_body_size', text)
+            self.assertNotIn('location', text)
+        self.assertGreaterEqual(cr.EDGE_CONNECTIONS, 100)
+
+    def run_activation(self, work, smoke=None):
+        site = work / 'site'
+        site.write_text('server {\n    %s\n}\n' % cr.ROUTES_ANCHOR)
+        zones, snippet = work / 'zones.conf', work / 'edge.conf'
+        reloads = []
+        with patch.object(cr, 'SITE', site), patch.object(cr, 'SITE_LINK', site), \
+                patch.object(cr, 'EDGE_ZONES', zones), patch.object(cr, 'EDGE_SNIPPET', snippet), \
+                patch.object(cr, 'public_smoke', lambda: smoke or {'public_swagger': 'PASS'}), \
+                patch.object(cr.p, 'reload_host_nginx', lambda: reloads.append(1)), \
+                patch.object(cr.p, 'regression', lambda: None):
+            try:
+                cr.activate_edge_rate_limits('a' * 40, '9-1', '')
+                error = None
+            except RuntimeError as e:
+                error = e
+            state = (site.read_text(), zones.exists(), snippet.exists())
+            entry = json.loads((work / 'journal.json').read_text())[-1]
+            undone = None
+            if error is None:
+                cr.undo_edge_rate_limits(entry['edgeLimits'])
+                undone = (site.read_text(), zones.exists(), snippet.exists())
+        return error, state, entry, reloads, undone
+
+    def test_activation_includes_the_limits_once_and_the_rollback_removes_exactly_them(self):
+        with isolated_work() as work:
+            error, (site, zones, snippet), entry, reloads, undone = self.run_activation(work)
+        self.assertIsNone(error)
+        self.assertEqual(site.count(cr.EDGE_INCLUDE), 1)
+        self.assertLess(site.index(cr.EDGE_INCLUDE), site.index(cr.ROUTES_ANCHOR))
+        self.assertTrue(zones and snippet)
+        self.assertEqual((entry['operation'], entry['status']), ('activate-edge-rate-limits', 'done'))
+        self.assertEqual(entry['edgeLimits'], {'rate': '50r/s', 'burst': 200, 'connections': 300})
+        self.assertEqual(undone, ('server {\n    %s\n}\n' % cr.ROUTES_ANCHOR, False, False))
+        self.assertEqual(len(reloads), 2)
+
+    def test_a_failed_check_restores_the_previous_site_and_files(self):
+        with isolated_work() as work:
+            error, (site, zones, snippet), entry, reloads, _ = self.run_activation(
+                work, smoke={'public_swagger': 'FAIL'})
+        self.assertRegex(str(error), 'Public smoke failed')
+        self.assertEqual((site, zones, snippet), ('server {\n    %s\n}\n' % cr.ROUTES_ANCHOR, False, False))
+        self.assertEqual(entry['status'], 'failed')
+
+    def test_refuses_a_site_that_already_declares_zones(self):
+        with isolated_work() as work:
+            site = work / 'site'
+            site.write_text('limit_req_zone x;\nserver {\n    %s\n}\n' % cr.ROUTES_ANCHOR)
+            with patch.object(cr, 'SITE', site), patch.object(cr, 'SITE_LINK', site):
+                with self.assertRaisesRegex(RuntimeError, 'already declares'):
+                    cr.activate_edge_rate_limits('a' * 40, '9-1', '')
+
+    def test_the_rollback_and_the_workflow_know_both_steps(self):
+        self.assertIn('activate-edge-rate-limits', cr.OPERATIONS)
+        self.assertEqual(cr.ACTIVATIONS['activate-token-ceiling'][0], ('activate-gateway-routing',))
+        workflow = (REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        for op in ('activate-edge-rate-limits', 'activate-token-ceiling'):
+            self.assertIn(op, workflow)
+        src = (REPO / 'infra/calling/production/coordinated_release.py').read_text()
+        self.assertIn("undo_edge_rate_limits(entry['edgeLimits'])", src)
+
+    def test_the_token_ceiling_sets_only_the_gateway_variable(self):
+        calls = []
+        with patch.object(cr, 'env_of', lambda n: {'API_GATEWAY_PUBLIC_ROUTING_ENABLED': 'true'}), \
+                patch.object(cr, 'apply_activation', lambda *a, **k: calls.append(a)):
+            cr.activate_token_ceiling('a' * 40, '9-1', '')
+        self.assertEqual(calls[0][0], 'activate-token-ceiling')
+        self.assertEqual(calls[0][3], [('api-gateway', {'API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE': '600'})])
+        with patch.object(cr, 'env_of', lambda n: {}):
+            with self.assertRaisesRegex(RuntimeError, 'gateway routing'):
+                cr.activate_token_ceiling('a' * 40, '9-1', '')

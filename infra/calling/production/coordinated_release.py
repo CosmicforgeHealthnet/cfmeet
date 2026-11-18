@@ -294,7 +294,7 @@ FLAGS = (
     'FEATURE_HEALTHCARE_PROFILE_ENABLED', 'MESSAGING_SESSION_DEVICES_ENABLED', 'EMAIL_VERIFICATION_ENFORCEMENT',
     'DEVELOPER_SESSION_BRIDGE_ENABLED', 'CALLING_WEBHOOK_AUTHORITY', 'CALLING_WEBHOOK_DELIVERY_ENABLED',
     'CALLING_PUBLIC_EVENTS_DESTINATION', 'MESSAGING_PUBLIC_EVENTS_DESTINATION', 'MEETING_SERVICE_PUBLIC_EVENTS_DESTINATION',
-    'API_GATEWAY_DISABLED_DOMAINS', 'DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS',
+    'API_GATEWAY_DISABLED_DOMAINS', 'API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE', 'DEVELOPER_PLATFORM_CREDENTIAL_LIFECYCLE_INTERVAL_SECS',
     'ORGANIZATIONS_AUTHORITY_MODE', 'ORGANIZATION_CALLING_SCOPE', 'CFMEET_USAGE_EXPORT_ENABLED',
     'EMAIL_PROVIDER', 'EMAIL_FROM_ADDRESS', 'EMAIL_VERIFICATION_REQUIRED', 'EMAIL_VERIFICATION_ENFORCE_FROM',
     'EMAIL_VERIFICATION_GRACE_UNTIL', 'FEATURE_MEETING_V2_ENABLED', 'FEATURE_RTC_PROVIDER_CONTROL_V2',
@@ -1549,7 +1549,7 @@ def rollback(sha, run_id):
     journal = load_journal()
     candidates = [e for e in journal if e['status'] in ('done', 'failed')
                   and (e['components'] or e.get('routing') or e.get('edge') or e.get('notificationRouting')
-                       or e.get('notificationFence'))]
+                       or e.get('notificationFence') or e.get('edgeLimits'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
@@ -1569,6 +1569,8 @@ def rollback(sha, run_id):
         p.reload_host_nginx()
     if entry.get('edge'):
         undo_gateway_docs(entry['edge'])
+    if entry.get('edgeLimits'):
+        undo_edge_rate_limits(entry['edgeLimits'])
     if entry.get('notificationRouting'):
         notif_ops.undo_routing(sys.modules[__name__], entry['notificationRouting'], run_id)
     if entry.get('notificationFence'):
@@ -2522,6 +2524,107 @@ def undo_gateway_routing(routing, old_snippet=None):
         remove(GATEWAY_RELAY)
 
 
+# --- Edge throttling (P7) ----------------------------------------------------------------------
+
+# Per-client-IP limits at the api.cfmeet.com edge (host nginx). Sized not to break the web app
+# (bursts of page-load requests), Messaging / signaling WebSockets (long-lived connections, one
+# request each) or uploads (one request each; body size limits are unchanged): a sustained
+# EDGE_RATE requests per second per IP with an immediate EDGE_BURST, and at most EDGE_CONNECTIONS
+# concurrent connections per IP (an office NAT with many users stays far below it). Over the
+# limit nginx answers 429. Opt-out: `rollback` of this step (or omitting the activation).
+EDGE_RATE = '50r/s'
+EDGE_BURST = 200
+EDGE_CONNECTIONS = 300
+EDGE_ZONES = Path('/etc/nginx/conf.d/cfmeet-edge-rate-limits.conf')
+EDGE_SNIPPET = Path('/etc/nginx/snippets/cfmeet-edge-limits.conf')
+EDGE_INCLUDE = 'include /etc/nginx/snippets/cfmeet-edge-limits.conf;'
+# The API Gateway's per-token ceiling of end-user / device traffic (requests per token per
+# minute; the gateway's API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE, 0 = off).
+TOKEN_CEILING_PER_MINUTE = '600'
+
+
+def edge_zones():
+    """http-context declarations (conf.d): the shared per-IP zones and the 429 status."""
+    return ('# CF Meet edge throttling (coordinated release, activate-edge-rate-limits).\n'
+            'limit_req_zone $binary_remote_addr zone=cfmeet_edge_req:20m rate=%s;\n'
+            'limit_conn_zone $binary_remote_addr zone=cfmeet_edge_conn:20m;\n'
+            'limit_req_status 429;\nlimit_conn_status 429;\nlimit_req_log_level warn;\n'
+            'limit_conn_log_level warn;\n' % EDGE_RATE)
+
+
+def edge_snippet():
+    """server-context limits, inherited by every location of the public site."""
+    return ('# CF Meet edge throttling: per client IP (activate-edge-rate-limits).\n'
+            'limit_req zone=cfmeet_edge_req burst=%d nodelay;\n'
+            'limit_conn cfmeet_edge_conn %d;\n' % (EDGE_BURST, EDGE_CONNECTIONS))
+
+
+def activate_edge_rate_limits(sha, run_id, confirm):
+    """P7: per-IP request rate and connection limits at the public api.cfmeet.com server block.
+    Host nginx only (no container change). Refuses an unexpected site topology; any failed check
+    (nginx -t, public smoke) restores the previous files. Rollback removes exactly this step's
+    include and files."""
+    assert SITE_LINK.resolve() == SITE, 'Unexpected public site topology'
+    site = SITE.read_text()
+    if site.count(ROUTES_ANCHOR) != 1:
+        raise RuntimeError('Unexpected public site topology (calling routes include)')
+    if 'limit_req_zone' in site or 'limit_conn_zone' in site:
+        raise RuntimeError('The public site already declares rate limit zones')
+    previous = {'site': site, 'zones': EDGE_ZONES.read_text() if EDGE_ZONES.exists() else None,
+                'snippet': EDGE_SNIPPET.read_text() if EDGE_SNIPPET.exists() else None}
+    p.write_private(WORK / 'edge-rate-limits' / run_id / 'site.before', site)
+    entry = begin('activate-edge-rate-limits', sha, run_id)
+    entry['edgeLimits'] = {'rate': EDGE_RATE, 'burst': EDGE_BURST, 'connections': EDGE_CONNECTIONS}
+    commit(entry)
+    try:
+        EDGE_ZONES.write_text(edge_zones())
+        EDGE_SNIPPET.write_text(edge_snippet())
+        if EDGE_INCLUDE not in site:
+            SITE.write_text(site.replace(ROUTES_ANCHOR, EDGE_INCLUDE + '\n    ' + ROUTES_ANCHOR))
+        p.reload_host_nginx()  # nginx -t first
+        checks = public_smoke()
+        emit('edgeRateLimits', checks)
+        if any(v != 'PASS' for v in checks.values()):
+            raise RuntimeError('Public smoke failed after edge rate limits')
+        p.regression()
+    except Exception:
+        restore_edge_rate_limits(previous)
+        entry['status'] = 'failed'
+        commit(entry)
+        raise
+    entry['status'] = 'done'
+    commit(entry)
+
+
+def restore_edge_rate_limits(previous):
+    SITE.write_text(previous['site'])
+    for path, text in ((EDGE_ZONES, previous['zones']), (EDGE_SNIPPET, previous['snippet'])):
+        if text is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(text)
+    p.reload_host_nginx()
+
+
+def undo_edge_rate_limits(_edge_limits):
+    """The opt-out: removes only this step's include, snippet and zones."""
+    SITE.write_text(SITE.read_text().replace(EDGE_INCLUDE + '\n    ', '').replace(EDGE_INCLUDE, ''))
+    EDGE_SNIPPET.unlink(missing_ok=True)
+    EDGE_ZONES.unlink(missing_ok=True)
+    p.reload_host_nginx()
+
+
+def activate_token_ceiling(sha, run_id, confirm):
+    """P7: the API Gateway's per-token ceiling of end-user / device traffic (meeting sessions,
+    participant tokens, developer sessions, client tokens, signaling credentials, realtime
+    tickets): TOKEN_CEILING_PER_MINUTE requests per token per minute, counted in the shared quota
+    store (429 RATE_LIMITED, x-cf-quota-level: GATEWAY_TOKEN). Opt-out: rollback (0 = off)."""
+    if env_of('api-gateway').get('API_GATEWAY_PUBLIC_ROUTING_ENABLED') != 'true':
+        raise RuntimeError('Run activate-developer-platform first (gateway routing is still disabled)')
+    apply_activation('activate-token-ceiling', sha, run_id, [
+        ('api-gateway', {'API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE': TOKEN_CEILING_PER_MINUTE})])
+
+
 # --- dispatcher ------------------------------------------------------------------------------
 
 ACTIVATIONS = {
@@ -2548,6 +2651,9 @@ ACTIVATIONS = {
     'activate-web-push': (('activate-personal-encryption',), activate_web_push),
     'activate-web-origins': (('activate-gateway-routing',), activate_web_origins),
     'activate-gateway-docs': (('activate-gateway-routing',), activate_gateway_docs),
+    # P7: per-IP edge throttling (host nginx) and the gateway's per-token ceiling.
+    'activate-edge-rate-limits': ((), activate_edge_rate_limits),
+    'activate-token-ceiling': (('activate-gateway-routing',), activate_token_ceiling),
     'activate-developer-console': (('activate-developer-platform',), activate_developer_console),
     'activate-developer-webhooks': (('activate-developer-console',), activate_developer_webhooks),
     'activate-gateway-families': (('activate-gateway-routing', 'activate-developer-webhooks'), activate_gateway_families),
