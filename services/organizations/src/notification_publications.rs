@@ -985,3 +985,27 @@ mod tests {
         assert!(RETENTION > LIFETIME);
     }
 }
+
+/// The two G19 lifecycle types are admitted by the publication rows' event-type CHECK
+/// (the pending migration `m20261118_000007_lifecycle_notification_types` was applied).
+pub async fn lifecycle_types_admitted(
+    db: &sea_orm::DatabaseConnection,
+) -> Result<bool, sea_orm::DbErr> {
+    use sea_orm::{ConnectionTrait, DbBackend, Statement};
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint \
+             WHERE conname = 'ck_organization_notification_publications_event_type'"
+                .to_owned(),
+        ))
+        .await?;
+    Ok(match row {
+        Some(r) => {
+            let def: String = r.try_get("", "def")?;
+            def.contains("organizations.organization.archived")
+                && def.contains("organizations.organization.reactivated")
+        }
+        None => false,
+    })
+}

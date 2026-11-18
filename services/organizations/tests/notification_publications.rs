@@ -992,7 +992,14 @@ async fn archive_and_reactivation_are_published_only_when_enabled() {
         assert!(of_type(&h, t).await.is_empty(), "{t} published while off");
     }
 
-    // Enabled: discovered through the same path.
+    // Enabled (after the pending G19 schema change, which releases apply together with the
+    // switch): discovered through the same path.
+    h.exec(LIFECYCLE_TYPES_SQL).await.unwrap();
+    assert!(
+        organizations::notification_publications::lifecycle_types_admitted(&h.db.conn)
+            .await
+            .unwrap()
+    );
     let enabled = sink(copy(&k), Some(&fake.url)).with_lifecycle_events(true);
     run_once(&h.db.conn, &enabled).await.unwrap();
     for (t, org, member) in [
@@ -1032,3 +1039,16 @@ async fn archive_and_reactivation_are_published_only_when_enabled() {
     }
     assert!(fake.invalid().is_empty());
 }
+
+/// The pending G19 migration's UP (migration/pending/m20261118_000007_lifecycle_notification_types.rs).
+const LIFECYCLE_TYPES_SQL: &str = r#"
+ALTER TABLE organization_notification_publications
+    DROP CONSTRAINT ck_organization_notification_publications_event_type,
+    ADD CONSTRAINT ck_organization_notification_publications_event_type CHECK (event_type IN (
+        'organizations.invitation.created', 'organizations.invitation.accepted',
+        'organizations.invitation.declined', 'organizations.invitation.revoked',
+        'organizations.invitation.expired', 'organizations.membership.role_changed',
+        'organizations.membership.suspended', 'organizations.membership.removed',
+        'organizations.ownership.transferred', 'organizations.organization.suspended',
+        'organizations.organization.archived', 'organizations.organization.reactivated'));
+"#;

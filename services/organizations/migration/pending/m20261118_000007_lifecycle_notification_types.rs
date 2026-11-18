@@ -1,3 +1,13 @@
+//! PENDING — not registered in the migrator on purpose (rollback safety).
+//!
+//! The Organizations migration history refuses an older binary on a newer schema, so a
+//! registered migration would make the previous image unable to start after a rollback.
+//! G19 ships switched off (`ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED=false`), which
+//! never writes these two types, so the schema change is not needed yet. Move this file
+//! back to `migration/src/`, register it in `Migrator::migrations()`, and release it
+//! together with the Notification Service catalogue types, before turning the switch on.
+//! Until then Organizations refuses to start with the switch on (startup schema check).
+//!
 //! Gap audit G19 — organization lifecycle notifications.
 //!
 //! Members are notified when their organization is archived or reactivated
