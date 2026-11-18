@@ -17,6 +17,7 @@ mod m20261108_000003_scope_service_bindings;
 mod m20261110_000004_messaging_service_binding;
 mod m20261113_000005_automatic_service_bindings;
 mod m20261117_000006_notification_publications;
+mod m20261118_000007_lifecycle_notification_types;
 
 /// Name of the table recording which Organizations migrations have been applied.
 pub const MIGRATION_TABLE: &str = "organizations_seaql_migrations";
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261110_000004_messaging_service_binding::Migration),
             Box::new(m20261113_000005_automatic_service_bindings::Migration),
             Box::new(m20261117_000006_notification_publications::Migration),
+            Box::new(m20261118_000007_lifecycle_notification_types::Migration),
         ]
     }
 

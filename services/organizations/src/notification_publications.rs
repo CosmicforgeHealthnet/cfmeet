@@ -40,6 +40,13 @@
 //! | `membership.role_changed` / `membership.suspended` / `membership.removed` | the member |
 //! | `ownership.transferred` | the new and the previous owner |
 //! | `organization.suspended` | the organization's ACTIVE members at the time of the event, in chunks of [`RECIPIENTS_PER_ENVELOPE`] |
+//! | `organization.archived` / `organization.reactivated` (only with [`LIFECYCLE_TYPES`] enabled) | the same as `organization.suspended` |
+//!
+//! Gap audit G19 — archive / reactivation ([`LIFECYCLE_TYPES`]): published only when the
+//! sink enables them (`ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED=true`, default off),
+//! through this same discovery and relay. The Notification Service catalogue does not
+//! carry `organizations.organization.{archived, reactivated}` yet; until it does, an
+//! enabled lifecycle event is recorded `SKIPPED` (`NOT_IN_CATALOGUE`) and nothing is sent.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -110,6 +117,19 @@ pub const SOURCE_TYPES: &[(&str, &str)] = &[
     ),
 ];
 
+/// Gap audit G19: organization lifecycle events published only when enabled (off by
+/// default; see the module documentation). Source outbox event type → catalogue type.
+pub const LIFECYCLE_TYPES: &[(&str, &str)] = &[
+    (
+        "organization.archived",
+        "organizations.organization.archived",
+    ),
+    (
+        "organization.reactivated",
+        "organizations.organization.reactivated",
+    ),
+];
+
 /// Roles the notification contract can carry (`data.role` enum). Organizations' MANAGER
 /// is not among them.
 pub const CONTRACT_ROLES: &[&str] = &["OWNER", "ADMIN", "MEMBER", "GUEST"];
@@ -118,6 +138,7 @@ pub const CONTRACT_ROLES: &[&str] = &["OWNER", "ADMIN", "MEMBER", "GUEST"];
 pub fn catalogue_type(source_type: &str) -> Option<&'static str> {
     SOURCE_TYPES
         .iter()
+        .chain(LIFECYCLE_TYPES)
         .find(|(s, _)| *s == source_type)
         .map(|(_, c)| *c)
 }
@@ -204,21 +225,23 @@ pub async fn recipients<C: ConnectionTrait>(c: &C, src: &Source) -> Result<Vec<U
             .into_iter()
             .chain(uuid_at(inner, "fromUserId"))
             .collect(),
-        "organization.suspended" => db::all::<IdRow, _>(
-            c,
-            "SELECT user_id AS id FROM organization_memberships \
+        "organization.suspended" | "organization.archived" | "organization.reactivated" => {
+            db::all::<IdRow, _>(
+                c,
+                "SELECT user_id AS id FROM organization_memberships \
               WHERE organization_id = $1 AND status = 'ACTIVE' AND created_at <= $2 \
               ORDER BY user_id LIMIT $3",
-            vec![
-                src.organization_id.into(),
-                src.created_at.into(),
-                MAX_ORGANIZATION_RECIPIENTS.into(),
-            ],
-        )
-        .await?
-        .into_iter()
-        .map(|r| r.id)
-        .collect(),
+                vec![
+                    src.organization_id.into(),
+                    src.created_at.into(),
+                    MAX_ORGANIZATION_RECIPIENTS.into(),
+                ],
+            )
+            .await?
+            .into_iter()
+            .map(|r| r.id)
+            .collect()
+        }
         _ => Vec::new(),
     };
     if let Some(actor) = uuid_at(&src.payload["actor"], "userId") {
@@ -270,7 +293,10 @@ fn data(src: &Source) -> Result<Vec<(&'static str, Value)>, Unbuilt> {
         "membership.suspended" | "membership.removed" => {
             vec![("membershipId", subject), ("organizationId", org)]
         }
-        "ownership.transferred" | "organization.suspended" => vec![("organizationId", org)],
+        "ownership.transferred"
+        | "organization.suspended"
+        | "organization.archived"
+        | "organization.reactivated" => vec![("organizationId", org)],
         _ => return Err(Unbuilt::Skip("NOT_PUBLISHED")),
     })
 }
@@ -305,7 +331,12 @@ pub fn envelopes(src: &Source, recipients: &[Uuid]) -> Result<Vec<Value>, Unbuil
         };
         let mut builder =
             EnvelopeBuilder::new(Producer::Organizations, event_type, &occurred_at, route)
-                .map_err(|_| Unbuilt::Invalid)?
+                .map_err(|e| match e {
+                    // A type the Notification Service catalogue does not carry (yet): never
+                    // sent, recorded for the operator.
+                    EnvelopeError::UnknownEventType => Unbuilt::Skip("NOT_IN_CATALOGUE"),
+                    _ => Unbuilt::Invalid,
+                })?
                 .event_id(event_id.clone())
                 .correlation_id(correlation(src))
                 .subject(src.aggregate_id, Some(src.aggregate_version))
@@ -380,8 +411,19 @@ async fn insert(
 
 /// Turns at most `limit` recent, not yet published source events into publication rows
 /// (built envelopes, or a `SKIPPED` / `DEAD` record). One discoverer at a time; returns
-/// (discovered, skipped).
+/// (discovered, skipped). The [`LIFECYCLE_TYPES`] are not discovered (see
+/// [`discover_with`]).
 pub async fn discover(db: &DatabaseConnection, limit: i64) -> Result<(usize, usize), DbErr> {
+    discover_with(db, limit, false).await
+}
+
+/// [`discover`], also discovering the [`LIFECYCLE_TYPES`] when `lifecycle` is set (gap
+/// audit G19).
+pub async fn discover_with(
+    db: &DatabaseConnection,
+    limit: i64,
+    lifecycle: bool,
+) -> Result<(usize, usize), DbErr> {
     let txn = db.begin().await?;
     let locked = txn
         .query_one(db::stmt(
@@ -397,7 +439,11 @@ pub async fn discover(db: &DatabaseConnection, limit: i64) -> Result<(usize, usi
         return Ok((0, 0));
     }
     let now = db::now(&txn).await?;
-    let types: Vec<String> = SOURCE_TYPES.iter().map(|(s, _)| s.to_string()).collect();
+    let types: Vec<String> = SOURCE_TYPES
+        .iter()
+        .chain(if lifecycle { LIFECYCLE_TYPES } else { &[] })
+        .map(|(s, _)| s.to_string())
+        .collect();
     let sources: Vec<Source> = db::all(
         &txn,
         "SELECT o.event_id, o.organization_id, o.aggregate_id, o.aggregate_version, o.event_type, o.payload, o.created_at \
@@ -491,17 +537,33 @@ impl PublishFailure {
 pub trait NotificationEventSink: Send + Sync {
     /// Posts one batch (≤ [`MAX_BATCH`]).
     async fn ingest(&self, events: &[Value]) -> Result<Vec<IngestResult>, PublishFailure>;
+
+    /// Whether the [`LIFECYCLE_TYPES`] are published too (gap audit G19; default off).
+    fn lifecycle_events(&self) -> bool {
+        false
+    }
 }
 
 /// The service-authenticated I1 of the Notification Service (`cfmeet.notifications`,
 /// `notifications-event.publish`), signed with Organizations' outbound key.
 pub struct NotificationServiceEvents {
     client: Arc<InternalServiceClient>,
+    lifecycle: bool,
 }
 
 impl NotificationServiceEvents {
     pub fn new(client: Arc<InternalServiceClient>) -> Self {
-        Self { client }
+        Self {
+            client,
+            lifecycle: false,
+        }
+    }
+
+    /// Also publishes the [`LIFECYCLE_TYPES`]
+    /// (`ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED`).
+    pub fn with_lifecycle_events(mut self, enabled: bool) -> Self {
+        self.lifecycle = enabled;
+        self
     }
 }
 
@@ -521,6 +583,10 @@ pub fn classify_status(status: u16) -> Option<PublishFailure> {
 
 #[async_trait]
 impl NotificationEventSink for NotificationServiceEvents {
+    fn lifecycle_events(&self) -> bool {
+        self.lifecycle
+    }
+
     async fn ingest(&self, events: &[Value]) -> Result<Vec<IngestResult>, PublishFailure> {
         let request = OutboundServiceRequest::new_operation(ServiceId::notifications());
         match self
@@ -756,7 +822,7 @@ pub async fn run_once(
     sink: &dyn NotificationEventSink,
 ) -> Result<PublicationReport, DbErr> {
     let (expired, purged) = maintain(db, 1000).await?;
-    let (discovered, skipped) = discover(db, 200).await?;
+    let (discovered, skipped) = discover_with(db, 200, sink.lifecycle_events()).await?;
     let relayed = relay_due(db, sink, 500).await?;
     Ok(PublicationReport {
         discovered,
@@ -803,7 +869,34 @@ mod tests {
             assert_eq!(catalogue_type(s), Some(*c));
         }
         assert_eq!(catalogue_type("membership.activated"), None);
-        assert_eq!(catalogue_type("organization.reactivated"), None);
+        assert_eq!(catalogue_type("organization.provisioned"), None);
+    }
+
+    /// Gap audit G19: archive / reactivation map to their catalogue types and are built
+    /// like `organization.suspended` once the catalogue carries them; until then they are
+    /// skipped (`NOT_IN_CATALOGUE`), never sent and never dead-lettered.
+    #[test]
+    fn lifecycle_types_are_skipped_until_the_catalogue_carries_them() {
+        assert_eq!(
+            catalogue_type("organization.archived"),
+            Some("organizations.organization.archived")
+        );
+        assert_eq!(
+            catalogue_type("organization.reactivated"),
+            Some("organizations.organization.reactivated")
+        );
+        for (s, c) in LIFECYCLE_TYPES {
+            let src = source(s, json!({}));
+            let built = envelopes(&src, &users(2));
+            match cf_notification_client::catalogue::spec(c) {
+                None => assert_eq!(built, Err(Unbuilt::Skip("NOT_IN_CATALOGUE")), "{s}"),
+                Some(_) => {
+                    let env: Envelope = serde_json::from_value(built.unwrap()[0].clone()).unwrap();
+                    validate(&env, Some("cfmeet.organizations")).unwrap();
+                    assert_eq!(env.event_type, *c);
+                }
+            }
+        }
     }
 
     #[test]

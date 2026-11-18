@@ -947,3 +947,88 @@ async fn a_large_audience_is_published_in_chunks() {
     assert_eq!(rows.iter().map(|p| p.chunk).collect::<Vec<_>>(), vec![0, 1]);
     assert!(rows.iter().all(|p| p.state == "ACKED"));
 }
+
+/// Gap audit G19: archive and reactivation reach the organization's ACTIVE members (never
+/// the acting owner) through the same publication path — but only with the lifecycle
+/// switch on (`ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED`, default off). While the
+/// Notification Service catalogue does not carry the two types, they are recorded
+/// `SKIPPED` (`NOT_IN_CATALOGUE`) and nothing is sent.
+#[tokio::test]
+async fn archive_and_reactivation_are_published_only_when_enabled() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (org_a, owner_a, member_a, _) = small_org(&h, "notif-life-a").await;
+    let (org_b, owner_b, member_b, _) = small_org(&h, "notif-life-b").await;
+    // A: suspended by its owner, then reactivated (organization.reactivated).
+    for action in ["suspend", "reactivate"] {
+        h.user(owner_a)
+            .post(
+                &format!("/internal/v1/organizations/{org_a}/{action}"),
+                json!({}),
+            )
+            .await
+            .expect(200);
+    }
+    // B: archived by its owner (organization.archived).
+    h.user(owner_b)
+        .post(
+            &format!("/internal/v1/organizations/{org_b}/archive"),
+            json!({}),
+        )
+        .await
+        .expect(200);
+    let k = key("organizations-test-1");
+    let fake = FakeI1::start(&k).await;
+
+    // Default: the lifecycle events are not discovered at all.
+    run_once(&h.db.conn, &sink(copy(&k), Some(&fake.url)))
+        .await
+        .unwrap();
+    for t in [
+        "organizations.organization.archived",
+        "organizations.organization.reactivated",
+    ] {
+        assert!(of_type(&h, t).await.is_empty(), "{t} published while off");
+    }
+
+    // Enabled: discovered through the same path.
+    let enabled = sink(copy(&k), Some(&fake.url)).with_lifecycle_events(true);
+    run_once(&h.db.conn, &enabled).await.unwrap();
+    for (t, org, member) in [
+        ("organizations.organization.archived", &org_b, member_b),
+        ("organizations.organization.reactivated", &org_a, member_a),
+    ] {
+        let rows = of_type(&h, t).await;
+        assert_eq!(rows.len(), 1, "{t}");
+        assert_eq!(rows[0].organization_id.to_string(), *org);
+        match cf_notification_client::catalogue::spec(t) {
+            None => assert_eq!(
+                (rows[0].state.as_str(), rows[0].last_error.as_deref()),
+                ("SKIPPED", Some("NOT_IN_CATALOGUE")),
+                "{t}"
+            ),
+            Some(_) => {
+                let env = rows[0].envelope.clone().expect("built");
+                assert_eq!(refs(&env), vec![user_ref(member)], "{t}");
+                assert_eq!(env["data"]["organizationId"], *org);
+            }
+        }
+    }
+    let sent: Vec<Value> = fake
+        .envelopes()
+        .into_iter()
+        .filter(|e| {
+            e["eventType"] == "organizations.organization.archived"
+                || e["eventType"] == "organizations.organization.reactivated"
+        })
+        .collect();
+    for e in &sent {
+        // Never the acting owner.
+        assert!(!refs(e).contains(&user_ref(owner_a)) && !refs(e).contains(&user_ref(owner_b)));
+    }
+    if cf_notification_client::catalogue::spec("organizations.organization.archived").is_none() {
+        assert!(sent.is_empty(), "nothing the catalogue lacks is sent");
+    }
+    assert!(fake.invalid().is_empty());
+}

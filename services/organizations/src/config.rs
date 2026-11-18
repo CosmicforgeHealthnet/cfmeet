@@ -18,6 +18,7 @@
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | when provisioning | Platform Access (`platform-identity.provision-first-party`; with service bindings also `platform-identity.bind-organization-services`) |
 //! | `CF_MEETING_SERVICE_BASE_URL` | when `cfmeet.meeting-service` receives events | Meeting Service internal base URL (`meeting-organization-events.apply`) |
 //! | `CF_NOTIFICATIONS_BASE_URL` | no | Notification Service internal base URL (I1, `notifications-event.publish`, roadmap N7): when set, the catalogue events `organizations.*` are published from the committed outbox record rows; unset (default): nothing is published and nothing is written |
+//! | `ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED` | no | `true` / `false` (default `false`; gap audit G19): with `CF_NOTIFICATIONS_BASE_URL`, also notify the organization's ACTIVE members of `organization.archived` / `organization.reactivated` (`organizations.organization.{archived, reactivated}`). Leave off until the Notification Service catalogue carries both types: an event whose type the catalogue does not know is recorded `SKIPPED` (`NOT_IN_CATALOGUE`), never sent |
 //! | `CF_SERVICE_TOKEN_TTL_SECONDS` | no | 10–300 (default 120) |
 //! | `CF_INTERNAL_HTTP_TIMEOUT_MS` | no | outbound timeout (100–30000, default 5000) |
 //!
@@ -119,6 +120,8 @@ pub struct OrganizationsConfig {
     /// `CF_NOTIFICATIONS_BASE_URL`: the Notification Service (I1); `None`: no
     /// notification is published.
     pub notifications_base_url: Option<String>,
+    /// `ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED=true` (gap audit G19; default off).
+    pub lifecycle_notifications: bool,
     /// `Some` iff provisioning, event delivery or notification publication is enabled.
     pub signing: Option<SigningSettings>,
 }
@@ -145,6 +148,7 @@ impl fmt::Debug for OrganizationsConfig {
                 "notification_publications",
                 &self.notifications_base_url.is_some(),
             )
+            .field("lifecycle_notifications", &self.lifecycle_notifications)
             .finish_non_exhaustive()
     }
 }
@@ -291,6 +295,17 @@ impl OrganizationsConfig {
             });
         }
         let notifications_base_url = get("CF_NOTIFICATIONS_BASE_URL");
+        let lifecycle_notifications =
+            match get("ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED").as_deref() {
+                None | Some("false") => false,
+                Some("true") => true,
+                Some(_) => {
+                    return Err(invalid(
+                        "ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED",
+                        "must be `true` or `false`",
+                    ))
+                }
+            };
         let signing = if enabled || !event_consumers.is_empty() || notifications_base_url.is_some()
         {
             let key_id = KeyId::parse(&required("CF_SERVICE_AUTH_KEY_ID")?)
@@ -345,6 +360,7 @@ impl OrganizationsConfig {
             service_bindings_enabled,
             event_consumers,
             notifications_base_url,
+            lifecycle_notifications,
             signing,
         })
     }
@@ -381,9 +397,10 @@ impl OrganizationsConfig {
             .map_err(|e| invalid("CF_NOTIFICATIONS_BASE_URL", e.to_string()))?;
         let client = InternalServiceClient::new(self.signer(s, clock)?, targets, s.http_timeout)
             .map_err(|e| invalid("CF_INTERNAL_HTTP_TIMEOUT_MS", e.to_string()))?;
-        Ok(Some(Arc::new(NotificationServiceEvents::new(Arc::new(
-            client,
-        )))))
+        Ok(Some(Arc::new(
+            NotificationServiceEvents::new(Arc::new(client))
+                .with_lifecycle_events(self.lifecycle_notifications),
+        )))
     }
 
     /// The event dispatcher: signed delivery to every configured consumer, or the
@@ -690,6 +707,26 @@ mod tests {
         assert!(err.to_string().contains("CF_NOTIFICATIONS_BASE_URL"));
         assert!(!err.to_string().contains("plain-notif-host"));
         std::fs::remove_file(&pem).ok();
+    }
+
+    #[test]
+    fn lifecycle_notifications_are_off_by_default() {
+        let cfg = OrganizationsConfig::from_lookup(lookup(BASE)).unwrap();
+        assert!(!cfg.lifecycle_notifications);
+        let mut on: Vec<_> = BASE.to_vec();
+        on.push(("ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED", "true"));
+        assert!(
+            OrganizationsConfig::from_lookup(lookup(&on))
+                .unwrap()
+                .lifecycle_notifications
+        );
+        let mut bad: Vec<_> = BASE.to_vec();
+        bad.push(("ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED", "soon-xyz"));
+        let err = OrganizationsConfig::from_lookup(lookup(&bad)).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED"));
+        assert!(!err.to_string().contains("soon-xyz"));
     }
 
     #[test]
