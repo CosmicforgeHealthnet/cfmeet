@@ -293,7 +293,7 @@ async fn s11_meeting_invitation_email_only_on_request_with_the_token_in_the_frag
     let h = some!(Harness::new(true).await);
     let app = &h.app;
     let owner = app.user("owner").await;
-    let (sid, _) = scheduled(
+    let (sid, conference) = scheduled(
         app,
         &owner,
         "Quarterly review",
@@ -330,6 +330,34 @@ async fn s11_meeting_invitation_email_only_on_request_with_the_token_in_the_frag
         sent[0].text
     );
     assert!(sent[0].html.contains(&format!("/invite#{token}")));
+    // A space-wide invitation has no single time: no calendar file.
+    assert!(sent[0].calendar.is_none());
+
+    // Gap audit M14: an invitation to a scheduled occurrence carries its calendar invite,
+    // without the invitation token.
+    let (s, v) = invite(
+        app,
+        &owner,
+        sid,
+        json!({ "inviteeEmail": guest, "sendEmail": true, "conferenceId": conference["id"] }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    let sent = h.mail.sent();
+    let ics = sent
+        .last()
+        .unwrap()
+        .calendar
+        .clone()
+        .expect("calendar invite");
+    assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"), "{ics}");
+    assert!(ics.contains("BEGIN:VEVENT"));
+    assert!(ics.contains(&format!(
+        "UID:conference-{}@cfmeet.com",
+        uuid(&conference["id"]).simple()
+    )));
+    assert!(ics.contains("SUMMARY:Quarterly review"), "{ics}");
+    assert!(!ics.contains(v["token"].as_str().unwrap()));
 
     // sendEmail needs an address.
     let (s, v) = invite(app, &owner, sid, json!({ "sendEmail": true })).await;
@@ -348,7 +376,7 @@ async fn s11_meeting_invitation_email_only_on_request_with_the_token_in_the_frag
     .await;
     assert_eq!(s, StatusCode::CREATED);
     assert_eq!(v["emailDelivery"], "ACCEPTED");
-    assert_eq!(h.mail.sent().len(), 1);
+    assert_eq!(h.mail.sent().len(), 2);
 
     // Unknown preferences or a queue outage: the invitation exists, the email is FAILED.
     let known = app.user_with_email("known", &unique_email("known")).await;
@@ -374,7 +402,7 @@ async fn s11_meeting_invitation_email_only_on_request_with_the_token_in_the_frag
     assert_eq!(s, StatusCode::CREATED);
     assert_eq!(v["emailDelivery"], "FAILED");
     h.mail.set_failing(false);
-    assert_eq!(h.mail.sent().len(), 1);
+    assert_eq!(h.mail.sent().len(), 2);
 }
 
 #[tokio::test]

@@ -176,6 +176,15 @@ async fn main() -> anyhow::Result<()> {
         panic!("Account hardening migration is required (account-hardening-migration up)");
     }
 
+    // Backend gap audit: case-insensitive identity, authenticator MFA, avatars and calendar
+    // invites live in their own additive history (`gap-closure-migration up`).
+    if !migration::gap_closure_ready(&state.db)
+        .await
+        .expect("Gap-closure migration readiness")
+    {
+        panic!("Gap-closure migration is required (gap-closure-migration up)");
+    }
+
     // Blueprint Section 4: which store answers organization questions (the client
     // configuration was validated when the meeting domain was built; misconfiguration
     // stopped startup there).

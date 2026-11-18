@@ -41,6 +41,7 @@ mod m20261117_000001_account_passwordless;
 mod m20261118_000001_case_insensitive_identity;
 mod m20261118_000002_account_mfa;
 mod m20261118_000003_account_avatars;
+mod m20261118_000004_email_calendar_invite;
 
 pub mod phase2_backfill;
 
@@ -192,6 +193,10 @@ where
             AccountHardeningMigrator::migration_table_name().to_string(),
             pending_migrations::<AccountHardeningMigrator, _>(db).await?,
         ),
+        (
+            GapClosureMigrator::migration_table_name().to_string(),
+            pending_migrations::<GapClosureMigrator, _>(db).await?,
+        ),
     ])
 }
 
@@ -264,9 +269,6 @@ impl MigratorTrait for AccountSecurityMigrator {
             Box::new(m20261106_000001_account_security::Migration),
             Box::new(m20261115_000001_account_devices::Migration),
             Box::new(m20261117_000001_account_passwordless::Migration),
-            Box::new(m20261118_000001_case_insensitive_identity::Migration),
-            Box::new(m20261118_000002_account_mfa::Migration),
-            Box::new(m20261118_000003_account_avatars::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {
@@ -434,6 +436,35 @@ pub async fn notification_fence_ready<C: sea_orm_migration::sea_orm::ConnectionT
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<NotificationFenceMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Backend gap-audit history (case-insensitive identity, authenticator MFA, avatars,
+/// calendar invites). SEPARATE and additive: every earlier history fails closed on unknown
+/// versions, so the previous image keeps starting after a rollback.
+pub struct GapClosureMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for GapClosureMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![
+            Box::new(m20261118_000001_case_insensitive_identity::Migration),
+            Box::new(m20261118_000002_account_mfa::Migration),
+            Box::new(m20261118_000003_account_avatars::Migration),
+            Box::new(m20261118_000004_email_calendar_invite::Migration),
+        ]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_gap_closure_migrations").into_iden()
+    }
+}
+
+/// The gap-closure history satisfies the DATA-011 target rule (applied ⊇ known, unknown
+/// versions fail closed).
+pub async fn gap_closure_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<GapClosureMigrator, _>(db)
         .await?
         .is_empty())
 }

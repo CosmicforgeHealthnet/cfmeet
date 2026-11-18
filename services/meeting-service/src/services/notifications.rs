@@ -92,6 +92,8 @@ pub struct OutgoingEmail {
     pub subject: String,
     pub html: String,
     pub text: String,
+    /// Gap audit M14: RFC 5545 calendar invite, attached as `invite.ics`.
+    pub calendar: Option<String>,
 }
 
 /// Why an email was not handed to the delivery queue.
@@ -124,7 +126,7 @@ pub trait NotificationMail: Send + Sync {
 #[async_trait]
 impl NotificationMail for EmailService {
     async fn send(&self, email: OutgoingEmail) -> Result<(), MailError> {
-        crate::services::email_delivery::enqueue(
+        crate::services::email_delivery::enqueue_with_calendar(
             self.db(),
             crate::services::email_delivery::NewEmail {
                 category: email.category,
@@ -136,6 +138,7 @@ impl NotificationMail for EmailService {
                 text: email.text,
                 expires_at: None,
             },
+            email.calendar,
         )
         .await
         .map(|_| ())
@@ -558,6 +561,40 @@ async fn meeting_invitation_inner(
         )
     ));
     let link = format!("{}/invite#{token}", ctx.app_url);
+    // Gap audit M14: a scheduled occurrence comes with its calendar invite. The link opens
+    // CF Meet; the invitation token never goes into the calendar file.
+    let calendar = conference.as_ref().and_then(|c| {
+        let start = c.scheduled_start_at?;
+        let end = c
+            .scheduled_end_at
+            .unwrap_or(start + chrono::Duration::hours(1));
+        let event = crate::services::ics::IcsEvent {
+            uid: format!("conference-{}@cfmeet.com", c.id.simple()),
+            sequence: c.version.saturating_sub(1),
+            summary: title.clone(),
+            description: Some(format!(
+                "{inviter} invited you. Open the invitation email to join."
+            )),
+            url: Some(ctx.app_url.clone()),
+            start,
+            end,
+            status: crate::services::ics::IcsStatus::Confirmed,
+            rrule: None,
+            exdates: vec![],
+            recurrence_id: None,
+            created: None,
+            last_modified: chrono::Utc::now(),
+        };
+        Some(crate::services::ics::render(
+            &crate::services::ics::IcsCalendar {
+                timezone: space.timezone.parse().ok(),
+                name: Some(title.clone()),
+                events: vec![event],
+                timezone_until: Some(end),
+            },
+            chrono::Utc::now(),
+        ))
+    });
     let subject = clean(&format!("Invitation: {title}"), 160);
     let template = render(&NotificationBody {
         subject: &subject,
@@ -580,6 +617,7 @@ async fn meeting_invitation_inner(
             subject,
             html: template.html,
             text: template.text,
+            calendar,
         })
         .await;
     Ok(if sent.is_ok() {
@@ -671,6 +709,7 @@ pub async fn send_organization_invitation(
             subject,
             html: template.html,
             text: template.text,
+            calendar: None,
         })
         .await
     {
@@ -1161,6 +1200,7 @@ async fn deliver(
                 subject: email.0,
                 html: email.1,
                 text: email.2,
+                calendar: None,
             })
             .await;
         if let Err(refused @ (MailError::InvalidAddress | MailError::Suppressed)) = sent {
@@ -1374,6 +1414,7 @@ mod tests {
             subject: "s".into(),
             html: "h".into(),
             text: "t".into(),
+            calendar: None,
         };
         m.send(e.clone()).await.unwrap();
         m.set_failing(true);

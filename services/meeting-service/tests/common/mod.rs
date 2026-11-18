@@ -173,6 +173,9 @@ async fn template(admin: &str) -> String {
             migration::NotificationFenceMigrator::up(&tmpl, None)
                 .await
                 .expect("notification fence migrations apply");
+            migration::GapClosureMigrator::up(&tmpl, None)
+                .await
+                .expect("gap-closure migrations apply");
             tmpl.close().await.ok();
             name
         })
