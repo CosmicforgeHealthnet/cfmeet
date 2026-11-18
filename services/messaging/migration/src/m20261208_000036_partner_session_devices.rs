@@ -61,7 +61,7 @@ ALTER TABLE messaging_application_baselines
     ADD CONSTRAINT ck_messaging_application_baselines_name
         CHECK (baseline IN ('CFMEET_FIRST_PARTY', 'CFMEET_PLATFORM_PARTNER'));
 
-CREATE TABLE IF NOT EXISTS messaging_message_sent_facts (
+CREATE TABLE messaging_message_sent_facts (
     message_id        UUID         NOT NULL,
     tenant_id         UUID         NOT NULL,
     application_id    UUID         NOT NULL,
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS messaging_message_sent_facts (
 CREATE INDEX IF NOT EXISTS ix_messaging_message_sent_facts_position
     ON messaging_message_sent_facts (occurred_at, message_id);
 
-CREATE TABLE IF NOT EXISTS messaging_partner_push_registrations (
+CREATE TABLE messaging_partner_push_registrations (
     id               UUID          NOT NULL,
     tenant_id        UUID          NOT NULL,
     application_id   UUID          NOT NULL,
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS messaging_partner_push_registrations (
 CREATE INDEX IF NOT EXISTS ix_messaging_partner_push_registrations_active
     ON messaging_partner_push_registrations (environment_id, principal_id) WHERE status = 'ACTIVE';
 
-CREATE TABLE IF NOT EXISTS messaging_partner_push_publications (
+CREATE TABLE messaging_partner_push_publications (
     id                UUID          NOT NULL,
     outbox_event_id   UUID          NOT NULL,
     tenant_id         UUID          NOT NULL,
