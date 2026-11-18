@@ -110,6 +110,14 @@ async fn resolve(
         ));
     }
     let owner = verify_principal(&state, &ctx, body.owner_principal_id).await?;
+    // The owner of a partner meeting's chat is the environment's meeting system
+    // principal (`cfmeet:meeting-system`, BOT_OR_SERVICE).
+    if !ctx.first_party && owner.kind != "BOT_OR_SERVICE" {
+        return Err(ApiError::reason(
+            crate::error::ErrorCode::PrincipalNotAuthorized,
+            "PARTNER_MEETING_OWNER_KIND",
+        ));
+    }
     let (status, view) = meeting::resolve(&state, &ctx, &owner, body).await?;
     state.wake_outbox();
     Ok((
@@ -127,7 +135,20 @@ async fn member(
     let ctx = meeting_scope(&state, &caller).await?;
     if body.state == "ACTIVE" {
         // Admission requires an ACTIVE messaging principal now; removals never do.
-        verify_principal(&state, &ctx, principal_id).await?;
+        let member = verify_principal(&state, &ctx, principal_id).await?;
+        // ADR 0062 §8: a partner meeting admits that environment's partner users only
+        // (another environment's principal is already unknown here).
+        if !ctx.first_party
+            && !matches!(
+                member.kind.as_str(),
+                "EXTERNAL_APPLICATION_PRINCIPAL" | "TEMPORARY_EXTERNAL_PARTICIPANT"
+            )
+        {
+            return Err(ApiError::reason(
+                crate::error::ErrorCode::PrincipalNotAuthorized,
+                "PARTNER_MEETING_MEMBER_KIND",
+            ));
+        }
     }
     let view = meeting::sync_member(&state, &ctx, conversation_id, principal_id, body).await?;
     state.wake_outbox();

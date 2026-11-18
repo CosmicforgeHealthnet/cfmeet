@@ -1018,13 +1018,10 @@ macro_rules! public_bundle {
 }
 
 /// (Swagger name, served path, public bundle). The Meeting Service document is generated
-/// at runtime (it carries the configured server list) and is listed first.
-const PEER_DOCS: [(&str, &str, &str); 8] = [
-    (
-        "Communications",
-        "/api-docs/communications.json",
-        public_bundle!("communications"),
-    ),
+/// at runtime (it carries the configured server list) and is listed first. ADR 0061: the
+/// Communications Hub is first-party only (`EXCLUDED FIRST_PARTY_COMMUNICATIONS_HUB`), so
+/// its public bundle is empty by design and is not published on the doc host.
+const PEER_DOCS: [(&str, &str, &str); 7] = [
     (
         "Calling",
         "/api-docs/calling.json",
@@ -1613,7 +1610,6 @@ mod tests {
             "/api-docs/openapi.json",
             "/api-docs/organizations.json",
             "/api-docs/calling.json",
-            "/api-docs/communications.json",
             "/api-docs/numbering.json",
             "/api-docs/privacy-relay.json",
             "/api-docs/sms-gateway.json",
@@ -1637,6 +1633,8 @@ mod tests {
             "/api-docs/telephony.json",
             "/api-docs/messaging-internal.json",
             "/api-docs/sms-gateway-internal.json",
+            // ADR 0061: the Communications Hub is first-party only.
+            "/api-docs/communications.json",
         ] {
             let response = router
                 .clone()
@@ -1673,7 +1671,6 @@ mod tests {
     /// Gateway catalogue domain of each served peer document.
     fn catalogue_domain(name: &str) -> &'static str {
         match name {
-            "Communications" => "communications",
             "Calling" => "calling",
             "Numbering / DCNs" => "numbering",
             "Privacy Relay" => "privacy-relay",
@@ -1959,7 +1956,6 @@ mod tests {
             [
                 "Meetings",
                 "Organizations",
-                "Communications",
                 "Calling",
                 "Numbering / DCNs",
                 "Privacy Relay",
