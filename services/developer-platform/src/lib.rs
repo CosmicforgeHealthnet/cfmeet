@@ -25,6 +25,7 @@ pub mod ledger;
 pub mod notification_publications;
 pub mod platform_access;
 pub mod reference_reconciliation;
+pub mod retention;
 pub mod session;
 pub mod state;
 pub mod webhooks;

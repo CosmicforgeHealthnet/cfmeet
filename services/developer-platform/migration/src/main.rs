@@ -15,5 +15,37 @@ async fn main() {
         eprintln!("ERROR: DATABASE_URL is not set (see services/developer-platform/.env.example).");
         std::process::exit(1);
     }
+    // `up` applies the main history, then the separate gap-closure history; `reset` first
+    // rolls the gap-closure history back; every other subcommand concerns the main history.
+    let command = std::env::args()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or_default();
+    let connect = || async {
+        let url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+        sea_orm_migration::sea_orm::Database::connect(url)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("ERROR: cannot connect for the gap-closure migrations: {e}");
+                std::process::exit(1);
+            })
+    };
+    if command == "reset" {
+        if let Err(e) =
+            developer_platform_migration::GapClosureMigrator::down(&connect().await, None).await
+        {
+            eprintln!("ERROR: gap-closure rollback failed: {e}");
+            std::process::exit(1);
+        }
+    }
     cli::run_cli(developer_platform_migration::Migrator).await;
+    if command == "up" {
+        if let Err(e) =
+            developer_platform_migration::GapClosureMigrator::up(&connect().await, None).await
+        {
+            eprintln!("ERROR: gap-closure migrations failed: {e}");
+            std::process::exit(1);
+        }
+        println!("Gap-closure migrations applied.");
+    }
 }

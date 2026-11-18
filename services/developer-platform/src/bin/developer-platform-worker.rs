@@ -99,6 +99,15 @@ async fn main() -> anyhow::Result<()> {
         reference_reconciliation_interval: config.reference_reconciliation_interval,
         reference_reconciliation_remote_limit: config.reference_reconciliation_remote_limit,
         notifications,
+        retention: match developer_platform::retention::RetentionSettings::from_lookup(
+            &|k: &str| std::env::var(k).ok(),
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(error = %e, "retention configuration error");
+                std::process::exit(2);
+            }
+        },
     };
     let mut stopped = stop_rx;
     developer_platform::worker::run_with_jobs(

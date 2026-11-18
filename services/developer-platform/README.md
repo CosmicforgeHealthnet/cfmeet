@@ -10,7 +10,17 @@ implemented.
   Platform Access (`platform-identity.read`) to re-validate every forwarded context. It
   never verifies a credential and never issues one.
 * **Database:** its own PostgreSQL database, `devplat_` tables, history in
-  `developer_platform_seaql_migrations`; the server refuses to start with pending migrations.
+  `developer_platform_seaql_migrations`; additive changes since P9 in a separate gap-closure
+  history (`developer_platform_gap_closure_seaql_migrations`, `migration/src/gap/`) that
+  `developer-platform-migration up` applies after the main one (`reset` rolls it back first);
+  the server refuses to start with pending migrations in either.
+* **Retention (P9):** the worker purges webhook delivery / event history, the API usage
+  batch ledger and counters, ingestion rejections and the activity feed past their bounds
+  (`src/retention.rs`; `DEVELOPER_PLATFORM_RETENTION_*_DAYS`, `0` keeps a class,
+  `DEVELOPER_PLATFORM_RETENTION_ENABLED=false` turns it off), at most hourly, in bounded,
+  audited batches (`devplat_retention_audit`). Only the worker can delete: the tables' guards
+  still refuse every other delete. Unified-ledger facts / rollups, reconciliations and the
+  operator audit are not purged (billing evidence: owner decision).
 * **Binaries:** `developer-platform` (API), `developer-platform-worker` (own loop:
   heartbeats; Section 50+ jobs plug in), `developer-platform-migration`.
 * **HTTP:** `GET /health`, `GET /ready`, `GET /openapi.json` (contract

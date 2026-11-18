@@ -29,7 +29,6 @@ use developer_platform::{
     platform_access::{AuthorityUnavailable, CanonicalContext, ContextOutcome, PlatformAccessPort},
     state::AppState,
 };
-use developer_platform_migration::MigratorTrait;
 use http_body_util::BodyExt;
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
 use serde_json::{json, Value};
@@ -112,7 +111,7 @@ async fn template(admin: &str) -> String {
                 .unwrap();
             conn.close().await.ok();
             let tmpl = Database::connect(with_db(admin, &name)).await.unwrap();
-            developer_platform_migration::Migrator::up(&tmpl, None)
+            developer_platform_migration::up_all(&tmpl)
                 .await
                 .expect("migrations apply");
             tmpl.close().await.ok();
