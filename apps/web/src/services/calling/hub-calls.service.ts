@@ -46,6 +46,8 @@ export interface HubContact {
   alias: string | null;
   favorite: boolean;
   relationship: unknown;
+  /** The contact's calling principal while CONNECTED (null otherwise). */
+  principalId?: string | null;
 }
 
 export interface HubContactsPage {

@@ -50,7 +50,7 @@ export default function AddPeopleDialog({ callId, version, principalId, inviterP
   // Personal contacts (WhatsApp) first, then organization colleagues.
   const people = useMemo<Person[]>(() => [
     ...(contacts.data?.data ?? [])
-      .filter((c) => c.relationship === "CONNECTED" || c.relationship == null)
+      .filter((c) => (c.relationship === "CONNECTED" || c.relationship == null) && c.principalId !== principalId && !(c.principalId && participantPrincipalIds.includes(c.principalId)))
       .map((c) => ({ key: `c:${c.contactId}`, kind: "contact" as const, id: c.contactId, name: c.alias || c.displayName })),
     ...(directory.data?.people ?? [])
       .filter((p) => p.principalId !== principalId && !(p.principalId && participantPrincipalIds.includes(p.principalId)))
