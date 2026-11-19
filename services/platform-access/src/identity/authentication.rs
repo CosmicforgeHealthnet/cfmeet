@@ -153,6 +153,22 @@ pub struct AuthorityChain {
     /// ADR 0064: the grant (installation) the OAuth token belongs to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant_id: Option<Uuid>,
+    /// ADR 0064: the one principal an OAuth token acts as (user `cfmeet-user:<uuid>` or bot
+    /// `app:<uuid>`), OAuth tokens only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restricted_principal: Option<RestrictedPrincipal>,
+    /// ADR 0064: when the OAuth token was issued (`credential.createdAt`), OAuth tokens only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_issued_at: Option<DateTime<Utc>>,
+}
+
+/// The restricted principal of an OAuth token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestrictedPrincipal {
+    pub id: Uuid,
+    pub kind: String,
+    pub reference: String,
 }
 
 /// The kind of an OAuth app credential (ADR 0064).
@@ -258,7 +274,8 @@ SELECT
     (SELECT jsonb_build_object(
                 'kind', o.kind, 'grantId', g.id, 'appId', g.app_id, 'grantStatus', g.status,
                 'scopes', to_jsonb(g.scopes), 'principalId', g.principal_id,
-                'principalStatus', p.status, 'clientStatus', oc.status,
+                'principalStatus', p.status, 'principalKind', p.kind,
+                'principalReference', p.external_reference, 'clientStatus', oc.status,
                 'appActive', (oa.status = 'ACTIVE' AND ot.status = 'ACTIVE'))
        FROM platform_oauth_tokens o
        JOIN platform_oauth_grants g ON g.id = o.grant_id
@@ -312,6 +329,8 @@ struct OAuthRow {
     scopes: Vec<String>,
     principal_id: Uuid,
     principal_status: String,
+    principal_kind: String,
+    principal_reference: String,
     client_status: String,
     app_active: bool,
 }
@@ -752,7 +771,7 @@ fn evaluate(
     // ADR 0064: an OAuth token lives only while its grant, app and principal do; its
     // scopes are the grant's (live), mapped through the closed catalogue, STANDARD only;
     // its restriction is exactly the grant's principal.
-    let (scopes, credential_kind, app_id, grant_id) = match (oauth, oauth_kind) {
+    let (scopes, credential_kind, app_id, grant_id, restricted_principal) = match (oauth, oauth_kind) {
         (Some(o), Some(kind)) => {
             if o.grant_status != "ACTIVE" || o.client_status == "SUSPENDED" {
                 return Err(R::CredentialRevoked);
@@ -777,10 +796,22 @@ fn evaluate(
                             .is_some_and(|d| d.trust == super::scopes::ScopeTrust::Standard)
                     })
                     .collect();
-            (scopes, Some(kind), Some(o.app_id), Some(o.grant_id))
+            let principal = RestrictedPrincipal {
+                id: o.principal_id,
+                kind: o.principal_kind,
+                reference: o.principal_reference,
+            };
+            (
+                scopes,
+                Some(kind),
+                Some(o.app_id),
+                Some(o.grant_id),
+                Some(principal),
+            )
         }
-        _ => (scopes, None, None, None),
+        _ => (scopes, None, None, None, None),
     };
+    let credential_issued_at = credential_kind.map(|_| credential.created_at);
     // Defence in depth: never report live telecom outside PRODUCTION.
     let mut environment = environment;
     environment.live_telecom_allowed &= environment.kind.may_allow_live_telecom();
@@ -802,6 +833,8 @@ fn evaluate(
         credential_kind,
         app_id,
         grant_id,
+        restricted_principal,
+        credential_issued_at,
     })
 }
 

@@ -122,6 +122,15 @@ fn no_store(mut response: Response) -> Response {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ClientBody {
     name: String,
+    /// Optional override of the developer tenant's display name.
+    #[serde(default)]
+    developer_name: Option<String>,
+    /// Optional https logo URL (≤ 512 characters).
+    #[serde(default)]
+    logo_url: Option<String>,
+    /// Optional in-meeting surface.
+    #[serde(default)]
+    meeting_surface: Option<SurfaceBody>,
     redirect_uris: Vec<String>,
     #[serde(default)]
     user_scopes: Vec<String>,
@@ -140,6 +149,14 @@ struct ClientBody {
     allowed_organization_ids: Vec<Uuid>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SurfaceBody {
+    url: String,
+    #[serde(default)]
+    origins: Vec<String>,
+}
+
 async fn put_client(
     State(state): State<AppState>,
     caller: InternalCaller,
@@ -156,6 +173,9 @@ async fn put_client(
             application_id,
             ClientInput {
                 name: b.name,
+                developer_name: b.developer_name,
+                logo_url: b.logo_url,
+                meeting_surface: b.meeting_surface.map(|m| (m.url, m.origins)),
                 redirect_uris: b.redirect_uris,
                 user_scopes: b.user_scopes,
                 bot_scopes: b.bot_scopes,
@@ -259,6 +279,8 @@ async fn app_grants(
         .list_oauth_grants(GrantFilter::App(application_id), cursor, limit)
         .await
         .map_err(AccessError::service)?;
+    let key = pairwise(&state);
+    let items: Vec<_> = items.into_iter().map(|g| g.with_sub(&key)).collect();
     Ok(Json(json!({ "items": items, "nextCursor": next })))
 }
 
@@ -412,6 +434,8 @@ async fn list_grants(
         .list_oauth_grants(filter, None, 200)
         .await
         .map_err(AccessError::service)?;
+    let key = pairwise(&state);
+    let items: Vec<_> = items.into_iter().map(|g| g.with_sub(&key)).collect();
     Ok(Json(json!({ "items": items })))
 }
 
@@ -446,7 +470,8 @@ async fn revoke_grant(
         .revoke_oauth_grant(grant_id, revoke_reason::UNINSTALLED)
         .await
         .map_err(AccessError::service)?
-        .ok_or(AccessError::Refused(ErrorCode::NotFound))?;
+        .ok_or(AccessError::Refused(ErrorCode::NotFound))?
+        .with_sub(&pairwise(&state));
     Ok(Json(json!({ "grant": grant })))
 }
 

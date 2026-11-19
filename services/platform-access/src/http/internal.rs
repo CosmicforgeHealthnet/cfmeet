@@ -40,8 +40,8 @@ use crate::{
     domain::{EnvironmentKind, PrincipalId, PrincipalKind},
     identity::{
         authentication::{
-            AuthenticationError, AuthorityChain, AuthorityMode, OAuthCredentialKind, SuspendedLink,
-            Throttle,
+            AuthenticationError, AuthorityChain, AuthorityMode, OAuthCredentialKind,
+            RestrictedPrincipal, SuspendedLink, Throttle,
         },
         changes,
         credentials::CredentialEffectiveState,
@@ -401,13 +401,26 @@ struct CredentialStatusView {
     app_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     grant_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    restricted_principal: Option<RestrictedPrincipal>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential_issued_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// ADR 0064: what an OAuth token credential adds to its status view.
+struct OAuthFacts {
+    kind: OAuthCredentialKind,
+    app_id: Uuid,
+    grant_id: Uuid,
+    scopes: Vec<String>,
+    principal: RestrictedPrincipal,
 }
 
 /// ADR 0064: `(kind, appId, grantId, mapped internal scopes)` of an OAuth token credential.
 async fn oauth_facts(
     state: &AppState,
     credential_id: Uuid,
-) -> AccessResult<Option<(OAuthCredentialKind, Uuid, Uuid, Vec<String>)>> {
+) -> AccessResult<Option<OAuthFacts>> {
     if !state.build.oauth_enabled {
         return Ok(None);
     }
@@ -416,8 +429,11 @@ async fn oauth_facts(
         .db()
         .query_one(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            "SELECT o.kind, g.id AS grant_id, g.app_id, g.scopes FROM platform_oauth_tokens o \
-             JOIN platform_oauth_grants g ON g.id = o.grant_id WHERE o.credential_id = $1",
+            "SELECT o.kind, g.id AS grant_id, g.app_id, g.scopes, p.id AS principal_id, \
+                    p.kind AS principal_kind, p.external_reference AS principal_reference \
+             FROM platform_oauth_tokens o \
+             JOIN platform_oauth_grants g ON g.id = o.grant_id \
+             JOIN platform_principals p ON p.id = g.principal_id WHERE o.credential_id = $1",
             [credential_id.into()],
         ))
         .await
@@ -441,12 +457,17 @@ async fn oauth_facts(
                 .is_some_and(|d| d.trust == crate::identity::scopes::ScopeTrust::Standard)
         })
         .collect();
-    Ok(Some((
+    Ok(Some(OAuthFacts {
         kind,
-        row.try_get("", "app_id").map_err(internal)?,
-        row.try_get("", "grant_id").map_err(internal)?,
-        mapped,
-    )))
+        app_id: row.try_get("", "app_id").map_err(internal)?,
+        grant_id: row.try_get("", "grant_id").map_err(internal)?,
+        scopes: mapped,
+        principal: RestrictedPrincipal {
+            id: row.try_get("", "principal_id").map_err(internal)?,
+            kind: row.try_get("", "principal_kind").map_err(internal)?,
+            reference: row.try_get("", "principal_reference").map_err(internal)?,
+        },
+    }))
 }
 
 async fn load_credential_in_scope(
@@ -493,7 +514,7 @@ async fn load_credential_in_scope(
     let oauth = oauth_facts(state, credential.id).await?;
     // ADR 0064: an OAuth token's scopes are its grant's, mapped (live).
     let scopes = match &oauth {
-        Some((_, _, _, mapped)) => mapped.clone(),
+        Some(facts) => facts.scopes.clone(),
         None => effective_scopes(state, scope, credential.id).await?,
     };
     let principal_restriction = state
@@ -502,15 +523,18 @@ async fn load_credential_in_scope(
         .await
         .map_err(AccessError::service)?
         .map(|ids| ids.into_iter().map(|p| p.as_uuid()).collect());
+    let credential_issued_at = oauth.as_ref().map(|_| credential.created_at);
     Ok(CredentialStatusView {
+        credential_issued_at,
         authenticates: effective_state.authenticates(),
         credential,
         effective_state,
         scopes,
         principal_restriction,
-        credential_kind: oauth.as_ref().map(|o| o.0),
-        app_id: oauth.as_ref().map(|o| o.1),
-        grant_id: oauth.as_ref().map(|o| o.2),
+        credential_kind: oauth.as_ref().map(|o| o.kind),
+        app_id: oauth.as_ref().map(|o| o.app_id),
+        grant_id: oauth.as_ref().map(|o| o.grant_id),
+        restricted_principal: oauth.map(|o| o.principal),
     })
 }
 

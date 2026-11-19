@@ -705,7 +705,7 @@
       }
     },
     "AuthorityChain": {
-      "description": "The trusted authority of an authenticated credential: every link, the effective scopes (sorted) and the authorized-principal restriction. The tenant of a request is ALWAYS taken from here, never from a request. ADR 0064: for an OAuth app token (`cfoa_` / `cfob_`) the chain is the grant's target FIRST_PARTY triple and its installation service account, `scopes` are the internal scopes mapped from the grant's OAuth scopes, `principalRestriction` is exactly the user (or bot) principal, and `credentialKind`, `appId` and `grantId` are present (absent for every other credential).",
+      "description": "The trusted authority of an authenticated credential: every link, the effective scopes (sorted) and the authorized-principal restriction. The tenant of a request is ALWAYS taken from here, never from a request. ADR 0064: for an OAuth app token (`cfoa_` / `cfob_`) the chain is the grant's target FIRST_PARTY triple and its installation service account, `scopes` are the internal scopes mapped from the grant's OAuth scopes, `principalRestriction` is exactly the user (or bot) principal, and `credentialKind`, `appId` and `grantId` are present (absent for every other credential). OAuth credentials also carry restrictedPrincipal ({id, kind, reference}) and credentialIssuedAt.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -789,6 +789,17 @@
           "allOf": [
             {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          ]
+        },
+        "restrictedPrincipal": {
+          "$ref": "#/$defs/RestrictedPrincipal"
+        },
+        "credentialIssuedAt": {
+          "description": "ADR 0064: when the OAuth token was issued (= credential.createdAt). OAuth credentials only.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
             }
           ]
         }
@@ -913,7 +924,7 @@
       }
     },
     "CredentialStatusResult": {
-      "description": "GET /internal/v1/credentials/{credentialId}: status, expiry and revocation of a credential of the delegated scope. ADR 0064: for an OAuth app token, scopes are the grant's mapped internal scopes and credentialKind / appId / grantId are present (absent for every other credential).",
+      "description": "GET /internal/v1/credentials/{credentialId}: status, expiry and revocation of a credential of the delegated scope. ADR 0064: for an OAuth app token, scopes are the grant's mapped internal scopes and credentialKind / appId / grantId are present (absent for every other credential). OAuth credentials also carry restrictedPrincipal ({id, kind, reference}) and credentialIssuedAt.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -968,6 +979,17 @@
           "allOf": [
             {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          ]
+        },
+        "restrictedPrincipal": {
+          "$ref": "#/$defs/RestrictedPrincipal"
+        },
+        "credentialIssuedAt": {
+          "description": "ADR 0064: when the OAuth token was issued (= credential.createdAt). OAuth credentials only.",
+          "allOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
             }
           ]
         }
@@ -1836,6 +1858,32 @@
         },
         "updatedAt": {
           "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RestrictedPrincipal": {
+      "description": "ADR 0064: the one principal an OAuth app token acts as: the user (NATIVE_CF_USER, reference `cfmeet-user:<accountId>`) or the app's bot in an organization (BOT_OR_SERVICE, reference `app:<appId>`).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "reference"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "NATIVE_CF_USER",
+            "BOT_OR_SERVICE"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "pattern": "^(cfmeet-user|app):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
         }
       }
     }

@@ -269,13 +269,37 @@ pub struct ClientRow {
     pub app_active: bool,
     /// Issue time of the current (non-overlapping) client secret.
     pub secret_issued_at: Option<DateTime<Utc>>,
+    /// Whether `developer_name` is the client's own override (else the tenant's name).
+    pub developer_name_set: bool,
+    pub logo_url: Option<String>,
+    pub meeting_surface: Option<MeetingSurface>,
+}
+
+/// The in-meeting surface of an app: an https page and its exact https origins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingSurface {
+    pub url: String,
+    pub origins: Vec<String>,
+}
+
+/// What the Meeting Service shows about an app next to a grant.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSummary {
+    pub name: String,
+    pub developer_name: String,
+    pub logo_url: Option<String>,
+    pub meeting_surface: Option<MeetingSurface>,
 }
 
 const CLIENT_SELECT: &str = "SELECT c.application_id, c.tenant_id, c.name, c.redirect_uris, c.user_scopes, \
         c.bot_scopes, c.distribution, c.status, c.test_account_ids::text[] AS test_account_ids, \
         c.allowed_account_ids::text[] AS allowed_account_ids, \
         c.allowed_organization_ids::text[] AS allowed_organization_ids, c.revision, c.created_at, \
-        c.updated_at, t.display_name AS developer_name, \
+        c.updated_at, coalesce(c.developer_name, t.display_name) AS developer_name, \
+        (c.developer_name IS NOT NULL) AS developer_name_set, c.logo_url, c.meeting_surface_url, \
+        c.meeting_surface_origins, \
         (a.status = 'ACTIVE' AND t.status = 'ACTIVE') AS app_active, \
         (SELECT max(s.issued_at) FROM platform_oauth_client_secrets s \
           WHERE s.application_id = c.application_id AND s.revoked_at IS NULL AND s.valid_until IS NULL) \
@@ -307,6 +331,20 @@ fn client_from_row(r: &QueryResult) -> Result<ClientRow, DbErr> {
         developer_name: r.try_get("", "developer_name")?,
         app_active: r.try_get("", "app_active")?,
         secret_issued_at: r.try_get("", "secret_issued_at")?,
+        developer_name_set: r.try_get("", "developer_name_set")?,
+        logo_url: r.try_get("", "logo_url")?,
+        meeting_surface: surface_from_row(r)?,
+    })
+}
+
+fn surface_from_row(r: &QueryResult) -> Result<Option<MeetingSurface>, DbErr> {
+    let url: Option<String> = r.try_get("", "meeting_surface_url")?;
+    Ok(match url {
+        Some(url) => Some(MeetingSurface {
+            url,
+            origins: r.try_get("", "meeting_surface_origins")?,
+        }),
+        None => None,
     })
 }
 
@@ -325,6 +363,8 @@ impl ClientRow {
             "allowedAccountIds": self.allowed_account_ids,
             "allowedOrganizationIds": self.allowed_organization_ids,
             "developerName": self.developer_name,
+            "logoUrl": self.logo_url,
+            "meetingSurface": self.meeting_surface,
             "revision": self.revision,
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
@@ -372,6 +412,12 @@ impl ClientRow {
 #[derive(Debug, Clone, Default)]
 pub struct ClientInput {
     pub name: String,
+    /// Optional override of the developer tenant's display name.
+    pub developer_name: Option<String>,
+    /// Optional https logo URL (≤ 512 characters).
+    pub logo_url: Option<String>,
+    /// Optional in-meeting surface: an https URL and at most 10 exact https origins.
+    pub meeting_surface: Option<(String, Vec<String>)>,
     pub redirect_uris: Vec<String>,
     pub user_scopes: Vec<String>,
     pub bot_scopes: Vec<String>,
@@ -430,6 +476,48 @@ pub fn validate_redirect_uri(uri: &str, draft: bool) -> PlatformResult<()> {
         }
     }
     Ok(())
+}
+
+/// An https URL of at most `max` characters without spaces / control characters.
+fn https_url(value: &str, max: usize, field: &str) -> PlatformResult<String> {
+    let rest = value.strip_prefix("https://").unwrap_or("");
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if value.len() > max
+        || host.is_empty()
+        || host.contains('@')
+        || value.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err(PlatformError::Validation(format!(
+            "{field} must be an https:// URL of at most {max} characters"
+        )));
+    }
+    Ok(value.to_string())
+}
+
+/// Maximum origins of a meeting surface.
+pub const MAX_SURFACE_ORIGINS: usize = 10;
+
+fn meeting_surface(url: &str, origins: &[String]) -> PlatformResult<MeetingSurface> {
+    let url = https_url(url, 2048, "meetingSurface.url")?;
+    let mut out: Vec<String> = Vec::new();
+    for origin in origins {
+        if !origin.starts_with("https://") {
+            return Err(PlatformError::Validation(
+                "meetingSurface.origins must be exact https:// origins".into(),
+            ));
+        }
+        let origin = super::environment_origins::validate_origin(origin, EnvironmentKind::Production)
+            .map_err(PlatformError::Validation)?;
+        if !out.contains(&origin) {
+            out.push(origin);
+        }
+    }
+    if out.len() > MAX_SURFACE_ORIGINS {
+        return Err(PlatformError::Validation(format!(
+            "meetingSurface allows at most {MAX_SURFACE_ORIGINS} origins"
+        )));
+    }
+    Ok(MeetingSurface { url, origins: out })
 }
 
 fn scope_list(values: &[String], allowed: &[Audience], field: &str) -> PlatformResult<Vec<String>> {
@@ -550,6 +638,8 @@ pub struct GrantView {
     pub id: Uuid,
     pub app_id: Uuid,
     pub app_name: String,
+    /// The app as the Meeting Service shows it.
+    pub app: AppSummary,
     pub target: String,
     pub account_id: Option<Uuid>,
     pub organization_id: Option<Uuid>,
@@ -566,9 +656,18 @@ pub struct GrantView {
     pub revoke_reason: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// The pairwise subject of the grant (filled by the HTTP layer, which holds the key).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub: Option<String>,
 }
 
 impl GrantView {
+    /// The grant with its pairwise `sub` (same HMAC as introspection).
+    pub fn with_sub(mut self, key: &PairwiseKey) -> Self {
+        self.sub = Some(key.sub(self.app_id, &pairwise_subject(&self)));
+        self
+    }
+
     pub fn active(&self) -> bool {
         self.status == "ACTIVE"
     }
@@ -578,12 +677,15 @@ impl GrantView {
     }
 }
 
-const GRANT_SELECT: &str = "SELECT g.id, g.app_id, c.name AS app_name, g.target, g.account_id, \
+const GRANT_SELECT: &str = "SELECT g.id, g.app_id, c.name AS app_name, \
+        coalesce(c.developer_name, t.display_name) AS developer_name, c.logo_url, \
+        c.meeting_surface_url, c.meeting_surface_origins, g.target, g.account_id, \
         g.organization_id, g.installed_by_account_id, g.tenant_id, g.application_id, \
         g.environment_id, e.kind AS environment_kind, g.principal_id, g.service_account_id, \
         g.scopes, g.status, g.revoked_at, g.revoke_reason, g.created_at, g.updated_at \
      FROM platform_oauth_grants g \
      JOIN platform_oauth_clients c ON c.application_id = g.app_id \
+     JOIN platform_tenants t ON t.id = c.tenant_id \
      JOIN platform_environments e ON e.id = g.environment_id";
 
 fn grant_from_row(r: &QueryResult) -> Result<GrantView, DbErr> {
@@ -592,6 +694,12 @@ fn grant_from_row(r: &QueryResult) -> Result<GrantView, DbErr> {
         id: r.try_get("", "id")?,
         app_id: r.try_get("", "app_id")?,
         app_name: r.try_get("", "app_name")?,
+        app: AppSummary {
+            name: r.try_get("", "app_name")?,
+            developer_name: r.try_get("", "developer_name")?,
+            logo_url: r.try_get("", "logo_url")?,
+            meeting_surface: surface_from_row(r)?,
+        },
         target: r.try_get("", "target")?,
         account_id: r.try_get("", "account_id")?,
         organization_id: r.try_get("", "organization_id")?,
@@ -609,6 +717,7 @@ fn grant_from_row(r: &QueryResult) -> Result<GrantView, DbErr> {
         revoke_reason: r.try_get("", "revoke_reason")?,
         created_at: r.try_get("", "created_at")?,
         updated_at: r.try_get("", "updated_at")?,
+        sub: None,
     })
 }
 
@@ -715,6 +824,21 @@ impl PlatformService {
             )
         })?;
         let name = super::display_name(&input.name)?;
+        let developer_name = input
+            .developer_name
+            .as_deref()
+            .map(super::display_name)
+            .transpose()?;
+        let logo_url = input
+            .logo_url
+            .as_deref()
+            .map(|u| https_url(u, 512, "logoUrl"))
+            .transpose()?;
+        let surface = input
+            .meeting_surface
+            .as_ref()
+            .map(|(url, origins)| meeting_surface(url, origins))
+            .transpose()?;
         let mut redirect_uris: Vec<String> = Vec::new();
         for uri in &input.redirect_uris {
             validate_redirect_uri(uri, status == ClientStatus::Draft)?;
@@ -770,15 +894,19 @@ impl PlatformService {
             .query_one(stmt(
                 "INSERT INTO platform_oauth_clients (application_id, tenant_id, name, redirect_uris, \
                    user_scopes, bot_scopes, distribution, status, test_account_ids, \
-                   allowed_account_ids, allowed_organization_ids, created_at, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10::uuid[], $11::uuid[], $12, $12) \
+                   allowed_account_ids, allowed_organization_ids, created_at, updated_at, \
+                   developer_name, logo_url, meeting_surface_url, meeting_surface_origins) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10::uuid[], $11::uuid[], $12, $12, \
+                   $13, $14, $15, $16) \
                  ON CONFLICT (application_id) DO UPDATE SET name = EXCLUDED.name, \
                    redirect_uris = EXCLUDED.redirect_uris, user_scopes = EXCLUDED.user_scopes, \
                    bot_scopes = EXCLUDED.bot_scopes, distribution = EXCLUDED.distribution, \
                    status = EXCLUDED.status, test_account_ids = EXCLUDED.test_account_ids, \
                    allowed_account_ids = EXCLUDED.allowed_account_ids, \
                    allowed_organization_ids = EXCLUDED.allowed_organization_ids, \
-                   updated_at = EXCLUDED.updated_at \
+                   updated_at = EXCLUDED.updated_at, developer_name = EXCLUDED.developer_name, \
+                   logo_url = EXCLUDED.logo_url, meeting_surface_url = EXCLUDED.meeting_surface_url, \
+                   meeting_surface_origins = EXCLUDED.meeting_surface_origins \
                  RETURNING (xmax = 0) AS created",
                 vec![
                     application_id.into(),
@@ -793,6 +921,10 @@ impl PlatformService {
                     text_list(&accounts),
                     text_list(&orgs),
                     now.into(),
+                    developer_name.into(),
+                    logo_url.into(),
+                    surface.as_ref().map(|s| s.url.clone()).into(),
+                    surface.map(|s| s.origins).unwrap_or_default().into(),
                 ],
             ))
             .await?
@@ -1934,6 +2066,9 @@ mod tests {
             developer_name: "Dev".into(),
             app_active: true,
             secret_issued_at: None,
+            developer_name_set: false,
+            logo_url: None,
+            meeting_surface: None,
         }
     }
 
