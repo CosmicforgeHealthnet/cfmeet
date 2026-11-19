@@ -15,7 +15,7 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.7.0 | 307 |
-| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.7.0 | 74 |
+| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.8.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.30.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.21.0 | 108 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.8.0 | 101 |
@@ -544,7 +544,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.7.0**; ba
 
 ## Communications Hub (contacts, CF Meet ID / QR, timeline, activity)
 
-Contract `packages/contracts/communications/http/v1.openapi.json` version **1.7.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
+Contract `packages/contracts/communications/http/v1.openapi.json` version **1.8.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
 
 ### Calls
 

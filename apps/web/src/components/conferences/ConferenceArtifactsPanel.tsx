@@ -24,6 +24,7 @@ import {
   useWithdrawConsent,
 } from "@/hooks/v2/useArtifacts";
 import { effectiveConferenceRole, meetingAllows } from "@/lib/meeting-authority";
+import { MEETING_AI_READY, MEETING_RECORDING_READY } from "@/lib/meeting-capture";
 import { artifactAccessible, artifactDisplayName, artifactStateLabel, formatBytes } from "@/lib/artifact-display";
 import { cn } from "@/lib/utils";
 import type { ConsentKind, GenerateReportRequest, ProfilePolicy, Role, WithdrawalResponse } from "@/types/v2";
@@ -88,7 +89,7 @@ export default function ConferenceArtifactsPanel({ conferenceId, spaceRole, role
   const can = (permission: string) => meetingAllows(role, permission as never, rolePolicy);
   const canList = can("artifact.list") || can("artifact.read") || can("recording.start");
   const canExport = can("artifact.export");
-  const canTranscripts = can("transcript.read") || can("transcription.start");
+  const canTranscripts = MEETING_AI_READY && (can("transcript.read") || can("transcription.start"));
   const canConsent = me.data?.admissionState === "ADMITTED";
   const consent = useConsentRequirements(conferenceId, canConsent);
   const hasConsent = !!consent.data?.requirements.length;
@@ -323,8 +324,8 @@ function ReportsTab({ conferenceId, canList, canExport, canRead, canDelete }: { 
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold text-foreground">{label}</span>
                 <span className="block truncate text-xs text-muted-foreground">{hint}</span>
-                <button type="button" disabled={generate.isPending} onClick={() => generate.mutate({ artifactType: value }, { onSuccess: () => setNotice(`${label} report saved below.`) })}
-                  className="mt-0.5 text-xs font-semibold text-primary hover:underline disabled:opacity-50">Save a copy</button>
+                {MEETING_RECORDING_READY ? <button type="button" disabled={generate.isPending} onClick={() => generate.mutate({ artifactType: value }, { onSuccess: () => setNotice(`${label} report saved below.`) })}
+                  className="mt-0.5 text-xs font-semibold text-primary hover:underline disabled:opacity-50">Save a copy</button> : null}
               </span>
               <button type="button" aria-label={`Download ${label.toLowerCase()}`} title="Download" onClick={() => void downloadReport(conferenceId, value, label).catch(setFailure)}
                 className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><Download className="size-4" /></button>

@@ -8345,7 +8345,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$",
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$",
             "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
           }
         },
@@ -10562,7 +10562,7 @@
           },
           "counterpartCfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$",
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$",
             "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
           },
           "title": {

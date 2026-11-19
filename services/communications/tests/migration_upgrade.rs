@@ -3,8 +3,8 @@
 //! rows without advancing their version and the version guard aborted the migration.
 use communications_migration::{
     DeviceSessionMigrator, GroupInvitationPolicyMigrator, Migrator, MigratorTrait,
-    NotificationPublicationsMigrator, PreferenceAuthorityMigrator, TimelineRealtimeMigrator,
-    UnifiedMigrator,
+    NotificationPublicationsMigrator, PreferenceAuthorityMigrator, ShortIdsMigrator,
+    TimelineRealtimeMigrator, UnifiedMigrator,
 };
 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 use uuid::Uuid;
@@ -44,7 +44,10 @@ async fn the_group_invitation_history_upgrades_existing_privacy_rows_without_tou
                  account_reference, principal_id, display_name) VALUES ('{profile}', '{t}', '{t}', '{t}', \
                  'cfmeet-user:{n}', '{p}', 'Person {n}');
                  INSERT INTO communication_privacy (profile_id, version, contact_request_permissions) \
-                 VALUES ('{profile}', 3, '{permission}');",
+                 VALUES ('{profile}', 3, '{permission}');
+                 INSERT INTO communication_public_ids (public_id, profile_id) \
+                 VALUES ('CF-{long}', '{profile}');",
+                long = "ABCDEFGHIJKLMNOPQRSTUVWXY".to_owned() + if n == 1 { "2" } else { "3" },
                 t = Uuid::nil(),
                 p = Uuid::new_v4(),
         ))
@@ -86,5 +89,57 @@ async fn the_group_invitation_history_upgrades_existing_privacy_rows_without_tou
         ))
         .await;
     assert!(refused.is_err(), "the version guard must be enabled again");
+    assert!(!communications_migration::ready(&db).await.unwrap());
+
+    // Short CF Meet IDs (owner decision 2026-11-19): every long current ID is retired and
+    // replaced by CF- plus 6 characters; direct contact is on; privacy versions unchanged.
+    ShortIdsMigrator::up(&db, None).await.unwrap();
+    let ids = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT public_id, current FROM communication_public_ids ORDER BY current, public_id"
+                .to_owned(),
+        ))
+        .await
+        .unwrap();
+    let ids: Vec<(String, bool)> = ids
+        .iter()
+        .map(|r| {
+            (
+                r.try_get("", "public_id").unwrap(),
+                r.try_get("", "current").unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(ids.len(), 4, "{ids:?}");
+    assert!(
+        ids[..2]
+            .iter()
+            .all(|(id, current)| !current && id.len() == 29),
+        "{ids:?}"
+    );
+    assert!(
+        ids[2..].iter().all(|(id, current)| *current
+            && id.len() == 9
+            && id.starts_with("CF-")
+            && id[3..]
+                .bytes()
+                .all(|b| b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789".contains(&b))),
+        "{ids:?}"
+    );
+    let privacy = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT contact_approval, version FROM communication_privacy".to_owned(),
+        ))
+        .await
+        .unwrap();
+    for r in privacy {
+        assert_eq!(
+            r.try_get::<String>("", "contact_approval").unwrap(),
+            "AUTOMATIC"
+        );
+        assert_eq!(r.try_get::<i64>("", "version").unwrap(), 3);
+    }
     assert!(communications_migration::ready(&db).await.unwrap());
 }

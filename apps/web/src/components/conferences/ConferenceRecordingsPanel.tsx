@@ -9,6 +9,7 @@ import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { useCurrentParticipant } from "@/hooks/v2/useParticipants";
 import { useRecordings, useStartRecording, useStopRecording } from "@/hooks/v2/useArtifacts";
 import { effectiveConferenceRole, meetingAllows } from "@/lib/meeting-authority";
+import { MEETING_AI_READY, MEETING_RECORDING_READY } from "@/lib/meeting-capture";
 import type { ArtifactStatus, RecordingResponse, Role, RolePolicy } from "@/types/v2";
 
 const activeRecordingStatuses: ArtifactStatus[] = ["REQUESTED", "RECORDING", "STOPPING", "PROCESSING"];
@@ -41,7 +42,7 @@ export default function ConferenceRecordingsPanel({
   const [feedback, setFeedback] = useState("");
   const me = useCurrentParticipant(conferenceId);
   const role = effectiveConferenceRole(spaceRole, me.data?.role, me.data?.admissionState);
-  const recordingEnabled = recordingPolicy !== "DISABLED";
+  const recordingEnabled = MEETING_RECORDING_READY && recordingPolicy !== "DISABLED";
   const canStart = recordingEnabled && meetingAllows(role, "recording.start", rolePolicy);
   const canStop = recordingEnabled && meetingAllows(role, "recording.stop", rolePolicy);
   const canList = meetingAllows(role, "artifact.list", rolePolicy) || canStart || canStop;

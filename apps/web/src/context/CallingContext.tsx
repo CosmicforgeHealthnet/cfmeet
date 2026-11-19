@@ -236,7 +236,7 @@ function CallingSession({ principalId, children }: { principalId: string; childr
         setMedia(null);
         void (async () => {
           const call = await callsService.get(callId);
-          await callsService.cancel(callId, { expectedVersion: call.version }, newIdempotencyKey());
+          await callsService.hangUp(callId, "cancel", call.version);
         })().catch(() => undefined);
       }
       // Keep the calling screen up until this call's own screen takes over (no blank gap).
@@ -262,7 +262,7 @@ function CallingSession({ principalId, children }: { principalId: string; childr
     if (callId) {
       void (async () => {
         const call = await callsService.get(callId);
-        await callsService.cancel(callId, { expectedVersion: call.version }, newIdempotencyKey());
+        await callsService.hangUp(callId, "cancel", call.version);
       })().catch(() => undefined);
     }
   }, []);

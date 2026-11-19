@@ -143,6 +143,10 @@ export interface Privacy {
   directChatPolicy: "CONNECTIONS" | "NOBODY";
   publicProfileVisibility: "PUBLIC" | "CONNECTIONS" | "HIDDEN";
   presenceVisibility: "CONNECTIONS" | "NOBODY";
+  /** Who may add this person to groups (optional on update; always present when read). */
+  groupInvitationPolicy?: "CONNECTIONS" | "NOBODY";
+  /** Direct contact: AUTOMATIC lets anyone with the CF Meet ID add, chat and call straight away. */
+  contactApproval?: "AUTOMATIC" | "MANUAL";
 }
 
 export interface PrivacyView {

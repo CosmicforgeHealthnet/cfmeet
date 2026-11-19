@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAccountProfile, useUpdateAccountProfile } from "@/hooks/useAccount";
 import { accountService } from "@/services/account.service";
+import { AVATAR_ERROR_MESSAGES, prepareAvatarImage } from "@/lib/account/avatar-image";
 import { authService } from "@/services/auth.service";
 import {
   accountStatusLabel,
@@ -185,7 +186,6 @@ const LANGUAGES = [
   { value: "sw", label: "Kiswahili" },
 ];
 
-/** Tap the photo to upload a new one (PNG, JPEG or WebP, up to 512 KB). */
 /** Your CF Meet ID: what people type to add you as a contact. */
 function MyCfMeetId() {
   const profile = useHubProfile();
@@ -202,15 +202,20 @@ function MyCfMeetId() {
   );
 }
 
+/** Tap the photo to upload a new one; large photos are shrunk to fit the 512 KB limit. */
 function AvatarUpload({ avatar, initials, onUploaded }: { avatar: string | null; initials: string; onUploaded: (url: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pick = async (file: File | undefined) => {
     if (!file) return;
-    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setError("Use a PNG, JPEG or WebP image."); return; }
-    if (file.size > 512 * 1024) { setError("That photo is too big. Use one under 512 KB."); return; }
     setBusy(true); setError(null);
-    try { const p = await accountService.uploadAvatar(file); if (p.avatarUrl) onUploaded(p.avatarUrl); }
+    try {
+      // Shrink phone photos in the browser so they fit the server's 512 KB limit.
+      const prepared = await prepareAvatarImage(file);
+      if (!prepared.ok) { setError(AVATAR_ERROR_MESSAGES[prepared.error]); return; }
+      const p = await accountService.uploadAvatar(prepared.file);
+      if (p.avatarUrl) onUploaded(p.avatarUrl);
+    }
     catch (e) { setError(getErrorMessage(e, "The photo couldn't be uploaded. Try again.")); }
     finally { setBusy(false); }
   };
@@ -224,7 +229,7 @@ function AvatarUpload({ avatar, initials, onUploaded }: { avatar: string | null;
           <span className="flex size-16 items-center justify-center bg-primary/10 text-xl font-semibold text-primary">{initials}</span>
         )}
         <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-[11px] font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">{busy ? "Uploading…" : "Change"}</span>
-        <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
+        <input type="file" accept="image/*" className="sr-only" disabled={busy} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
       </label>
       {error ? <p role="alert" className="max-w-[10rem] text-center text-[11px] text-destructive">{error}</p> : null}
     </div>
