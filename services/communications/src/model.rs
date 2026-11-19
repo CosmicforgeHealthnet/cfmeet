@@ -42,6 +42,14 @@ pub enum Audience {
     Connections,
     Nobody,
 }
+/// Who decides on a new contact: AUTOMATIC (default) connects anyone who has the person's
+/// CF Meet ID straight away (they gave their consent by sharing it); MANUAL keeps requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContactApproval {
+    Automatic,
+    Manual,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum RequestPermission {
@@ -76,6 +84,10 @@ pub struct Privacy {
     /// on update (absent: unchanged); always present when read.
     #[serde(default)]
     pub group_invitation_policy: Option<Audience>,
+    /// Direct contact by CF Meet ID. Optional on update (absent: unchanged); always present
+    /// when read.
+    #[serde(default)]
+    pub contact_approval: Option<ContactApproval>,
 }
 impl Default for Privacy {
     fn default() -> Self {
@@ -88,6 +100,7 @@ impl Default for Privacy {
             public_profile_visibility: Visibility::Public,
             presence_visibility: Audience::Connections,
             group_invitation_policy: Some(Audience::Connections),
+            contact_approval: Some(ContactApproval::Automatic),
         }
     }
 }
@@ -103,6 +116,8 @@ pub struct PrivacyRow {
     pub presence_visibility: Audience,
     #[serde(default)]
     pub group_invitation_policy: Option<Audience>,
+    #[serde(default)]
+    pub contact_approval: Option<ContactApproval>,
 }
 impl PrivacyRow {
     pub fn settings(&self) -> Privacy {
@@ -118,6 +133,7 @@ impl PrivacyRow {
                 self.group_invitation_policy
                     .unwrap_or(Audience::Connections),
             ),
+            contact_approval: Some(self.contact_approval.unwrap_or(ContactApproval::Automatic)),
         }
     }
 }

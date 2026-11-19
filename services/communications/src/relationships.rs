@@ -92,6 +92,54 @@ impl State {
             }
         }
         let id = Uuid::new_v4();
+        // Direct contact (owner decision 2026-11-19): a person whose contact approval is
+        // AUTOMATIC gave their consent by sharing their CF Meet ID, so adding them connects
+        // straight away, and chat and calls (CONNECTIONS policies) work at once. The same
+        // checks as accepting a request apply (active person and account, no domain block).
+        let automatic = self
+            .store
+            .privacy(&txn, target.id)
+            .await?
+            .contact_approval
+            .unwrap_or(ContactApproval::Automatic)
+            == ContactApproval::Automatic
+            && target.activation_state == Activation::Active
+            && self.active_account(scope, &target).await?
+            && !self.domain_blocks(scope, &target, p).await?;
+        if automatic {
+            execute(&txn,"INSERT INTO communication_contact_requests(id,connection_id,sender_profile_id,recipient_profile_id,state) VALUES($1,$2,$3,$4,'ACCEPTED')",vec![id.into(),pair.id.into(),p.id.into(),target.id.into()]).await?;
+            execute(&txn,"UPDATE communication_connections SET state='CONNECTED',connected_at=now(),version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into()]).await?;
+            for owner in [p.id, target.id] {
+                execute(&txn,"INSERT INTO communication_contact_aliases(id,owner_profile_id,connection_id) VALUES($1,$2,$3) ON CONFLICT(owner_profile_id,connection_id) DO NOTHING",vec![Uuid::new_v4().into(),owner.into(),pair.id.into()]).await?;
+            }
+            self.store
+                .audit(&txn, p, "CONNECTION_ADDED_DIRECTLY", Some(id), json!({}))
+                .await?;
+            self.store.event(&txn,p,"communications.connection.connected",pair.id,pair.version+1,json!({"actorPrincipalId":p.principal_id,"targetPrincipalId":target.principal_id,"state":"CONNECTED"})).await?;
+            // The added person learns they have a new contact ("You are now connected").
+            notification_publications::enqueue(
+                self,
+                &txn,
+                Notice {
+                    notice: ConnectionNotice::Connected,
+                    request_id: id,
+                    connection_id: pair.id,
+                    connection_version: pair.version + 1,
+                    actor: p,
+                    recipient: &target,
+                },
+            )
+            .await?;
+            self.store
+                .relationship_changed(&txn, &[p.id, target.id], pair.id, pair.version + 1)
+                .await?;
+            let result = json!({"schemaVersion":1,"requestId":id,"cfMeetId":self.store.current_public_id(&txn,target.id).await?,"state":"ACCEPTED","version":1,"relationship":"CONNECTED"});
+            self.store
+                .finish_idempotency(&txn, p, "contact-request.create", key, result.clone())
+                .await?;
+            txn.commit().await?;
+            return Ok(result);
+        }
         execute(&txn,"INSERT INTO communication_contact_requests(id,connection_id,sender_profile_id,recipient_profile_id) VALUES($1,$2,$3,$4)",vec![id.into(),pair.id.into(),p.id.into(),target.id.into()]).await?;
         execute(&txn,"UPDATE communication_connections SET state='REQUEST_PENDING',version=version+1,updated_at=now() WHERE id=$1",vec![pair.id.into()]).await?;
         self.store
@@ -116,7 +164,7 @@ impl State {
         self.store
             .relationship_changed(&txn, &[p.id, target.id], pair.id, pair.version + 1)
             .await?;
-        let result = json!({"schemaVersion":1,"requestId":id,"cfMeetId":request.cf_meet_id,"state":"PENDING","version":1});
+        let result = json!({"schemaVersion":1,"requestId":id,"cfMeetId":self.store.current_public_id(&txn,target.id).await?,"state":"PENDING","version":1,"relationship":"REQUEST_PENDING"});
         self.store
             .finish_idempotency(&txn, p, "contact-request.create", key, result.clone())
             .await?;

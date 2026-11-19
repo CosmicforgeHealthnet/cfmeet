@@ -72,6 +72,11 @@ jobs:
       - name: Account session tests
         run: node --experimental-strip-types --test tests/account-session.test.mjs
 
+      # Gap A22: the profile photo is shrunk in the browser (EXIF orientation, <= 512 px,
+      # JPEG at decreasing quality) to fit the Meeting Service's 512 KiB avatar limit.
+      - name: Avatar image shrinking tests
+        run: node --experimental-strip-types --test tests/avatar-image.test.mjs
+
       # F1: structured 400 VALIDATION_ERROR details mapped onto form fields (sign-up,
       # password reset, password change), with the message-only fallback.
       - name: Form validation error mapping tests

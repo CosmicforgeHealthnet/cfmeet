@@ -837,11 +837,32 @@ impl Harness {
             .clone()
             .with_initiating_principal(a.principal_id, DelegatedPrincipalKind::NativeCfUser)
     }
+    /// A profile with MANUAL contact approval, so the request flow these tests cover still
+    /// applies; [`Harness::direct_profile`] keeps the AUTOMATIC default.
     pub async fn profile(&self, a: &VerifiedAccount) -> Profile {
+        let p = self.direct_profile(a).await;
+        self.set_contact_approval(&p, "MANUAL").await;
+        p
+    }
+    /// A profile with the default contact approval (AUTOMATIC: direct contact by CF Meet ID).
+    pub async fn direct_profile(&self, a: &VerifiedAccount) -> Profile {
         self.state
             .ensure_profile(&self.delegated(a), a)
             .await
             .unwrap()
+    }
+    /// Sets contact approval without advancing the privacy version (test setup only).
+    pub async fn set_contact_approval(&self, p: &Profile, value: &str) {
+        let db = &self.state.store.db;
+        for sql in [
+            "ALTER TABLE communication_privacy DISABLE TRIGGER communication_privacy_version".to_owned(),
+            format!("UPDATE communication_privacy SET contact_approval = '{value}' WHERE profile_id = '{}'", p.id),
+            "ALTER TABLE communication_privacy ENABLE TRIGGER communication_privacy_version".to_owned(),
+        ] {
+            db.execute(Statement::from_string(DbBackend::Postgres, sql))
+                .await
+                .unwrap();
+        }
     }
     pub async fn public_id(&self, p: &Profile) -> String {
         self.state
@@ -927,6 +948,9 @@ impl Harness {
             .await
             .unwrap();
         let id = Uuid::parse_str(request["requestId"].as_str().unwrap()).unwrap();
+        if request["state"] == "ACCEPTED" {
+            return id; // direct contact: already connected
+        }
         self.state
             .decide_request(
                 &self.scope,

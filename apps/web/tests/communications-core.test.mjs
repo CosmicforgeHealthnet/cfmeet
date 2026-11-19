@@ -33,10 +33,13 @@ test("invite payloads: only the connect path's token is accepted", () => {
   assert.equal(inviteTokenFromPayload("short"), null);
 });
 
-test("CF Meet IDs are normalized and validated", () => {
-  const raw = "abcdefghijklmnopqrstuvwxyz".toUpperCase().replace(/[01890]/g, "A");
-  assert.equal(normalizeCfMeetId(` cf-${raw.toLowerCase()} `), `CF-${raw}`);
+test("CF Meet IDs are short, normalized and validated", () => {
+  assert.equal(normalizeCfMeetId(" cf-ab7k3q "), "CF-AB7K3Q");
+  assert.equal(normalizeCfMeetId("cfab7k3q"), "CF-AB7K3Q");
+  assert.equal(normalizeCfMeetId("ab7k3q"), "CF-AB7K3Q");
   assert.equal(normalizeCfMeetId("CF-123"), null);
+  assert.equal(normalizeCfMeetId("CF-AB7K3O"), null, "no look-alike letters");
+  assert.equal(normalizeCfMeetId("CF-ABCDEFGHJKLMNPQRSTUVWXYZ23"), null, "old long IDs no longer work");
 });
 
 test("Hub change-feed domains map to refetch areas; resync is never a silent ack", () => {

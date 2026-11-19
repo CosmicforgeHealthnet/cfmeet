@@ -45,11 +45,11 @@ export default function ConnectInvite({ token }: { token: string }) {
               <p className="text-sm">You are already connected. <Link className="text-primary underline" href="/dashboard/contacts">Open contacts</Link></p>
             ) : (
               <Button data-testid="invite-request" disabled={request.isPending || request.isSuccess || profile.permittedActions?.requestConnection === false} onClick={() => request.mutate(profile.cfMeetId)}>
-                <UserPlus className="h-4 w-4" /> {request.isSuccess ? "Request sent" : "Send contact request"}
+                <UserPlus className="h-4 w-4" /> {request.isSuccess ? (request.data?.state === "ACCEPTED" ? "Added to contacts" : "Request sent") : "Send contact request"}
               </Button>
             )}
             {request.error ? <p role="alert" className="text-sm text-destructive">{communicationsErrorMessage(request.error)}</p> : null}
-            {request.isSuccess ? <p className="text-sm text-muted-foreground">They will see your request in their Contacts. <Link className="text-primary underline" href="/dashboard/contacts">Go to contacts</Link></p> : null}
+            {request.isSuccess ? <p className="text-sm text-muted-foreground">{request.data?.state === "ACCEPTED" ? "You can chat and call them now." : "They will see your request in their Contacts."} <Link className="text-primary underline" href="/dashboard/contacts">Go to contacts</Link></p> : null}
           </div>
         ) : null}
       </div>

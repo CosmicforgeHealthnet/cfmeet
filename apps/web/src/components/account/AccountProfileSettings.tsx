@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { useAccountProfile, useUpdateAccountProfile } from "@/hooks/useAccount";
 import { accountService } from "@/services/account.service";
+import { AVATAR_ERROR_MESSAGES, prepareAvatarImage } from "@/lib/account/avatar-image";
 import { authService } from "@/services/auth.service";
 import {
   accountStatusLabel,
@@ -201,37 +202,18 @@ function MyCfMeetId() {
   );
 }
 
-const AVATAR_MAX_BYTES = 512 * 1024;
-
-/** Phone photos are usually several MB: crop to a centred square, resize and re-encode until it fits. */
-async function shrinkPhoto(file: File): Promise<Blob> {
-  if (file.size <= AVATAR_MAX_BYTES) return file;
-  const bitmap = await createImageBitmap(file);
-  const side = Math.min(bitmap.width, bitmap.height);
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = Math.min(512, side);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("This browser can't resize photos.");
-  ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  for (const quality of [0.9, 0.8, 0.65, 0.5]) {
-    const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/jpeg", quality));
-    if (blob && blob.size <= AVATAR_MAX_BYTES) return blob;
-  }
-  throw new Error("That photo couldn't be made small enough. Try another one.");
-}
-
-/** Tap the photo to upload a new one (PNG, JPEG or WebP; large photos are resized here). */
+/** Tap the photo to upload a new one; large photos are shrunk to fit the 512 KB limit. */
 function AvatarUpload({ avatar, initials, onUploaded }: { avatar: string | null; initials: string; onUploaded: (url: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pick = async (file: File | undefined) => {
     if (!file) return;
-    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setError("Use a PNG, JPEG or WebP image."); return; }
     setBusy(true); setError(null);
     try {
-      const photo = await shrinkPhoto(file);
-      const p = await accountService.uploadAvatar(photo instanceof File ? photo : new File([photo], "photo.jpg", { type: "image/jpeg" }));
+      // Shrink phone photos in the browser so they fit the server's 512 KB limit.
+      const prepared = await prepareAvatarImage(file);
+      if (!prepared.ok) { setError(AVATAR_ERROR_MESSAGES[prepared.error]); return; }
+      const p = await accountService.uploadAvatar(prepared.file);
       if (p.avatarUrl) onUploaded(p.avatarUrl);
     }
     catch (e) { setError(getErrorMessage(e, "The photo couldn't be uploaded. Try again.")); }
@@ -247,7 +229,7 @@ function AvatarUpload({ avatar, initials, onUploaded }: { avatar: string | null;
           <span className="flex size-16 items-center justify-center bg-primary/10 text-xl font-semibold text-primary">{initials}</span>
         )}
         <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-[11px] font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">{busy ? "Uploading…" : "Change"}</span>
-        <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
+        <input type="file" accept="image/*" className="sr-only" disabled={busy} onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
       </label>
       {error ? <p role="alert" className="max-w-[10rem] text-center text-[11px] text-destructive">{error}</p> : null}
     </div>

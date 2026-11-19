@@ -7,17 +7,21 @@
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const CF_MEET_ID = /^CF-[A-Z2-7]{26}$/;
+const CF_MEET_ID = /^CF-[A-HJ-NP-Z2-9]{6}$/;
 
 export function isUuid(value: unknown): value is string {
   return typeof value === "string" && UUID.test(value);
 }
 
-/** A CF Meet ID as typed by a person: trimmed, upper-cased, `CF-` + 26 base32 characters. */
+/**
+ * A CF Meet ID as typed by a person: trimmed, upper-cased, spaces removed, the `CF` prefix and
+ * hyphen optional — `CF-` + 6 characters without look-alikes (no I, O, 0 or 1).
+ */
 export function normalizeCfMeetId(input: string): string | null {
   const v = input.trim().toUpperCase().replace(/\s+/g, "");
-  const withPrefix = v.startsWith("CF-") ? v : `CF-${v}`;
-  return CF_MEET_ID.test(withPrefix) ? withPrefix : null;
+  const body = v.startsWith("CF-") ? v.slice(3) : v.startsWith("CF") && v.length === 8 ? v.slice(2) : v;
+  const id = `CF-${body}`;
+  return CF_MEET_ID.test(id) ? id : null;
 }
 
 // ------------------------------------------------------------------ navigation hooks

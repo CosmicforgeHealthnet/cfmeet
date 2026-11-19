@@ -257,7 +257,13 @@ impl State {
                 .map(str::to_owned)
                 .into(),
         );
-        let changed=execute(&txn,"UPDATE communication_privacy SET public_id_discoverable=$3,invitation_permissions=$4,contact_request_permissions=$5,incoming_call_policy=$6,direct_chat_policy=$7,public_profile_visibility=$8,presence_visibility=$9,group_invitation_policy=COALESCE($10,group_invitation_policy),version=version+1,updated_at=now() WHERE profile_id=$1 AND version=$2",values).await?;
+        values.push(
+            encoded["contactApproval"]
+                .as_str()
+                .map(str::to_owned)
+                .into(),
+        );
+        let changed=execute(&txn,"UPDATE communication_privacy SET public_id_discoverable=$3,invitation_permissions=$4,contact_request_permissions=$5,incoming_call_policy=$6,direct_chat_policy=$7,public_profile_visibility=$8,presence_visibility=$9,group_invitation_policy=COALESCE($10,group_invitation_policy),contact_approval=COALESCE($11,contact_approval),version=version+1,updated_at=now() WHERE profile_id=$1 AND version=$2",values).await?;
         if changed != 1 {
             return Err(Error::Version);
         }
