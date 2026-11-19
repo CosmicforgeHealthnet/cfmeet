@@ -8,6 +8,7 @@
 //! There is no customer-facing route: customers reach the Developer Platform only through
 //! the API Gateway. Extractor rejections are normalized to the error envelope.
 
+pub mod apps;
 pub mod error;
 pub mod internal;
 pub mod middleware;
@@ -47,6 +48,7 @@ pub fn app(state: AppState) -> Router {
             "/v1",
             public::routes()
                 .merge(public::build_routes(state.build))
+                .merge(apps::console_routes(state.build))
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
@@ -63,14 +65,20 @@ pub fn app(state: AppState) -> Router {
             internal::routes()
                 .merge(operator::routes())
                 .merge(crate::webhooks::migration::http::routes())
+                .merge(apps::operator_routes(state.build))
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )
         .layer(map_response(normalize_rejections))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(from_fn_with_state(state.clone(), require_internal_service))
-        .with_state(state);
-    public.merge(customer).merge(internal)
+        .with_state(state.clone());
+    // ADR 0064 / 0065: the anonymous `/v1/oauth/*` and `/v1/app-directory*` routes (only
+    // registered while their flags are on).
+    public
+        .merge(apps::anonymous_routes(state))
+        .merge(customer)
+        .merge(internal)
 }
 
 /// The served API description: exactly the checked-in contract

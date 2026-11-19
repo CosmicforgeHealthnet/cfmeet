@@ -22,10 +22,18 @@ internal / admin / provider operation public (the build fails).
 
 Partner meetings family (``/v1/meetings``): every Meeting Service operation that accepts a
 platform credential (the machine operations, ``x-cfmeet-required-scope`` meetings.*) is ALSO
-routed as ``/v1/meetings/<rest>`` -> upstream ``/api/v2/<rest>``, PLATFORM_CREDENTIAL only
-(route id ``meetings.platform.<operationId>``, ``aliasOf`` the ``/api/v2`` route, which stays
-unchanged). Production edge cannot send ``/api/v2`` to the gateway: the CF Meet apps call
-those paths directly. The public meetings document lists the alias paths too.
+routed as ``/v1/meetings/<rest>`` -> upstream ``/api/v2/<rest>``, PLATFORM_CREDENTIAL only —
+plus OAUTH_ACCESS_TOKEN when the operation's security also lists ``oauthAccessToken``
+(ADR 0064) — (route id ``meetings.platform.<operationId>``, ``aliasOf`` the ``/api/v2`` route,
+which stays unchanged). Production edge cannot send ``/api/v2`` to the gateway: the CF Meet
+apps call those paths directly. The public meetings document lists the alias paths too.
+
+Authorization pass-through (ADR 0064): an operation marked
+``x-cfmeet-forward-authorization: true`` (the Developer Console OAuth token / revoke /
+userinfo endpoints) is routed ANONYMOUS with ``forwardAuthorization: true``: the gateway
+transports ``Authorization`` (an OAuth bearer token or Basic client credentials) unchanged and
+the Developer Console verifies it with Platform Access. Only REST Developer Platform
+operations may carry the marker; their declared security documents what the Console checks.
 
 Outputs (generated, checked by CI with ``--check``):
   * ``infra/api-gateway/route-manifest.json`` — the full classified catalogue plus the
@@ -90,7 +98,10 @@ AUTH_MODES = {
     "participant_token": "PARTICIPANT_TOKEN",
     "userSession": "DEVELOPER_SESSION",
     "userToken": "USER_TOKEN",
+    "oauthAccessToken": "OAUTH_ACCESS_TOKEN",
 }
+# Authentication modes a ``/v1/meetings`` alias may carry (machine credentials only).
+ALIAS_AUTH = ("PLATFORM_CREDENTIAL", "OAUTH_ACCESS_TOKEN")
 # Security schemes that never appear in customer documents.
 INTERNAL_SCHEMES = {"cfServiceAuth", "serviceToken", "mediaProviderSignature", "providerSignature",
                     "contactDelegation", "mediaCredential", "api_key_auth"}
@@ -173,8 +184,9 @@ def meetings_platform_alias(route: dict, operation_id: str):
     """The ``/v1/meetings`` partner alias of a meetings route, or None.
 
     Only a REST Meeting Service ``/api/v2/...`` route that accepts PLATFORM_CREDENTIAL gets
-    one; the alias accepts PLATFORM_CREDENTIAL only and keeps the scope, forwarded headers
-    and timeout. The gateway refuses any other rewrite shape (services/api-gateway routing)."""
+    one; the alias accepts PLATFORM_CREDENTIAL (and OAUTH_ACCESS_TOKEN when the route accepts
+    it) and keeps the scope, forwarded headers and timeout. The gateway refuses any other
+    rewrite shape (services/api-gateway routing)."""
     if route["domain"] != "meetings" or route["protocol"] != "REST" or "PLATFORM_CREDENTIAL" not in route["auth"]:
         return None
     if route["upstream"] != "cfmeet.meeting-service" or route["upstreamPath"] != route["pattern"]:
@@ -190,7 +202,7 @@ def meetings_platform_alias(route: dict, operation_id: str):
         "protocol": "REST",
         "upstream": route["upstream"],
         "upstreamPath": route["upstreamPath"],
-        "auth": ["PLATFORM_CREDENTIAL"],
+        "auth": [m for m in ALIAS_AUTH if m in route["auth"]],
         "forwardHeaders": list(route["forwardHeaders"]),
         "aliasOf": route["id"],
     }
@@ -202,7 +214,8 @@ def meetings_platform_alias(route: dict, operation_id: str):
 
 def check_aliases(routes):
     """Every alias names a live route with the same method and upstream, is exactly the
-    ``/v1/meetings/<rest>`` -> ``/api/v2/<rest>`` shape and accepts a platform credential only."""
+    ``/v1/meetings/<rest>`` -> ``/api/v2/<rest>`` shape and accepts machine credentials only:
+    a platform credential, plus an OAuth access token exactly when its route accepts one."""
     by_id = {r["id"]: r for r in routes}
     for r in routes:
         if "aliasOf" not in r:
@@ -216,8 +229,31 @@ def check_aliases(routes):
         if (r["domain"] != "meetings" or not r["id"].startswith(MEETINGS_ALIAS_ID)
                 or r["upstream"] != "cfmeet.meeting-service" or r["protocol"] != "REST"
                 or not r["upstreamPath"].startswith(MEETINGS_UPSTREAM_PREFIX + "/")
-                or r["pattern"] != MEETINGS_ALIAS_PREFIX + rest or r["auth"] != ["PLATFORM_CREDENTIAL"]):
-            raise CatalogueError(f"{r['id']}: an alias is a PLATFORM_CREDENTIAL-only /v1/meetings/<rest> -> /api/v2/<rest> Meeting Service route")
+                or r["pattern"] != MEETINGS_ALIAS_PREFIX + rest
+                or r["auth"] != [m for m in ALIAS_AUTH if m in target["auth"]]
+                or "PLATFORM_CREDENTIAL" not in r["auth"]):
+            raise CatalogueError(f"{r['id']}: an alias is a machine-credential (PLATFORM_CREDENTIAL [+ OAUTH_ACCESS_TOKEN]) /v1/meetings/<rest> -> /api/v2/<rest> Meeting Service route")
+
+
+FORWARD_AUTHORIZATION = "x-cfmeet-forward-authorization"
+
+
+def forward_authorization(route_id: str, op: dict, doc: dict, upstream: str, protocol: str):
+    """Whether the operation is a marked ``Authorization`` pass-through (route auth ANONYMOUS,
+    ``forwardAuthorization: true``). Only a REST Developer Platform operation may be marked;
+    its declared security (documentation of what the Developer Console verifies) must not name
+    an internal scheme."""
+    marker = op.get(FORWARD_AUTHORIZATION)
+    if marker is None:
+        return False
+    if marker is not True:
+        raise CatalogueError(f"{route_id}: {FORWARD_AUTHORIZATION} must be true when present")
+    if upstream != "cfmeet.developer-platform" or protocol != "REST":
+        raise CatalogueError(f"{route_id}: {FORWARD_AUTHORIZATION} is only for REST Developer Platform operations")
+    internal = [n for n in security_names(op, doc) if n in INTERNAL_SCHEMES]
+    if internal:
+        raise CatalogueError(f"{route_id}: internal security scheme {internal[0]} on a public route")
+    return True
 
 
 def check_replacements(routes):
@@ -309,17 +345,23 @@ def build():
         if route_id in route_ids:
             raise CatalogueError(f"{key}: duplicate route id {route_id} (operationIds must be unique per domain)")
         route_ids.add(route_id)
+        protocol = entry.get("protocol", "REST")
+        forward = forward_authorization(route_id, op, doc, upstream, protocol)
+        if forward and entry.get("auth") not in (None, ["ANONYMOUS"]):
+            raise CatalogueError(f"{route_id}: a {FORWARD_AUTHORIZATION} route is ANONYMOUS")
         route = {
             "id": route_id,
             "domain": domain,
             "method": method,
             "pattern": pattern_of(path),
-            "protocol": entry.get("protocol", "REST"),
+            "protocol": protocol,
             "upstream": upstream,
             "upstreamPath": entry.get("upstreamPath", pattern_of(path)),
-            "auth": entry.get("auth") or auth_modes(domain, op, doc),
+            "auth": ["ANONYMOUS"] if forward else (entry.get("auth") or auth_modes(domain, op, doc)),
             "forwardHeaders": EXTRA_FORWARDED.get(domain, []),
         }
+        if forward:
+            route["forwardAuthorization"] = True
         scope = op.get("x-cfmeet-required-scope")
         if scope is not None:
             check_required_scope(route_id, scope, registry)
@@ -444,21 +486,25 @@ def prune_components(doc):
 
 
 def alias_operation(op, alias, op_ids):
-    """The documented ``/v1/meetings`` alias of a public operation: platform credential only."""
+    """The documented ``/v1/meetings`` alias of a public operation: machine credentials only."""
     out = copy.deepcopy(op)
     operation_id = MEETINGS_ALIAS_OPERATION + op["operationId"]
     if operation_id in op_ids:
         raise CatalogueError(f"{alias['id']}: alias operationId {operation_id} is already a contract operationId")
     op_ids.add(operation_id)
     out["operationId"] = operation_id
-    note = (f"Partner server route (platform credential only) of `{alias['method']} {alias['upstreamPath']}`; "
+    who = ("platform credential or CF Meet Apps OAuth access token" if "OAUTH_ACCESS_TOKEN" in alias["auth"]
+           else "platform credential only")
+    note = (f"Partner server route ({who}) of `{alias['method']} {alias['upstreamPath']}`; "
             "the CF Meet apps call that path directly.")
     out["description"] = note + ("\n\n" + out["description"] if out.get("description") else "")
     out["x-cfmeet-route-id"] = alias["id"]
     out["x-cfmeet-auth"] = alias["auth"]
     out["x-cfmeet-alias-of"] = alias["aliasOf"]
     security = [alt for alt in out.get("security", []) or []
-                if alt and all(AUTH_MODES.get(k) == "PLATFORM_CREDENTIAL" for k in alt)]
+                if alt and all(AUTH_MODES.get(k) in alias["auth"] for k in alt)]
+    if not any(all(AUTH_MODES.get(k) == "PLATFORM_CREDENTIAL" for k in alt) for alt in security):
+        security = []
     if not security:
         raise CatalogueError(f"{alias['id']}: the operation has no platform credential security requirement")
     out["security"] = security

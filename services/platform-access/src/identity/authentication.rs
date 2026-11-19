@@ -144,6 +144,52 @@ pub struct AuthorityChain {
     pub scopes: Vec<String>,
     /// `Some`: the credential may act only for these principals (sorted).
     pub principal_restriction: Option<Vec<Uuid>>,
+    /// ADR 0064: present only for an OAuth app token (`OAUTH_ACCESS` | `OAUTH_BOT`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_kind: Option<OAuthCredentialKind>,
+    /// ADR 0064: the acting app (its client id), OAuth tokens only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<Uuid>,
+    /// ADR 0064: the grant (installation) the OAuth token belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_id: Option<Uuid>,
+}
+
+/// The kind of an OAuth app credential (ADR 0064).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OAuthCredentialKind {
+    #[serde(rename = "OAUTH_ACCESS")]
+    Access,
+    #[serde(rename = "OAUTH_BOT")]
+    Bot,
+}
+
+impl OAuthCredentialKind {
+    fn from_token_kind(kind: &str) -> Option<Self> {
+        match kind {
+            "ACCESS" => Some(Self::Access),
+            "BOT" => Some(Self::Bot),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Access => "OAUTH_ACCESS",
+            Self::Bot => "OAUTH_BOT",
+        }
+    }
+}
+
+/// Which credential family a verification expects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Expect {
+    /// A `cfmk_` API credential (never an OAuth token row).
+    ApiKey,
+    /// An OAuth token of this kind.
+    OAuth(OAuthCredentialKind),
+    /// Whatever the row is (by-id authority of a gateway-verified credential).
+    Any,
 }
 
 /// Failed-authentication throttling outcome (§109): the caller answers 429 with
@@ -208,7 +254,19 @@ SELECT
        FROM platform_credential_principal_restrictions r
       WHERE r.credential_id = c.id) AS restricted_principals,
     EXISTS (SELECT 1 FROM platform_credential_suspensions s
-             WHERE s.credential_id = c.id) AS suspended
+             WHERE s.credential_id = c.id) AS suspended,
+    (SELECT jsonb_build_object(
+                'kind', o.kind, 'grantId', g.id, 'appId', g.app_id, 'grantStatus', g.status,
+                'scopes', to_jsonb(g.scopes), 'principalId', g.principal_id,
+                'principalStatus', p.status, 'clientStatus', oc.status,
+                'appActive', (oa.status = 'ACTIVE' AND ot.status = 'ACTIVE'))
+       FROM platform_oauth_tokens o
+       JOIN platform_oauth_grants g ON g.id = o.grant_id
+       JOIN platform_principals p ON p.id = g.principal_id
+       JOIN platform_oauth_clients oc ON oc.application_id = g.app_id
+       JOIN platform_applications oa ON oa.id = g.app_id
+       JOIN platform_tenants ot ON ot.id = oa.tenant_id
+      WHERE o.credential_id = c.id) AS oauth
 FROM platform_api_credentials c
 JOIN platform_service_accounts sa
   ON sa.id = c.service_account_id
@@ -240,6 +298,22 @@ struct AuthorityRow {
     grants: Value,
     restricted_principals: Option<Vec<Uuid>>,
     suspended: bool,
+    oauth: Option<Value>,
+}
+
+/// The OAuth facts of a token row (ADR 0064).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OAuthRow {
+    kind: String,
+    grant_id: Uuid,
+    app_id: Uuid,
+    grant_status: String,
+    scopes: Vec<String>,
+    principal_id: Uuid,
+    principal_status: String,
+    client_status: String,
+    app_active: bool,
 }
 
 #[derive(Deserialize)]
@@ -458,7 +532,39 @@ impl CredentialAuthenticator {
         &self,
         presented: &str,
     ) -> Result<AuthorityChain, AuthenticationError> {
-        let Some(presented) = credential_format::parse(presented) else {
+        self.authenticate_family(presented, credential_format::API_CREDENTIAL, Expect::ApiKey)
+            .await
+    }
+
+    /// ADR 0064: authenticates an OAuth access (`cfoa_`) or bot (`cfob_`) token. Refresh
+    /// tokens (`cfor_`) and anything else are malformed here. The chain is the grant's
+    /// target triple and installation service account; scopes are the grant's mapped
+    /// internal scopes; the restriction is exactly the grant's principal.
+    pub async fn authenticate_oauth(
+        &self,
+        presented: &str,
+    ) -> Result<AuthorityChain, AuthenticationError> {
+        let (family, kind) = if presented.starts_with("cfoa_") {
+            (super::oauth::ACCESS_TOKEN, OAuthCredentialKind::Access)
+        } else if presented.starts_with("cfob_") {
+            (super::oauth::BOT_TOKEN, OAuthCredentialKind::Bot)
+        } else {
+            return Err(AuthenticationError::rejected(
+                AuthFailureReason::MalformedCredential,
+                None,
+            ));
+        };
+        self.authenticate_family(presented, family, Expect::OAuth(kind))
+            .await
+    }
+
+    async fn authenticate_family(
+        &self,
+        presented: &str,
+        family: credential_format::CredentialFamily,
+        expect: Expect,
+    ) -> Result<AuthorityChain, AuthenticationError> {
+        let Some(presented) = credential_format::parse_as(family, presented) else {
             return Err(AuthenticationError::rejected(
                 AuthFailureReason::MalformedCredential,
                 None,
@@ -469,7 +575,8 @@ impl CredentialAuthenticator {
                 summary: summarize_db_error(&e),
             }
         })?;
-        let message = credential_format::verifier_message(
+        let message = credential_format::verifier_message_as(
+            family,
             presented.tag_kind,
             &presented.public_id,
             &presented.secret,
@@ -507,7 +614,7 @@ impl CredentialAuthenticator {
         }
 
         let now = self.clock.now();
-        let chain = evaluate(row, presented.tag_kind, now, &self.registry)
+        let chain = evaluate(row, presented.tag_kind, now, &self.registry, expect)
             .map_err(|reason| AuthenticationError::rejected(reason, Some(&presented)))?;
         self.note_use(chain.credential.id, now).await;
         Ok(chain)
@@ -541,7 +648,7 @@ impl CredentialAuthenticator {
             .ok_or_else(|| {
                 AuthenticationError::rejected(AuthFailureReason::CorruptAuthorityChain, None)
             })?;
-        evaluate(row, kind, self.clock.now(), &self.registry)
+        evaluate(row, kind, self.clock.now(), &self.registry, Expect::Any)
             .map_err(|reason| AuthenticationError::rejected(reason, None))
     }
 
@@ -562,9 +669,27 @@ fn evaluate(
     presented_kind: EnvironmentKind,
     now: DateTime<Utc>,
     registry: &ScopeRegistry,
+    expect: Expect,
 ) -> Result<AuthorityChain, AuthFailureReason> {
     use AuthFailureReason as R;
     let corrupt = |_| R::CorruptAuthorityChain;
+    let oauth: Option<OAuthRow> = row
+        .oauth
+        .clone()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(corrupt)?;
+    let oauth_kind = match &oauth {
+        Some(o) => Some(OAuthCredentialKind::from_token_kind(&o.kind).ok_or(R::CorruptAuthorityChain)?),
+        None => None,
+    };
+    // A value of one family never authenticates as another (the verifier labels differ
+    // too; this is the explicit second check).
+    match (expect, oauth_kind) {
+        (Expect::ApiKey, Some(_)) | (Expect::OAuth(_), None) => return Err(R::UnknownCredential),
+        (Expect::OAuth(want), Some(have)) if want != have => return Err(R::UnknownCredential),
+        _ => {}
+    }
     let credential: CredentialSnapshot = from_row_json(row.credential).map_err(corrupt)?;
     let service_account: ServiceAccountSnapshot =
         from_row_json(row.service_account).map_err(corrupt)?;
@@ -622,6 +747,38 @@ fn evaluate(
             tenant.classification,
         )
         .names();
+    // ADR 0064: an OAuth token lives only while its grant, app and principal do; its
+    // scopes are the grant's (live), mapped through the closed catalogue, STANDARD only;
+    // its restriction is exactly the grant's principal.
+    let (scopes, credential_kind, app_id, grant_id) = match (oauth, oauth_kind) {
+        (Some(o), Some(kind)) => {
+            if o.grant_status != "ACTIVE" || o.client_status == "SUSPENDED" {
+                return Err(R::CredentialRevoked);
+            }
+            if !o.app_active {
+                return Err(R::CredentialSuspended);
+            }
+            match o.principal_status.as_str() {
+                "ACTIVE" => {}
+                "SUSPENDED" => return Err(R::CredentialSuspended),
+                _ => return Err(R::CredentialRevoked),
+            }
+            if row.restricted_principals.as_deref() != Some(&[o.principal_id][..]) {
+                return Err(R::CorruptAuthorityChain);
+            }
+            let scopes: Vec<String> =
+                super::oauth_scopes::internal_scopes(o.scopes.iter().map(String::as_str))
+                    .into_iter()
+                    .filter(|s| {
+                        registry
+                            .definition(s)
+                            .is_some_and(|d| d.trust == super::scopes::ScopeTrust::Standard)
+                    })
+                    .collect();
+            (scopes, Some(kind), Some(o.app_id), Some(o.grant_id))
+        }
+        _ => (scopes, None, None, None),
+    };
     // Defence in depth: never report live telecom outside PRODUCTION.
     let mut environment = environment;
     environment.live_telecom_allowed &= environment.kind.may_allow_live_telecom();
@@ -640,6 +797,9 @@ fn evaluate(
         effective_state,
         scopes,
         principal_restriction: row.restricted_principals,
+        credential_kind,
+        app_id,
+        grant_id,
     })
 }
 

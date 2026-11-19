@@ -358,7 +358,10 @@ pub async fn relay_due_to(
             .await?;
             txn.commit().await?;
             report.dead_lettered += 1;
-            crate::metrics::inc("messaging_webhook_relay_total", &[("outcome", "dead_letter")]);
+            crate::metrics::inc(
+                "messaging_webhook_relay_total",
+                &[("outcome", "dead_letter")],
+            );
             continue;
         }
         // The first transient / unconfigured failure and the first refusal of this pass.

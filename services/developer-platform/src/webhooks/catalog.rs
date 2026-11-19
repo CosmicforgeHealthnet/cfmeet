@@ -41,14 +41,14 @@ pub const PRODUCERS: &[(&str, &str, &[&str])] = &[
     (
         PRODUCER_MESSAGING,
         "messaging",
-        &["message", "conversation"],
+        &["message", "conversation", "bot"],
     ),
     (PRODUCER_NUMBERING, "number", &["number"]),
     (PRODUCER_SMS_GATEWAY, "sms-gateway", &["sms"]),
     (
         PRODUCER_DEVELOPER_PLATFORM,
         "developer-platform",
-        &["credential", "production_access", "usage", "limit"],
+        &["credential", "production_access", "usage", "limit", "app"],
     ),
 ];
 
@@ -170,6 +170,14 @@ catalog! {
     "production_access.requested" => Some(scopes::PRODUCTION_ACCESS_REQUEST),
     "production_access.approved" => Some(scopes::PRODUCTION_ACCESS_REQUEST),
     "production_access.rejected" => Some(scopes::PRODUCTION_ACCESS_REQUEST),
+    // ADR 0064 install events: the app lifecycle (from Platform Access's APP_GRANT change
+    // feed, delivered only to the installed app's own subscriptions) and the bot events
+    // Messaging publishes for an organization install's bot (ids only, never text).
+    "app.installed" => None,
+    "app.uninstalled" => None,
+    "app.grant_revoked" => None,
+    "bot.message_received" => Some(scopes::MESSAGES_READ),
+    "bot.mentioned" => Some(scopes::MESSAGES_READ),
 }
 
 pub fn definition(name: &str) -> Option<&'static EventTypeDef> {
@@ -452,6 +460,8 @@ const MESSAGING_KEYS: &[(&str, &str, bool)] = &[
     ("role", "role", false),
     ("reason", "reason", false),
     ("channel", "channel", false),
+    // ADR 0064: the bot a `bot.*` event concerns (the install routing key).
+    ("subject_principal_id", "subjectPrincipalId", false),
 ];
 
 /// Projects a Messaging envelope (`messaging.<aggregate>.<fact>`). Only application
@@ -473,11 +483,16 @@ pub fn project_messaging(envelope: &Value) -> Option<PublicEvent> {
         "messaging.message.deleted" => "message.deleted",
         "messaging.message.moderated" => "message.moderated",
         "messaging.message.expired" => "message.expired",
+        "messaging.bot.mentioned" => "bot.mentioned",
+        "messaging.bot.message-received" => "bot.message_received",
         _ => return None,
     };
     let mut data = Map::new();
     copy_fields(MESSAGING_KEYS, &[payload], &mut data);
     data.get("conversationId")?;
+    if family(event_type) == "bot" {
+        data.get("subjectPrincipalId")?;
+    }
     Some(PublicEvent { event_type, data })
 }
 
@@ -603,6 +618,16 @@ pub fn project_developer_platform(envelope: &Value) -> Option<PublicEvent> {
     Some(PublicEvent { event_type, data })
 }
 
+/// ADR 0064: the keys of the app lifecycle events and the one the install routing pass
+/// adds to every event it routes (`installationId`, the Platform Access grant id).
+pub const INSTALL_KEYS: &[(&str, &str, bool)] = &[
+    ("installation_id", "installationId", false),
+    ("app_id", "appId", false),
+    ("target_kind", "targetKind", false),
+    ("organization_id", "organizationId", false),
+    ("reason_code", "reasonCode", false),
+];
+
 /// Every public `data` key any projection can emit (the event contract's vocabulary).
 pub fn public_keys() -> Vec<&'static str> {
     let mut keys: Vec<&'static str> = [
@@ -612,6 +637,7 @@ pub fn public_keys() -> Vec<&'static str> {
         NUMBER_KEYS,
         MEETING_KEYS,
         DEVELOPER_PLATFORM_KEYS,
+        INSTALL_KEYS,
     ]
     .iter()
     .flat_map(|keys| keys.iter().map(|(_, public, _)| *public))
@@ -779,6 +805,23 @@ mod tests {
                         "principalId": principal })
             );
         }
+    }
+
+    #[test]
+    fn bot_events_carry_ids_only_and_name_the_bot() {
+        let c = "11111111-1111-4111-8111-111111111111";
+        let bot = "77777777-7777-4777-8777-777777777777";
+        let env = json!({ "event_type": "messaging.bot.mentioned", "payload": {
+            "conversation_id": c, "message_id": "22222222-2222-4222-8222-222222222222",
+            "subject_principal_id": bot, "text": "@bot deploy now" } });
+        let e = project(PRODUCER_MESSAGING, &env).unwrap().unwrap();
+        assert_eq!(e.event_type, "bot.mentioned");
+        assert!(!Value::Object(e.data.clone()).to_string().contains("deploy"));
+        assert_eq!(e.data["subjectPrincipalId"], bot);
+        // Without the bot it names, a bot event is not public.
+        let env = json!({ "event_type": "messaging.bot.message-received",
+            "payload": { "conversation_id": c } });
+        assert_eq!(project(PRODUCER_MESSAGING, &env), Ok(None));
     }
 
     #[test]

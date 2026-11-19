@@ -2,7 +2,7 @@
 //!
 //! | Route | Permission | Scope source |
 //! |---|---|---|
-//! | `POST /internal/v1/credentials/authenticate` | `platform-credential.authenticate` | the presented credential itself |
+//! | `POST /internal/v1/credentials/authenticate` | `platform-credential.authenticate` | the presented credential itself (ADR 0064: also `cfoa_` / `cfob_` app tokens with `PLATFORM_ACCESS_OAUTH_ENABLED`; the chain then adds `credentialKind`, `appId`, `grantId`) |
 //! | `GET /internal/v1/credentials/{id}` | `platform-identity.read` | signed delegated context (must own the credential) |
 //! | `POST /internal/v1/authorization/evaluate` | `platform-identity.read` | signed delegated context |
 //! | `GET /internal/v1/identity/context` | `platform-identity.read` | signed delegated context |
@@ -148,6 +148,10 @@ async fn delegated_authority(
         throttle: None,
     };
     match state.authenticator.authority_of(credential_id).await {
+        // ADR 0064: an OAuth token is known only while the OAuth flag is on.
+        Ok(chain) if chain.credential_kind.is_some() && !state.build.oauth_enabled => {
+            Ok(Json(rejected("unknown_credential")))
+        }
         Ok(chain)
             if chain.tenant.id == delegated.tenant_id()
                 && chain.application.id == delegated.application_id()
@@ -186,10 +190,16 @@ async fn authenticate(
             throttle: None,
         }));
     }
-    let outcome = state
-        .authenticator
-        .authenticate(body.credential.trim())
-        .await;
+    let presented = body.credential.trim();
+    // ADR 0064: OAuth access / bot tokens only with the flag on; `cfor_` refresh tokens
+    // never authenticate here (malformed, like any other unknown value).
+    let outcome = if state.build.oauth_enabled
+        && (presented.starts_with("cfoa_") || presented.starts_with("cfob_"))
+    {
+        state.authenticator.authenticate_oauth(presented).await
+    } else {
+        state.authenticator.authenticate(presented).await
+    };
     drop(body);
     match outcome {
         Ok(chain) => {

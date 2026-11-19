@@ -141,9 +141,7 @@ impl OAuthCredential {
                 (*place, place.get("credentialKind")),
                 (
                     nested,
-                    nested
-                        .get("credentialKind")
-                        .or_else(|| nested.get("kind")),
+                    nested.get("credentialKind").or_else(|| nested.get("kind")),
                 ),
             ];
             for (v, kind) in candidates {
@@ -890,10 +888,17 @@ mod tests {
             "credentialKind": "OAUTH_BOT", "appId": app, "grantId": grant });
         let ctx = TrustedContext::from_response(&body).unwrap();
         assert_eq!(ctx.oauth.unwrap().kind, OAuthKind::Bot);
-        assert_eq!(ctx.oauth_principal(), None, "an empty restriction names nobody");
+        assert_eq!(
+            ctx.oauth_principal(),
+            None,
+            "an empty restriction names nobody"
+        );
         let mut nested = chain("TEST", "FULL", Value::Null);
         nested["oauth"] = json!({ "kind": "OAUTH_BOT", "appId": app, "grantId": grant });
-        assert!(TrustedContext::from_authority(&nested).unwrap().oauth.is_some());
+        assert!(TrustedContext::from_authority(&nested)
+            .unwrap()
+            .oauth
+            .is_some());
         // A non-OAuth kind is an ordinary credential.
         let mut key = chain("TEST", "FULL", Value::Null);
         key["credentialKind"] = json!("API_KEY");
@@ -917,9 +922,15 @@ mod tests {
     fn application_bot_references_are_canonical() {
         let app = Uuid::new_v4();
         assert_eq!(application_bot_reference(&format!("app:{app}")), Some(app));
-        assert_eq!(application_bot_reference(&format!("app:{}", app.simple())), None);
+        assert_eq!(
+            application_bot_reference(&format!("app:{}", app.simple())),
+            None
+        );
         assert_eq!(application_bot_reference("cfmeet:meeting-system"), None);
-        assert_eq!(application_bot_reference(&format!("cfmeet-user:{app}")), None);
+        assert_eq!(
+            application_bot_reference(&format!("cfmeet-user:{app}")),
+            None
+        );
     }
 
     #[test]

@@ -24,10 +24,10 @@ async fn main() -> anyhow::Result<()> {
         developer_platform::webhooks::require_signable(&db, &config.webhooks)
             .await
             .unwrap_or_else(|e| fatal("webhook configuration error", e));
-        Some(developer_platform::webhooks::WebhookService::new(
-            db.clone(),
-            config.webhooks.clone(),
-        ))
+        Some(
+            developer_platform::webhooks::WebhookService::new(db.clone(), config.webhooks.clone())
+                .with_install_events(config.build.install_events),
+        )
     } else {
         None
     };
@@ -99,6 +99,25 @@ async fn main() -> anyhow::Result<()> {
         reference_reconciliation_interval: config.reference_reconciliation_interval,
         reference_reconciliation_remote_limit: config.reference_reconciliation_remote_limit,
         notifications,
+        // ADR 0064: the APP_GRANT projection (Platform Access) when install events are on.
+        app_grants: match (
+            config.build.install_events,
+            runtime_auth.as_ref().filter(|_| settings.has_platform_access()),
+        ) {
+            (true, Some(runtime_auth)) => Some(developer_platform::worker::AppGrantJobs {
+                port: std::sync::Arc::new(
+                    developer_platform::apps::port::HttpPlatformOAuth::new(runtime_auth.client()),
+                ),
+            }),
+            (true, None) => {
+                tracing::warn!(
+                    "DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED needs CF_PLATFORM_ACCESS_BASE_URL: \
+                     the app grant projection is disabled"
+                );
+                None
+            }
+            (false, _) => None,
+        },
         retention: match developer_platform::retention::RetentionSettings::from_lookup(
             &|k: &str| std::env::var(k).ok(),
         ) {

@@ -41,6 +41,10 @@ pub struct RegisteredActor {
     /// Meeting media opened by this request are tied to it, so ending one sign-in ends
     /// only its own device's media (multi-device policy).
     pub account_session_id: Option<Uuid>,
+    /// ADR 0064: set when an app acts for this user with an OAuth access token (the
+    /// platform middleware's verified `DelegatedUser`); the request is then restricted to
+    /// the machine operations on the user's own meetings and is never a platform admin.
+    pub delegation: Option<crate::services::apps::delegated::DelegatedUser>,
 }
 
 impl RegisteredActor {
@@ -273,6 +277,47 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
             client_kind: None,
         });
     }
+    // ADR 0064: an app acting for a user (OAuth access token), admitted by the platform
+    // middleware after Platform Access, the account and the revocation-epoch checks. It is
+    // the user — never a platform administrator — restricted to that middleware's
+    // operations and meetings.
+    if let Some(delegated) = parts
+        .extensions
+        .get::<crate::services::apps::delegated::DelegatedUser>()
+    {
+        let refused =
+            || ApiError::domain(ErrorCode::AuthenticationRequired, "Authentication failed");
+        let user = users::Entity::find_by_id(delegated.account_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(refused)?;
+        if matches!(user.status, UserStatus::Inactive | UserStatus::Suspended)
+            || user.role == UserRole::Guest
+        {
+            return Err(refused());
+        }
+        let verified_email = user
+            .email_verified(state.require_email_verification)
+            .then(|| user.email.to_ascii_lowercase());
+        let verified_organizations = state
+            .organization_directory
+            .organizations_for_user(user.id)
+            .await;
+        return Ok(ActorContext {
+            kind: ActorKind::RegisteredUser(RegisteredActor {
+                user_id: user.id,
+                display_name: user.presentation_name(),
+                verified_email,
+                platform_admin: false,
+                revocation_checked: true,
+                account_session_id: None,
+                delegation: Some(delegated.clone()),
+            }),
+            verified_organizations,
+            request_id,
+            client_kind: None,
+        });
+    }
     // An internal service token is never a user, guest or anonymous identity: without
     // the platform middleware's verified actor it is refused (no fall-through).
     if parts
@@ -385,6 +430,7 @@ pub async fn resolve_actor(parts: &Parts, state: &AppState) -> ApiResult<ActorCo
                     platform_admin: user.role == UserRole::Admin,
                     revocation_checked,
                     account_session_id: authorization.session_id,
+                    delegation: None,
                 }),
                 verified_organizations,
                 request_id,
@@ -528,6 +574,7 @@ mod tests {
             platform_admin: false,
             revocation_checked: true,
             account_session_id: None,
+            delegation: None,
         };
         assert_eq!(actor.verified_domain().as_deref(), Some("example.com"));
         actor.verified_email = None;

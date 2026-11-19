@@ -624,7 +624,10 @@ async fn admit_oauth(
         require_managed_target(state, ctx.scope.environment_id, request.uri().path()).await
     {
         if e.error_code() == ErrorCode::NotFound {
-            crate::metrics::inc("messaging_oauth_requests_total", &[("outcome", "e2ee_refused")]);
+            crate::metrics::inc(
+                "messaging_oauth_requests_total",
+                &[("outcome", "e2ee_refused")],
+            );
         }
         return Err(e);
     }

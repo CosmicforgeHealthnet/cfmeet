@@ -1880,6 +1880,7 @@ mod tests {
             platform_admin: false,
             revocation_checked: true,
             account_session_id: None,
+            delegation: None,
         };
         let acting = ActingUser::of(&actor);
         assert_eq!(acting.user_id(), actor.user_id);

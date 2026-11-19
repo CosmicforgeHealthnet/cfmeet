@@ -36,15 +36,17 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cf_service_auth::{headers::SERVICE_AUTHORIZATION, InternalPermission, ServiceId};
+use sea_orm::EntityTrait;
 use uuid::Uuid;
 
 use crate::{
     error::{ApiError, ErrorCode},
     services::{
         actor::{PlatformActor, PARTICIPANT_TOKEN_HEADER},
+        apps::delegated::{self, DelegatedUser},
         meeting_core::{find_conference, find_space, platform_owns},
         platform::{
-            authority::Authentication,
+            authority::{Authentication, OauthCredential, OauthCredentialKind},
             operations::{self, PlatformOperation, Target},
             with_correlation,
         },
@@ -116,6 +118,141 @@ async fn guard_target(
                 .ok_or_else(not_found)
         }
     }
+}
+
+/// Step 7 for a delegated user: write = meetings the user owns; read = owned, or HOST /
+/// CO_HOST member. Anything else is 404, exactly as for an unknown id.
+async fn guard_delegated(
+    state: &AppState,
+    op: &PlatformOperation,
+    path: &str,
+    user: &DelegatedUser,
+) -> Result<(), ApiError> {
+    let db = &state.meeting.core.db;
+    let space = match op.target {
+        Target::None => return Ok(()),
+        Target::Space => {
+            let not_found = || delegated::not_found(false);
+            let id = id_param(op.route, path).ok_or_else(not_found)?;
+            let id = urlencoding::decode(id).map_err(|_| not_found())?;
+            match state.meeting.compat.resolve(&id).await {
+                Ok(r) => r.space,
+                Err(e) if e.code() == Some(ErrorCode::MeetingNotFound) => return Err(not_found()),
+                Err(e) => return Err(e),
+            }
+        }
+        Target::Conference => {
+            let not_found = || delegated::not_found(true);
+            let id = id_param(op.route, path)
+                .and_then(|v| Uuid::parse_str(v).ok())
+                .ok_or_else(not_found)?;
+            let conference = match find_conference(db, id).await {
+                Ok(c) => c,
+                Err(e) if e.code() == Some(ErrorCode::ConferenceNotFound) => {
+                    return Err(not_found())
+                }
+                Err(e) => return Err(e),
+            };
+            match find_space(db, conference.meeting_space_id).await {
+                Ok(s) => s,
+                Err(e) if e.code() == Some(ErrorCode::MeetingNotFound) => return Err(not_found()),
+                Err(e) => return Err(e),
+            }
+        }
+    };
+    if user.may_act_on(db, &space, op.scope).await? {
+        Ok(())
+    } else {
+        Err(delegated::not_found(op.target == Target::Conference))
+    }
+}
+
+/// ADR 0064: the `DelegatedUser` branch (credential kind `OAUTH_ACCESS`).
+#[allow(clippy::too_many_arguments)]
+async fn delegated_user(
+    state: &AppState,
+    mut request: Request,
+    next: Next,
+    op: &'static PlatformOperation,
+    route: &str,
+    delegated_ctx: &cf_service_auth::DelegatedPlatformContext,
+    oauth: Result<OauthCredential, ()>,
+    scopes: std::collections::BTreeSet<String>,
+    correlation: cf_service_auth::CorrelationId,
+) -> Response {
+    if !state.apps.delegated_enabled {
+        return refuse("oauth_credentials_disabled", route);
+    }
+    let Ok(oauth) = oauth else {
+        return refuse("oauth_credential_incomplete", route);
+    };
+    if oauth.kind != OauthCredentialKind::Access {
+        return refuse("oauth_bot_not_a_meetings_actor", route);
+    }
+    // The gateway names the restricted principal; it must be exactly the credential's.
+    if let Some(p) = delegated_ctx.initiating_principal() {
+        if Some(p.principal_id) != oauth.restricted_principal
+            || p.principal_kind != cf_service_auth::DelegatedPrincipalKind::NativeCfUser
+        {
+            return refuse(delegated::Refusal::PrincipalMismatch.as_str(), route);
+        }
+    }
+    let account = match delegated::account_of(&state.db, &oauth).await {
+        Ok(Ok(a)) => a,
+        Ok(Err(r)) => return refuse(r.as_str(), route),
+        Err(e) => return e.into_response(),
+    };
+    let user = match crate::models::users::Entity::find_by_id(account)
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(u)) => u,
+        Ok(None) => return refuse(delegated::Refusal::UnknownAccount.as_str(), route),
+        Err(e) => return ApiError::from(e).into_response(),
+    };
+    let cutoff = match crate::services::account_security::credentials_cutoff(state, account).await
+    {
+        Ok(c) => c,
+        Err(e) => return e.into_response(),
+    };
+    if let Err(r) =
+        delegated::check_account(user.status.clone(), user.role.clone(), cutoff, oauth.issued_at)
+    {
+        return refuse(r.as_str(), route);
+    }
+    let user = DelegatedUser {
+        account_id: account,
+        app_id: oauth.app_id,
+        grant_id: oauth.grant_id,
+        scopes,
+    };
+    // 6. (OAuth scopes map to the same internal meetings scopes.)
+    if !user.has_scope(op.scope) {
+        tracing::info!(route, scope = op.scope, "delegated scope check denied");
+        return ApiError::domain(
+            ErrorCode::PermissionDenied,
+            "The app was not granted the scope this operation requires",
+        )
+        .into_response();
+    }
+    // 7.
+    let path = request
+        .extensions()
+        .get::<OriginalUri>()
+        .map(|u| u.0.path().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string());
+    if let Err(e) = guard_delegated(state, op, &path, &user).await {
+        return e.into_response();
+    }
+    tracing::info!(route, account_id = %user.account_id, app_id = %user.app_id,
+        grant_id = %user.grant_id, "delegated app request admitted (via app)");
+    let (app, grant) = (user.app_id, user.grant_id);
+    request.extensions_mut().insert(user);
+    with_correlation(
+        correlation,
+        delegated::with_via_app(app, grant, next.run(request)),
+    )
+    .await
 }
 
 pub async fn platform_credential(
@@ -213,6 +350,22 @@ pub async fn platform_credential(
     }
     if !chain.full_authority {
         return refuse("scope_suspended", &route);
+    }
+    // ADR 0064: an OAuth credential is never a machine caller. With delegated apps on, an
+    // access token acts for its user (`DelegatedUser`); bot tokens never touch meetings.
+    if let Some(oauth) = chain.oauth.clone() {
+        return delegated_user(
+            &state,
+            request,
+            next,
+            op,
+            &route,
+            &delegated,
+            oauth,
+            chain.actor.scopes.clone(),
+            correlation,
+        )
+        .await;
     }
     let actor = chain.actor;
     // 6.

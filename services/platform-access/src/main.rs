@@ -101,6 +101,8 @@ async fn main() -> anyhow::Result<()> {
         user_tokens = config.build.user_tokens_enabled,
         environment_origins = config.build.environment_origins_enabled,
         meeting_platform = config.build.meeting_platform_enabled,
+        oauth = config.build.oauth_enabled,
+        oauth_pairwise_key = if config.build.oauth_pairwise_key.is_some() { "configured" } else { "derived" },
         user_token_kid = config
             .build
             .user_token_keys
@@ -131,6 +133,14 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 {
                     tracing::warn!(summary = %summarize_db_error(&e), "mint-window pruning failed");
+                }
+                // ADR 0064: expired authorization codes can never be used; keep a day.
+                let code_before = clock.now() - chrono::Duration::days(1);
+                if let Err(e) =
+                    platform_access::identity::oauth::prune_codes(state.platform.db(), code_before)
+                        .await
+                {
+                    tracing::warn!(summary = %summarize_db_error(&e), "OAuth code pruning failed");
                 }
             }
         });

@@ -368,13 +368,14 @@ async fn main() -> anyhow::Result<()> {
         let developer_platform = destination
             .destinations()
             .contains(&messaging::webhook_relay::EventDestination::DeveloperPlatform);
-        let apps = messaging::apps::AppsSettings::from_env(
-            |k| std::env::var(k).ok(),
-            developer_platform,
-        )
-        .map_err(|e| anyhow!("apps configuration: {e}"))?;
+        let apps =
+            messaging::apps::AppsSettings::from_env(|k| std::env::var(k).ok(), developer_platform)
+                .map_err(|e| anyhow!("apps configuration: {e}"))?;
         if apps.enabled {
-            tracing::info!(bot_events = apps.bot_events, "CF Meet Apps are enabled (MESSAGING_APPS_ENABLED)");
+            tracing::info!(
+                bot_events = apps.bot_events,
+                "CF Meet Apps are enabled (MESSAGING_APPS_ENABLED)"
+            );
             if !apps.bot_events {
                 tracing::warn!("MESSAGING_APPS_ENABLED is set but MESSAGING_PUBLIC_EVENTS_DESTINATION does not include developer-platform: bot events are not recorded");
             }

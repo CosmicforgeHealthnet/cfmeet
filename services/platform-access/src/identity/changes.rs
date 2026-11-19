@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use super::{
     snapshots::{
-        camel_object, ApplicationScopeSnapshot, ApplicationSnapshot, CredentialScopeSnapshot,
+        camel_object, AppGrantSnapshot, ApplicationScopeSnapshot, ApplicationSnapshot, CredentialScopeSnapshot,
         CredentialSnapshot, EnvironmentSnapshot, PrincipalSnapshot, ServiceAccountSnapshot,
         TenantSnapshot,
     },
@@ -34,6 +34,8 @@ text_enum!(
         Credential = "CREDENTIAL",
         CredentialScope = "CREDENTIAL_SCOPE",
         Principal = "PRINCIPAL",
+        /// ADR 0064: an app grant (installation) changed.
+        AppGrant = "APP_GRANT",
     }
 );
 
@@ -100,6 +102,7 @@ fn typed_snapshot(kind: EntityKind, row: Value) -> PlatformResult<Value> {
         EntityKind::Credential => check::<CredentialSnapshot>(v),
         EntityKind::CredentialScope => check::<CredentialScopeSnapshot>(v),
         EntityKind::Principal => check::<PrincipalSnapshot>(v),
+        EntityKind::AppGrant => check::<AppGrantSnapshot>(v),
     }
 }
 

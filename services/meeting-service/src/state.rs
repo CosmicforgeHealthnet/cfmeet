@@ -57,6 +57,9 @@ pub struct AppState {
     /// Document 4 §3.1: the Notification Service user relay (U1–U9 under
     /// `/api/v2/notifications`; `None`: not configured, the routes answer 503).
     pub notifications: Option<Arc<crate::services::notification_relay::NotificationsRelay>>,
+    /// ADR 0064 / 0065: CF Meet Apps (consent relay, connected apps, delegated apps,
+    /// in-meeting apps). Everything off by default.
+    pub apps: Arc<crate::services::apps::Apps>,
 }
 
 impl AppState {
@@ -126,6 +129,7 @@ impl AppState {
             email_webhook_secret: email_config.resend_webhook_secret.clone(),
             notifier,
             notifications: None,
+            apps: Arc::new(crate::services::apps::Apps::disabled()),
         }
     }
 
@@ -138,6 +142,12 @@ impl AppState {
     /// Enables partner-user joins (and, when configured, partner meeting chat) — ADR 0062.
     pub fn with_platform_users(mut self, users: crate::services::platform::PlatformUsers) -> Self {
         self.platform_users = Some(users);
+        self
+    }
+
+    /// Enables CF Meet Apps (ADR 0064 / 0065).
+    pub fn with_apps(mut self, apps: crate::services::apps::Apps) -> Self {
+        self.apps = Arc::new(apps);
         self
     }
 

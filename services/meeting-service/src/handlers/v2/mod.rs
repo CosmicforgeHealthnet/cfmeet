@@ -8,6 +8,7 @@ pub mod account_devices;
 pub mod account_identity;
 pub mod account_profile;
 pub mod account_sessions;
+pub mod apps;
 pub mod artifacts;
 pub mod breakouts;
 pub mod calendar;

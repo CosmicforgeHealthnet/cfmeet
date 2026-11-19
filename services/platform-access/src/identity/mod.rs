@@ -35,6 +35,8 @@ pub mod environment_origins;
 pub mod environments;
 pub mod error;
 pub mod handoff;
+pub mod oauth;
+pub mod oauth_scopes;
 pub mod operator;
 pub mod organization_bindings;
 pub mod organization_scopes;

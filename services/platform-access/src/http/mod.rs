@@ -13,6 +13,7 @@ pub mod error;
 pub mod internal;
 pub mod meeting_platform;
 pub mod middleware;
+pub mod oauth;
 pub mod organization_scopes;
 pub mod user_tokens;
 
@@ -58,6 +59,8 @@ pub fn app(state: AppState) -> Router {
                 .merge(user_tokens::routes())
                 .merge(environment_origins::routes())
                 .merge(meeting_platform::routes())
+                // ADR 0064 (CF Meet Apps): behind PLATFORM_ACCESS_OAUTH_ENABLED.
+                .merge(oauth::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

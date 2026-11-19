@@ -325,8 +325,9 @@ fn meetings_platform_routes_take_platform_credentials_with_meetings_scopes() {
 
 /// Partner servers reach the machine meeting operations at `/v1/meetings/...` (the edge
 /// keeps first-party `/api/v2` direct): every platform-credential `/api/v2` meetings
-/// route has exactly one PLATFORM_CREDENTIAL-only alias forwarded to the same upstream
-/// path, and nothing else is aliased.
+/// route has exactly one machine-credential alias (PLATFORM_CREDENTIAL, plus
+/// OAUTH_ACCESS_TOKEN when the operation takes it) forwarded to the same upstream path,
+/// and nothing else is aliased.
 #[test]
 fn the_partner_meetings_family_aliases_every_machine_operation_and_nothing_else() {
     let table = catalogue::table_for(true, true, &RoutingControls::default()).unwrap();
@@ -347,7 +348,13 @@ fn the_partner_meetings_family_aliases_every_machine_operation_and_nothing_else(
             .iter()
             .find(|a| a.method == m.method && a.pattern == pattern)
             .unwrap_or_else(|| panic!("{} {pattern} missing", m.method));
-        assert_eq!(a.auth, [AuthMode::PlatformCredential], "{}", a.id);
+        // PLATFORM_CREDENTIAL, plus OAUTH_ACCESS_TOKEN when the machine operation takes it
+        // (ADR 0064).
+        let mut expected = vec![AuthMode::PlatformCredential];
+        if m.auth.contains(&AuthMode::OauthAccessToken) {
+            expected.push(AuthMode::OauthAccessToken);
+        }
+        assert_eq!(a.auth, expected, "{}", a.id);
         assert_eq!(a.upstream, services::MEETING_SERVICE);
         assert_eq!(a.upstream_path, m.pattern);
         assert_eq!(a.required_scope, m.required_scope);

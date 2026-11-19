@@ -69,8 +69,7 @@ class UserTokenGrants {
   Map<String, Object?> toJson() => {
         if (msg.isNotEmpty) 'msg': msg,
         if (call.isNotEmpty) 'call': call,
-        if (meetings.isNotEmpty)
-          'mtg': [for (final m in meetings) m.toJson()],
+        if (meetings.isNotEmpty) 'mtg': [for (final m in meetings) m.toJson()],
       };
 }
 
@@ -110,8 +109,8 @@ class UsersClient {
     String? idempotencyKey,
     CancelToken? cancelToken,
   }) async =>
-      PartnerUser.fromJson((await _create(externalId, displayName, imageUrl,
-              idempotencyKey, cancelToken))
+      PartnerUser.fromJson((await _create(
+              externalId, displayName, imageUrl, idempotencyKey, cancelToken))
           .body);
 
   /// Like [create], telling whether the user was created (201) or existed (200).
@@ -167,8 +166,8 @@ class UsersClient {
   /// The user with this externalId, or null.
   Future<PartnerUser?> findByExternalId(String externalId,
       {CancelToken? cancelToken}) async {
-    final page = await list(
-        externalId: externalId, limit: 1, cancelToken: cancelToken);
+    final page =
+        await list(externalId: externalId, limit: 1, cancelToken: cancelToken);
     final items = page.json['items'];
     return items is List && items.isNotEmpty
         ? PartnerUser.fromJson(items.first)

@@ -10,7 +10,7 @@
 //!   not list the mode is `403 CREDENTIAL_NOT_ACCEPTED` (never transported);
 //! * the `/v1/meetings` alias family accepts OAuth tokens;
 //! * anonymous Developer Console routes forward `application/x-www-form-urlencoded`
-//!   bodies verbatim (signed hop, no delegated context);
+//!   bodies verbatim (transported, no gateway token, no delegated context);
 //! * `forwardAuthorization` transports `Authorization` (OAuth bearer, Basic client
 //!   credentials) only on the marked route;
 //! * flag off: everything as before.
@@ -350,8 +350,8 @@ async fn anonymous_form_urlencoded_posts_reach_the_developer_console_verbatim() 
             last.headers.get("content-type").unwrap(),
             "application/x-www-form-urlencoded"
         );
-        // A gateway-signed hop with neither a delegated context nor a session.
-        assert_eq!(last.issuer.as_deref(), Some(services::API_GATEWAY));
+        // Transported: no gateway token, no delegated context, no session.
+        assert_eq!(last.issuer, None);
         assert!(last.delegated.is_none());
         assert!(last.headers.get("x-cf-user-session").is_none());
         assert!(last.headers.get("authorization").is_none());
@@ -372,7 +372,7 @@ async fn anonymous_form_urlencoded_posts_reach_the_developer_console_verbatim() 
             g.get("/v1/app-directory", None).await.status,
             StatusCode::OK
         );
-        assert_eq!(g.dp().last().issuer.as_deref(), Some(services::API_GATEWAY));
+        assert_eq!(g.dp().last().issuer, None);
     }
 }
 

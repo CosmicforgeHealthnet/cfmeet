@@ -31,6 +31,54 @@ class RouteChecks(unittest.TestCase):
         self.assertEqual(public_api.auth_modes("meetings", op, doc), ["USER_TOKEN", "MEETING_SESSION"])
         self.assertNotIn("userToken", public_api.INTERNAL_SCHEMES)
 
+    def test_the_oauth_access_token_scheme_maps_to_the_gateway_oauth_mode(self):
+        # ADR 0064 / Integrate contract §6.
+        self.assertEqual(public_api.AUTH_MODES["oauthAccessToken"], "OAUTH_ACCESS_TOKEN")
+        op = {"operationId": "listConversations",
+              "security": [{"platformCredential": []}, {"oauthAccessToken": []}]}
+        self.assertEqual(public_api.auth_modes("messaging", op, {}), ["PLATFORM_CREDENTIAL", "OAUTH_ACCESS_TOKEN"])
+        self.assertNotIn("oauthAccessToken", public_api.INTERNAL_SCHEMES)
+
+    def test_a_forward_authorization_operation_is_an_anonymous_developer_platform_route(self):
+        original = public_api.operations
+
+        def patched(target_domain, target_op, mutate):
+            def ops():
+                for item in original():
+                    domain, service, rel, cid, method, path, op, doc = item
+                    if domain == target_domain and op.get("operationId") == target_op:
+                        op = mutate(copy.deepcopy(op))
+                    yield domain, service, rel, cid, method, path, op, doc
+            return ops
+
+        marked = lambda op: {**op, "x-cfmeet-forward-authorization": True,
+                             "security": [{"oauthAccessToken": []}]}
+        try:
+            public_api.operations = patched("developer-platform", "listScopeRegistry", marked)
+            routes = public_api.build()["routes"]
+            r = next(r for r in routes if r["id"] == "developer-platform.listScopeRegistry")
+            self.assertEqual((r["auth"], r["forwardAuthorization"]), (["ANONYMOUS"], True))
+            self.assertEqual(sum(1 for r in routes if r.get("forwardAuthorization")), 1, "only the marked route")
+            for name, (domain, op_id, mutate) in {
+                "other upstream": ("messaging", "listConversations", marked),
+                "not true": ("developer-platform", "listScopeRegistry",
+                             lambda op: {**op, "x-cfmeet-forward-authorization": "yes"}),
+                "internal scheme": ("developer-platform", "listScopeRegistry",
+                                    lambda op: {**op, "x-cfmeet-forward-authorization": True,
+                                                "security": [{"cfServiceAuth": []}]}),
+            }.items():
+                public_api.operations = patched(domain, op_id, mutate)
+                with self.assertRaises(public_api.CatalogueError, msg=name):
+                    public_api.build()
+        finally:
+            public_api.operations = original
+        # Unmarked operations carry no flag at all (the manifest stays unchanged).
+        self.assertFalse(any("forwardAuthorization" in r for r in public_api.build()["routes"]))
+        self.assertFalse(public_api.forward_authorization("x.y", {}, {}, "cfmeet.developer-platform", "REST"))
+        with self.assertRaises(public_api.CatalogueError):
+            public_api.forward_authorization("x.y", {"x-cfmeet-forward-authorization": True}, {},
+                                             "cfmeet.developer-platform", "WEBSOCKET")
+
     def test_a_gate_scope_must_be_a_platform_access_registry_scope(self):
         registry = public_api.registered_scopes()
         self.assertIn("privacy.contacts.write", registry)
@@ -115,6 +163,45 @@ class MeetingsPlatformAliases(unittest.TestCase):
         self.assertEqual(original["auth"], ["MEETING_SESSION", "PLATFORM_CREDENTIAL"])
         public_api.check_aliases([original, alias])
 
+    def test_an_oauth_meetings_route_gets_an_alias_that_also_accepts_oauth(self):
+        # ADR 0064 §6: the alias carries OAUTH_ACCESS_TOKEN exactly when the source route does.
+        original = meetings_route("GET", "/api/v2/meeting-spaces/{id}",
+                                  ["MEETING_SESSION", "PLATFORM_CREDENTIAL", "OAUTH_ACCESS_TOKEN"],
+                                  op="v2_get_meeting_space")
+        alias = public_api.meetings_platform_alias(original, "v2_get_meeting_space")
+        self.assertEqual(alias["auth"], ["PLATFORM_CREDENTIAL", "OAUTH_ACCESS_TOKEN"])
+        public_api.check_aliases([original, alias])
+        plain = meetings_route("GET", "/api/v2/meeting-spaces/{id}", ["MEETING_SESSION", "PLATFORM_CREDENTIAL"],
+                               op="v2_get_meeting_space")
+        self.assertEqual(public_api.meetings_platform_alias(plain, "v2_get_meeting_space")["auth"],
+                         ["PLATFORM_CREDENTIAL"])
+        # OAuth only (no platform credential): no alias.
+        self.assertIsNone(public_api.meetings_platform_alias({**original, "auth": ["OAUTH_ACCESS_TOKEN"]}, "x"))
+        for name, (target, auth) in {
+            "oauth without the source route": (plain, ["PLATFORM_CREDENTIAL", "OAUTH_ACCESS_TOKEN"]),
+            "oauth dropped": (original, ["PLATFORM_CREDENTIAL"]),
+            "oauth only": (original, ["OAUTH_ACCESS_TOKEN"]),
+            "reordered": (original, ["OAUTH_ACCESS_TOKEN", "PLATFORM_CREDENTIAL"]),
+        }.items():
+            with self.assertRaises(public_api.CatalogueError, msg=name):
+                public_api.check_aliases([target, {**alias, "auth": auth}])
+
+    def test_the_documented_oauth_alias_keeps_platform_and_oauth_security(self):
+        op = {"operationId": "v2_get_meeting_space", "description": "Gets a space.",
+              "security": [{"bearer_auth": []}, {"platformCredential": []}, {"oauthAccessToken": []}]}
+        oauth_alias = {"id": "meetings.platform.v2_get_meeting_space", "method": "GET",
+                       "upstreamPath": "/api/v2/meeting-spaces/{id}", "aliasOf": "meetings.v2_get_meeting_space",
+                       "auth": ["PLATFORM_CREDENTIAL", "OAUTH_ACCESS_TOKEN"]}
+        out = public_api.alias_operation(op, oauth_alias, set())
+        self.assertEqual([list(a) for a in out["security"]], [["platformCredential"], ["oauthAccessToken"]])
+        self.assertEqual(out["x-cfmeet-auth"], ["PLATFORM_CREDENTIAL", "OAUTH_ACCESS_TOKEN"])
+        self.assertIn("OAuth access token", out["description"])
+        plain = public_api.alias_operation(op, {**oauth_alias, "auth": ["PLATFORM_CREDENTIAL"]}, set())
+        self.assertEqual([list(a) for a in plain["security"]], [["platformCredential"]])
+        self.assertTrue(plain["description"].startswith("Partner server route (platform credential only)"))
+        with self.assertRaises(public_api.CatalogueError, msg="no platform credential alternative"):
+            public_api.alias_operation({**op, "security": [{"oauthAccessToken": []}]}, oauth_alias, set())
+
     def test_no_alias_without_a_platform_credential_or_outside_the_meeting_service_api_v2(self):
         base = meetings_route("GET", "/api/v2/meeting-spaces", ["MEETING_SESSION", "PLATFORM_CREDENTIAL"])
         self.assertIsNotNone(public_api.meetings_platform_alias(base, "x"))
@@ -195,7 +282,9 @@ class MeetingsPlatformAliases(unittest.TestCase):
             target = by_id[a["aliasOf"]]
             self.assertEqual(a["id"], "meetings.platform." + target["id"].split(".", 1)[1])
             self.assertEqual(a["pattern"], "/v1/meetings" + target["pattern"][len("/api/v2"):])
-            self.assertEqual(a["auth"], ["PLATFORM_CREDENTIAL"])
+            # PLATFORM_CREDENTIAL, plus OAUTH_ACCESS_TOKEN when the machine operation accepts it.
+            expected = ["PLATFORM_CREDENTIAL"] + (["OAUTH_ACCESS_TOKEN"] if "OAUTH_ACCESS_TOKEN" in target["auth"] else [])
+            self.assertEqual(a["auth"], expected)
             self.assertIn(a["requiredScope"], ("meetings.read", "meetings.write"))
             self.assertEqual(a["requiredScope"], target["requiredScope"])
             self.assertIn("PLATFORM_CREDENTIAL", target["auth"])

@@ -9,7 +9,8 @@
 //!   * acts ONLY as that principal (`CF-Acting-Principal` is set to it; a different one is
 //!     `403 PRINCIPAL_NOT_AUTHORIZED` / `ACTING_PRINCIPAL_MISMATCH`);
 //!   * reaches only the closed allowlist [`OAUTH_ROUTES`] (conversation / member reads,
-//!     messages, reactions, read cursor, unread, events, attachments, search) — anything
+//!     messages, reactions, read cursor, unread, events, attachments, search, invitation
+//!     accept / decline) — anything
 //!     else is `403 INSUFFICIENT_SCOPE` / `OAUTH_ROUTE_NOT_ALLOWED`, which keeps client
 //!     tokens, realtime, devices, MLS, backups and administration out of reach;
 //!   * sees MANAGED conversations only: a PRIVATE_E2EE conversation is `404 NOT_FOUND` on
@@ -24,7 +25,8 @@
 //!   conversation with one in, a PRIVATE_E2EE conversation is
 //!   `403 PRINCIPAL_NOT_AUTHORIZED` / `APP_BOT_MANAGED_ONLY`). A MANAGED message that
 //!   mentions a bot (`mentionedPrincipalIds`) records `messaging.bot.mentioned`; a MANAGED
-//!   message in a DIRECT conversation with a bot records `messaging.bot.message-received`.
+//!   message in a DIRECT conversation with a bot (ACTIVE, or INVITED by a message request
+//!   it can then accept) records `messaging.bot.message-received`.
 //!   Both are committed with the message (outbox, ids only: conversation, message, sender
 //!   and the bot as subject; never text) in the conversation's own (organization) scope
 //!   and relayed ONLY to the Developer Platform's central event ingestion
@@ -94,19 +96,31 @@ impl AppsSettings {
 /// The closed allowlist of an OAuth credential (method, path pattern; `*` is one
 /// non-empty segment): the partner session device member operations
 /// ([`crate::http::middleware::PARTNER_SESSION_DEVICE_ROUTES`]) plus search across the
-/// principal's MANAGED conversations. Scopes still apply on top (an app holds
+/// principal's MANAGED conversations and accepting / declining an invitation. Scopes still apply on top (an app holds
 /// `messages.read` / `messages.send` only).
-pub const OAUTH_ROUTES: &[(&str, &str)] = &[("GET", "/v1/messaging/search")];
+pub const OAUTH_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/v1/messaging/search"),
+    // A message request / invitation to a MANAGED conversation (a bot or user accepts
+    // it; a PRIVATE_E2EE target is NOT_FOUND like every conversation route).
+    ("POST", "/v1/conversations/*/invitation/accept"),
+    ("POST", "/v1/conversations/*/invitation/decline"),
+];
 
 /// Whether an OAuth credential may call `method path`.
 pub fn oauth_route(method: &Method, path: &str) -> bool {
     if crate::http::middleware::partner_session_device_route(method, path) {
         return true;
     }
-    let path = path.trim_end_matches('/');
-    OAUTH_ROUTES
-        .iter()
-        .any(|(m, p)| *m == method.as_str() && *p == path)
+    let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+    OAUTH_ROUTES.iter().any(|(m, pattern)| {
+        let want: Vec<&str> = pattern.split('/').collect();
+        *m == method.as_str()
+            && want.len() == segments.len()
+            && want
+                .iter()
+                .zip(&segments)
+                .all(|(w, got)| (*w == "*" && !got.is_empty()) || w == got)
+    })
 }
 
 fn unavailable(e: crate::identity::AuthorityUnavailable) -> Error {
@@ -157,11 +171,7 @@ pub async fn require_member_allowed(
         vec![conversation_id.into(), ctx.scope.environment_id.into()],
     )
     .await?;
-    if e2ee > 0
-        && !application_bots(state, ctx, &[principal])
-            .await?
-            .is_empty()
-    {
+    if e2ee > 0 && !application_bots(state, ctx, &[principal]).await?.is_empty() {
         return Err(bot_managed_only());
     }
     Ok(())
@@ -221,7 +231,7 @@ pub async fn bot_targets(
         db::one::<Other, _>(
             &state.db,
             "SELECT principal_id FROM messaging_conversation_members WHERE conversation_id = $1 \
-               AND principal_id <> $2 AND state = 'ACTIVE'",
+               AND principal_id <> $2 AND state IN ('ACTIVE', 'INVITED')",
             vec![conversation.id.into(), sender.into()],
         )
         .await?
@@ -329,11 +339,19 @@ mod tests {
         assert!(ok(Method::POST, &format!("/v1/conversations/{c}/messages")));
         assert!(ok(Method::GET, "/v1/messaging/search"));
         assert!(ok(Method::GET, &format!("/v1/conversations/{c}/search")));
+        assert!(ok(
+            Method::POST,
+            &format!("/v1/conversations/{c}/invitation/accept")
+        ));
+        assert!(!ok(Method::GET, "/v1/messaging/invitations"));
         assert!(!ok(Method::POST, "/v1/conversations"));
         assert!(!ok(Method::POST, &format!("/v1/conversations/{c}/members")));
         assert!(!ok(Method::POST, "/v1/messaging/client-tokens"));
         assert!(!ok(Method::POST, "/v1/realtime/tickets"));
-        assert!(!ok(Method::POST, &format!("/v1/conversations/{c}/mls/commits")));
+        assert!(!ok(
+            Method::POST,
+            &format!("/v1/conversations/{c}/mls/commits")
+        ));
         assert!(!ok(Method::GET, "/v1/messaging/policy"));
     }
 

@@ -52,10 +52,10 @@
 //!      environment with the token's credential id and the installation service account
 //!      as the caller dimensions.
 //!
-//!    Anonymous requests to the Developer Platform (OAuth token / revoke / metadata, the
-//!    app directory) carry a gateway service token WITHOUT a delegated context or a
-//!    session — the Developer Platform's public API is reachable only through the
-//!    gateway; anonymous requests to other services are transported as before.
+//!    Anonymous requests (also the Developer Console OAuth endpoints and app directory)
+//!    are transported without a gateway service token, as before: the internal protocol
+//!    refuses a service token next to a customer `Authorization`, which the OAuth
+//!    endpoints carry.
 //!
 //!    End-user / device traffic (every mode above except PLATFORM_CREDENTIAL,
 //!    OAUTH_ACCESS_TOKEN and anonymous) is held to a per-token ceiling when
@@ -80,7 +80,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use cf_service_auth::{services, OutboundServiceRequest};
+use cf_service_auth::OutboundServiceRequest;
 use futures_util::TryStreamExt;
 use tracing::Instrument;
 
@@ -850,23 +850,6 @@ async fn forward_rest(
                     headers.insert(HeaderName::from_static(USER_SESSION_HEADER), session);
                 }
                 _ => return ApiError::Code(ErrorCode::AuthenticationFailed).into_response(),
-            }
-        }
-        // The Developer Platform's public API is reachable only through the gateway: an
-        // anonymous request carries a gateway token with no delegated context and no
-        // session (the Developer Platform decides what an anonymous caller may do).
-        Forward::Passthrough(AuthMode::Anonymous)
-            if route.upstream.as_str() == services::DEVELOPER_PLATFORM =>
-        {
-            let hop =
-                OutboundServiceRequest::continuing(route.upstream.clone(), &context.correlation_id);
-            match state
-                .service_auth
-                .signer()
-                .sign_request(&hop, &parts.method, upstream_path)
-            {
-                Ok(signed) => signed.apply_to(&mut headers),
-                Err(_) => return ApiError::Code(ErrorCode::InternalError).into_response(),
             }
         }
         Forward::Passthrough(_) => {}

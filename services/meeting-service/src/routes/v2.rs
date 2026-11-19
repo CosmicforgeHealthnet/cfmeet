@@ -867,6 +867,40 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
             "/me/security-events",
             get(crate::handlers::v2::account_devices::list_my_security_events),
         )
+        // ADR 0064 / 0065: CF Meet Apps (each behind its default-off flag).
+        .route(
+            "/oauth/authorize/context",
+            get(crate::handlers::v2::apps::authorize_context),
+        )
+        .route(
+            "/oauth/authorize/approve",
+            post(crate::handlers::v2::apps::authorize_decide),
+        )
+        .route("/me/apps", get(crate::handlers::v2::apps::list_my_apps))
+        .route(
+            "/me/apps/:grant_id",
+            delete(crate::handlers::v2::apps::revoke_my_app),
+        )
+        .route(
+            "/organizations/:id/apps",
+            get(crate::handlers::v2::apps::list_organization_apps),
+        )
+        .route(
+            "/organizations/:id/apps/:grant_id",
+            delete(crate::handlers::v2::apps::revoke_organization_app),
+        )
+        .route(
+            "/conferences/:id/apps",
+            get(crate::handlers::v2::apps::list_conference_apps),
+        )
+        .route(
+            "/conferences/:id/apps/:app_id/context",
+            post(crate::handlers::v2::apps::create_app_context),
+        )
+        .route(
+            "/app-context-keys",
+            get(crate::handlers::v2::apps::app_context_keys),
+        )
         // Document 4 §3.1: Notification Service user APIs U1–U9 (Account-verified relay)
         .route("/notifications", get(notifications::list_my_notifications))
         .route(
