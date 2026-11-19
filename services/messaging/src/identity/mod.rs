@@ -116,6 +116,10 @@ impl OAuthKind {
     }
 }
 
+/// OAuth facts that name an `OAUTH_*` kind but are not well formed (fail closed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MalformedOAuth;
+
 /// The CF Meet App an authenticated credential belongs to (ADR 0064): the credential's
 /// kind, the app (OAuth `client_id` = the app's application id) and the grant
 /// (installation). Taken ONLY from Platform Access's authentication answer.
@@ -131,9 +135,9 @@ impl OAuthCredential {
     /// on the authority chain (`credentialKind`, `appId`, `grantId`), in a nested `oauth`
     /// object, or beside the chain in the response: the first place that names a
     /// `credentialKind` wins. `Ok(None)`: an ordinary credential (no kind, or a non-OAuth
-    /// kind). `Err(())`: an `OAUTH_*` kind that is unknown or lacks well-formed ids
+    /// kind). `Err`: an `OAUTH_*` kind that is unknown or lacks well-formed ids
     /// (fail closed).
-    pub fn parse(places: &[&Value]) -> Result<Option<Self>, ()> {
+    pub fn parse(places: &[&Value]) -> Result<Option<Self>, MalformedOAuth> {
         for place in places {
             // On the object itself `credentialKind`; in a nested `oauth` object also `kind`.
             let nested = &place["oauth"];
@@ -146,17 +150,17 @@ impl OAuthCredential {
             ];
             for (v, kind) in candidates {
                 let Some(kind) = kind else { continue };
-                let kind = match kind.as_str().ok_or(())? {
+                let kind = match kind.as_str().ok_or(MalformedOAuth)? {
                     "OAUTH_ACCESS" => OAuthKind::Access,
                     "OAUTH_BOT" => OAuthKind::Bot,
-                    k if k.starts_with("OAUTH_") => return Err(()),
+                    k if k.starts_with("OAUTH_") => return Err(MalformedOAuth),
                     _ => return Ok(None),
                 };
                 let id = |name: &str| {
                     v.get(name)
                         .and_then(Value::as_str)
                         .and_then(|s| Uuid::parse_str(s).ok())
-                        .ok_or(())
+                        .ok_or(MalformedOAuth)
                 };
                 return Ok(Some(Self {
                     kind,

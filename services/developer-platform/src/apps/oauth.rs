@@ -41,18 +41,22 @@ const RFC_ERRORS: &[&str] = &[
     "invalid_token",
     "insufficient_scope",
     "temporarily_unavailable",
+    "slow_down",
 ];
 
 fn description(code: &str) -> &'static str {
     match code {
         "invalid_request" => "The request is missing a parameter or is malformed.",
         "invalid_client" => "Client authentication failed.",
-        "invalid_grant" => "The authorization code or refresh token is invalid, expired or revoked.",
+        "invalid_grant" => {
+            "The authorization code or refresh token is invalid, expired or revoked."
+        }
         "unauthorized_client" => "The client is not authorized to use this grant type.",
         "unsupported_grant_type" => "The grant type is not supported.",
         "invalid_scope" => "The requested scope is invalid.",
         "invalid_token" => "The access token is invalid, expired or revoked.",
         "insufficient_scope" => "The access token lacks the required scope.",
+        "slow_down" => "Too many requests; retry later.",
         _ => "The service is temporarily unavailable.",
     }
 }
@@ -79,6 +83,7 @@ pub fn oauth_error(code: &str) -> Response {
     let status = match code {
         "invalid_client" | "invalid_token" => StatusCode::UNAUTHORIZED,
         "insufficient_scope" => StatusCode::FORBIDDEN,
+        "slow_down" => StatusCode::TOO_MANY_REQUESTS,
         "temporarily_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::BAD_REQUEST,
     };
@@ -158,7 +163,10 @@ fn form_content(headers: &HeaderMap) -> bool {
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(';').next())
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("application/x-www-form-urlencoded"))
+        .is_some_and(|v| {
+            v.trim()
+                .eq_ignore_ascii_case("application/x-www-form-urlencoded")
+        })
 }
 
 /// The `Authorization` header (a name, so the gateway hop never needs to know it).
@@ -278,7 +286,14 @@ pub async fn token(state: &AppState, headers: &HeaderMap, body: &Bytes) -> Respo
         Ok(c) => c,
         Err(code) => return oauth_error(code),
     };
-    let text = |k: &str| form.get(k).and_then(Value::as_str).filter(|v| bounded(v, 4096));
+    if !state.apps.limiter.allow(&format!("token:{client_id}")) {
+        return oauth_error("slow_down");
+    }
+    let text = |k: &str| {
+        form.get(k)
+            .and_then(Value::as_str)
+            .filter(|v| bounded(v, 4096))
+    };
     let mut request = json!({ "clientId": client_id, "clientSecret": client_secret });
     match form.get("grant_type").and_then(Value::as_str) {
         Some("authorization_code") => {
@@ -334,6 +349,9 @@ pub async fn revoke(state: &AppState, headers: &HeaderMap, body: &Bytes) -> Resp
         Ok(c) => c,
         Err(code) => return oauth_error(code),
     };
+    if !state.apps.limiter.allow(&format!("revoke:{client_id}")) {
+        return oauth_error("slow_down");
+    }
     let Some(presented) = form
         .get("token")
         .and_then(Value::as_str)
@@ -344,7 +362,8 @@ pub async fn revoke(state: &AppState, headers: &HeaderMap, body: &Bytes) -> Resp
     let correlation = current_context()
         .map(|c| c.correlation_id)
         .unwrap_or_else(cf_service_auth::CorrelationId::generate);
-    let request = json!({ "clientId": client_id, "clientSecret": client_secret, "token": presented });
+    let request =
+        json!({ "clientId": client_id, "clientSecret": client_secret, "token": presented });
     match state.oauth.revoke(&request, &correlation).await {
         Ok(OAuthReply::Refused { status, code })
             if code == "invalid_client" || matches!(status, 401) =>
@@ -373,6 +392,9 @@ fn scope_list(v: Option<&Value>) -> Vec<String> {
 
 /// `GET /v1/oauth/userinfo`.
 pub async fn userinfo(state: &AppState, headers: &HeaderMap) -> Response {
+    if !state.apps.limiter.allow_route("userinfo") {
+        return oauth_error("slow_down");
+    }
     let Some(access) = authorization(headers)
         .and_then(|v| scheme(v, "bearer"))
         .filter(|t| t.starts_with("cfoa_") && bounded(t, 4096))
@@ -463,7 +485,9 @@ mod tests {
 
     #[test]
     fn forms_are_decoded_and_repeats_refused() {
-        let f = parse_form(b"grant_type=authorization_code&code=a%2Bb+c&redirect_uri=https%3A%2F%2Fx").unwrap();
+        let f =
+            parse_form(b"grant_type=authorization_code&code=a%2Bb+c&redirect_uri=https%3A%2F%2Fx")
+                .unwrap();
         assert_eq!(f["code"], "a+b c");
         assert_eq!(f["redirect_uri"], "https://x");
         assert!(parse_form(b"code=a&code=b").is_none());
@@ -488,7 +512,10 @@ mod tests {
             Err("invalid_client")
         );
         let bad = parse_form(b"client_secret=x&client_id=not-a-uuid").unwrap();
-        assert_eq!(client_credentials(&HeaderMap::new(), &bad), Err("invalid_client"));
+        assert_eq!(
+            client_credentials(&HeaderMap::new(), &bad),
+            Err("invalid_client")
+        );
     }
 
     #[test]

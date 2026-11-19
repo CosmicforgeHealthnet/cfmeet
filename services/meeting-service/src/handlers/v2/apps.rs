@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::{V2Json, V2Path, V2Query};
 use crate::{
     dto::apps::*,
-    error::{ApiResult, ErrorEnvelope},
+    error::ApiResult,
     services::actor::ActorContext,
     state::AppState,
 };

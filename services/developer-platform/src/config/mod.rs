@@ -780,8 +780,14 @@ mod tests {
             ("DEVELOPER_PLATFORM_OAUTH_ENABLED", "true"),
             ("DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED", "true"),
             ("DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED", "true"),
-            ("DEVELOPER_PLATFORM_APP_REVIEWERS", "github-alice, github-bob"),
-            ("DEVELOPER_PLATFORM_OAUTH_ISSUER", "https://api.example.test/"),
+            (
+                "DEVELOPER_PLATFORM_APP_REVIEWERS",
+                "github-alice, github-bob",
+            ),
+            (
+                "DEVELOPER_PLATFORM_OAUTH_ISSUER",
+                "https://api.example.test/",
+            ),
         ]);
         let cfg = DeveloperPlatformConfig::from_lookup(lookup(&pairs)).unwrap();
         let b = cfg.build;
@@ -795,7 +801,10 @@ mod tests {
         ] {
             let mut pairs = BASE.to_vec();
             pairs.push((var, value));
-            assert!(DeveloperPlatformConfig::from_lookup(lookup(&pairs)).is_err(), "{var}");
+            assert!(
+                DeveloperPlatformConfig::from_lookup(lookup(&pairs)).is_err(),
+                "{var}"
+            );
         }
     }
 

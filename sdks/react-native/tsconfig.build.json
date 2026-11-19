@@ -1,0 +1,13 @@
+{
+  // Emits dist/ against the BUILT SDK (cd ../typescript && npm run build first).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmitOnError": true,
+    "paths": {}
+  },
+  "include": ["src"]
+}

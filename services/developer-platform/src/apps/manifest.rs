@@ -185,10 +185,7 @@ pub fn normalize(input: ManifestInput) -> Result<Value, ApiError> {
     let name = crate::control::display_name(&input.name)?;
     let description = match input.description.as_deref().map(str::trim) {
         None | Some("") => Value::Null,
-        Some(d)
-            if d.chars().count() <= 1000
-                && !d.chars().any(|c| c.is_control() && c != '\n') =>
-        {
+        Some(d) if d.chars().count() <= 1000 && !d.chars().any(|c| c.is_control() && c != '\n') => {
             Value::String(d.to_string())
         }
         Some(_) => return Err(invalid()),
@@ -328,7 +325,9 @@ mod tests {
         let m = input(v).unwrap();
         assert!(!reviewable(&m), "loopback only while DRAFT");
         let mut v = base();
-        v["redirectUris"] = json!((0..11).map(|i| format!("https://a.example.com/{i}")).collect::<Vec<_>>());
+        v["redirectUris"] = json!((0..11)
+            .map(|i| format!("https://a.example.com/{i}"))
+            .collect::<Vec<_>>());
         assert!(input(v).is_err());
         let mut v = base();
         v["redirectUris"] = json!([]);

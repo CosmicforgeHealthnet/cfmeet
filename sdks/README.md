@@ -10,6 +10,7 @@ publishing waits for an owner decision (registry, publisher, licence, version po
 |---|---|---|---|
 | TypeScript | [`typescript/`](typescript) | `@cfmeet/platform-sdk` 0.1.0 (private) | beta |
 | Dart | [`dart/`](dart) | `cfmeet_platform_sdk` 0.1.0 (`publish_to: none`) | beta |
+| React Native | [`react-native/`](react-native) | `@cfmeet/platform-sdk-react-native` 0.1.0 (private) | beta (hand-written over the TypeScript SDK) |
 
 Both SDKs are generated from the **published** contracts listed in
 [`generation.json`](generation.json) (registered in `packages/contracts/manifest.json`)
@@ -73,7 +74,11 @@ try {
   `'userSession'` (Bearer developer / meeting session), `'participantToken'`
   (`X-Participant-Token`), `'clientToken'` (`Authorization: CF-Client-Token …`),
   `'signalingCredential'` (Bearer `cfsig_…`); each a string or a provider function (asked
-  again per request / reconnect). An operation whose auth modes exclude the configured
+  again per request / reconnect). `{ type: 'userToken', tokenProvider }` (Bearer
+  `cfut_…`, ADR 0062, device side): the token is cached, the provider is asked again ~60 s
+  before the JWS `exp` (decoded, never verified, by the SDK) and after a 401
+  `USER_TOKEN_EXPIRED` / `USER_TOKEN_REVOKED` / `USER_TOKEN_INVALID` /
+  `AUTHENTICATION_FAILED` / `AUTHENTICATION_REQUIRED`, and the request is retried once. An operation whose auth modes exclude the configured
   type is refused before sending (override per call with `options.auth`); anonymous
   operations never carry a credential.
 * **Browser safety:** a `cfmk_` credential is **refused** when `window` and `document`
@@ -165,7 +170,138 @@ CFMEET_STACK_ENV=/path/stack.json npm test   # + the real-stack suite (SKIPPED o
 
 Examples (type-checked in CI): [`examples/`](typescript/examples) — server-side SMS with
 idempotency, conversation pagination, a Node `http` webhook receiver, browser usage with
-a user session.
+a user session, partner users / tokens / server-placed calls (`server-partner-users.ts`)
+and a partner device web app (`device-web.ts`).
+
+## CF Meet Platform "Build": partner users on their own devices (ADR 0062 / 0063)
+
+Partners put CF Meet chat, calls and meetings in their own apps for their own users, who
+have no CF Meet account. The partner's **server** creates a CF Meet user per app user and
+mints a short-lived **user token** (`cfut_…`); the **device** SDK exchanges it for the
+credentials each product already uses (chat client token, call signaling credential,
+meeting participant token + RTC credential) and keeps them fresh. The platform credential
+(`cfmk_…`) never leaves the server.
+
+| Surface | TypeScript | Dart (Flutter) | Route |
+|---|---|---|---|
+| Users (server) | `client.users.create / upsert / get / list / all / findByExternalId / update / delete / revokeSessions` | `client.users.*` | `/v1/users*` |
+| User tokens (server) | `client.users.createToken / upsertWithToken` | same | `POST /v1/users/{id}/tokens`, `POST /v1/users/tokens` |
+| Device client | `new CfMeetDeviceClient({ baseUrl, tokenProvider, storage })` | `CfMeetDeviceClient(baseUrl:, tokenProvider:, storage:)` | — |
+| Chat | `device.chat.connect()` → `ChatSession` (`sendMessage`, `listMessages`, `listConversations`, `markRead`, `getUnreadCount`, `request(name, …)`, `on('message')`) | `ChatSession` (`messages` stream, same methods) | `POST /v1/messaging/user-sessions` → `POST /v1/realtime/tickets` → `/v1/realtime` |
+| Calls | `device.calls.connect({ kind })` → `CallSession` (`on('invitation')`, `acknowledge`, `accept`, `decline`, `mediaCredential`, `recoverInvitations`) | `DeviceCallSession` (`invitations` stream) | `POST /v1/calling/user-sessions` → `/v1/calling/signaling` |
+| Meetings | `device.meetings.join(conferenceId)` → `MeetingJoin` (`rtc`, `participantToken`, `renewMediaCredential`, `realtime`) | same | `POST /api/v2/conferences/{id}/join` |
+| Push | `device.push.register({ platform: 'APNS' \| 'APNS_VOIP' \| 'FCM', handle })`, `unregister` | `PushPlatform.*` | `/v1/messaging/user-push-registrations/{installationId}` |
+| Installation id | `InstallationIdStore` over `localStorage` / AsyncStorage (`getItem` / `setItem`), default in memory | `KeyValueStorage` (e.g. a `shared_preferences` adapter) | `[A-Za-z0-9._-]{8,128}` |
+
+The users helpers and device clients send hand-written operation specs (`USER_ROUTES`,
+`DEVICE_ROUTES` / `UserRoutes`, `DeviceRoutes`) through `client.request`, so they work
+before the generated catalogue includes these routes; after regeneration the same
+operations also appear as `client.developerPlatform.createUser` & co. Derived credentials
+are renewed before expiry (`renewBeforeExpirySeconds`, default 60, at most half their
+lifetime; `autoRenew` in the background) and after a 401; a renewal whose session device
+ended (404) starts a new one; realtime channels reconnect with backoff, and a refused
+ticket / signaling close 4001 triggers one fresh exchange. Each feature is off until its
+service flag is on (see the build contract).
+
+### Server quickstart (Node)
+
+```ts
+const cfmeet = new CfMeetClient({ baseUrl: 'https://api.cfmeet.com', auth: { type: 'platformCredential', credential: process.env.CFMEET_API_CREDENTIAL! } });
+
+// GET /my-api/cfmeet-token, behind YOUR login: create-or-update the user and mint a token.
+const { token, user } = await cfmeet.users.upsertWithToken({
+  externalId: me.id, // your opaque id — never a phone number or SIP address
+  displayName: me.name,
+  grants: { msg: ['read', 'send'], call: ['receive'] }, // + mtg: [{ conferenceId, role: 'PARTICIPANT' }]
+  ttlSeconds: 3600,
+});
+// Signed out everywhere / banned:
+await cfmeet.users.revokeSessions(user.id);            // or update(user.id, { status: 'SUSPENDED' })
+```
+
+The key needs `principals.write` + `user_tokens.issue` (and `messages.*`, `calls.write`,
+`meetings.write` for the grants it mints). Token mints are not retried automatically:
+an Idempotency-Key replay returns the metadata without the token (`tokenRedacted`).
+
+### Device quickstart (web)
+
+```ts
+const device = new CfMeetDeviceClient({
+  baseUrl: 'https://api.cfmeet.com',
+  tokenProvider: async () => (await (await fetch('/my-api/cfmeet-token')).json()).token,
+  storage: browserLocalStorage() ?? undefined,
+});
+const chat = await device.chat.connect<{ type: string }>();
+chat.on('message', ({ data }) => render(data));
+await chat.sendMessage(conversationId, 'On my way');
+
+const calls = await device.calls.connect({ kind: 'WEB' });
+calls.on('invitation', async ({ invitation }) => {
+  await calls.acknowledge(invitation.invitationId);
+  const { data } = await calls.accept(invitation);           // or calls.decline(invitation)
+  const media = await calls.mediaCredential(data.sessionId); // media gateway url + token
+});
+
+const meeting = await device.meetings.join(conferenceId);
+// LiveKit's client SDK (your dependency): await room.connect(meeting.rtc!.url, meeting.rtc!.credential)
+```
+
+The page's origin must be an allowed website of the environment (Developer Console).
+Full examples: [`typescript/examples/server-partner-users.ts`](typescript/examples/server-partner-users.ts),
+[`typescript/examples/device-web.ts`](typescript/examples/device-web.ts).
+
+### Flutter quickstart
+
+```dart
+final device = CfMeetDeviceClient(
+  baseUrl: 'https://api.cfmeet.com',
+  tokenProvider: () => myApi.cfmeetToken(),   // your server mints it
+  storage: PrefsStorage(prefs),               // implements KeyValueStorage
+);
+final chat = await device.chat.connect();
+chat.messages.listen(render);
+await chat.sendMessage(conversationId, 'On my way');
+
+final calls = await device.calls.connect(kind: DeviceKind.mobile);
+calls.invitations.listen((inv) async {
+  final accepted = await calls.accept(inv.invitationId);
+  final media = await calls.mediaCredential(accepted.json['sessionId'] as String);
+});
+final meeting = await device.meetings.join(conferenceId);  // meeting.rtc!.url / .credential → livekit_client
+await device.push.register(platform: PushPlatform.apnsVoip, handle: voipToken);
+```
+
+CallKit / ConnectionService and PushKit / FCM glue is the app's (see the React Native
+README for what it must do; the same rules apply to Flutter plugins).
+
+### React Native quickstart
+
+See [`react-native/README.md`](react-native/README.md): `createDeviceClient({ …, storage:
+AsyncStorage })`, the hooks `useCfMeetChat` / `useCfMeetCall` / `useCfMeetMeeting`, and
+the `NativeCallBridge` your native module implements for push tokens and the system call
+UI (`connectNativeCalls`).
+
+### Example: KarryGo (a rider calls the customer; chat is the fallback)
+
+1. **Sign-in** — both apps call KarryGo's `/cfmeet-token`; KarryGo's server runs
+   `users.upsertWithToken({ externalId, displayName, grants: { msg: ['read','send'], call: ['receive'] } })`
+   and stores the returned `user.id` (the CF Meet principal) with its own user.
+2. **Devices** — each app runs `device.calls.connect({ kind: 'MOBILE' })` and registers
+   its push tokens (`APNS_VOIP` / `FCM`); the customer's phone rings even when the app is
+   closed.
+3. **Call** — the rider taps "Call customer": the rider app sends its `calls.endpointId`
+   to KarryGo; KarryGo checks the delivery is active and the caller is its rider, then
+   places the call server-side: `calling.createCall({ body: { kind: 'VOICE',
+   initiatorPrincipalId: rider, initiatorEndpointId, targetPrincipalIds: [customer] },
+   idempotencyKey: delivery.callKey })` (paid class: never auto-retried; replay with the
+   same key on an `UnknownOutcomeError`).
+4. **Answer** — the customer's app gets `call.incoming` (or the VoIP push → CallKit),
+   `accept`s and connects media with `mediaCredential(sessionId)`.
+5. **Fallback** — no live invitation (`liveInvitationCount === 0`), declined or no
+   answer: KarryGo creates the delivery chat (`messaging.createConversation`, MANAGED,
+   `contextClass: 'TRANSACTION'`) and both apps use `device.chat` with push for new
+   messages. When the delivery ends KarryGo stops placing calls; tokens expire within the
+   hour, and `revokeSessions` ends them at once.
 
 ## Dart (`sdks/dart`, beta)
 

@@ -131,9 +131,7 @@ impl GrantSnapshot {
         match (previous, self.status.as_str()) {
             (None | Some("REVOKED"), "ACTIVE") => Some("app.installed"),
             (Some("ACTIVE"), "REVOKED") => Some(match self.revoked_reason.as_deref() {
-                None | Some("UNINSTALLED" | "USER_REVOKED" | "ADMIN_REVOKED") => {
-                    "app.uninstalled"
-                }
+                None | Some("UNINSTALLED" | "USER_REVOKED" | "ADMIN_REVOKED") => "app.uninstalled",
                 Some(_) => "app.grant_revoked",
             }),
             _ => None,
@@ -225,7 +223,10 @@ async fn apply<C: ConnectionTrait>(
         return Ok(Some(0));
     }
     let mut data = Map::new();
-    data.insert("installationId".into(), Value::String(g.grant_id.to_string()));
+    data.insert(
+        "installationId".into(),
+        Value::String(g.grant_id.to_string()),
+    );
     data.insert("appId".into(), Value::String(g.app_id.to_string()));
     data.insert("targetKind".into(), Value::String(g.target_kind.clone()));
     if let Some(o) = g.organization_id {
@@ -300,7 +301,10 @@ pub async fn sync_once(
             .and_then(Value::as_i64)
             .filter(|n| *n >= after)
             .ok_or(ApiError(ErrorCode::ServiceUnavailable))?;
-        let more = page.get("hasMore").and_then(Value::as_bool).unwrap_or(false);
+        let more = page
+            .get("hasMore")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let txn = db.begin().await?;
         for c in &changes {
             if c.get("entityKind").and_then(Value::as_str) != Some("APP_GRANT") {

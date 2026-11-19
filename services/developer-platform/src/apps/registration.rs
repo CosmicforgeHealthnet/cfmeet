@@ -457,7 +457,11 @@ pub async fn put(
         &txn,
         caller,
         &row,
-        if created { "app.created" } else { "app.updated" },
+        if created {
+            "app.created"
+        } else {
+            "app.updated"
+        },
         json!({ "version": row.current_version, "status": row.status }),
     )
     .await?;
@@ -542,7 +546,8 @@ pub async fn rotate_secret(
         .filter(|s| {
             !s.is_empty()
                 && s.len() <= 64
-                && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
         })
         .map(str::to_string);
     let issued_at = issued
@@ -645,9 +650,16 @@ pub async fn submit(
 fn grant_view(g: &Value) -> Option<Value> {
     let id = g.get("id").and_then(Value::as_str)?;
     Uuid::parse_str(id).ok()?;
-    let text = |k: &str| g.get(k).filter(|v| v.is_string()).cloned().unwrap_or(Value::Null);
+    let text = |k: &str| {
+        g.get(k)
+            .filter(|v| v.is_string())
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
     let scopes = match g.get("scopes") {
-        Some(Value::Array(a)) => Value::Array(a.iter().filter(|s| s.is_string()).cloned().collect()),
+        Some(Value::Array(a)) => {
+            Value::Array(a.iter().filter(|s| s.is_string()).cloned().collect())
+        }
         Some(Value::String(s)) => json!(s.split_whitespace().collect::<Vec<_>>()),
         _ => json!([]),
     };
@@ -686,7 +698,11 @@ pub async fn grants(
     }
     let body = match state
         .oauth
-        .client_grants(project_id, q.cursor.as_deref(), &caller.request.correlation_id)
+        .client_grants(
+            project_id,
+            q.cursor.as_deref(),
+            &caller.request.correlation_id,
+        )
         .await
     {
         Ok(OAuthReply::Ok { body, .. }) => body,

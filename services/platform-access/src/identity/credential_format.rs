@@ -114,6 +114,7 @@ fn is_lower_hex(s: &str, len: usize) -> bool {
 }
 
 /// Strict parse. Returns `None` for anything that is not exactly a well-formed credential.
+#[cfg(test)]
 pub(crate) fn parse(presented: &str) -> Option<PresentedCredential> {
     parse_as(API_CREDENTIAL, presented)
 }

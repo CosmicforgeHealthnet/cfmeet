@@ -105,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
         .with_app_settings(developer_platform::apps::AppSettings {
             reviewers: config.app_reviewers.clone(),
             endpoints: config.oauth_endpoints.clone(),
+            ..Default::default()
         });
     if config.webhooks.enabled {
         developer_platform::webhooks::require_signable(&state.db, &config.webhooks)

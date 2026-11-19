@@ -34,7 +34,6 @@ text_enum!(
         Credential = "CREDENTIAL",
         CredentialScope = "CREDENTIAL_SCOPE",
         Principal = "PRINCIPAL",
-        /// ADR 0064: an app grant (installation) changed.
         AppGrant = "APP_GRANT",
     }
 );

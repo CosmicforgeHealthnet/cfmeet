@@ -1,0 +1,33 @@
+{
+  "name": "@cfmeet/platform-sdk-react-native",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CF Meet platform SDK for React Native: the TypeScript SDK core (user tokens, chat, calls, meetings, push) plus an installation-id store over AsyncStorage, a typed native bridge interface for push tokens and CallKit / ConnectionService, and React hooks.",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cfmeet/platform-sdk": "file:../typescript"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.6.3"
+  }
+}

@@ -194,7 +194,9 @@ async fn operator_list(
 ) -> ApiResult<Json<Value>> {
     caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
     let Query(q) = q.map_err(|_| ApiError(ErrorCode::ValidationError))?;
-    Ok(Json(review::operator_list(&s.db, q.status.as_deref()).await?))
+    Ok(Json(
+        review::operator_list(&s.db, q.status.as_deref()).await?,
+    ))
 }
 
 async fn operator_get(
@@ -253,6 +255,10 @@ fn gateway_on(s: &AppState) -> Option<Response> {
     (!s.flags.gateway_api).then(|| ApiError(ErrorCode::NotFound).into_response())
 }
 
+fn route_limited(s: &AppState, route: &str) -> Option<Response> {
+    (!s.apps.limiter.allow_route(route)).then(|| ApiError(ErrorCode::RateLimited).into_response())
+}
+
 async fn token(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
     if let Some(r) = gateway_on(&s) {
         return r;
@@ -278,6 +284,9 @@ async fn metadata(State(s): State<AppState>) -> Response {
     if let Some(r) = gateway_on(&s) {
         return r;
     }
+    if !s.apps.limiter.allow_route("metadata") {
+        return oauth::oauth_error("slow_down");
+    }
     oauth::metadata(&s)
 }
 
@@ -285,7 +294,7 @@ async fn directory_list(
     State(s): State<AppState>,
     q: Result<Query<PageQuery>, axum::extract::rejection::QueryRejection>,
 ) -> Response {
-    if let Some(r) = gateway_on(&s) {
+    if let Some(r) = gateway_on(&s).or_else(|| route_limited(&s, "directory")) {
         return r;
     }
     let result = async {
@@ -300,7 +309,7 @@ async fn directory_list(
 }
 
 async fn directory_get(State(s): State<AppState>, Path(id): Path<String>) -> Response {
-    if let Some(r) = gateway_on(&s) {
+    if let Some(r) = gateway_on(&s).or_else(|| route_limited(&s, "directory")) {
         return r;
     }
     let Ok(id) = Uuid::parse_str(&id) else {

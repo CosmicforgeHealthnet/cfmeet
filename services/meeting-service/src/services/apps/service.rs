@@ -411,9 +411,14 @@ impl Apps {
             .and_then(Value::as_str)
             .filter(|c| !c.is_empty() && c.len() <= 512)
             .ok_or_else(|| unavailable(AuthorityUnavailable("authorization without code".into())))?;
+        let grant = answer
+            .body
+            .get("grantId")
+            .and_then(|g| g.as_str())
+            .unwrap_or("")
+            .to_string();
         tracing::info!(app_id = %req.client_id, target = req.target(),
-            organization_id = ?req.organization_id,
-            grant_id = answer.body.get("grantId").and_then(Value::as_str).unwrap_or(""),
+            organization_id = ?req.organization_id, grant_id = %grant,
             "app authorized by the account");
         Ok(AuthorizeDecisionResponse {
             redirect_to: req.redirect_with(&[("code", code)])?,

@@ -71,7 +71,10 @@ pub struct Decision {
 }
 
 /// `GET /internal/v1/operator/apps?status=`.
-pub async fn operator_list(db: &DatabaseConnection, status: Option<&str>) -> Result<Value, ApiError> {
+pub async fn operator_list(
+    db: &DatabaseConnection,
+    status: Option<&str>,
+) -> Result<Value, ApiError> {
     if status.is_some_and(|s| !STATUSES.contains(&s)) {
         return Err(ApiError(ErrorCode::ValidationError));
     }
@@ -120,7 +123,10 @@ pub async fn operator_get(db: &DatabaseConnection, app_id: Uuid) -> Result<Value
             vec![app_id.into()],
         ))
         .await?;
-    let h: Result<Vec<Value>, _> = history.iter().map(|r| r.try_get::<Value>("", "v")).collect();
+    let h: Result<Vec<Value>, _> = history
+        .iter()
+        .map(|r| r.try_get::<Value>("", "v"))
+        .collect();
     v["history"] = Value::Array(h?);
     Ok(v)
 }
@@ -155,7 +161,10 @@ pub async fn operator_decide(
         let Some(user) = operator_user else {
             return Err(ApiError(ErrorCode::OperatorRequired));
         };
-        if membership(&state.db, current.tenant_id, user).await?.is_some() {
+        if membership(&state.db, current.tenant_id, user)
+            .await?
+            .is_some()
+        {
             return Err(ApiError(ErrorCode::SelfApprovalForbidden));
         }
     }

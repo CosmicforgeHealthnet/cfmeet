@@ -34,7 +34,7 @@ use axum::{
 };
 use cf_service_auth::InternalPermission;
 use serde::{de::DeserializeOwned, Deserialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use uuid::Uuid;
 
 use super::{
@@ -365,6 +365,7 @@ async fn authorize(
     } else {
         None
     };
+    let user = personal.is_some();
     let (code, grant_id) = state
         .platform
         .authorize(&request, personal)
@@ -372,7 +373,14 @@ async fn authorize(
         .map_err(oauth_err)?;
     crate::metrics::inc(
         "platform_access_oauth_authorizations_total",
-        &[("target", request.target.as_str())],
+        &[(
+            "target",
+            if user {
+                "USER"
+            } else {
+                "ORGANIZATION"
+            },
+        )],
     );
     let response = (
         StatusCode::CREATED,

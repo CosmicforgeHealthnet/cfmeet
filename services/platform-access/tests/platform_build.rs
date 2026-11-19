@@ -38,6 +38,7 @@ fn build(keys: Arc<UserTokenKeys>) -> PlatformBuildConfig {
         meeting_platform_enabled: true,
         end_user_caps: EndUserCaps::default(),
         user_token_keys: Some(keys),
+        ..PlatformBuildConfig::default()
     }
 }
 

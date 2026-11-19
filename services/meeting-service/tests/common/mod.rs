@@ -478,6 +478,8 @@ pub struct TestOptions {
     /// (`None` = `ORGANIZATION_CALLING_SCOPE=shared`).
     pub organization_calling:
         Option<backend::services::organization_calling::SharedOrganizationCalling>,
+    /// ADR 0064 / 0065: CF Meet Apps (`None` = every Apps flag off).
+    pub apps: Option<backend::services::apps::Apps>,
 }
 
 impl Default for TestOptions {
@@ -503,6 +505,7 @@ impl Default for TestOptions {
             platform: None,
             organizations_authority: None,
             organization_calling: None,
+            apps: None,
         }
     }
 }
@@ -841,6 +844,9 @@ impl TestApp {
         );
         if let Some(platform) = opts.platform.clone() {
             state = state.with_platform(platform);
+        }
+        if let Some(apps) = opts.apps.clone() {
+            state = state.with_apps(apps);
         }
         let router = routes::create_routes(state.clone())
             .route_layer(axum::middleware::from_fn(route_coverage::record));

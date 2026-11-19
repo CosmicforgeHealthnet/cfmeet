@@ -360,7 +360,11 @@ impl PlatformOAuthPort for UnconfiguredPlatformOAuth {
         Err(not_configured())
     }
 
-    async fn token(&self, _: &Value, _: &CorrelationId) -> Result<OAuthReply, AuthorityUnavailable> {
+    async fn token(
+        &self,
+        _: &Value,
+        _: &CorrelationId,
+    ) -> Result<OAuthReply, AuthorityUnavailable> {
         Err(not_configured())
     }
 
@@ -421,7 +425,10 @@ mod tests {
             refusal_code(br#"{"error":{"code":"VALIDATION_ERROR"}}"#),
             "VALIDATION_ERROR"
         );
-        assert_eq!(refusal_code(br#"{"error":"invalid_client"}"#), "invalid_client");
+        assert_eq!(
+            refusal_code(br#"{"error":"invalid_client"}"#),
+            "invalid_client"
+        );
         assert_eq!(
             refusal_code(br#"{"error":{"code":"bad code <script>"}}"#),
             "REFUSED"
