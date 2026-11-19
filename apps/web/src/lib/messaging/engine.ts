@@ -185,7 +185,12 @@ type ServerMessage = {
   attachmentIds: string[];
   e2ee?: { epoch: number; ciphertext: string | null } | null;
   managed?: { text: string | null } | null;
+  replyToMessageId?: string | null;
+  targetMessageId?: string | null;
 };
+
+/** What the server knows about a private message (never its content): deletion, reply and edit links. */
+type E2eeMeta = { lifecycle: string; replyTo: string | null; target: string | null };
 
 type ServerDevice = { deviceId: string; status: string; signaturePublicKey: string; displayLabel: string | null };
 
@@ -285,6 +290,7 @@ export class MessagingEngine {
   private managed = new Map<string, ManagedConversationState>();
   private loadedManaged = new Set<string>();
   private reactions = new Map<string, Map<string, ReactionView[]>>();
+  private e2eeMeta = new Map<string, Map<string, E2eeMeta>>();
   private attachmentMeta = new Map<string, AttachmentMeta>();
   private attachmentLoading = new Set<string>();
   private outbox: MessageOutbox | null = null;
@@ -1312,9 +1318,10 @@ export class MessagingEngine {
     const missing: string[] = [];
     const newDevices: ServerDevice[] = [];
     const activeInTree: string[] = [];
+    const lookups = new Map((await Promise.all((members.members ?? []).filter((m) => !m.state || m.state === "ACTIVE").map(async (m) => [m.principalId, await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${m.principalId}/devices`).catch(() => ({ devices: [] as ServerDevice[] }))] as const))));
     for (const m of members.members ?? []) {
       if (m.state && m.state !== "ACTIVE") continue;
-      const d = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${m.principalId}/devices`).catch(() => ({ devices: [] as ServerDevice[] }));
+      const d = lookups.get(m.principalId) ?? { devices: [] as ServerDevice[] };
       for (const x of d.devices) if (x.status === "ACTIVE" && inTree.has(x.deviceId)) activeInTree.push(x.deviceId);
       const fresh = d.devices.filter((x) => x.status === "ACTIVE" && !inTree.has(x.deviceId));
       if (fresh.length) {
@@ -1466,6 +1473,7 @@ export class MessagingEngine {
         const after = await c.call<number>("cursor", { conversationId });
         const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=${PAGE}`);
         if (!page.messages.length) break;
+        this.noteMeta(conversationId, page.messages);
         const processed = await c.call<{ records: StoredRecord[] }>("processMessages", {
           conversationId,
           groupId: gid,
@@ -1499,8 +1507,18 @@ export class MessagingEngine {
     const me = this.snapshot.identity?.principalId ?? null;
     const records = this.crypto && this.snapshot.deviceId ? await this.crypto.call<StoredRecord[]>("history", { conversationId }).catch(() => []) : [];
     const views: MessageView[] = [];
+    const meta = this.metaFor(conversationId);
+    const reactions = this.reactions.get(conversationId);
+    const pinned = new Set((this.snapshot.pins[conversationId] ?? []).map((p) => p.messageId));
+    // Edits are encrypted messages that point at the original (the link is server metadata).
+    const edits = new Map<string, string>();
     for (const r of records) {
-      if (r.status === "COMMIT") continue;
+      const target = r.messageId ? meta.get(r.messageId)?.target : null;
+      if (r.kind === "EDIT" && target && (r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text") edits.set(target, r.payload.text);
+    }
+    for (const r of records) {
+      if (r.status === "COMMIT" || r.kind === "EDIT") continue;
+      const m = r.messageId ? meta.get(r.messageId) : undefined;
       const base: MessageView = {
         key: `s${r.sequence}`,
         sequence: r.sequence,
@@ -1513,10 +1531,23 @@ export class MessagingEngine {
         file: null,
         note: null,
         transferred: Boolean(r.transferred),
+        messageId: r.messageId ?? null,
+        reactions: r.messageId ? reactions?.get(r.messageId) ?? [] : [],
+        pinned: !!r.messageId && pinned.has(r.messageId),
       };
+      if (m && m.lifecycle !== "ACTIVE") {
+        base.state = "removed";
+        base.note = m.lifecycle === "HIDDEN_FOR_YOU" ? "Hidden for you" : m.lifecycle === "MODERATED" ? "Removed by a moderator" : "Message deleted";
+        views.push(base);
+        continue;
+      }
       if (r.status === "DECRYPTED" || r.status === "SENT") {
         base.state = r.status === "SENT" ? "sent" : "delivered";
         if (r.payload?.t === "text") base.text = r.payload.text;
+        if (r.messageId && edits.has(r.messageId)) {
+          base.text = edits.get(r.messageId) ?? base.text;
+          base.editCount = 1;
+        }
         else if (r.payload?.t === "file") {
           base.text = r.payload.caption;
           base.file = { name: r.fileName ?? r.payload.name ?? "attachment", mediaType: r.mediaType ?? r.payload.mediaType ?? "application/octet-stream", size: r.size ?? null, attachmentId: r.attachmentId ?? r.payload.attachmentId };
@@ -1535,6 +1566,14 @@ export class MessagingEngine {
         base.note = `This message could not be decrypted on this device (${r.error ?? "FAILED"})`;
       }
       views.push(base);
+    }
+    // Replies: the quoted message is read from this device's own history.
+    const byId = new Map(views.filter((v) => v.messageId).map((v) => [v.messageId as string, v]));
+    for (const v of views) {
+      const to = v.messageId ? meta.get(v.messageId)?.replyTo : null;
+      if (!to) continue;
+      const q = byId.get(to);
+      v.replyTo = { messageId: to, senderPrincipalId: q?.senderPrincipalId ?? null, text: q && q.state !== "removed" ? q.text ?? (q.file ? q.file.name : null) : null, removed: q?.state === "removed" };
     }
     const pending = this.pendingSends.get(conversationId) ?? [];
     // Held drafts survive reloads (sealed in the worker): show them as pending setup.
@@ -1772,6 +1811,13 @@ export class MessagingEngine {
   async openConversation(conversationId: string): Promise<void> {
     await this.sync(conversationId);
     const conv = this.server.get(conversationId);
+    if (conv?.securityProfile === "PRIVATE_E2EE") {
+      await this.refreshE2eeMeta(conversationId);
+      const ids = (this.snapshot.messages[conversationId] ?? []).map((v) => v.messageId).filter((x): x is string => !!x).slice(-30);
+      await Promise.all([this.loadPins(conversationId).catch(() => {}), this.loadReactions(conversationId, ids).catch(() => {})]);
+      await this.renderE2ee(conversationId);
+      return;
+    }
     if (conv?.securityProfile !== "MANAGED") return;
     const st = this.stateFor(conversationId);
     await Promise.all([
@@ -1791,13 +1837,38 @@ export class MessagingEngine {
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
+    await this.rerender(conversationId);
+  }
+
+  private rerender(conversationId: string): Promise<void> {
+    if (this.server.get(conversationId)?.securityProfile === "PRIVATE_E2EE") return this.renderE2ee(conversationId);
     this.renderManaged(conversationId);
+    return Promise.resolve();
+  }
+
+  private metaFor(conversationId: string): Map<string, E2eeMeta> {
+    let m = this.e2eeMeta.get(conversationId);
+    if (!m) this.e2eeMeta.set(conversationId, (m = new Map()));
+    return m;
+  }
+
+  private noteMeta(conversationId: string, messages: ServerMessage[]): void {
+    const m = this.metaFor(conversationId);
+    for (const x of messages) m.set(x.messageId, { lifecycle: x.lifecycle, replyTo: x.replyToMessageId ?? null, target: x.targetMessageId ?? null });
+  }
+
+  /** Re-reads the newest private messages' server state (deletions, replies, edits); never their content. */
+  private async refreshE2eeMeta(conversationId: string): Promise<void> {
+    const newest = Math.max(0, ...(this.snapshot.messages[conversationId] ?? []).map((v) => v.sequence ?? 0));
+    if (!newest) return;
+    const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${conversationId}/messages?beforeSequence=${newest + 1}&limit=${PAGE}`).catch(() => null);
+    if (page) this.noteMeta(conversationId, page.messages);
   }
 
   async loadPins(conversationId: string): Promise<void> {
     const r = await relay<{ pins: PinView[] }>("GET", `v1/conversations/${conversationId}/pins`);
     this.set({ pins: { ...this.snapshot.pins, [conversationId]: r.pins } });
-    this.renderManaged(conversationId);
+    await this.rerender(conversationId);
   }
 
   async react(conversationId: string, messageId: string, reaction: string, add: boolean): Promise<void> {
@@ -1810,8 +1881,14 @@ export class MessagingEngine {
     await this.loadPins(conversationId);
   }
 
-  /** MANAGED edit (`PATCH`, compare-and-swap on the edit count). */
+  /** MANAGED edit (`PATCH`, compare-and-swap on the edit count); PRIVATE_E2EE sends an encrypted EDIT. */
   async editMessage(conversationId: string, messageId: string, text: string): Promise<void> {
+    const conv = this.server.get(conversationId);
+    if (conv?.securityProfile === "PRIVATE_E2EE") {
+      await this.sendEncrypted(conv, { t: "text", text }, [], { kind: "EDIT", targetMessageId: messageId });
+      await this.sync(conversationId);
+      return;
+    }
     const st = this.stateFor(conversationId);
     const current = st.get(messageId);
     const msg = await relay<ManagedServerMessage>("PATCH", `v1/conversations/${conversationId}/messages/${messageId}`, {
@@ -1825,6 +1902,11 @@ export class MessagingEngine {
   /** Deletes for everyone (sender) or hides for you; the tombstone replaces the message. */
   async deleteMessage(conversationId: string, messageId: string, scope: "EVERYONE" | "ME"): Promise<void> {
     await relay("DELETE", `v1/conversations/${conversationId}/messages/${messageId}?scope=${scope}`);
+    if (this.server.get(conversationId)?.securityProfile === "PRIVATE_E2EE") {
+      this.metaFor(conversationId).set(messageId, { ...(this.metaFor(conversationId).get(messageId) ?? { replyTo: null, target: null }), lifecycle: scope === "ME" ? "HIDDEN_FOR_YOU" : "DELETED" });
+      await this.renderE2ee(conversationId);
+      return;
+    }
     const st = this.stateFor(conversationId);
     const r = await relay<{ message: ManagedServerMessage }>("GET", `v1/conversations/${conversationId}/messages/${messageId}`).catch(() => null);
     if (r?.message) st.applyMessages([r.message]);
@@ -1981,12 +2063,12 @@ export class MessagingEngine {
       this.scheduleSync(conversationId);
       return;
     }
-    return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text));
+    return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text, options.replyToMessageId ?? null));
   }
 
-  private async deliver(conv: ServerConversation, conversationId: string, key: string, text: string): Promise<void> {
+  private async deliver(conv: ServerConversation, conversationId: string, key: string, text: string, replyToMessageId: string | null = null): Promise<void> {
     try {
-      if (conv.securityProfile === "PRIVATE_E2EE") await this.sendEncrypted(conv, { t: "text", text }, []);
+      if (conv.securityProfile === "PRIVATE_E2EE") await this.sendEncrypted(conv, { t: "text", text }, [], { replyToMessageId });
       else await relay("POST", `v1/conversations/${conversationId}/messages`, { clientMessageId: uuid(), text });
       this.settlePending(conversationId, key, null);
     } catch (e) {
@@ -1995,15 +2077,16 @@ export class MessagingEngine {
     await this.sync(conversationId);
   }
 
-  private async sendEncrypted(conv: ServerConversation, payload: Record<string, unknown>, attachmentIds: string[]): Promise<void> {
+  private async sendEncrypted(conv: ServerConversation, payload: Record<string, unknown>, attachmentIds: string[], extra: { replyToMessageId?: string | null; kind?: "EDIT"; targetMessageId?: string } = {}): Promise<void> {
     const c = this.crypto;
     const deviceId = this.snapshot.deviceId;
     if (!c || !deviceId || !conv.encryption.mlsGroupId) throw new MessagingApiError(0, "DEVICE_REQUIRED", null);
     const gid = b64u.dec(conv.encryption.mlsGroupId);
     if (!(await c.call<boolean>("hasGroup", { groupId: gid }))) throw new MessagingApiError(0, "NOT_IN_GROUP", null);
     for (let attempt = 0; attempt < 2; attempt++) {
-      // Process everything first: a message must be sent in the current epoch.
-      await this.sync(conv.conversationId);
+      // Realtime keeps the group current, so send straight away. Only when the server says the
+      // group moved on (409: new epoch, or a removal to commit) process everything and retry.
+      if (attempt > 0) await this.sync(conv.conversationId);
       const clientMessageId = uuid();
       const out = await c.call<{ ciphertext: Uint8Array; epoch: number }>("encrypt", { conversationId: conv.conversationId, groupId: gid, clientMessageId, payload });
       try {
@@ -2013,7 +2096,10 @@ export class MessagingEngine {
           epoch: out.epoch,
           ciphertext: b64u.enc(out.ciphertext),
           ...(attachmentIds.length ? { attachmentIds } : {}),
+          ...(extra.replyToMessageId ? { replyToMessageId: extra.replyToMessageId } : {}),
+          ...(extra.kind ? { kind: extra.kind, targetMessageId: extra.targetMessageId } : {}),
         });
+        this.scheduleSync(conv.conversationId);
         return;
       } catch (e) {
         const stale = e instanceof MessagingApiError && e.status === 409;
