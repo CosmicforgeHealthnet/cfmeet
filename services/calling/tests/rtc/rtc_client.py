@@ -8,10 +8,12 @@ Commands:
   {"cmd": "connect", "url": ..., "token": ...}         -> {"ok": true, "identity": ...}
   {"cmd": "publish", "kind": "audio"|"video"|"screen"} -> {"ok": bool, "error"?: ...}
                                                           (screen: a video track with the
-                                                           SCREEN_SHARE source)
+                                                           SCREEN_SHARE source; ok only once
+                                                           the media server receives it)
   {"cmd": "sources"}                                   -> {"ok": true, "sources": [TrackSource, ...]}
   {"cmd": "status"}                                    -> {"connected": bool, "subscribed": [...],
-                                                           "remote": [...], "disconnect_reason": ...,
+                                                           "remote": [...], "publications": [...],
+                                                           "disconnect_reason": ...,
                                                            "can_publish": bool, "can_subscribe": bool}
   {"cmd": "wait_subscribed", "count": n, "timeout": s} -> {"ok": bool, "subscribed": [...]}
   {"cmd": "refresh_issuers"}                           -> {"ok": true, "issuers": [<key name>, ...]}
@@ -163,7 +165,57 @@ class Client:
         except Exception as e:  # denied publications time out or raise
             return {"ok": False, "error": type(e).__name__}
         self.tasks.append(asyncio.create_task(feed()))
+        if not await self.wait_sending(track):
+            return {"ok": False, "error": "PublicationNeverNegotiated"}
         return {"ok": True}
+
+    async def wait_sending(self, track, timeout=10.0):
+        """Waits until the media server actually receives the published track: its RTP
+        sender has sent packets, which needs a negotiated m-section on the (single) peer
+        connection.
+
+        Works around a defect of the pinned SDK's debounced publisher negotiation (livekit
+        Rust SDK `RtcSession::debounce_negotiation`, still present in 0.12): a negotiation
+        request that arrives after the 150 ms debounce timer fired but before that offer is
+        created is silently dropped (`Debouncer::call` still succeeds on the running task).
+        The debounced path is the one used here because Calling's join credential carries no
+        media permission (join-then-admit), so LiveKit's join response has
+        `fast_publish=false`. In single peer connection mode the server also asks for
+        renegotiations itself (`MediaSectionsRequirement`, e.g. right after Calling's
+        admission grants subscribe / publish), so a publish ~150 ms later can lose its
+        negotiation: the new sender is never offered, LiveKit never sees the track
+        ("publish time out") and no other participant can subscribe to it. The JS SDK of
+        CF Meet's own clients serialises offers and re-runs a negotiation requested during an
+        in-flight one (`PCTransport.negotiate` / `renegotiate`), so this is a test-client
+        artefact, not a Calling or LiveKit server behaviour.
+
+        When nothing is sent, ask the SDK for another publisher negotiation: registering an
+        RPC method does exactly that (`LocalParticipant::register_rpc_method` ->
+        `publisher_negotiation_needed`) and has no other effect on the session."""
+        loop = asyncio.get_event_loop()
+        end = loop.time() + timeout
+        nudge_at = loop.time() + 1.0
+        nudges = 0
+        local = self.room.local_participant
+        while loop.time() < end:
+            try:
+                stats = await track.get_stats()
+            except Exception:
+                stats = []
+            if any(s.WhichOneof("stats") == "outbound_rtp" and s.outbound_rtp.sent.packets_sent > 0
+                   for s in stats):
+                if nudges:
+                    logging.getLogger("rtc_client").warning(
+                        "publication negotiated after %d renegotiation request(s)", nudges)
+                return True
+            if loop.time() >= nudge_at:
+                nudges += 1
+                method = f"cert-renegotiate-{nudges}"
+                local.register_rpc_method(method, lambda _data: "")
+                local.unregister_rpc_method(method)
+                nudge_at = loop.time() + 1.0
+            await asyncio.sleep(0.1)
+        return False
 
     def connected(self):
         try:
@@ -174,16 +226,22 @@ class Client:
     def status(self):
         can_publish, can_subscribe = self.permission()
         remote = []
+        publications = []
         if self.room:
             try:
                 for p in self.room.remote_participants.values():
                     remote.append(p.identity)
+                    for pub in p.track_publications.values():
+                        publications.append({"from": p.identity, "sid": pub.sid,
+                                             "source": int(pub.source),
+                                             "subscribed": bool(pub.subscribed)})
             except Exception:
                 pass
         return {
             "connected": self.connected(),
             "subscribed": self.subscribed,
             "remote": remote,
+            "publications": publications,
             "disconnect_reason": self.disconnect_reason,
             "can_publish": can_publish,
             "can_subscribe": can_subscribe,
