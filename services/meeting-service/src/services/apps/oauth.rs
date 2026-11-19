@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use axum::http::Method;
 use cf_service_auth::{
     client::{InternalCallError, InternalServiceClient},
-    OutboundServiceRequest, ServiceId,
+    DelegatedPlatformContext, OutboundServiceRequest, ServiceId,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -60,12 +60,38 @@ pub enum GrantOwner {
     Organization(Uuid),
 }
 
+impl GrantOwner {
+    fn query(&self) -> (&'static str, String) {
+        match self {
+            GrantOwner::Account(id) => ("accountId", id.to_string()),
+            GrantOwner::Organization(id) => ("organizationId", id.to_string()),
+        }
+    }
+}
+
+/// `scope` is the account's personal FIRST_PARTY scope context (the same signed delegated
+/// context as `/internal/v1/principals/ensure`); Platform Access derives a USER grant's
+/// environment from it. ORGANIZATION requests carry `organizationId` instead (`None`).
 #[async_trait]
 pub trait OauthAuthority: Send + Sync {
-    async fn validate(&self, request: &Value) -> Result<PaAnswer, AuthorityUnavailable>;
-    async fn authorize(&self, request: &Value) -> Result<PaAnswer, AuthorityUnavailable>;
+    async fn validate(
+        &self,
+        request: &Value,
+        scope: Option<&DelegatedPlatformContext>,
+    ) -> Result<PaAnswer, AuthorityUnavailable>;
+    async fn authorize(
+        &self,
+        request: &Value,
+        scope: Option<&DelegatedPlatformContext>,
+    ) -> Result<PaAnswer, AuthorityUnavailable>;
+    /// ACTIVE grants of the owner.
     async fn grants(&self, owner: GrantOwner) -> Result<PaAnswer, AuthorityUnavailable>;
-    async fn revoke(&self, grant_id: Uuid) -> Result<PaAnswer, AuthorityUnavailable>;
+    /// Revokes the grant only if it belongs to `owner` (`?accountId=` / `?organizationId=`).
+    async fn revoke(
+        &self,
+        grant_id: Uuid,
+        owner: GrantOwner,
+    ) -> Result<PaAnswer, AuthorityUnavailable>;
 }
 
 pub type SharedOauthAuthority = Arc<dyn OauthAuthority>;
@@ -86,8 +112,12 @@ impl PlatformAccessOauth {
         path: &str,
         query: &[(&str, &str)],
         body: Option<&Value>,
+        scope: Option<&DelegatedPlatformContext>,
     ) -> Result<PaAnswer, AuthorityUnavailable> {
-        let request = OutboundServiceRequest::new_operation(ServiceId::platform_access());
+        let mut request = OutboundServiceRequest::new_operation(ServiceId::platform_access());
+        if let Some(scope) = scope {
+            request = request.with_delegated_context(scope.clone());
+        }
         let response = self
             .client
             .exchange_json_query(&request, method, path, query, body)
@@ -104,31 +134,41 @@ impl PlatformAccessOauth {
 
 #[async_trait]
 impl OauthAuthority for PlatformAccessOauth {
-    async fn validate(&self, request: &Value) -> Result<PaAnswer, AuthorityUnavailable> {
-        self.call(Method::POST, VALIDATE_PATH, &[], Some(request))
+    async fn validate(
+        &self,
+        request: &Value,
+        scope: Option<&DelegatedPlatformContext>,
+    ) -> Result<PaAnswer, AuthorityUnavailable> {
+        self.call(Method::POST, VALIDATE_PATH, &[], Some(request), scope)
             .await
     }
 
-    async fn authorize(&self, request: &Value) -> Result<PaAnswer, AuthorityUnavailable> {
-        self.call(Method::POST, AUTHORIZATIONS_PATH, &[], Some(request))
+    async fn authorize(
+        &self,
+        request: &Value,
+        scope: Option<&DelegatedPlatformContext>,
+    ) -> Result<PaAnswer, AuthorityUnavailable> {
+        self.call(Method::POST, AUTHORIZATIONS_PATH, &[], Some(request), scope)
             .await
     }
 
     async fn grants(&self, owner: GrantOwner) -> Result<PaAnswer, AuthorityUnavailable> {
-        let (key, id) = match owner {
-            GrantOwner::Account(id) => ("accountId", id),
-            GrantOwner::Organization(id) => ("organizationId", id),
-        };
-        let id = id.to_string();
-        self.call(Method::GET, GRANTS_PATH, &[(key, id.as_str())], None)
+        let (key, id) = owner.query();
+        self.call(Method::GET, GRANTS_PATH, &[(key, id.as_str())], None, None)
             .await
     }
 
-    async fn revoke(&self, grant_id: Uuid) -> Result<PaAnswer, AuthorityUnavailable> {
+    async fn revoke(
+        &self,
+        grant_id: Uuid,
+        owner: GrantOwner,
+    ) -> Result<PaAnswer, AuthorityUnavailable> {
+        let (key, id) = owner.query();
         self.call(
             Method::DELETE,
             &format!("{GRANTS_PATH}/{grant_id}"),
-            &[],
+            &[(key, id.as_str())],
+            None,
             None,
         )
         .await

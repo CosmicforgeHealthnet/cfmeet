@@ -54,6 +54,8 @@ struct FakeOauth {
     validations: Mutex<Vec<Value>>,
     authorizations: Mutex<Vec<Value>>,
     revoked: Mutex<Vec<Uuid>>,
+    /// The signed delegated context of each validate / authorize call.
+    scopes: Mutex<Vec<Option<DelegatedPlatformContext>>>,
     calls: AtomicUsize,
 }
 
@@ -104,13 +106,23 @@ impl FakeOauth {
 
 #[async_trait]
 impl OauthAuthority for FakeOauth {
-    async fn validate(&self, request: &Value) -> Result<PaAnswer, AuthorityUnavailable> {
+    async fn validate(
+        &self,
+        request: &Value,
+        scope: Option<&DelegatedPlatformContext>,
+    ) -> Result<PaAnswer, AuthorityUnavailable> {
+        self.scopes.lock().unwrap().push(scope.cloned());
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.validations.lock().unwrap().push(request.clone());
         Ok(self.check(request))
     }
 
-    async fn authorize(&self, request: &Value) -> Result<PaAnswer, AuthorityUnavailable> {
+    async fn authorize(
+        &self,
+        request: &Value,
+        scope: Option<&DelegatedPlatformContext>,
+    ) -> Result<PaAnswer, AuthorityUnavailable> {
+        self.scopes.lock().unwrap().push(scope.cloned());
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.authorizations.lock().unwrap().push(request.clone());
         let checked = self.check(request);
@@ -144,13 +156,29 @@ impl OauthAuthority for FakeOauth {
         })
     }
 
-    async fn revoke(&self, grant_id: Uuid) -> Result<PaAnswer, AuthorityUnavailable> {
+    async fn revoke(
+        &self,
+        grant_id: Uuid,
+        owner: GrantOwner,
+    ) -> Result<PaAnswer, AuthorityUnavailable> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        // Platform Access restricts the revocation to the named owner.
+        let mut grants = self.grants.lock().unwrap();
+        let owned = grants.iter().any(|g| {
+            g["id"] == json!(grant_id)
+                && match owner {
+                    GrantOwner::Account(a) => g["accountId"] == json!(a),
+                    GrantOwner::Organization(o) => g["organizationId"] == json!(o),
+                }
+        });
+        if !owned {
+            return Ok(PaAnswer {
+                status: 404,
+                body: json!({ "error": { "code": "NOT_FOUND" } }),
+            });
+        }
         self.revoked.lock().unwrap().push(grant_id);
-        self.grants
-            .lock()
-            .unwrap()
-            .retain(|g| g["id"] != json!(grant_id));
+        grants.retain(|g| g["id"] != json!(grant_id));
         Ok(PaAnswer {
             status: 204,
             body: Value::Null,
@@ -201,6 +229,26 @@ impl AppOrganizations for FakeOrganizations {
     }
 }
 
+/// The account authority's personal FIRST_PARTY scope (fixed for the test process).
+fn personal_scope() -> DelegatedPlatformContext {
+    static IDS: std::sync::OnceLock<[Uuid; 4]> = std::sync::OnceLock::new();
+    let ids = IDS.get_or_init(|| {
+        [
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        ]
+    });
+    DelegatedPlatformContext::new(
+        ids[0],
+        ids[1],
+        ids[2],
+        ApplicationEnvironmentKind::Production,
+        ids[3],
+    )
+}
+
 struct Fakes {
     oauth: Arc<FakeOauth>,
     orgs: Arc<FakeOrganizations>,
@@ -221,6 +269,7 @@ fn apps(all: bool) -> (Apps, Fakes) {
             oauth: Some(oauth.clone()),
             organizations: Some(orgs.clone()),
             context: Some(signer.clone()),
+            personal_scope: Some(personal_scope()),
         },
         Fakes {
             oauth,
@@ -301,6 +350,14 @@ async fn consent_context_approve_and_deny_build_the_redirect_for_the_signed_in_a
         "https://calendar.example/oauth/callback?tenant=7&code=code-123&state=st+1"
     );
     let authz = f.oauth.authorizations.lock().unwrap()[0].clone();
+    // USER requests are signed with the account's personal first-party scope.
+    assert!(f
+        .oauth
+        .scopes
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|sc| sc.as_ref() == Some(&personal_scope())));
     assert_eq!(authz["decision"], "APPROVE");
     assert_eq!(authz["accountId"], json!(user.id));
     assert_eq!(authz["target"], "USER");
@@ -407,6 +464,10 @@ async fn organization_installs_need_the_organization_policy() {
     let authz = f.oauth.authorizations.lock().unwrap()[0].clone();
     assert_eq!(authz["target"], "ORGANIZATION");
     assert_eq!(authz["organizationId"], json!(org));
+    assert!(
+        f.oauth.scopes.lock().unwrap().iter().all(Option::is_none),
+        "ORGANIZATION requests name the organization, not a personal scope"
+    );
     assert_eq!(authz["accountId"], json!(admin.id));
     assert!(f.orgs.checks.load(Ordering::SeqCst) >= 2);
 }

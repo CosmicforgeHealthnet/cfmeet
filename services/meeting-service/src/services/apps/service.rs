@@ -12,6 +12,14 @@
 //! `INVALID_SCOPE`, `PKCE_REQUIRED`, `APP_NOT_AVAILABLE`); the frontend must never redirect
 //! after `INVALID_CLIENT` / `INVALID_REDIRECT_URI`.
 //!
+//! A USER (personal) request is signed with the account's personal FIRST_PARTY scope as
+//! its delegated context (the Communications bridge scope, the same context as
+//! `/internal/v1/principals/ensure`): Platform Access derives the grant's environment from
+//! it. An ORGANIZATION request names `organizationId` (Platform Access resolves the
+//! organization's triple; `409 INVALID_STATE` → `409 PROVISIONING_PENDING`). Revocations
+//! name the owner (`?accountId=` / `?organizationId=`), so Platform Access refuses another
+//! owner's grant even if the listing check were bypassed.
+//!
 //! **Connected apps / organization Apps.** Grants are listed from Platform Access; a grant
 //! can be revoked only by its own account (USER grants) or by an OWNER / ADMIN of its
 //! organization (ORGANIZATION grants); anything else is `404 APP_NOT_FOUND`.
@@ -216,6 +224,13 @@ impl AuthorizationRequest {
 
 /// Maps a Platform Access refusal of an authorization request.
 fn refusal(answer: &PaAnswer) -> ApiError {
+    if answer.status == 409 {
+        // INVALID_STATE: the organization's first-party scope is not provisioned yet.
+        return ApiError::domain(
+            ErrorCode::ProvisioningPending,
+            "ORGANIZATION_NOT_READY: the organization is not ready for app installs",
+        );
+    }
     let reason = answer.error_code().filter(|c| {
         matches!(
             c.as_str(),
@@ -237,6 +252,24 @@ fn str_of(v: &Value, k: &str) -> Option<String> {
 }
 
 impl Apps {
+    /// The signed delegated context of a USER request: the account's personal FIRST_PARTY
+    /// scope (the same context as `/internal/v1/principals/ensure`); ORGANIZATION requests
+    /// carry `organizationId` instead.
+    fn scope_for(
+        &self,
+        state: &AppState,
+        req: &AuthorizationRequest,
+    ) -> ApiResult<Option<cf_service_auth::DelegatedPlatformContext>> {
+        if req.organization_id.is_some() {
+            return Ok(None);
+        }
+        self.personal_scope
+            .clone()
+            .or_else(|| state.communications.as_ref().map(|b| b.scope.clone()))
+            .map(Some)
+            .ok_or_else(|| disabled("Personal app installs (first-party communications scope)"))
+    }
+
     fn oauth(&self, enabled: bool, what: &str) -> ApiResult<&super::oauth::SharedOauthAuthority> {
         if !enabled {
             return Err(disabled(what));
@@ -246,10 +279,16 @@ impl Apps {
 
     /// Platform Access validation; the answer must be for this client and, when it names a
     /// redirect URI, exactly the requested one.
-    async fn validate(&self, req: &AuthorizationRequest, account: Uuid) -> ApiResult<Value> {
+    async fn validate(
+        &self,
+        state: &AppState,
+        req: &AuthorizationRequest,
+        account: Uuid,
+    ) -> ApiResult<Value> {
         let pa = self.oauth(self.authorize_enabled, "App authorization")?;
+        let scope = self.scope_for(state, req)?;
         let answer = pa
-            .validate(&req.platform_body(account, None))
+            .validate(&req.platform_body(account, None), scope.as_ref())
             .await
             .map_err(unavailable)?;
         if !answer.ok() {
@@ -296,6 +335,7 @@ impl Apps {
     /// `GET /api/v2/oauth/authorize/context`.
     pub async fn authorize_context(
         &self,
+        state: &AppState,
         actor: &ActorContext,
         q: &AuthorizeContextQuery,
     ) -> ApiResult<AuthorizeContextResponse> {
@@ -311,7 +351,7 @@ impl Apps {
             q.install.as_deref(),
             q.organization_id,
         )?;
-        let body = self.validate(&req, user.user_id).await?;
+        let body = self.validate(state, &req, user.user_id).await?;
         let organization_install =
             self.install_decision(&req, user.user_id)
                 .await?
@@ -360,6 +400,7 @@ impl Apps {
     /// `POST /api/v2/oauth/authorize/approve` (approve or deny).
     pub async fn authorize_decision(
         &self,
+        state: &AppState,
         actor: &ActorContext,
         body: &AuthorizeDecisionRequest,
     ) -> ApiResult<AuthorizeDecisionResponse> {
@@ -381,7 +422,7 @@ impl Apps {
             _ => return Err(invalid("decision must be APPROVE or DENY")),
         };
         // Even a denial redirects only to a redirect URI Platform Access just validated.
-        self.validate(&req, user.user_id).await?;
+        self.validate(state, &req, user.user_id).await?;
         if !approve {
             tracing::info!(app_id = %req.client_id, target = req.target(), "app authorization denied by the account");
             return Ok(AuthorizeDecisionResponse {
@@ -397,7 +438,10 @@ impl Apps {
             ));
         }
         let answer = pa
-            .authorize(&req.platform_body(user.user_id, Some("APPROVE")))
+            .authorize(
+                &req.platform_body(user.user_id, Some("APPROVE")),
+                self.scope_for(state, &req)?.as_ref(),
+            )
             .await
             .map_err(unavailable)?;
         if !answer.ok() {
@@ -469,7 +513,7 @@ impl Apps {
         if !self.grants(owner).await?.iter().any(|g| g.id == grant_id) {
             return Err(app_not_found());
         }
-        let answer = pa.revoke(grant_id).await.map_err(unavailable)?;
+        let answer = pa.revoke(grant_id, owner).await.map_err(unavailable)?;
         match answer.status {
             200..=299 | 404 => {
                 tracing::info!(%grant_id, ?owner, "app grant revoked");

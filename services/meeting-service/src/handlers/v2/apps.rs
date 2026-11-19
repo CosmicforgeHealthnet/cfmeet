@@ -44,7 +44,7 @@ pub async fn authorize_context(
     actor: ActorContext,
     V2Query(q): V2Query<AuthorizeContextQuery>,
 ) -> ApiResult<Response> {
-    let body = state.apps.authorize_context(&actor, &q).await?;
+    let body = state.apps.authorize_context(&state, &actor, &q).await?;
     Ok(no_store(StatusCode::OK, body))
 }
 
@@ -72,7 +72,7 @@ pub async fn authorize_decide(
     actor: ActorContext,
     V2Json(body): V2Json<AuthorizeDecisionRequest>,
 ) -> ApiResult<Response> {
-    let body = state.apps.authorize_decision(&actor, &body).await?;
+    let body = state.apps.authorize_decision(&state, &actor, &body).await?;
     Ok(no_store(StatusCode::OK, body))
 }
 

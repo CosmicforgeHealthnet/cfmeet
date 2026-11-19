@@ -49,6 +49,10 @@ pub struct Apps {
     pub oauth: Option<oauth::SharedOauthAuthority>,
     pub organizations: Option<organizations::SharedAppOrganizations>,
     pub context: Option<Arc<context::AppContextSigner>>,
+    /// The account's personal FIRST_PARTY scope context signed on USER authorization
+    /// requests; `None`: the Communications bridge's scope (`CFMEET_COMMUNICATION_*`, the
+    /// same context as `/internal/v1/principals/ensure`).
+    pub personal_scope: Option<cf_service_auth::DelegatedPlatformContext>,
 }
 
 impl std::fmt::Debug for Apps {
@@ -245,6 +249,7 @@ impl AppsConfig {
                     as organizations::SharedAppOrganizations
             }),
             context,
+            personal_scope: None,
         })
     }
 }
