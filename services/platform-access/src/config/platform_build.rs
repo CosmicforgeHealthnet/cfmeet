@@ -12,13 +12,19 @@
 //! | `PLATFORM_ACCESS_USER_TOKEN_SIGNING_KEY_FILE` | — | PKCS#8 PEM Ed25519 private key FILE signing user tokens (required when user tokens are enabled; inline keys are refused) |
 //! | `PLATFORM_ACCESS_USER_TOKEN_PREVIOUS_PUBLIC_KEYS` | — | comma-separated base64url raw Ed25519 public keys still accepted during a rotation (`ACTIVE`) |
 //! | `PLATFORM_ACCESS_USER_TOKEN_RETIRED_PUBLIC_KEYS` | — | comma-separated base64url raw Ed25519 public keys that are retired: tokens they signed are `USER_TOKEN_REVOKED` |
+//! | `PLATFORM_ACCESS_OAUTH_ENABLED` | `false` | ADR 0064 CF Meet Apps: `/internal/v1/oauth/*` and `cfoa_` / `cfob_` app tokens at `/credentials/authenticate` |
+//! | `PLATFORM_ACCESS_OAUTH_PAIRWISE_KEY_FILE` | — | FILE holding the server key of the pairwise `sub` (`HMAC-SHA-256(key, appId, accountId)`); at least 32 random bytes (pepper rules); inline values are refused. Unset: the key is DERIVED from the current `API_CREDENTIAL_PEPPER` (`HMAC(pepper, "cfmeet.platform-access.oauth-pairwise-key.v1")`) — then a pepper rotation changes every `sub`, so production should set the file |
+//! | `PLATFORM_ACCESS_OAUTH_PERSONAL_ENVIRONMENT_ID` | — | fallback target of USER grants: CF Meet's FIRST_PARTY personal communications environment, used only when the Meeting Service's authorization call carries no signed delegated context |
 
 use std::{fmt, sync::Arc};
 
 use secrecy::ExposeSecret;
 
 use super::{secret, ConfigError};
-use crate::{domain::EnvironmentKind, identity::user_tokens::UserTokenKeys};
+use crate::{
+    domain::EnvironmentKind,
+    identity::{oauth::PairwiseKey, user_tokens::UserTokenKeys},
+};
 
 /// Per-environment-kind caps of ACTIVE partner users.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +64,12 @@ pub struct PlatformBuildConfig {
     pub end_user_caps: EndUserCaps,
     /// Present whenever a signing key is configured (always when user tokens are enabled).
     pub user_token_keys: Option<Arc<UserTokenKeys>>,
+    /// ADR 0064: OAuth clients, grants and app tokens (`PLATFORM_ACCESS_OAUTH_ENABLED`).
+    pub oauth_enabled: bool,
+    /// The configured pairwise-`sub` key; `None`: derived from the credential pepper.
+    pub oauth_pairwise_key: Option<Arc<PairwiseKey>>,
+    /// Fallback FIRST_PARTY personal environment of USER grants.
+    pub oauth_personal_environment_id: Option<uuid::Uuid>,
 }
 
 impl fmt::Debug for PlatformBuildConfig {
@@ -72,6 +84,12 @@ impl fmt::Debug for PlatformBuildConfig {
             .field("meeting_platform_enabled", &self.meeting_platform_enabled)
             .field("end_user_caps", &self.end_user_caps)
             .field("user_token_keys", &self.user_token_keys)
+            .field("oauth_enabled", &self.oauth_enabled)
+            .field("oauth_pairwise_key", &self.oauth_pairwise_key)
+            .field(
+                "oauth_personal_environment_id",
+                &self.oauth_personal_environment_id,
+            )
             .finish()
     }
 }
@@ -80,6 +98,10 @@ pub const SIGNING_KEY_VAR: &str = "PLATFORM_ACCESS_USER_TOKEN_SIGNING_KEY";
 pub const SIGNING_KEY_FILE_VAR: &str = "PLATFORM_ACCESS_USER_TOKEN_SIGNING_KEY_FILE";
 pub const PREVIOUS_KEYS_VAR: &str = "PLATFORM_ACCESS_USER_TOKEN_PREVIOUS_PUBLIC_KEYS";
 pub const RETIRED_KEYS_VAR: &str = "PLATFORM_ACCESS_USER_TOKEN_RETIRED_PUBLIC_KEYS";
+pub const OAUTH_ENABLED_VAR: &str = "PLATFORM_ACCESS_OAUTH_ENABLED";
+pub const PAIRWISE_KEY_VAR: &str = "PLATFORM_ACCESS_OAUTH_PAIRWISE_KEY";
+pub const PAIRWISE_KEY_FILE_VAR: &str = "PLATFORM_ACCESS_OAUTH_PAIRWISE_KEY_FILE";
+pub const PERSONAL_ENVIRONMENT_VAR: &str = "PLATFORM_ACCESS_OAUTH_PERSONAL_ENVIRONMENT_ID";
 
 fn flag(get: &impl Fn(&str) -> Option<String>, var: &'static str) -> Result<bool, ConfigError> {
     match get(var).as_deref().map(str::trim) {
@@ -152,7 +174,33 @@ impl PlatformBuildConfig {
                 var: SIGNING_KEY_FILE_VAR,
             });
         }
+        if get(PAIRWISE_KEY_VAR).is_some_and(|v| !v.trim().is_empty()) {
+            return Err(ConfigError::invalid(
+                PAIRWISE_KEY_VAR,
+                format!("inline keys are not accepted; set {PAIRWISE_KEY_FILE_VAR}"),
+            ));
+        }
+        let oauth_pairwise_key =
+            match secret::read_secret(get, PAIRWISE_KEY_VAR, PAIRWISE_KEY_FILE_VAR)? {
+                None => None,
+                Some(raw) => Some(Arc::new(PairwiseKey::parse(
+                    PAIRWISE_KEY_FILE_VAR,
+                    raw.expose_secret(),
+                )?)),
+            };
+        let oauth_personal_environment_id = match get(PERSONAL_ENVIRONMENT_VAR)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            None => None,
+            Some(v) => Some(uuid::Uuid::parse_str(&v).map_err(|_| {
+                ConfigError::invalid(PERSONAL_ENVIRONMENT_VAR, "must be a UUID".to_string())
+            })?),
+        };
         Ok(Self {
+            oauth_enabled: flag(get, OAUTH_ENABLED_VAR)?,
+            oauth_pairwise_key,
+            oauth_personal_environment_id,
             end_users_enabled: flag(get, "PLATFORM_ACCESS_END_USERS_ENABLED")?,
             user_tokens_enabled,
             environment_origins_enabled: flag(get, "PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED")?,
@@ -216,6 +264,9 @@ mod tests {
         assert!(!cfg.user_tokens_enabled);
         assert!(!cfg.environment_origins_enabled);
         assert!(!cfg.meeting_platform_enabled);
+        assert!(!cfg.oauth_enabled);
+        assert!(cfg.oauth_pairwise_key.is_none());
+        assert!(cfg.oauth_personal_environment_id.is_none());
         assert!(!cfg.minting_enabled());
         assert!(!cfg.verification_enabled());
         assert_eq!(cfg.end_user_caps, EndUserCaps::default());
@@ -271,6 +322,45 @@ mod tests {
         assert!(
             PlatformBuildConfig::from_lookup(&lookup(&[(PREVIOUS_KEYS_VAR, "not-a-key")])).is_ok()
         );
+    }
+
+    #[test]
+    fn oauth_settings_are_parsed_strictly_and_keys_only_from_files() {
+        use super::super::secret::tests::TempSecret;
+        let cfg = PlatformBuildConfig::from_lookup(&lookup(&[
+            (OAUTH_ENABLED_VAR, "true"),
+            (
+                PERSONAL_ENVIRONMENT_VAR,
+                "6f1c2b9e-3a4d-4c5e-8f70-112233445566",
+            ),
+        ]))
+        .unwrap();
+        assert!(cfg.oauth_enabled);
+        assert!(cfg.oauth_personal_environment_id.is_some());
+        for (var, value) in [
+            (OAUTH_ENABLED_VAR, "on"),
+            (PERSONAL_ENVIRONMENT_VAR, "not-a-uuid"),
+            (PAIRWISE_KEY_VAR, "inline-pairwise-key-0123456789abcdefghijklmnop"),
+        ] {
+            let err = PlatformBuildConfig::from_lookup(&lookup(&[(var, value)])).unwrap_err();
+            assert!(!err.to_string().contains("inline-pairwise"), "{err}");
+        }
+        let file = TempSecret::new("pairwise-test-key-0123456789abcdefghijklmnopqrstuv", 0o600);
+        let path = file.path();
+        let cfg = PlatformBuildConfig::from_lookup(&lookup(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            (PAIRWISE_KEY_FILE_VAR, path.as_str()),
+        ]))
+        .unwrap();
+        let key = cfg.oauth_pairwise_key.unwrap();
+        assert!(!format!("{key:?}").contains("pairwise-test-key"));
+        let weak = TempSecret::new("changeme", 0o600);
+        let weak_path = weak.path();
+        assert!(PlatformBuildConfig::from_lookup(&lookup(&[(
+            PAIRWISE_KEY_FILE_VAR,
+            weak_path.as_str()
+        )]))
+        .is_err());
     }
 
     #[test]

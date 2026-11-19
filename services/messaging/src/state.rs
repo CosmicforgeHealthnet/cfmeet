@@ -54,6 +54,9 @@ pub struct AppState {
     /// ADR 0062 / 0063 partner devices and push (every flag off by default: nothing
     /// partner-specific is reachable).
     pub partner: Arc<crate::partner::Partner>,
+    /// ADR 0064 CF Meet Apps (`MESSAGING_APPS_ENABLED`, default off: OAuth credentials
+    /// are refused and nothing app-specific happens).
+    pub apps: crate::apps::AppsSettings,
 }
 
 impl AppState {
@@ -90,6 +93,7 @@ impl AppState {
             sms: Arc::new(crate::sms_bridge::UnconfiguredSmsTransport),
             push_mirror: None,
             partner: Arc::new(crate::partner::Partner::disabled()),
+            apps: crate::apps::AppsSettings::default(),
         }
     }
 
