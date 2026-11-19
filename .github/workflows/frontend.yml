@@ -68,6 +68,10 @@ jobs:
         run: |
           node --experimental-strip-types --test tests/messaging-e2ee-membership.test.mjs
           node --test tests/messaging-crypto-external-join.test.mjs
+      # Chat titles: a direct chat is the other person (alias first, never a member list); a
+      # group shows its name; a private group's name travels only inside its encrypted group.
+      - name: Chat title tests
+        run: node --experimental-strip-types --test tests/messaging-titles.test.mjs
 
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh

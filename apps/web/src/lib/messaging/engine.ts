@@ -38,6 +38,7 @@ import { reactionSegment } from "./routes";
 import { messagingRealtimeOrigin } from "./urls";
 import { browserDeviceLabel } from "@/lib/auth/device-label";
 import { KEY_PACKAGE_TARGET, WAITING_NOTE, beforeJoinNote, joinerEntry, keyPackagesToPublish, missingDevices, removalPlan } from "./e2ee-membership";
+import { conversationTitle, decodeGroupTitle, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle } from "./conversation-title";
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
 /** `needs-signin`: this sign-in is too old to register the browser; the standard sign-in flow takes over. */
@@ -71,6 +72,8 @@ export type ConversationView = {
   ownerPrincipalId: string | null;
   /** The MANAGED conversation title set by a member (null: derived from the members). */
   serverTitle: string | null;
+  /** A PRIVATE_E2EE group's name, read from its encrypted group on this device (never held by the server). */
+  groupTitle: string | null;
   avatarRef: string | null;
   unreadCount: number;
   mentionCount: number;
@@ -358,6 +361,8 @@ export class MessagingEngine {
   private ownDeviceCache: { at: number; ids: Set<string> } | null = null;
   /** Sends of one conversation leave in the order the user wrote them. */
   private sendQueues = new Map<string, Promise<void>>();
+  /** PRIVATE_E2EE group names read from (or sent into) each encrypted group on this device. */
+  private groupTitles = new Map<string, string>();
 
   private enqueue(conversationId: string, job: () => Promise<void>): Promise<void> {
     const previous = this.sendQueues.get(conversationId) ?? Promise.resolve();
@@ -1140,6 +1145,7 @@ export class MessagingEngine {
         version: c.version ?? 0,
         ownerPrincipalId: c.ownerPrincipalId ?? null,
         serverTitle: c.title ?? null,
+        groupTitle: c.securityProfile === "PRIVATE_E2EE" ? (this.groupTitles.get(c.conversationId) ?? null) : null,
         avatarRef: c.avatarRef ?? null,
         unreadCount: c.inbox?.unreadCount ?? previous?.unreadCount ?? 0,
         mentionCount: c.inbox?.mentionCount ?? previous?.mentionCount ?? 0,
@@ -1156,21 +1162,61 @@ export class MessagingEngine {
       try {
         const r = await identityApi.names([...needNames].slice(0, 256));
         const names = { ...this.snapshot.names };
-        for (const p of r.principals) names[p.principalId] = p.displayName;
+        // Your own saved contact name (alias) first, as the contact list shows it.
+        for (const p of r.principals) names[p.principalId] = p.alias?.trim() || p.displayName;
         this.set({ names });
       } catch {
         // Names are cosmetic; ids are shown instead.
       }
     }
-    for (const v of views) {
-      const others = v.members.filter((m) => m !== me);
-      v.title = v.serverTitle?.trim()
-        ? v.serverTitle.trim()
-        : others.length ? others.map((m) => this.snapshot.names[m] ?? "CF Meet user").join(", ") : v.contextClass === "GROUP" ? "Group conversation" : "Conversation";
-    }
+    for (const v of views) v.title = this.titleOf(v);
     // Inbox order: latest activity first (MSG-007 `orderBy=lastActivity`).
     views.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.createdAt.localeCompare(a.createdAt));
     this.set({ conversations: views });
+  }
+
+  /** Direct chat: the other person (alias, then name); group: its name, else its other members. */
+  private titleOf(v: ConversationView): string {
+    return conversationTitle({ contextClass: v.contextClass, serverTitle: v.serverTitle, groupTitle: v.groupTitle, members: v.members, me: this.snapshot.identity?.principalId, names: this.snapshot.names });
+  }
+
+  /** A private group's name changed on this device: the list, header and chat info follow. */
+  private applyGroupTitle(conversationId: string, title: string | null): void {
+    if (title) this.groupTitles.set(conversationId, title);
+    else this.groupTitles.delete(conversationId);
+    const v = this.snapshot.conversations.find((c) => c.id === conversationId);
+    if (!v || v.securityProfile !== "PRIVATE_E2EE" || v.groupTitle === title) return;
+    const next = { ...v, groupTitle: title };
+    next.title = this.titleOf(next);
+    this.set({ conversations: this.snapshot.conversations.map((c) => (c.id === conversationId ? next : c)) });
+  }
+
+  /**
+   * Names a private group inside its end-to-end encrypted group: an encrypted message only
+   * member devices can read (the server refuses to hold a PRIVATE_E2EE title). While nobody
+   * else can decrypt yet it is held sealed on this device and sent with the held messages.
+   */
+  private async shareGroupTitle(conversationId: string, title: string): Promise<void> {
+    const conv = this.server.get(conversationId);
+    const c = this.crypto;
+    if (!conv || conv.securityProfile !== "PRIVATE_E2EE" || conv.contextClass === "DIRECT" || !c || this.snapshot.phase !== "ready") return;
+    const text = encodeGroupTitle(title);
+    this.applyGroupTitle(conversationId, normalizeTitle(title));
+    const gid = conv.encryption.mlsGroupId ? b64u.dec(conv.encryption.mlsGroupId) : null;
+    const inGroup = !!gid && (await c.call<boolean>("hasGroup", { groupId: gid }).catch(() => false));
+    if (!inGroup || (await this.updateAwaitingSetup(conv))) {
+      await c.call("holdDraft", { conversationId, clientMessageId: uuid(), text, createdAt: new Date().toISOString() });
+      this.deviceChecks.delete(conversationId);
+      this.scheduleSync(conversationId);
+      return;
+    }
+    await this.enqueue(conversationId, () => this.sendEncrypted(conv, { t: "text", text }, []));
+  }
+
+  /** A device or member was just added to a private group: it receives the group's name too. */
+  private reshareGroupTitle(conversationId: string): void {
+    const title = this.groupTitles.get(conversationId);
+    if (title) void this.shareGroupTitle(conversationId, title).catch(() => {});
   }
 
   async directory(q?: string): Promise<Colleague[]> {
@@ -1217,7 +1263,11 @@ export class MessagingEngine {
       const me = this.snapshot.identity?.principalId;
       principals = (conv.members ?? []).map((x) => x.principalId).filter((x) => x !== me);
     }
-    if (profile === "PRIVATE_E2EE") await this.establishGroup(conv, principals);
+    if (profile === "PRIVATE_E2EE") {
+      await this.establishGroup(conv, principals);
+      // The name travels inside the encrypted group, after the members' devices were added.
+      if (title && !direct) await this.shareGroupTitle(conv.conversationId, title.slice(0, 120)).catch(() => {});
+    }
     this.subscribeConversation(conv);
     await this.refreshConversations();
     return conv.conversationId;
@@ -1351,6 +1401,7 @@ export class MessagingEngine {
     if (conv.securityProfile === "PRIVATE_E2EE") {
       await this.sync(conversationId);
       await this.addPrincipalsToGroup(conv, [p.principalId], false);
+      this.reshareGroupTitle(conversationId);
     }
     await this.refreshConversations();
   }
@@ -1369,6 +1420,7 @@ export class MessagingEngine {
     if (conv.securityProfile === "PRIVATE_E2EE") {
       await this.sync(conversationId);
       await this.addPrincipalsToGroup(conv, [member.principalId], false);
+      this.reshareGroupTitle(conversationId);
     }
     await this.refreshConversations();
   }
@@ -1443,6 +1495,13 @@ export class MessagingEngine {
   async renameConversation(conversationId: string, title: string | null): Promise<void> {
     const conv = this.server.get(conversationId);
     if (!conv) return;
+    if (conv.securityProfile === "PRIVATE_E2EE") {
+      // A private group's name is never sent to the server in the clear.
+      const name = normalizeTitle(title?.slice(0, 120));
+      if (!name) throw new MessagingApiError(0, "VALIDATION_ERROR", "Enter a group name.");
+      await this.shareGroupTitle(conversationId, name);
+      return;
+    }
     const current = await relay<ServerConversation>("GET", `v1/conversations/${conversationId}`);
     await relay("PATCH", `v1/conversations/${conversationId}`, { expectedVersion: current.version ?? conv.version ?? 0, title: title?.trim() ? title.trim().slice(0, 120) : null });
     await this.refreshConversations();
@@ -1522,15 +1581,18 @@ export class MessagingEngine {
       if (ok) verified.push(d.deviceId);
     }
     if (!verified.length) return;
+    let added = false;
     try {
-      await this.addDevicesOf(conv, missing, verified);
+      added = await this.addDevicesOf(conv, missing, verified);
     } catch (e) {
       // The group moved on (another commit won the epoch): catch up once and add again.
       // (Only before a send: during a sync the next sync catches up.)
       if (!urgent || !(e instanceof MessagingApiError && e.status === 409)) return;
       await this.sync(id);
-      await this.addDevicesOf(conv, missing, verified).catch(() => {});
+      added = await this.addDevicesOf(conv, missing, verified).catch(() => false);
     }
+    // A private group's name travels inside the group: new devices get it again.
+    if (added) this.reshareGroupTitle(id);
     if (this.snapshot.awaitingSetup[id]) void this.flushDrafts(id);
   }
 
@@ -1538,13 +1600,13 @@ export class MessagingEngine {
    * Adds the given new devices of `principals` with one commit: the claim takes only
    * their KeyPackages (never one of a device already in the tree).
    */
-  private addDevicesOf(conv: ServerConversation, principals: string[], deviceIds: string[]): Promise<void> {
+  private addDevicesOf(conv: ServerConversation, principals: string[], deviceIds: string[]): Promise<boolean> {
     return this.withMlsLock(async () => {
       const c = this.crypto!;
       const gid = b64u.dec(conv.encryption.mlsGroupId!);
       const inTree = new Set(await c.call<string[]>("members", { groupId: gid }));
       const wanted = deviceIds.filter((d) => !inTree.has(d) && d !== this.snapshot.deviceId);
-      if (!wanted.length) return;
+      if (!wanted.length) return false;
       const path = `v1/conversations/${conv.conversationId}/mls/key-package-claims`;
       type Claim = { keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] };
       const claim = await relay<Claim>("POST", path, { principalIds: principals, deviceIds: wanted }).catch((e) =>
@@ -1564,9 +1626,10 @@ export class MessagingEngine {
         packages.push(kp);
         welcomed.push(k.deviceId);
       }
-      if (!packages.length) return;
+      if (!packages.length) return false;
       const out = await c.call<GroupChange>("addDevices", { groupId: gid, keyPackages: packages });
       await this.submitChange(conv, out, { welcomed, removed: [] });
+      return true;
     });
   }
 
@@ -1729,8 +1792,24 @@ export class MessagingEngine {
       const target = r.messageId ? meta.get(r.messageId)?.target : null;
       if (r.kind === "EDIT" && target && (r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text") edits.set(target, r.payload.text);
     }
+    // A private group's name travels as an encrypted control message: it renames the chat and
+    // shows as a note only when it changes the name (re-shares for new devices stay silent).
+    const titleRecords = records
+      .filter((r) => r.kind !== "EDIT" && (r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text" && isGroupTitleText(r.payload.text))
+      .filter((r) => { const l = r.messageId ? meta.get(r.messageId)?.lifecycle : undefined; return !l || l === "ACTIVE" || l === "HIDDEN_FOR_YOU"; })
+      .map((r) => ({ sequence: r.sequence, senderPrincipalId: r.senderPrincipalId ?? null, text: r.payload?.t === "text" ? r.payload.text : null }));
+    const named = groupTitleFromRecords(titleRecords);
     for (const r of records) {
       if (r.status === "COMMIT" || r.kind === "EDIT") continue;
+      if ((r.status === "DECRYPTED" || r.status === "SENT") && r.payload?.t === "text" && isGroupTitleText(r.payload.text)) {
+        const t = named.changes.get(r.sequence);
+        if (t) {
+          const mine = r.senderPrincipalId === me;
+          const who = mine ? "You" : (r.senderPrincipalId && this.snapshot.names[r.senderPrincipalId]) || "Someone";
+          views.push({ key: `s${r.sequence}`, sequence: r.sequence, senderPrincipalId: r.senderPrincipalId ?? null, mine, createdAt: r.createdAt ?? null, profile: "PRIVATE_E2EE", state: "system", text: null, file: null, note: `${who} named the group “${t}”`, transferred: Boolean(r.transferred), messageId: r.messageId ?? null });
+        }
+        continue;
+      }
       const m = r.messageId ? meta.get(r.messageId) : undefined;
       const base: MessageView = {
         key: `s${r.sequence}`,
@@ -1817,6 +1896,12 @@ export class MessagingEngine {
       const drafts = await this.crypto.call<{ clientMessageId: string; text: string; createdAt: string }[]>("drafts", { conversationId }).catch(() => []);
       for (const d of drafts) {
         const key = `d${d.clientMessageId}`;
+        // A held group name is not a message: it names the chat here and is sent with the held messages.
+        const heldTitle = decodeGroupTitle(d.text);
+        if (heldTitle || isGroupTitleText(d.text)) {
+          if (heldTitle) named.title = heldTitle;
+          continue;
+        }
         if (pending.some((m) => m.key === key)) continue;
         pending.push({ key, sequence: null, senderPrincipalId: me, mine: true, createdAt: d.createdAt, profile: "PRIVATE_E2EE", state: "pending-setup", text: d.text, file: null, note: PENDING_SETUP_NOTE, transferred: false });
       }
@@ -1827,6 +1912,7 @@ export class MessagingEngine {
         if (!waiting && drafts.length) void this.flushDrafts(conversationId);
       }
     }
+    if (named.title && this.server.get(conversationId)?.contextClass !== "DIRECT") this.applyGroupTitle(conversationId, named.title);
     this.set({ messages: { ...this.snapshot.messages, [conversationId]: this.withTicks(conversationId, [...views, ...pending]) } });
   }
 
