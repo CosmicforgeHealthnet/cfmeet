@@ -581,9 +581,13 @@ export class MessagingEngine {
       });
       const device = await identityApi.registerDevice(challenge.challengeId, b64u.enc(kp), label.slice(0, 64));
       await this.crypto.call("adopt");
+      // Publish this device's KeyPackages BEFORE it reports ready: from then on others may
+      // start chats with it while it is offline, adding it from these (WhatsApp). A failed
+      // publication is retried by the stock check.
+      this.set({ deviceId: device.deviceId });
+      await this.topUpKeyPackages(KEY_PACKAGE_TARGET).catch(() => {});
       this.set({ phase: "ready", deviceId: device.deviceId, detail: null });
       this.enrollBackoff = 15_000;
-      await this.topUpKeyPackages(KEY_PACKAGE_TARGET);
       this.connect();
       await this.refreshConversations();
       await this.checkWelcomes();

@@ -363,11 +363,12 @@ async function journey() {
   await bob.page.fill("[data-testid=incoming-link-code]", linkCode);
   await bob.page.click("[data-testid=approve-link]");
   await bob.page.locator("[data-testid=incoming-link]").waitFor({ state: "detached", timeout: T });
-  await phase(bob2.page, "ready");
-  step("second browser linked by a trusted browser (comparison code)", { linkCode: "######" });
-  // Every other device goes offline: Bob's new browser must not wait for anyone.
+  // Every other device goes offline before the new browser even has its messaging device:
+  // nobody can add it, so it must not wait for anyone.
   await alice.page.close();
   await bob.page.close();
+  await phase(bob2.page, "ready");
+  step("second browser linked by a trusted browser (comparison code)", { linkCode: "######" });
   await previewIsText(bob2.page);
   await openConversation(bob2.page, "PRIVATE_E2EE");
   // It joins the chat's encryption group by itself (MLS external commit from the GroupInfo).
