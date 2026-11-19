@@ -6,8 +6,8 @@
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "5a372758fe8f2a55f7b759d2579f74df6a36e4624b02ad51054ecc3accbedf8a",
-    "capability_matrix_sha256": "97a9de0a8f02ee5efb18603c0bc7bb9200ce6256780849f28e3bd8434935fb99"
+    "openapi_sha256": "72232c91613da19507ce527f7fa8d1c3f8adf4647a60ce5fc0e0380e4a2960af",
+    "capability_matrix_sha256": "ae8ac8b3ff37186c0b20fae9ac7455eb41aa2e6712941d846deeb6a304295d0d"
   },
   "query_shapes": {
     "SCOPED": [
@@ -3335,7 +3335,7 @@
       "path": "/messaging/switches",
       "source_endpoint": null,
       "path_params": [],
-      "query_shape": "SCOPED",
+      "query_shape": "SCOPED_PAGE",
       "query_required": [
         "market",
         "organization",
@@ -3712,7 +3712,7 @@
       "source_tests": []
     },
     {
-      "id": "calling.calls.search",
+      "id": "calling.calls.list",
       "version": "1.0",
       "module": "calling",
       "kind": "READ",
@@ -5861,7 +5861,7 @@
           "format": "uuid"
         }
       ],
-      "query_shape": "SCOPED",
+      "query_shape": "SCOPED_PAGE",
       "query_required": [
         "market",
         "organization",
@@ -12191,7 +12191,7 @@
       "path": "/operations/switches",
       "source_endpoint": null,
       "path_params": [],
-      "query_shape": "SCOPED",
+      "query_shape": "SCOPED_PAGE",
       "query_required": [
         "market",
         "organization",
@@ -12418,7 +12418,7 @@
       "source_tests": []
     },
     {
-      "id": "audit.entries.search",
+      "id": "audit.entries.list",
       "version": "1.0",
       "module": "audit",
       "kind": "READ",

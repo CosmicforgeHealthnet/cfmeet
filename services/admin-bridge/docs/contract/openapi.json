@@ -16254,6 +16254,25 @@
                 "privacy-request"
               ]
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+            }
           }
         ],
         "responses": {
@@ -16421,7 +16440,7 @@
           }
         },
         "x-cfmeet-kind": "READ",
-        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-query-shape": "SCOPED_PAGE",
         "x-cfmeet-permission": "messaging.switches.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
@@ -18222,8 +18241,8 @@
     },
     "/internal/cfmeet-admin/v1/calling/calls": {
       "get": {
-        "operationId": "calling.calls.search",
-        "summary": "calling.calls.search",
+        "operationId": "calling.calls.list",
+        "summary": "calling.calls.list",
         "tags": [
           "calling"
         ],
@@ -29213,6 +29232,25 @@
                 "privacy-request"
               ]
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+            }
           }
         ],
         "responses": {
@@ -29380,7 +29418,7 @@
           }
         },
         "x-cfmeet-kind": "READ",
-        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-query-shape": "SCOPED_PAGE",
         "x-cfmeet-permission": "organizations.bindings.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
@@ -60973,6 +61011,25 @@
                 "release-request"
               ]
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+            }
           }
         ],
         "responses": {
@@ -61140,7 +61197,7 @@
           }
         },
         "x-cfmeet-kind": "READ",
-        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-query-shape": "SCOPED_PAGE",
         "x-cfmeet-permission": "operations.switches.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
@@ -62178,8 +62235,8 @@
     },
     "/internal/cfmeet-admin/v1/audit/entries": {
       "get": {
-        "operationId": "audit.entries.search",
-        "summary": "audit.entries.search",
+        "operationId": "audit.entries.list",
+        "summary": "audit.entries.list",
         "tags": [
           "audit"
         ],

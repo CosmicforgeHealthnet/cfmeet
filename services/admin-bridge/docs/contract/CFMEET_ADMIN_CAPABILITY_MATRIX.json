@@ -1349,7 +1349,7 @@
     "tests": []
   },
   {
-    "id": "calling.calls.search",
+    "id": "calling.calls.list",
     "version": "1.0",
     "owner": "calling",
     "method": "GET",
@@ -4579,7 +4579,7 @@
     "tests": []
   },
   {
-    "id": "audit.entries.search",
+    "id": "audit.entries.list",
     "version": "1.0",
     "owner": "admin-bridge",
     "method": "GET",

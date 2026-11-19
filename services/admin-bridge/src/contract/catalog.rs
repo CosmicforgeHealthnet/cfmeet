@@ -994,7 +994,11 @@ pub fn catalog() -> Vec<Capability> {
     );
     c.push(
         mg(
-            get("messaging.switches.list", "/messaging/switches", Q::Scoped),
+            get(
+                "messaging.switches.list",
+                "/messaging/switches",
+                Q::ScopedPage,
+            ),
             S::CliToApi,
             P::A2,
         )
@@ -1087,7 +1091,7 @@ pub fn catalog() -> Vec<Capability> {
     let cl = |b: B, st, ph| b.at(Calling, st, ph);
     c.push(
         cl(
-            get("calling.calls.search", "/calling/calls", Q::ScopedWindow),
+            get("calling.calls.list", "/calling/calls", Q::ScopedWindow),
             S::New,
             P::A2,
         )
@@ -1564,7 +1568,7 @@ pub fn catalog() -> Vec<Capability> {
             get(
                 "organizations.bindings.list",
                 "/organizations/organizations/{organization_id}/bindings",
-                Q::Scoped,
+                Q::ScopedPage,
             ),
             S::Exists,
             P::A2,
@@ -2819,7 +2823,7 @@ pub fn catalog() -> Vec<Capability> {
             get(
                 "operations.switches.list",
                 "/operations/switches",
-                Q::Scoped,
+                Q::ScopedPage,
             ),
             P::A2,
         )
@@ -2870,7 +2874,7 @@ pub fn catalog() -> Vec<Capability> {
 
     // ---- 6.16 Audit ------------------------------------------------------------
     c.push(
-        get("audit.entries.search", "/audit/entries", Q::ScopedWindow)
+        get("audit.entries.list", "/audit/entries", Q::ScopedWindow)
             .at(AdminBridge, S::Local, P::A2)
             .risk(R::R1, V::OperationsMinimized),
     );
