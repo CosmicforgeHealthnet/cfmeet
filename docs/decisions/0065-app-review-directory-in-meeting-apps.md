@@ -15,7 +15,7 @@
 3. **In-meeting apps.** An app declares a meeting surface: its URL and origins.
    * The Meeting Service lists the apps installed for a meeting's workspace or owner.
    * It mints a 5-minute app-context token for the app. The token carries the conference, a pairwise participant id and the role; the user's principal is included only if that user granted the app.
-   * The token is signed with keys published at `/.well-known/cfmeet-app-keys`.
+   * The token is signed with keys published as a JWKS at `GET /api/v2/app-context-keys`.
    * The sandboxed iframe panel and its messaging bridge are frontend work.
 4. **Suspension.** An operator can suspend an app, which revokes every grant.
 
