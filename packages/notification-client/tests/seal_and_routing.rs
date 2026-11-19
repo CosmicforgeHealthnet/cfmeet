@@ -177,6 +177,34 @@ mod open {
             SealError::WrongKid
         );
     }
+    /// ADR 0063 N-P1: a partner push credential opens only for the scope it was sealed for.
+    #[test]
+    fn push_credentials_open_only_for_their_scope() {
+        use cf_notification_client::seal::{open_push_credential, seal_push_credential};
+        let (pk, sk) = pair("notif-hpke-2026-11");
+        let (t, a, e) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let secret = "{\"type\":\"service_account\",\"project_id\":\"demo\"}";
+        let sealed = seal_push_credential(&pk, t, a, e, secret).unwrap();
+        assert_eq!(
+            open_push_credential(&sk, t, a, e, &sealed)
+                .unwrap()
+                .as_str(),
+            secret
+        );
+        for (t2, a2, e2) in [
+            (Uuid::new_v4(), a, e),
+            (t, Uuid::new_v4(), e),
+            (t, a, Uuid::new_v4()),
+        ] {
+            assert_eq!(
+                open_push_credential(&sk, t2, a2, e2, &sealed).unwrap_err(),
+                SealError::OpenFailed
+            );
+        }
+        // An event part never opens as a credential (domain-separated info / AAD).
+        let part = seal(&pk, P, "evt_abc", T, &plaintext()).unwrap();
+        assert!(open_push_credential(&sk, t, a, e, &part).is_err());
+    }
 }
 
 fn state(mode: RoutingMode, canary_percent: u8, fallback: CriticalFallback) -> RoutingState {

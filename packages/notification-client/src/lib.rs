@@ -8,7 +8,8 @@
 //! * [`envelope`] — the `cfmeet.notifications.event` v1 builder and validator (forbidden
 //!   data keys, sealed allowance, legacy idempotency-key formats, CRITICAL rules, size);
 //! * [`seal`] — HPKE (RFC 9180) sealing of codes, tokens, addresses and account-notice
-//!   facts to the service key (`open` feature: the service renderer only);
+//!   facts to the service key (`open` feature: the service renderer only), and of partner
+//!   push provider credentials ([`seal::seal_push_credential`], ADR 0063 N-P1);
 //! * [`routing`] — the routing fence protocol v1 decision helper (§9.3), the guard-trigger
 //!   rule (§9.4) and the CRITICAL reroute rules (§9.8).
 //!
@@ -21,9 +22,12 @@ pub mod routing;
 pub mod seal;
 
 pub use catalogue::{
-    spec, EventSpec, Lane, LegacyKey, Priority, Producer, RecipientKind, CATALOGUE, CONTROL_EVENT,
-    EMAIL_CHANGED_SIDES, STEP_UP_PURPOSES,
+    parse_platform_principal, platform_principal_ref, spec, EventSpec, Lane, LegacyKey, Priority,
+    Producer, RecipientKind, CATALOGUE, CONTROL_EVENT, EMAIL_CHANGED_SIDES, PARTNER_EVENT_TYPES,
+    STEP_UP_PURPOSES,
 };
 pub use envelope::{validate, Envelope, EnvelopeBuilder, EnvelopeError};
 pub use routing::{decide, Decision, Route, RouteRef, RoutingMode, RoutingState, ROUTING_PROTOCOL};
-pub use seal::{Sealed, SealedPlaintext, SealingKey};
+pub use seal::{
+    push_credential_fingerprint, seal_push_credential, Sealed, SealedPlaintext, SealingKey,
+};

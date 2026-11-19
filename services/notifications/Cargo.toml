@@ -41,6 +41,8 @@ dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 secrecy = "0.10"
+# Opened partner push credentials are wiped from memory (ADR 0063).
+zeroize = "1.8"
 async-trait = "0.1"
 base64 = "0.22"
 hex = "0.4"

@@ -127,6 +127,7 @@ impl Machine {
         Authentication::Authenticated(Box::new(AuthorityChain {
             actor: self.actor.clone(),
             full_authority: full,
+            oauth: None,
         }))
     }
 }

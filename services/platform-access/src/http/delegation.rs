@@ -179,7 +179,10 @@ fn valid_actor(value: &str) -> bool {
 }
 
 /// Authorizes a delegated mutation: permission + a named human actor.
-fn delegated(caller: &InternalCaller, headers: &HeaderMap) -> AccessResult<OperatorContext> {
+pub(crate) fn delegated(
+    caller: &InternalCaller,
+    headers: &HeaderMap,
+) -> AccessResult<OperatorContext> {
     caller.require_permission(InternalPermission::PlatformIdentityDelegate)?;
     let actor = headers
         .get(ACTOR_HEADER)
@@ -190,7 +193,7 @@ fn delegated(caller: &InternalCaller, headers: &HeaderMap) -> AccessResult<Opera
         .map_err(|_| AccessError::Refused(ErrorCode::OperatorRequired))
 }
 
-fn read_only(caller: &InternalCaller) -> AccessResult<()> {
+pub(crate) fn read_only(caller: &InternalCaller) -> AccessResult<()> {
     caller.require_permission(InternalPermission::PlatformIdentityDelegate)
 }
 

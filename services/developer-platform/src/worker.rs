@@ -32,6 +32,21 @@ pub struct PeriodicJobs {
     /// P9: bounded retention purge (default here: off; the worker binary reads
     /// `DEVELOPER_PLATFORM_RETENTION_*`, on by default).
     pub retention: crate::retention::RetentionSettings,
+    /// ADR 0064 (`DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED`, None: off): the Platform
+    /// Access `APP_GRANT` projection and the app lifecycle events.
+    pub app_grants: Option<AppGrantJobs>,
+}
+
+/// The install projection's Platform Access port.
+#[derive(Clone)]
+pub struct AppGrantJobs {
+    pub port: Arc<dyn crate::apps::port::PlatformOAuthPort>,
+}
+
+impl std::fmt::Debug for AppGrantJobs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppGrantJobs").finish_non_exhaustive()
+    }
 }
 
 impl Default for PeriodicJobs {
@@ -42,6 +57,7 @@ impl Default for PeriodicJobs {
             reference_reconciliation_remote_limit: 0,
             notifications: None,
             retention: crate::retention::RetentionSettings::disabled(),
+            app_grants: None,
         }
     }
 }
@@ -440,6 +456,11 @@ pub async fn run_pass_with_jobs(
             credential_notification_pass(db, p, &jobs.credential_lifecycle, Utc::now()).await;
         }
         notification_publication_pass(db, n.sink.as_ref(), Utc::now()).await;
+    }
+    // ADR 0064: the APP_GRANT projection runs before the delivery pass so its lifecycle
+    // events go out in the same pass.
+    if let Some(a) = &jobs.app_grants {
+        crate::apps::installations::sync_pass(db, &a.port, webhooks).await;
     }
     // P9: bounded retention purge (at most once per hour across instances).
     crate::retention::retention_pass(db, &jobs.retention, Utc::now()).await;

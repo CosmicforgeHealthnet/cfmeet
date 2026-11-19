@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging internal API",
-    "version": "1.1.0",
-    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern."
+    "version": "1.2.0",
+    "description": "Service-authenticated /internal/v1 surface of services/messaging (Part V H §§97–112, I §116). Every path, including unknown ones, requires a valid Ed25519 service token whose issuer Messaging's trust bundle grants the operation's permission; customer credentials are refused. Scope comes only from the signed delegated platform context, re-validated against Platform Access (forged chains: DELEGATED_CONTEXT_INVALID; suspended: AUTHORITY_SUSPENDED). In addition, /internal/v1/delegated/v1/messaging/** and /internal/v1/delegated/v1/conversations/** expose exactly the customer operations of cfmeet.messaging.http-api to a FIRST_PARTY backend granted messaging-application.delegate, with the standard scopes messages.send, messages.read, conversations.create, conversations.manage, attachments.write and attachments.read (never moderation, export or administration); CF-Acting-Principal is verified as on /v1. 1.1.0 (gap audit G6 / G7): organization moderation under /internal/v1/organization-moderation/v1/messaging/** and team channels (PUT /internal/v1/team-channels), permission messaging-organization.govern. 1.2.0 (ADR 0062 §8, partner meeting chat): the meeting-conversation operations also accept a Meeting Service holding messaging-meeting.sync-platform for an ACTIVE EXTERNAL environment's signed delegated scope (re-validated against Platform Access) while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on; such a conversation is MANAGED only (SECURITY_PROFILE_NOT_ALLOWED / PARTNER_MEETING_CHAT_MANAGED_ONLY otherwise). First-party scopes keep requiring messaging-meeting.sync (sync-platform alone is INTERNAL_PERMISSION_DENIED there). In a partner scope the owner must be the environment's meeting system principal (BOT_OR_SERVICE; PRINCIPAL_NOT_AUTHORIZED / PARTNER_MEETING_OWNER_KIND) and admitted members EXTERNAL_APPLICATION_PRINCIPAL or TEMPORARY_EXTERNAL_PARTICIPANT principals of that environment (PARTNER_MEETING_MEMBER_KIND; another environment's principal is PRINCIPAL_UNKNOWN)."
   },
   "tags": [
     {
@@ -44,7 +44,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Idempotently resolves the MEETING conversation of a meeting reference (context namespace meeting). Never a silent profile fallback. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "description": "Idempotently resolves the MEETING conversation of a meeting reference (context namespace meeting). Never a silent profile fallback. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access. 1.2.0: or messaging-meeting.sync-platform for an EXTERNAL environment (partner meeting chat, MANAGED only; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED).",
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -110,7 +110,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Applies a version-fenced meeting membership change (admission, removal, ban, leave, role). Stale / replayed versions change nothing. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "description": "Applies a version-fenced meeting membership change (admission, removal, ban, leave, role). Stale / replayed versions change nothing. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access. 1.2.0: or messaging-meeting.sync-platform for an EXTERNAL environment (partner meeting chat, MANAGED only; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED).",
         "parameters": [
           {
             "name": "conversationId",
@@ -183,7 +183,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Applies a version-fenced meeting lifecycle change (e.g. CLOSED when the meeting ends). Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "description": "Applies a version-fenced meeting lifecycle change (e.g. CLOSED when the meeting ends). Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access. 1.2.0: or messaging-meeting.sync-platform for an EXTERNAL environment (partner meeting chat, MANAGED only; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED).",
         "parameters": [
           {
             "name": "conversationId",
@@ -248,7 +248,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Imports legacy meeting chat with LEGACY_MANAGED provenance into a MANAGED meeting conversation (never PRIVATE_E2EE), idempotently, keeping original times. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access.",
+        "description": "Imports legacy meeting chat with LEGACY_MANAGED provenance into a MANAGED meeting conversation (never PRIVATE_E2EE), idempotently, keeping original times. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access. 1.2.0: or messaging-meeting.sync-platform for an EXTERNAL environment (partner meeting chat, MANAGED only; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED).",
         "parameters": [
           {
             "name": "conversationId",
@@ -313,7 +313,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Removes (tombstones as MODERATED) a message of a meeting conversation on behalf of the meeting authority. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access. The content is never returned.",
+        "description": "Removes (tombstones as MODERATED) a message of a meeting conversation on behalf of the meeting authority. Permission messaging-meeting.sync; signed delegated scope of a FIRST_PARTY environment, re-validated against Platform Access. The content is never returned. 1.2.0: or messaging-meeting.sync-platform for an EXTERNAL environment (partner meeting chat, MANAGED only; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED).",
         "parameters": [
           {
             "name": "conversationId",

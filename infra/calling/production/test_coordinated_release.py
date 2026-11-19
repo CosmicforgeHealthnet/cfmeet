@@ -591,7 +591,11 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         manifest = json.loads((REPO / 'infra/api-gateway/route-manifest.json').read_text())
         families = {'/'.join(r['pattern'].split('/')[:3]) for r in manifest['routes']
                     if r['upstream'] == 'cfmeet.developer-platform'}
-        self.assertEqual(set(cr.GATEWAY_PREFIXES), families)
+        # The Developer Platform families the CF Meet Platform activations add to the edge
+        # (/v1/users; /v1/oauth and /v1/app-directory) are routed only by those operations.
+        later = set(cr.platform_ops.USERS_EDGE) | set(cr.integrate_ops.OAUTH_EDGE + cr.integrate_ops.DIRECTORY_EDGE)
+        self.assertEqual(set(cr.GATEWAY_PREFIXES), families - later)
+        self.assertFalse(set(cr.GATEWAY_PREFIXES) & later)
         others = [r for r in manifest['routes'] if r['upstream'] != 'cfmeet.developer-platform'
                   and any(r['pattern'] == x or r['pattern'].startswith(x + '/') for x in cr.GATEWAY_PREFIXES)]
         self.assertEqual(others, [])
@@ -637,8 +641,18 @@ class SafeDefaultsAndRouting(unittest.TestCase):
         except ImportError:
             self.skipTest('PyYAML unavailable')
         workflow = yaml.safe_load((REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text())
-        options = (workflow.get('on') or workflow[True])['workflow_dispatch']['inputs']['operation']['options']
-        self.assertEqual(tuple(options), cr.OPERATIONS)
+        options = tuple((workflow.get('on') or workflow[True])['workflow_dispatch']['inputs']['operation']['options'])
+        # The workflow is integrator-owned (docs/platform/build-internal-contracts.md §10): the CF Meet
+        # Platform "Build" operations are either all offered, in this order, or (until the
+        # integrator adds them) all absent. Every other operation must match exactly.
+        platform = cr.platform_ops.OPERATIONS + (cr.platform_ops.ACCEPTANCE,)
+        pending = tuple(op for op in platform if op not in options)
+        self.assertIn(pending, ((), platform))
+        # The CF Meet Apps operations (integrate_operations.py) likewise: all offered or all absent.
+        integrate = cr.integrate_ops.OPERATIONS
+        later = tuple(op for op in integrate if op not in options)
+        self.assertIn(later, ((), integrate))
+        self.assertEqual(options, tuple(op for op in cr.OPERATIONS if op not in pending + later))
 
 
 class PublicInternalDenial(unittest.TestCase):

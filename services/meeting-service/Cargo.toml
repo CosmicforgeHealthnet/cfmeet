@@ -56,7 +56,7 @@ redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
 deadpool-redis = "0.15"
 sha2 = "0.10"
 # Multi-device policy: device-key proofs of possession (already locked through cf-service-auth).
-ed25519-dalek = "2"
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 # Part G: S3-compatible SigV4 signing + integrity digests (artefact storage)
 hmac = "0.12"
 md-5 = "0.10"

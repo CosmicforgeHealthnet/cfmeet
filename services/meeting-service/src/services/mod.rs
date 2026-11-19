@@ -23,6 +23,7 @@ pub mod token_blacklist;
 pub mod actor;
 pub mod admission;
 pub mod appointment_authorization;
+pub mod apps;
 pub mod artifacts;
 pub mod calendar;
 pub mod collaboration;

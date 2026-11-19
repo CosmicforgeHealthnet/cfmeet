@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet public API — sms",
+    "title": "CF Meet Platform API — sms",
     "version": "1.3.0",
     "description": "HTTP surface of services/sms-gateway: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/sms (credential verified by Platform Access on every request; scopes sms.read/ sms.send; 503 when Platform Access is unreachable — fail closed); provider callbacks under /provider-callbacks/v1/sms (adapter signature). Every non-probe path, including unknown ones, runs behind its authentication. Request bodies are limited to 32 KiB. 1.3.0: x-cfmeet-required-scope (the API Gateway scope pre-check): sms.read on message / thread reads, sms.send on sending and opt-outs (Section 15, PLT-011).",
     "x-cfmeet-source-contract": "cfmeet.sms-gateway.http-api",
@@ -10,7 +10,7 @@
   "servers": [
     {
       "url": "https://api.cfmeet.com",
-      "description": "CF Meet public API Gateway"
+      "description": "CF Meet Platform API Gateway"
     }
   ],
   "paths": {

@@ -485,6 +485,12 @@ pub async fn create(
             }
         }
     }
+    // ADR 0064: a CF Meet App's bot (creator or DIRECT counterpart) takes part in
+    // MANAGED conversations only; the profile is decided in the transaction below.
+    // (The counterpart's kind is not kept above: it is looked up when the flag is on.)
+    let mut parties = vec![(acting.principal_id, Some(acting.kind.as_str()))];
+    parties.extend(counterpart.map(|p| (p, None)));
+    let app_bot = crate::apps::involves_bot(state, ctx, &parties).await?;
     let digest = hex::encode(Sha256::digest(
         canonical_json(&json!({
             "request": serde_json::to_value(&request).expect("serializes"),
@@ -508,6 +514,7 @@ pub async fn create(
                     &acting,
                     request,
                     counterpart,
+                    app_bot,
                     &key,
                     &digest,
                     &request_ctx,
@@ -534,6 +541,7 @@ async fn create_in(
     acting: &Acting,
     request: CreateRequest,
     counterpart: Option<Uuid>,
+    app_bot: bool,
     key: &str,
     digest: &str,
     request_ctx: &RequestContext,
@@ -599,6 +607,9 @@ async fn create_in(
             ))
         }
     };
+    if app_bot && profile == SecurityProfile::PrivateE2ee {
+        return Err(crate::apps::bot_managed_only());
+    }
     if !context_policy.allowed_profiles.contains(&profile) {
         return Err(Error::reason(
             ErrorCode::SecurityProfileNotAllowed,
@@ -966,6 +977,10 @@ pub struct ListQuery {
     /// (latest application message first; the inbox order).
     #[serde(default)]
     pub order_by: Option<String>,
+    /// ADR 0062: a partner session device sees MANAGED conversations only (set by the
+    /// handler from the request's authentication, never from the query).
+    #[serde(skip)]
+    pub managed_only: bool,
 }
 
 pub(crate) fn encode_cursor(t: DateTime<Utc>, id: Uuid) -> String {
@@ -1174,6 +1189,7 @@ pub async fn list(
                AND ($5::text IS NULL OR c.lifecycle_state = $5) \
                AND ($6::text IS NULL OR c.context_class = $6) \
                AND ($7::timestamptz IS NULL OR ({order_key}, c.id) < ($7, $8)) \
+               AND ($10::bool IS NOT TRUE OR c.security_profile = 'MANAGED') \
              ORDER BY {order_key} DESC, c.id DESC LIMIT $9"
         ),
         vec![
@@ -1186,6 +1202,7 @@ pub async fn list(
             cursor_t.into(),
             cursor_id.into(),
             ((limit + 1) as i64).into(),
+            q.managed_only.into(),
         ],
     )
     .await?;

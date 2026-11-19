@@ -199,6 +199,12 @@ pub enum ErrorCode {
     /// Multi-device policy: the linking challenge does not exist, is not the caller's,
     /// has expired or is no longer open.
     DeviceLinkInvalid,
+    /// ADR 0064: the app (or app grant) does not exist for this caller.
+    AppNotFound,
+    /// ADR 0064: Platform Access refused the app's authorization request; the message
+    /// starts with its reason (`INVALID_CLIENT`, `INVALID_REDIRECT_URI`, `INVALID_SCOPE`,
+    /// `PKCE_REQUIRED` or `APP_NOT_AVAILABLE`).
+    OauthRequestInvalid,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -328,6 +334,8 @@ impl ErrorCode {
             ErrorCode::MfaRequired => "MFA_REQUIRED",
             ErrorCode::DeviceKeyInUse => "DEVICE_KEY_IN_USE",
             ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
+            ErrorCode::AppNotFound => "APP_NOT_FOUND",
+            ErrorCode::OauthRequestInvalid => "OAUTH_REQUEST_INVALID",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -452,6 +460,8 @@ impl ErrorCode {
                 StatusCode::NOT_FOUND
             }
             ErrorCode::DeviceLinkInvalid => StatusCode::GONE,
+            ErrorCode::AppNotFound => StatusCode::NOT_FOUND,
+            ErrorCode::OauthRequestInvalid => StatusCode::BAD_REQUEST,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -819,6 +829,8 @@ mod tests {
             ErrorCode::DeviceNotFound,
             ErrorCode::DeviceKeyInUse,
             ErrorCode::DeviceLinkInvalid,
+            ErrorCode::AppNotFound,
+            ErrorCode::OauthRequestInvalid,
             ErrorCode::UserNotFound,
             ErrorCode::MfaRequired,
         ];

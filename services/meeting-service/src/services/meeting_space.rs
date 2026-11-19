@@ -795,12 +795,18 @@ impl MeetingSpaceService {
             None
         } else {
             let actor = ctx.require_registered()?;
-            let member_spaces = meeting_members::Entity::find()
+            let mut member_spaces = meeting_members::Entity::find()
                 .select_only()
                 .column(meeting_members::Column::MeetingSpaceId)
                 .filter(meeting_members::Column::UserId.eq(actor.user_id))
-                .filter(meeting_members::Column::Status.eq(MemberStatus::Active))
-                .into_query();
+                .filter(meeting_members::Column::Status.eq(MemberStatus::Active));
+            // ADR 0064: an app acting for the user reads only meetings the user owns or
+            // hosts (HOST / CO_HOST).
+            if actor.delegation.is_some() {
+                member_spaces = member_spaces
+                    .filter(meeting_members::Column::Role.is_in([Role::Host, Role::CoHost]));
+            }
+            let member_spaces = member_spaces.into_query();
             q = q.filter(
                 sea_orm::Condition::any()
                     .add(meeting_spaces::Column::OwnerUserId.eq(actor.user_id))

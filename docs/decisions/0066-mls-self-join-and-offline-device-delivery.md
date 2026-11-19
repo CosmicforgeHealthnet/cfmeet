@@ -1,4 +1,4 @@
-# ADR 0061 — Private chats: devices join by themselves, senders reach every registered device
+# ADR 0066 — Private chats: devices join by themselves, senders reach every registered device
 
 **Status:** Accepted
 **Date:** 2026-11-19

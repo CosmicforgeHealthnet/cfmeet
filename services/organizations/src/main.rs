@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
                 "notificationPublications": if notifications.is_some() { "enabled" } else { "disabled" },
                 "provisioning": if config.provisioning.is_some() { "enabled" } else { "disabled" },
                 "serviceBindings": if config.service_bindings_enabled { "enabled" } else { "disabled" },
+                "appInstalls": if config.app_installs_enabled { "enabled" } else { "disabled" },
             })
         );
         return Ok(());
@@ -89,7 +90,8 @@ async fn main() -> anyhow::Result<()> {
         AppState::new(db, verifier)
             .with_provisioning(provisioning_enabled)
             .with_platform(platform_port)
-            .with_event_destinations(event_destinations),
+            .with_event_destinations(event_destinations)
+            .with_app_installs(config.app_installs_enabled),
     );
     let listener = tokio::net::TcpListener::bind(config.bind_address).await?;
     tracing::info!(address = %config.bind_address, "organizations listening");

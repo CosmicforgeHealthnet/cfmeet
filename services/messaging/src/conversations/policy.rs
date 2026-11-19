@@ -852,18 +852,25 @@ pub enum ApplicationBaseline {
     /// files stay scanned (`managedScanRequired` is untouched); PRIVATE_E2EE files stay
     /// client-encrypted ciphertext the server never inspects.
     CfMeetFirstParty,
+    /// ADR 0062 / build contract §5: EXTERNAL tenants while
+    /// `MESSAGING_PARTNER_SESSION_DEVICES_ENABLED` is on (registered lazily, ignored while
+    /// the flag is off). Every context class allows `[MANAGED, PRIVATE_E2EE]` with MANAGED
+    /// as the default, and attachments are on; an explicit application setting wins.
+    PlatformPartner,
 }
 
 impl ApplicationBaseline {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CfMeetFirstParty => "CFMEET_FIRST_PARTY",
+            Self::PlatformPartner => "CFMEET_PLATFORM_PARTNER",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "CFMEET_FIRST_PARTY" => Some(Self::CfMeetFirstParty),
+            "CFMEET_PLATFORM_PARTNER" => Some(Self::PlatformPartner),
             _ => None,
         }
     }
@@ -877,6 +884,33 @@ impl ApplicationBaseline {
                 allowed_kinds: Some(ATTACHMENT_KINDS.iter().map(|k| k.to_string()).collect()),
                 ..Default::default()
             },
+            Self::PlatformPartner => AttachmentOverride {
+                enabled: Some(true),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// The per-context settings this baseline contributes, under the application's own
+    /// override of that context (`None`: the baseline leaves contexts alone).
+    fn context(self, own: Option<&ContextOverride>) -> Option<ContextOverride> {
+        match self {
+            Self::CfMeetFirstParty => None,
+            Self::PlatformPartner => {
+                let mut o = own.cloned().unwrap_or_default();
+                let managed_allowed = o
+                    .allowed_profiles
+                    .as_ref()
+                    .is_none_or(|a| a.contains(&SecurityProfile::Managed));
+                if o.allowed_profiles.is_none() {
+                    o.allowed_profiles =
+                        Some(vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]);
+                }
+                if o.default_profile.is_none() && managed_allowed {
+                    o.default_profile = Some(SecurityProfile::Managed);
+                }
+                Some(o)
+            }
         }
     }
 
@@ -890,6 +924,8 @@ impl ApplicationBaseline {
                 max_bytes: Some(256 * 1024 * 1024),
                 retain_count: Some(2),
             },
+            // Partner devices are MANAGED-only session devices: no secure backups.
+            Self::PlatformPartner => BackupOverride::default(),
         }
     }
 
@@ -919,6 +955,14 @@ impl ApplicationBaseline {
             daily_upload_bytes: own.daily_upload_bytes.or(base.daily_upload_bytes),
             max_concurrent_uploads: own.max_concurrent_uploads.or(base.max_concurrent_uploads),
         });
+        if own_backups == BackupOverride::default() && base_backups == BackupOverride::default() {
+            layered.backups = application.backups.clone();
+        }
+        for class in ContextClass::ALL {
+            if let Some(c) = self.context(application.contexts.get(class)) {
+                layered.contexts.insert(*class, c);
+            }
+        }
         layered
     }
 }
@@ -950,7 +994,35 @@ pub async fn load_baseline<C: ConnectionTrait>(
         vec![environment_id.into()],
     )
     .await?;
-    Ok(row.and_then(|r| ApplicationBaseline::parse(&r.baseline)))
+    Ok(row
+        .and_then(|r| ApplicationBaseline::parse(&r.baseline))
+        // The partner baseline applies only while the partner flag is on.
+        .filter(|b| {
+            *b != ApplicationBaseline::PlatformPartner || crate::partner::baseline_enabled()
+        }))
+}
+
+/// Registers the `CFMEET_PLATFORM_PARTNER` baseline for an EXTERNAL environment unless
+/// the environment already has a baseline (never replaces CF Meet's own). Idempotent.
+pub async fn register_partner_baseline<C: ConnectionTrait>(
+    db: &C,
+    scope: &crate::identity::OwnerScope,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    db::exec(
+        db,
+        "INSERT INTO messaging_application_baselines (environment_id, tenant_id, application_id, baseline, registered_at) \
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (environment_id) DO NOTHING",
+        vec![
+            scope.environment_id.into(),
+            scope.tenant_id.into(),
+            scope.application_id.into(),
+            ApplicationBaseline::PlatformPartner.as_str().into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    Ok(())
 }
 
 /// The stored application policy layered over the environment's baseline, and the
@@ -1407,6 +1479,76 @@ mod tests {
         assert!(r.attachments.enabled);
         assert_eq!(r.attachments.max_bytes, 1024);
         assert_eq!(r.attachments.allowed_kinds, vec!["IMAGE"]);
+    }
+
+    /// ADR 0062: the partner baseline makes MANAGED the default of every context with
+    /// both profiles allowed and turns attachments on; explicit settings win and a policy
+    /// without MANAGED keeps its own default.
+    #[test]
+    fn the_partner_baseline_defaults_to_managed_and_explicit_settings_win() {
+        let b = ApplicationBaseline::PlatformPartner;
+        assert_eq!(ApplicationBaseline::parse(b.as_str()), Some(b));
+        let r = resolve(&b.under(&ApplicationPolicy::default()), 0).unwrap();
+        assert!(r.attachments.enabled);
+        assert!(
+            !r.backups.enabled,
+            "no secure backups for MANAGED-only partner devices"
+        );
+        for c in r.contexts.values() {
+            assert_eq!(
+                c.allowed_profiles,
+                vec![SecurityProfile::Managed, SecurityProfile::PrivateE2ee]
+            );
+            assert_eq!(c.default_profile, Some(SecurityProfile::Managed));
+        }
+        let own: ApplicationPolicy = serde_json::from_value(json!({
+            "contexts": {
+                "DIRECT": { "allowedProfiles": ["PRIVATE_E2EE"] },
+                "GROUP": { "defaultProfile": "PRIVATE_E2EE" },
+                "SUPPORT": { "allowedProfiles": ["MANAGED"] }
+            },
+            "attachments": { "enabled": false }
+        }))
+        .unwrap();
+        let r = resolve(&b.under(&own), 2).unwrap();
+        assert!(
+            !r.attachments.enabled,
+            "an explicit application setting wins"
+        );
+        let ctx = |c: ContextClass| r.contexts.get(&c).unwrap();
+        assert_eq!(
+            ctx(ContextClass::Direct).allowed_profiles,
+            vec![SecurityProfile::PrivateE2ee]
+        );
+        assert_eq!(
+            ctx(ContextClass::Direct).default_profile,
+            Some(SecurityProfile::PrivateE2ee)
+        );
+        assert_eq!(
+            ctx(ContextClass::Group).default_profile,
+            Some(SecurityProfile::PrivateE2ee)
+        );
+        assert_eq!(
+            ctx(ContextClass::Support).default_profile,
+            Some(SecurityProfile::Managed)
+        );
+        assert_eq!(
+            ctx(ContextClass::Meeting).default_profile,
+            Some(SecurityProfile::Managed)
+        );
+        // The first-party baseline leaves contexts alone.
+        let r = resolve(
+            &ApplicationBaseline::CfMeetFirstParty.under(&ApplicationPolicy::default()),
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            r.contexts
+                .get(&ContextClass::Direct)
+                .unwrap()
+                .default_profile,
+            Some(SecurityProfile::PrivateE2ee)
+        );
     }
 
     #[test]

@@ -7,8 +7,9 @@
 //! query or `Authorization`), never inspects, stores or logs them. Messaging E2EE frames
 //! are relayed opaquely.
 //!
-//! 1. The upstream handshake runs FIRST, with the client's offered subprotocols, query
-//!    and transported credential. A refusal (401 / 403 / 404 / 409 …) is relayed to the
+//! 1. The upstream handshake runs FIRST, with the client's offered subprotocols, query,
+//!    transported credential and (with `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED`) the
+//!    browser's `Origin`. A refusal (401 / 403 / 404 / 409 …) is relayed to the
 //!    client as an HTTP response — the client is never upgraded to a dead socket.
 //! 2. The client is upgraded with the subprotocol the upstream SELECTED.
 //! 3. Frames are pumped both ways in order, one at a time (a slow peer back-pressures
@@ -33,6 +34,7 @@ use tokio_tungstenite::tungstenite::{
 };
 
 use crate::{
+    headers::safe_value,
     http::error::{ApiError, ErrorCode},
     http::ingress::{forwarded_headers, upstream_url, valid_query, Presented},
     routing::{AuthMode, RouteMatch},
@@ -73,6 +75,18 @@ pub async fn proxy(
     };
     for (name, value) in forwarded_headers(parts, route, Some(mode), auth).iter() {
         request.headers_mut().insert(name.clone(), value.clone());
+    }
+    // ADR 0062: the owning service checks the browser's `Origin` against the
+    // environment's allowed websites (`API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED`; off, no
+    // `Origin` is sent upstream, as before).
+    if state.flags.environment_origins {
+        if let Some(origin) = parts
+            .headers
+            .get(header::ORIGIN)
+            .filter(|v| v.len() <= 256 && safe_value(v))
+        {
+            request.headers_mut().insert(header::ORIGIN, origin.clone());
+        }
     }
     if let Some(protocols) = parts
         .headers

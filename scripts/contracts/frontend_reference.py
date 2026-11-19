@@ -89,6 +89,8 @@ def auth_of(doc, op) -> str:
         "realtimeTicket": "realtime ticket",
         "signalingCredential": "signaling credential",
         "mediaCredential": "media credential",
+        "userToken": "CF Meet user token (partner end-user device)",
+        "oauthAccessToken": "CF Meet app access token (OAuth, server-side only)",
         "none": "optional / public",
     }
     out = []

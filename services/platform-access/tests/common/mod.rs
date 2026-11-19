@@ -25,7 +25,9 @@ use cf_service_auth::{
 use chrono::{DateTime, Utc};
 use http_body_util::BodyExt;
 use platform_access::{
-    config::{service_auth::ServiceAuthRuntime, CredentialPolicy},
+    config::{
+        platform_build::PlatformBuildConfig, service_auth::ServiceAuthRuntime, CredentialPolicy,
+    },
     domain::{EnvironmentKind, ManualClock},
     http,
     identity::{
@@ -272,18 +274,42 @@ pub const CALLING_PERMISSIONS: &[&str] = &[
     "platform-principal.register",
     "platform-identity.read",
 ];
-/// Part V B: what Messaging's grant in Platform Access's trust bundle holds.
+/// Part V B: what Messaging's grant in Platform Access's trust bundle holds (+ ADR 0062:
+/// user-token verification and allowed websites).
 pub const MESSAGING_PERMISSIONS: &[&str] = &[
     "platform-credential.authenticate",
     "platform-principal.resolve",
     "platform-identity.read",
+    "platform-user-token.verify",
+    "platform-environment-origins.read",
 ];
 /// Part V H §104: the Meeting Service (first-party login authority) ensures the
-/// principals of the accounts it authenticated (nothing else).
-pub const MEETING_PERMISSIONS: &[&str] = &["platform-principal.ensure"];
-/// Part VI §50: the Developer Platform delegates the workspace hierarchy and reads identity.
-pub const DEVELOPER_PLATFORM_PERMISSIONS: &[&str] =
-    &["platform-identity.read", "platform-identity.delegate"];
+/// principals of the accounts it authenticated (+ ADR 0062: partner meeting principals and
+/// user-token verification).
+pub const MEETING_PERMISSIONS: &[&str] = &[
+    "platform-principal.ensure",
+    "platform-principal.ensure-meeting-platform",
+    "platform-user-token.verify",
+    // ADR 0064: CF Meet Apps authorization.
+    "platform-oauth.authorize",
+];
+/// Part VI §50: the Developer Platform delegates the workspace hierarchy and reads identity
+/// (+ ADR 0062: the partner Users API).
+pub const DEVELOPER_PLATFORM_PERMISSIONS: &[&str] = &[
+    "platform-identity.read",
+    "platform-identity.delegate",
+    "platform-end-users.delegate",
+    // ADR 0064: OAuth client profiles and the token endpoint backend.
+    "platform-oauth.manage",
+    "platform-oauth.token",
+];
+/// Part VI §51: the API Gateway authenticates credentials (+ ADR 0062: user tokens and
+/// allowed websites).
+pub const GATEWAY_PERMISSIONS: &[&str] = &[
+    "platform-credential.authenticate",
+    "platform-user-token.verify",
+    "platform-environment-origins.read",
+];
 /// Blueprint Section 7 (ADR 0058): Organizations provisions FIRST_PARTY organization scopes
 /// and (Amendment A2) the Calling / Messaging bindings inside them.
 pub const ORGANIZATIONS_PERMISSIONS: &[&str] = &[
@@ -346,7 +372,7 @@ pub fn service_auth_with(organizations_permissions: &[&str]) -> (ServiceAuthRunt
                 (
                     cf_service_auth::services::API_GATEWAY,
                     vec![gateway.public_jwk()],
-                    &["platform-credential.authenticate"],
+                    GATEWAY_PERMISSIONS,
                 ),
                 (
                     cf_service_auth::services::ORGANIZATIONS,
@@ -427,6 +453,17 @@ impl Harness {
         Some(Self::on(Arc::new(db), ring))
     }
 
+    /// A harness with the ADR 0062 feature configuration `build`.
+    pub async fn with_build(build: PlatformBuildConfig) -> Option<Self> {
+        let db = TestDb::new().await?;
+        Some(Self::on_with_build(
+            Arc::new(db),
+            keyring(TEST_PEPPER),
+            service_auth(),
+            build,
+        ))
+    }
+
     /// A harness whose Organizations identity holds only `permissions`.
     pub async fn with_organizations_permissions(permissions: &[&str]) -> Option<Self> {
         let db = TestDb::new().await?;
@@ -442,10 +479,20 @@ impl Harness {
         Self::on_with(db, ring, service_auth())
     }
 
-    fn on_with(
+    fn on_with(db: Arc<TestDb>, ring: VerifierKeyring, auth: (ServiceAuthRuntime, Peers)) -> Self {
+        Self::on_with_build(db, ring, auth, PlatformBuildConfig::default())
+    }
+
+    /// Another deployment over the same database with another feature configuration.
+    pub fn on_build(db: Arc<TestDb>, build: PlatformBuildConfig) -> Self {
+        Self::on_with_build(db, keyring(TEST_PEPPER), service_auth(), build)
+    }
+
+    fn on_with_build(
         db: Arc<TestDb>,
         ring: VerifierKeyring,
         (service_auth, peers): (ServiceAuthRuntime, Peers),
+        build: PlatformBuildConfig,
     ) -> Self {
         let clock = ManualClock::new(t0());
         let ring = Arc::new(ring);
@@ -459,7 +506,7 @@ impl Harness {
         );
         let authenticator =
             CredentialAuthenticator::new(db.conn.clone(), ring, registry, Arc::new(clock.clone()));
-        let state = AppState::new(platform, authenticator, service_auth);
+        let state = AppState::new(platform, authenticator, service_auth).with_build(build);
         let app = http::app(state.clone());
         Self {
             db,
@@ -504,6 +551,22 @@ impl Harness {
         delegated: Option<DelegatedPlatformContext>,
         operator: Option<&str>,
     ) -> Reply {
+        self.call_with_headers(signer, method, path, body, delegated, operator, &[])
+            .await
+    }
+
+    /// [`Harness::call`] with extra request headers.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn call_with_headers(
+        &self,
+        signer: &ServiceTokenSigner,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        delegated: Option<DelegatedPlatformContext>,
+        operator: Option<&str>,
+        extra: &[(&str, String)],
+    ) -> Reply {
         let mut outbound = OutboundServiceRequest::new_operation(ServiceId::platform_access());
         if let Some(ctx) = delegated {
             outbound = outbound.with_delegated_context(ctx);
@@ -515,6 +578,9 @@ impl Harness {
         }
         if let Some(op) = operator {
             builder = builder.header("x-cf-operator", op);
+        }
+        for (name, value) in extra {
+            builder = builder.header(*name, value.as_str());
         }
         let request = match body {
             Some(b) => builder

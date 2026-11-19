@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/messaging/common/v1.schema.json",
   "title": "CF Meet Messaging common v1",
-  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content. 1.16.0: conversation retentionSeconds / expiryGraceSeconds, pin expiry (PinRequest), ThreadSummary. 1.17.0: usage types REALTIME_CONNECTION (SECONDS), ATTACHMENT_EGRESS (BYTES), SEARCH_QUERY (QUERIES). 1.18.0: successor conversations (predecessorConversationId / successorConversationId, profileChangeDisclosureAcknowledged). 1.19.0: member roles MODERATOR / READ_ONLY / BOT_SERVICE, invitations (INVITED state, InvitationList), member authoritySource. 1.20.0: read receipts per conversation (readReceipts) and per user (shareReadReceipts); DIRECT message requests (requestsRequireAcceptance). 1.25.0: PushConfiguration (push platforms of the deployment and the Web Push application-server key). 1.26.0: PolicyView.applicationBaseline (CF Meet chat M1). 1.27.0: Readiness.routingProtocol (optional; routing fence protocol v1 of the Notification Service cutover). 1.28.0: ClientTokenRequest.accountSessionRef (first-party relays bind a client token to one account session; gap audit A11). 1.32.0: CommitRequest.groupInfo; MlsGroupState.groupInfo / groupInfoEpoch (MLS self-join by external commit); Device.keyPackagesAvailable (own devices only); KeyPackageClaimRequest.deviceIds.",
+  "description": "Messaging vocabulary and messages (Part V Workstreams C–D): error envelope, security profiles, protocol / cipher suite, devices and their PUBLIC MLS material, registration challenges, KeyPackage publication, the key-transparency tree head and proofs, conversations, context classes, lifecycle, policies. Never a private key, group secret, ciphertext or plaintext content. 1.16.0: conversation retentionSeconds / expiryGraceSeconds, pin expiry (PinRequest), ThreadSummary. 1.17.0: usage types REALTIME_CONNECTION (SECONDS), ATTACHMENT_EGRESS (BYTES), SEARCH_QUERY (QUERIES). 1.18.0: successor conversations (predecessorConversationId / successorConversationId, profileChangeDisclosureAcknowledged). 1.19.0: member roles MODERATOR / READ_ONLY / BOT_SERVICE, invitations (INVITED state, InvitationList), member authoritySource. 1.20.0: read receipts per conversation (readReceipts) and per user (shareReadReceipts); DIRECT message requests (requestsRequireAcceptance). 1.25.0: PushConfiguration (push platforms of the deployment and the Web Push application-server key). 1.26.0: PolicyView.applicationBaseline (CF Meet chat M1). 1.27.0: Readiness.routingProtocol (optional; routing fence protocol v1 of the Notification Service cutover). 1.28.0: ClientTokenRequest.accountSessionRef (first-party relays bind a client token to one account session; gap audit A11). 1.31.0 (CF Meet Platform Build, ADR 0062 / 0063): PolicyView.applicationBaseline CFMEET_PLATFORM_PARTNER (EXTERNAL environments while partner session devices are enabled: every context allows MANAGED and PRIVATE_E2EE with MANAGED the default, attachments on); UserSessionRequest / UserSession (the user-token exchange for a MANAGED-only partner session device); UserPushRegistrationRequest / UserPushRegistration (partner push registrations synchronised to the Notification Service). 1.31.0 (CF Meet Apps, ADR 0064): Message.viaApplicationId — the CF Meet App whose OAuth credential sent the message (present only on such messages, so clients can label \"sent by App X\"). 1.33.0: CommitRequest.groupInfo; MlsGroupState.groupInfo / groupInfoEpoch (MLS self-join by external commit); Device.keyPackagesAvailable (own devices only); KeyPackageClaimRequest.deviceIds.",
   "oneOf": [
     {
       "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/Error"
@@ -2301,13 +2301,14 @@
           }
         },
         "applicationBaseline": {
-          "description": "1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults <- baseline <- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE / VIDEO. null for every other environment. `policy` stays the application's own document.",
+          "description": "1.26.0 (CF Meet chat M1): the named, code-defined baseline layered between the platform defaults and this environment's application policy (effective = platform defaults <- baseline <- policy; an explicit policy setting always wins). CFMEET_FIRST_PARTY (CF Meet's own personal application environment only): attachments enabled, maxBytes 26214400, allowedKinds IMAGE / DOCUMENT / FILE / VOICE_NOTE / VIDEO. null for every other environment. `policy` stays the application's own document. 1.31.0: CFMEET_PLATFORM_PARTNER (ADR 0062) for EXTERNAL environments while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is on: every context class allows [MANAGED, PRIVATE_E2EE] with MANAGED as the default, attachments enabled; an explicit application setting still wins.",
           "type": [
             "string",
             "null"
           ],
           "enum": [
             "CFMEET_FIRST_PARTY",
+            "CFMEET_PLATFORM_PARTNER",
             null
           ]
         }
@@ -2882,6 +2883,10 @@
             }
           ],
           "description": "S11: the original sender, only when the policy shows it (messages.forwardShowsOriginalSender)."
+        },
+        "viaApplicationId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "ADR 0064: the CF Meet App (OAuth client id = application id) whose OAuth access or bot credential sent this message; absent on every other message."
         }
       },
       "required": [
@@ -8150,6 +8155,111 @@
               }
             }
           }
+        }
+      }
+    },
+    "UserSessionRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installationId"
+      ],
+      "description": "ADR 0062: the body of POST /v1/messaging/user-sessions (Authorization: Bearer cfut_...).",
+      "properties": {
+        "installationId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]{8,128}$",
+          "description": "Stable per app installation, generated by the SDK."
+        },
+        "sessionDeviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid",
+          "description": "Renew this ACTIVE partner session device of the same principal and installation (NOT_FOUND otherwise)."
+        }
+      }
+    },
+    "UserSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "principalId",
+        "sessionDeviceId",
+        "sessionDeviceExpiresAt",
+        "clientToken",
+        "clientTokenExpiresAt"
+      ],
+      "description": "ADR 0062: a MANAGED-only partner session device and a short-lived client token bound to it (scopes: the user token's effective msg grants; read -> messages.read / attachments.read, send -> messages.send / attachments.write). Present it as `Authorization: CF-Client-Token <clientToken>` to POST /v1/realtime/tickets and to the partner REST allowlist; renew through this exchange.",
+      "properties": {
+        "principalId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionDeviceId": {
+          "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+        },
+        "sessionDeviceExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "clientToken": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "clientTokenExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "UserPushRegistrationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "handle"
+      ],
+      "description": "ADR 0063: a partner device's push handle (an APNs / APNs VoIP device token or an FCM registration token). Synchronised to the Notification Service; Messaging never stores, echoes or logs it.",
+      "properties": {
+        "platform": {
+          "enum": [
+            "APNS",
+            "APNS_VOIP",
+            "FCM"
+          ]
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    },
+    "UserPushRegistration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "installationId",
+        "platform",
+        "status"
+      ],
+      "description": "ADR 0063: a partner push registration as the Notification Service accepted it (never the handle).",
+      "properties": {
+        "installationId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]{8,128}$",
+          "description": "Stable per app installation, generated by the SDK."
+        },
+        "platform": {
+          "enum": [
+            "APNS",
+            "APNS_VOIP",
+            "FCM"
+          ]
+        },
+        "status": {
+          "const": "ACTIVE"
         }
       }
     }

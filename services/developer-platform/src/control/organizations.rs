@@ -203,6 +203,7 @@ pub async fn create(
     let human = caller.human()?.clone();
     let name = display_name(&body.display_name)?;
     let support = body.support_email.as_deref().map(email).transpose()?;
+    owned_workspaces_cap(state, human.user_id).await?;
     let provisioning = Uuid::new_v4();
     let started = Utc::now();
     state
@@ -265,6 +266,34 @@ pub async fn create(
             Err(e)
         }
     }
+}
+
+/// `DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED`: a CF Meet account owns at most
+/// `DEVELOPER_PLATFORM_MAX_WORKSPACES_PER_OWNER` workspaces that are not CLOSED (0 =
+/// unlimited); creations it has in flight count too. 409 `LIMIT_EXCEEDED`.
+async fn owned_workspaces_cap(state: &AppState, user_id: Uuid) -> Result<(), ApiError> {
+    let cap = state.build.max_workspaces_per_owner;
+    if !state.build.creation_caps || cap == 0 {
+        return Ok(());
+    }
+    let owned: i64 = state
+        .db
+        .query_one(stmt(
+            "SELECT (SELECT count(*) FROM devplat_workspace_members m \
+                      JOIN devplat_organizations o ON o.tenant_id = m.tenant_id \
+                     WHERE m.user_id = $1 AND m.role = 'OWNER' AND m.status = 'ACTIVE' \
+                       AND o.state <> 'CLOSED') \
+                  + (SELECT count(*) FROM devplat_organization_provisioning \
+                     WHERE requested_by = $2 AND state = 'PENDING') AS n",
+            vec![user_id.into(), format!("user:{user_id}").into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::ServiceUnavailable))?
+        .try_get("", "n")?;
+    if owned >= i64::from(cap) {
+        return Err(ApiError(ErrorCode::LimitExceeded));
+    }
+    Ok(())
 }
 
 /// The local half of [`create`]: organization, OWNER membership, activity and the

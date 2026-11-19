@@ -146,6 +146,23 @@ pub const CAPABILITIES: &[Capability] = &[
         regulated: true,
         scopes: &["sms.send", "sms.read"],
     },
+    // ADR 0062: the partner Users API and CF Meet user tokens in PRODUCTION (software only,
+    // never regulated). The grant scopes a token carries (`messages.*`, `calls.write`,
+    // `meetings.write`) stay with MESSAGING / APP_CALLING / MEETINGS.
+    Capability {
+        name: "END_USERS",
+        regulated: false,
+        scopes: &["principals.read", "principals.write", "user_tokens.issue"],
+    },
+    // ADR 0063: partner push credentials (APNs / FCM) in PRODUCTION. Control plane only:
+    // uploaded from the console by OWNER / ADMIN, no machine scope beyond
+    // PLATFORM_CONTROL; required (approved and LIVE) before a PRODUCTION environment may
+    // hold push credentials.
+    Capability {
+        name: "PUSH",
+        regulated: false,
+        scopes: &[],
+    },
 ];
 
 pub fn capability(name: &str) -> Option<&'static Capability> {
@@ -1213,6 +1230,26 @@ pub async fn production_scope_approved<C: ConnectionTrait>(
         .any(|c| c.scopes.contains(&scope)))
 }
 
+/// Whether capability `name` is approved for `project` and LIVE.
+pub async fn production_capability_live<C: ConnectionTrait>(
+    db: &C,
+    project: Uuid,
+    name: &str,
+) -> Result<bool, ApiError> {
+    let row = db
+        .query_one(stmt(
+            "SELECT approved_capabilities FROM devplat_production_access_requests \
+             WHERE application_id = $1 AND state = 'LIVE'",
+            vec![project.into()],
+        ))
+        .await?;
+    let caps: Vec<String> = match row {
+        Some(r) => r.try_get("", "approved_capabilities")?,
+        None => return Ok(false),
+    };
+    Ok(caps.iter().any(|c| c == name))
+}
+
 /// The organization's production status for its support profile.
 pub async fn organization_production_status<C: ConnectionTrait>(
     db: &C,
@@ -1259,6 +1296,13 @@ mod tests {
         );
         assert!(regulated(&["SMS".into()]));
         assert!(!regulated(&["MEETINGS".into(), "APP_CALLING".into()]));
+        // ADR 0062 / 0063: software capabilities, never regulated.
+        assert!(!regulated(&["END_USERS".into(), "PUSH".into()]));
+        assert_eq!(
+            capability("END_USERS").unwrap().scopes,
+            ["principals.read", "principals.write", "user_tokens.issue"]
+        );
+        assert!(capability("PUSH").unwrap().scopes.is_empty());
         assert!(capabilities(&["NOPE".into()]).is_err());
         assert!(capabilities(&[]).is_err());
         assert_eq!(

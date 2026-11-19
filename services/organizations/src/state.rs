@@ -20,6 +20,9 @@ pub struct AppState {
     /// Consumer destinations the outbox worker delivers to (empty: delivery disabled).
     /// Reported by `/ready`; the reconciliation record is never among them.
     pub event_destinations: Vec<String>,
+    /// ADR 0064 (`ORGANIZATIONS_APP_INSTALLS_ENABLED`): the policy section `apps` and the
+    /// app-install check. Off (default): both are absent, exactly as before.
+    pub app_installs_enabled: bool,
 }
 
 impl AppState {
@@ -30,6 +33,7 @@ impl AppState {
             provisioning_enabled: false,
             platform: None,
             event_destinations: Vec::new(),
+            app_installs_enabled: false,
         }
     }
 
@@ -40,6 +44,11 @@ impl AppState {
 
     pub fn with_event_destinations(mut self, destinations: Vec<String>) -> Self {
         self.event_destinations = destinations;
+        self
+    }
+
+    pub fn with_app_installs(mut self, enabled: bool) -> Self {
+        self.app_installs_enabled = enabled;
         self
     }
 

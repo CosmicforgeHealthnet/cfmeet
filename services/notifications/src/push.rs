@@ -539,6 +539,8 @@ impl PushWorker {
 
     pub async fn tick(&self, now: DateTime<Utc>) -> Result<PushTick, DbErr> {
         let lease = Uuid::new_v4();
+        // Partner deliveries (`partner:<endpoint>`, ADR 0063) are never claimed here: CF
+        // Meet's own adapters never send to a partner endpoint.
         let claimed: Vec<ClaimedPush> = db::all(
             &self.db,
             "UPDATE notif_deliveries d SET status = 'DISPATCHING', lease_id = $1,
@@ -546,7 +548,8 @@ impl PushWorker {
                FROM notif_notifications n
               WHERE n.id = d.notification_id AND d.id IN (
                     SELECT id FROM notif_deliveries
-                     WHERE channel = 'PUSH' AND ((status IN ('PENDING', 'DEFERRED') AND next_attempt_at <= now())
+                     WHERE channel = 'PUSH' AND target_ref NOT LIKE 'partner:%'
+                       AND ((status IN ('PENDING', 'DEFERRED') AND next_attempt_at <= now())
                         OR (status = 'DISPATCHING' AND lease_until < now()))
                      ORDER BY lane = 'HIGH' DESC, next_attempt_at
                      LIMIT 16 FOR UPDATE SKIP LOCKED)

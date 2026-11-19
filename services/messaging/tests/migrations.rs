@@ -135,7 +135,7 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
         messaging_migration::pending_migrations(&db.conn)
             .await
             .unwrap(),
-        vec!["m20261208_000036_mls_group_infos".to_string()]
+        vec!["m20261210_000038_mls_group_infos".to_string()]
     );
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
         .await

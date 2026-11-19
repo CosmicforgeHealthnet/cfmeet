@@ -9,11 +9,12 @@ use std::{sync::Arc, time::Duration};
 
 use api_gateway::{
     quota::{Limits, QuotaAuthority, QuotaEngine},
-    routing::RoutingControls,
+    routing::{AuthMode, RoutingControls},
 };
 use axum::http::{Method, StatusCode};
 use cf_service_auth::{
-    CorrelationId, OutboundServiceRequest, ServiceId, ServiceTokenSigner, SystemClock, TokenTtl,
+    services, CorrelationId, OutboundServiceRequest, ServiceId, ServiceTokenSigner, SystemClock,
+    TokenTtl,
 };
 use common::*;
 use serde_json::json;
@@ -452,6 +453,81 @@ async fn platform_credential_meetings_requests_are_forwarded_with_the_signed_del
     assert_eq!(r.json["auth"], "passthrough");
     let got = g.meeting().last();
     assert!(got.issuer.is_none() && got.delegated.is_none());
+}
+
+/// The partner meetings family: `/v1/meetings/<rest>` is the Meeting Service's machine
+/// operation `/api/v2/<rest>`, PLATFORM_CREDENTIAL only. The signed hop is bound to the
+/// path the Meeting Service receives (`/api/v2/...`), which its receiver verifies.
+#[tokio::test]
+async fn partner_meetings_routes_rewrite_to_the_meeting_service_api_v2_path() {
+    let mut alias = route(
+        "meetings.platform.spaces",
+        "meetings",
+        Method::POST,
+        "/v1/meetings/test-spaces/{id}/archive",
+        services::MEETING_SERVICE,
+        &[AuthMode::PlatformCredential],
+        Some("meetings.write"),
+    );
+    alias.upstream_path = "/api/v2/test-spaces/{id}/archive".into();
+    let mut routes = test_routes();
+    routes.push(alias);
+    let g = Gateway::with(Options {
+        routes: Some(routes),
+        ..Options::default()
+    })
+    .await;
+    let c = customer(&["meetings.write"]);
+    g.authority.add(CRED, c.clone());
+    let r = g
+        .call(
+            Method::POST,
+            "/v1/meetings/test-spaces/s-1/archive?reason=x",
+            &[("authorization", &format!("Bearer {CRED}"))],
+            Some("{}"),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["auth"], "service", "{}", r.json);
+    let got = g.meeting().last();
+    assert_eq!(got.path, "/api/v2/test-spaces/s-1/archive");
+    assert_eq!(got.query.as_deref(), Some("reason=x"));
+    assert_eq!(got.issuer.as_deref(), Some("cfmeet.api-gateway"));
+    let d = got.delegated.expect("delegated context");
+    assert_eq!(d.initiating_credential_id(), Some(c.credential_id));
+    assert!(!got.headers.contains_key("authorization"));
+    // PLATFORM_CREDENTIAL only: a CF Meet session or participant token is refused at the
+    // edge on the partner path (the CF Meet apps call /api/v2 directly).
+    let before = g.meeting().count();
+    for headers in [
+        vec![("authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.session.sig")],
+        vec![("x-participant-token", "pt_123")],
+        vec![],
+    ] {
+        let r = g
+            .call(
+                Method::POST,
+                "/v1/meetings/test-spaces/s-1/archive",
+                &headers,
+                Some("{}"),
+            )
+            .await;
+        assert_eq!(
+            r.status,
+            StatusCode::UNAUTHORIZED,
+            "{headers:?}: {}",
+            r.json
+        );
+    }
+    assert_eq!(g.meeting().count(), before);
+    // Only the declared alias exists: no other /v1/meetings path, no reverse mapping.
+    for path in [
+        "/v1/meetings/test-spaces/s-1",
+        "/v1/meetings/test-instant-meetings",
+    ] {
+        let r = g.call(Method::POST, path, &[], Some("{}")).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
+    }
 }
 
 #[tokio::test]

@@ -79,7 +79,10 @@ use crate::{
     privacy_relay::{PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
     signaling::{
         bus::{RealtimeSignalBus, SignalEnvelope},
-        push::{NoPushTransport, PushCancel, PushDispatcher, PushOffer},
+        push::{
+            NoPushTransport, PartnerPushOffer, PlatformPrincipalRecipient, PushCancel,
+            PushDispatcher, PushOffer,
+        },
         signals::{self, SignalType},
     },
 };
@@ -322,6 +325,9 @@ pub struct AppCallService {
     /// Platform compliance overlay (Part H §78): countries whose paid routes always
     /// require compliance eligibility, whatever the customer policy says.
     pub(crate) compliance_overlay: crate::routing::compliance::ComplianceOverlay,
+    /// `CALLING_PARTNER_PUSH_ENABLED` (ADR 0063, default off): ring offers to partner
+    /// users of EXTERNAL tenants also produce a `platform-principal` push offer.
+    pub(crate) partner_push: bool,
 }
 
 impl AppCallService {
@@ -352,7 +358,14 @@ impl AppCallService {
             capture: Arc::new(enterprise::UnavailableCapture),
             abuse_controls: AbuseControls::default(),
             compliance_overlay: Default::default(),
+            partner_push: false,
         }
+    }
+
+    /// `CALLING_PARTNER_PUSH_ENABLED` (default off): see [`partner_recipient`].
+    pub fn with_partner_push(mut self, enabled: bool) -> Self {
+        self.partner_push = enabled;
+        self
     }
 
     /// Uses `controls` as the abuse-control thresholds (default: documented defaults).
@@ -509,6 +522,7 @@ pub struct CommandOutcome {
 pub(crate) struct PendingSignals {
     signals: Vec<SignalEnvelope>,
     pushes: Vec<PushOffer>,
+    partner_pushes: Vec<PartnerPushOffer>,
     /// Gap audit C1: rings to cancel (invitations that ended unanswered on their endpoint).
     cancels: Vec<PushCancel>,
 }
@@ -535,6 +549,9 @@ impl AppCallService {
         }
         for offer in signals.pushes {
             self.push.dispatch_offer(offer).await;
+        }
+        for offer in signals.partner_pushes {
+            self.push.dispatch_partner_offer(offer).await;
         }
         for cancel in signals.cancels {
             self.push.dispatch_cancel(cancel).await;
@@ -701,6 +718,17 @@ impl AppCallService {
         else {
             return Ok(());
         };
+        // ADR 0063: a partner's user is alerted through the Notification Service with
+        // the partner's own keys, whether or not the endpoint registered a push target.
+        if self.partner_push {
+            if let Some(recipient) = partner_recipient(db, &endpoint).await? {
+                pending.partner_pushes.push(PartnerPushOffer {
+                    recipient,
+                    payload: signals::push_payload(call, invitation, caller),
+                    call_id: call.id,
+                });
+            }
+        }
         let Some(target) = endpoint.push_target_ref else {
             return Ok(());
         };
@@ -749,6 +777,44 @@ pub(crate) async fn first_party_account<C: ConnectionTrait>(
         && principal.tenant_id == endpoint.tenant_id
         && valid)
         .then_some(reference))
+}
+
+/// ADR 0063 (§6 N-P3): the `platform-principal` recipient of an endpoint whose principal
+/// is a partner's user: an ACTIVE EXTERNAL_APPLICATION_PRINCIPAL of an EXTERNAL tenant, in
+/// the endpoint's own scope. Anything else (first-party accounts, other principal kinds)
+/// is `None` and never reaches the partner lane.
+pub(crate) async fn partner_recipient<C: ConnectionTrait>(
+    db: &C,
+    endpoint: &call_endpoints::Model,
+) -> CallResult<Option<PlatformPrincipalRecipient>> {
+    use crate::domain::{PrincipalKind, PrincipalStatus, TenantClassification};
+    let Some(tenant) = tenants::Entity::find_by_id(endpoint.tenant_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if tenant.classification != TenantClassification::External {
+        return Ok(None);
+    }
+    let Some(principal) = principals::Entity::find_by_id(endpoint.principal_id)
+        .one(db)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let in_scope = principal.tenant_id == endpoint.tenant_id
+        && principal.application_id == endpoint.application_id
+        && principal.environment_id == endpoint.environment_id;
+    Ok((in_scope
+        && principal.kind == PrincipalKind::ExternalApplicationPrincipal
+        && principal.status == PrincipalStatus::Active)
+        .then_some(PlatformPrincipalRecipient {
+            tenant_id: endpoint.tenant_id,
+            application_id: endpoint.application_id,
+            environment_id: endpoint.environment_id,
+            principal_id: endpoint.principal_id,
+        }))
 }
 
 /// The display name the Call's initiator was created with (shown on incoming calls).

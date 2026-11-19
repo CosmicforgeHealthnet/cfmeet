@@ -2,7 +2,10 @@
 //!
 //! Minted by Calling for one endpoint of one principal, at the request of the
 //! application's backend (authenticated by its API credential). The application hands the
-//! credential to its browser / mobile app, which never sees the API credential.
+//! credential to its browser / mobile app, which never sees the API credential. A partner
+//! user's device may also obtain one by exchanging a CF Meet user token
+//! (`POST /v1/calling/user-sessions`, ADR 0062): it then records the token's minting
+//! credential and service account and expires no later than the token.
 //!
 //! * Format: `cfsig_` + an HS256 JWS signed with Calling's dedicated signaling key
 //!   (`CALLING_SIGNALING_SIGNING_KEY`), separate from API credential verifiers, internal
@@ -196,6 +199,33 @@ impl SignalingKeys {
             minted_by_service_account_id,
             minted_by_credential_id,
             now,
+            now + self.ttl,
+            false,
+        )
+    }
+
+    /// Mints a credential that expires at the earlier of the configured lifetime and
+    /// `not_after` (a derived credential never outlives what it was exchanged for, e.g.
+    /// a CF Meet user token). `not_after` must be after `now`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn mint_until(
+        &self,
+        scope: CallScope,
+        principal_id: PrincipalId,
+        endpoint_id: CallEndpointId,
+        minted_by_service_account_id: ServiceAccountId,
+        minted_by_credential_id: CredentialId,
+        now: DateTime<Utc>,
+        not_after: DateTime<Utc>,
+    ) -> Result<MintedSignalingCredential, SignalingCredentialError> {
+        self.mint_with(
+            scope,
+            principal_id,
+            endpoint_id,
+            minted_by_service_account_id,
+            minted_by_credential_id,
+            now,
+            not_after,
             false,
         )
     }
@@ -219,6 +249,7 @@ impl SignalingKeys {
             minted_by_service_account_id,
             minted_by_credential_id,
             now,
+            now + self.ttl,
             true,
         )
     }
@@ -232,9 +263,13 @@ impl SignalingKeys {
         minted_by_service_account_id: ServiceAccountId,
         minted_by_credential_id: CredentialId,
         now: DateTime<Utc>,
+        not_after: DateTime<Utc>,
         organization_member: bool,
     ) -> Result<MintedSignalingCredential, SignalingCredentialError> {
-        let expires_at = now + self.ttl;
+        let expires_at = (now + self.ttl).min(not_after);
+        if expires_at.timestamp() <= now.timestamp() {
+            return Err(SignalingCredentialError::Expired);
+        }
         let mut jti = [0u8; 16];
         rand::rngs::OsRng.fill_bytes(&mut jti);
         let claims = Claims {

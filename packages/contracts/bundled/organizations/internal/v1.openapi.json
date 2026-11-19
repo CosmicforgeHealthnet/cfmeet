@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Organizations Service internal API",
-    "version": "1.7.0",
-    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling. 1.3.0 (final closure): organization event delivery to subscribed consumers over signed service HTTP (the Meeting Service, meeting-organization-events.apply) with the operator delivery status GET /internal/v1/admin/event-delivery and dead-letter replay POST /internal/v1/admin/event-delivery/replay (organization.administer); a Messaging service binding per organization scope (GET / PUT / DELETE .../service-bindings/messaging) carried by scopes/resolve as serviceBindings.messaging. 1.5.0 (ADR 0058 Amendment A2, automatic organization service bindings): with ORGANIZATIONS_SERVICE_BINDINGS_ENABLED the provisioning saga creates, reads back, verifies and records each organization's Calling and Messaging bindings through Platform Access (platform-identity.bind-organization-services) and the organization becomes READY only once both are verified; bindings are renewed and re-verified by reconciliation (drift: SERVICE_BINDING_DRIFT), revoked at Platform Access after archive; ServiceBinding gains source (AUTOMATIC / OPERATOR), verifiedAt and credentialExpiresAt; operator credential rotation POST .../service-bindings/{calling|messaging}/rotate (organization.administer)."
+    "version": "1.8.0",
+    "description": "Internal signed API of services/organizations (cfmeet.organizations), the first-party business organization authority (Blueprint v1.0 Sections 3-5, ADR 0056). Generated from and governed by docs/api/organizations-internal-v1.md. Every /internal/v1 route requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle; replayed tokens are refused. The acting user (X-CF-Acting-User) is honoured only from callers holding organization.act-for-user. Never routed by public ingress. 1.1.0 (Blueprint Sections 6-7): teams and team members, typed organization policies with compare-and-swap and effective constraints, the role / capability matrix, team context in resolve / evaluate, policy-restricted capabilities (POLICY_RESTRICTED), verified technical-scope resolution and the operator provisioning retry; provisioning is off by default. 1.2.0 (Blueprint Section 12 follow-up, CAL-007 / ORG-012 / CAL-009): per-organization Calling service binding of the organization's technical scope (operator routes GET / PUT / DELETE /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/calling; Platform Access ids only, re-verified by Platform Access at use) and resolveScope answers serviceBindings.calling. 1.3.0 (final closure): organization event delivery to subscribed consumers over signed service HTTP (the Meeting Service, meeting-organization-events.apply) with the operator delivery status GET /internal/v1/admin/event-delivery and dead-letter replay POST /internal/v1/admin/event-delivery/replay (organization.administer); a Messaging service binding per organization scope (GET / PUT / DELETE .../service-bindings/messaging) carried by scopes/resolve as serviceBindings.messaging. 1.5.0 (ADR 0058 Amendment A2, automatic organization service bindings): with ORGANIZATIONS_SERVICE_BINDINGS_ENABLED the provisioning saga creates, reads back, verifies and records each organization's Calling and Messaging bindings through Platform Access (platform-identity.bind-organization-services) and the organization becomes READY only once both are verified; bindings are renewed and re-verified by reconciliation (drift: SERVICE_BINDING_DRIFT), revoked at Platform Access after archive; ServiceBinding gains source (AUTOMATIC / OPERATOR), verifiedAt and credentialExpiresAt; operator credential rotation POST .../service-bindings/{calling|messaging}/rotate (organization.administer). 1.8.0 (ADR 0064, CF Meet Apps; ORGANIZATIONS_APP_INSTALLS_ENABLED, default off): the policy section apps {installTier ADMINS | MEMBERS (default ADMINS), allowList [appId] | null (default null), userInstallsAllowed (default true)} (refused while the flag is off) and POST /internal/v1/organizations/{id}/app-install-check (organization-apps.evaluate, Meeting Service only): may this account install this app for the whole organization; off: 404 like any unknown route."
   },
   "tags": [
     {
@@ -5828,6 +5828,99 @@
           }
         }
       }
+    },
+    "/internal/v1/organizations/{id}/app-install-check": {
+      "post": {
+        "operationId": "checkAppInstall",
+        "summary": "Organization app install policy check",
+        "description": "ADR 0064: may accountId install appId for the whole organization (an ORGANIZATION grant)? Decided under the organization policy apps section: membership (ACTIVE), organization ACTIVE and provisioning READY, role at least apps.installTier, appId on apps.allowList when set. Asked by the Meeting Service before it relays an organization install to Platform Access. Only while ORGANIZATIONS_APP_INSTALLS_ENABLED (otherwise 404 NOT_FOUND). An acting user, when relayed, must be accountId.",
+        "tags": [
+          "Authorization"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "organization-apps.evaluate",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrganizationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppInstallCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The decision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInstallCheckResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (VALIDATION_ERROR).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED or PERMISSION_DENIED (a relayed acting user other than accountId).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND (app installs are disabled).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6048,6 +6141,48 @@
         "required": [
           "status"
         ]
+      },
+      "AppInstallCheckRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountId",
+          "appId"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The CF Meet account asking to install."
+          },
+          "appId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The app (OAuth client id = Platform Access application id)."
+          }
+        }
+      },
+      "AppInstallCheckResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "allowed"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "NOT_A_MEMBER",
+              "ROLE_REQUIRED",
+              "NOT_ALLOWLISTED",
+              "ORGANIZATION_NOT_READY"
+            ],
+            "description": "Present only when allowed is false. NOT_A_MEMBER also covers unknown organizations and suspended or removed memberships (non-enumerating); ORGANIZATION_NOT_READY: the organization is not ACTIVE or its technical provisioning is not READY."
+          }
+        }
       },
       "AppointOwnerRequest": {
         "type": "object",
@@ -7673,6 +7808,38 @@
               "adminsMayManagePolicies": {
                 "type": "boolean",
                 "description": "Default true."
+              }
+            }
+          },
+          "apps": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "ADR 0064 workspace app installs (only while ORGANIZATIONS_APP_INSTALLS_ENABLED; absent when never set: the defaults apply).",
+            "properties": {
+              "installTier": {
+                "type": "string",
+                "enum": [
+                  "ADMINS",
+                  "MEMBERS"
+                ],
+                "description": "Who may install an app for the organization. Default ADMINS (ADMIN and OWNER); MEMBERS admits MEMBER and above (never GUEST)."
+              },
+              "allowList": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "maxItems": 200,
+                "uniqueItems": true,
+                "description": "null (default): any app; otherwise only these app ids (Developer Console app = Platform Access application id)."
+              },
+              "userInstallsAllowed": {
+                "type": "boolean",
+                "description": "Whether members may connect apps to their own accounts (a hint for the account authority). Default true."
               }
             }
           }

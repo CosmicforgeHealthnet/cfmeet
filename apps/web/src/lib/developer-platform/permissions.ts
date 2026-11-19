@@ -39,7 +39,16 @@ export type ConsoleAction =
   | "CredentialsRead"
   | "CredentialsRevoke"
   | "ProductionAccessRead"
-  | "SupportProfileManage";
+  | "SupportProfileManage"
+  | "EndUsersRead"
+  | "EndUsersManage"
+  | "UserTokensIssue"
+  | "AllowedOriginsRead"
+  | "AllowedOriginsManage"
+  | "PushCredentialsRead"
+  | "PushCredentialsManage"
+  | "AppsRead"
+  | "AppsManage";
 
 const ALL: Role[] = ["OWNER", "ADMIN", "DEVELOPER", "ANALYST", "BILLING"];
 const OWNER: Role[] = ["OWNER"];
@@ -74,6 +83,16 @@ export const ROLE_MATRIX: Record<ConsoleAction, Role[]> = {
   ActivityRead: ["OWNER", "ADMIN", "ANALYST"],
   CommercialRead: ["OWNER", "ADMIN", "BILLING"],
   BillingAccountManage: ["OWNER", "BILLING"],
+  // ADR 0062 / 0063 / 0064, mirrored from rbac.rs.
+  EndUsersRead: BUILDERS,
+  EndUsersManage: BUILDERS,
+  UserTokensIssue: BUILDERS,
+  AllowedOriginsRead: ALL,
+  AllowedOriginsManage: OWNER_ADMIN,
+  PushCredentialsRead: OWNER_ADMIN,
+  PushCredentialsManage: OWNER_ADMIN,
+  AppsRead: OWNER_ADMIN,
+  AppsManage: OWNER_ADMIN,
 };
 
 const READS: ConsoleAction[] = [
@@ -89,6 +108,10 @@ const READS: ConsoleAction[] = [
   "ServiceAccountsRead",
   "CredentialsRead",
   "ProductionAccessRead",
+  "EndUsersRead",
+  "AllowedOriginsRead",
+  "PushCredentialsRead",
+  "AppsRead",
 ];
 
 const ALLOWED_WHILE_RESTRICTED: ConsoleAction[] = [

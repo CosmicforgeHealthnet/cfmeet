@@ -45,6 +45,10 @@ pub struct AppState {
     /// Part VI §51: receiver of API Gateway–forwarded platform credential requests
     /// (`None`: platform access off — every service token on `/api/v2` is refused).
     pub platform: Option<crate::services::platform::PlatformReceiver>,
+    /// ADR 0062: partner users joining with a CF Meet user token
+    /// (`None`: `MEETING_PLATFORM_USER_JOIN_ENABLED` off — a `cfut_` bearer is refused
+    /// exactly like any unknown bearer token).
+    pub platform_users: Option<crate::services::platform::PlatformUsers>,
     /// Unified email delivery: provider webhook verification secret (Resend, Svix).
     pub email_webhook_secret: Option<String>,
     /// Blueprint Section 11: notification transport (the unified email ledger) and the
@@ -53,6 +57,9 @@ pub struct AppState {
     /// Document 4 §3.1: the Notification Service user relay (U1–U9 under
     /// `/api/v2/notifications`; `None`: not configured, the routes answer 503).
     pub notifications: Option<Arc<crate::services::notification_relay::NotificationsRelay>>,
+    /// ADR 0064 / 0065: CF Meet Apps (consent relay, connected apps, delegated apps,
+    /// in-meeting apps). Everything off by default.
+    pub apps: Arc<crate::services::apps::Apps>,
 }
 
 impl AppState {
@@ -118,15 +125,29 @@ impl AppState {
             organization_directory,
             realtime,
             platform: None,
+            platform_users: None,
             email_webhook_secret: email_config.resend_webhook_secret.clone(),
             notifier,
             notifications: None,
+            apps: Arc::new(crate::services::apps::Apps::disabled()),
         }
     }
 
     /// Enables the platform credential receiver (Part VI §51).
     pub fn with_platform(mut self, receiver: crate::services::platform::PlatformReceiver) -> Self {
         self.platform = Some(receiver);
+        self
+    }
+
+    /// Enables partner-user joins (and, when configured, partner meeting chat) — ADR 0062.
+    pub fn with_platform_users(mut self, users: crate::services::platform::PlatformUsers) -> Self {
+        self.platform_users = Some(users);
+        self
+    }
+
+    /// Enables CF Meet Apps (ADR 0064 / 0065).
+    pub fn with_apps(mut self, apps: crate::services::apps::Apps) -> Self {
+        self.apps = Arc::new(apps);
         self
     }
 
