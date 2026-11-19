@@ -62,6 +62,11 @@ jobs:
       - name: Messaging MANAGED sync, outbox and Communications tests
         run: node --experimental-strip-types --test tests/messaging-managed-sync.test.mjs tests/messaging-outbox.test.mjs tests/communications-core.test.mjs
 
+      # Chat titles: a direct chat is the other person (alias first, never a member list); a
+      # group shows its name; a private group's name travels only inside its encrypted group.
+      - name: Chat title tests
+        run: node --experimental-strip-types --test tests/messaging-titles.test.mjs
+
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh
         run: node scripts/generate-contract-types.mjs --check

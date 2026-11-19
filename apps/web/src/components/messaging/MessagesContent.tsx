@@ -38,6 +38,7 @@ import { organizationsService } from "@/services/v2/organizations.service";
 import { communicationsService as hub } from "@/services/v2/communications.service";
 import { messagingErrorMessage } from "@/lib/messaging/errors";
 import { communicationsErrorMessage } from "@/lib/communications/errors";
+import { directCounterpartLabel } from "@/lib/messaging/conversation-title";
 import {
   attachmentAvailability,
   attachmentSizeRefusal,
@@ -395,9 +396,8 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
     try {
       const userIds = ids.filter((x) => x.startsWith("u:")).map((x) => x.slice(2));
       const cfMeetIds = ids.filter((x) => x.startsWith("cf:")).map((x) => x.slice(3));
+      // Managed groups send the name with the create request; private groups carry it inside their encrypted group.
       const id = await engine.createConversation(userIds, profile, { cfMeetIds, title });
-      // Private groups get their name after they exist (the server only takes a title on create for managed chats).
-      if (title) await engine.renameConversation(id, title).catch(() => {});
       onCreated(id);
       close();
     } catch (e) {
@@ -734,7 +734,7 @@ function TimelineCardView({ card }: { card: TimelineCard }) {
 function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { engine: MessagingEngine; conversation: ConversationView; title: string; onClose: () => void; shareEnabled: boolean }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState(conversation.serverTitle ?? "");
+  const [name, setName] = useState(conversation.serverTitle ?? conversation.groupTitle ?? "");
   const [cfMeetId, setCfMeetId] = useState("");
   const me = s.identity?.principalId;
   const manager = conversation.myRole === "OWNER" || conversation.myRole === "ADMIN";
@@ -759,7 +759,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
           <p className="mt-3 text-lg font-semibold">{title}</p>
           <div className="mt-1"><ProfileBadge profile={conversation.securityProfile} /></div>
         </div>
-        {managed && isGroup ? (
+        {isGroup && (managed || manager) ? (
           <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); run(engine.renameConversation(conversation.id, name)); }}>
             <input aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} className={field} />
             <button type="submit" className={small} data-testid="rename-group">Rename</button>
@@ -907,7 +907,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     [messages, timeline.data, cleared],
   );
   const counterpart = context.data?.counterpart;
-  const title = conversation.contextClass === "DIRECT" && conversation.title === "CF Meet user" && counterpart ? counterpart.alias || counterpart.displayName || conversation.title : conversation.title;
+  // A direct chat is named after the other person (your alias for them first), never a member list.
+  const title = conversation.contextClass === "DIRECT" ? directCounterpartLabel({ counterpart, members: conversation.members, me: s.identity?.principalId, names: s.names }) ?? conversation.title : conversation.title;
   const typing = (s.typing[conversation.id] ?? []).map((p) => s.names[p] ?? (counterpart?.displayName || "Someone"));
   const pins = s.pins[conversation.id] ?? [];
   const actions = context.data?.actions ?? {};
