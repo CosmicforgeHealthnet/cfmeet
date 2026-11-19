@@ -763,7 +763,7 @@ async fn a_delegated_user_manages_only_its_own_meetings_and_never_joins() {
     let space = uuid(&v["meetingSpace"]["id"]);
     let conference = uuid(&v["conference"]["id"]);
     assert_eq!(v["meetingSpace"]["ownerUserId"], json!(alice.id));
-    assert_eq!(
+    assert!(
         h.app
             .scalar(&format!(
                 "SELECT count(*) FROM conference_audit_events WHERE meeting_space_id = '{space}' \
@@ -773,7 +773,7 @@ async fn a_delegated_user_manages_only_its_own_meetings_and_never_joins() {
             ))
             .await
             >= 1,
-        true
+        "audited via the app"
     );
     // Read and update her meeting.
     let (s, v) = as_app(

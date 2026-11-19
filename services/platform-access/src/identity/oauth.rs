@@ -55,8 +55,8 @@ use super::{
 use crate::{
     config::ConfigError,
     domain::{
-        CredentialId, EnvironmentId, EnvironmentKind, IssuedSecret, PrincipalKind,
-        PrincipalStatus, ServiceAccountStatus,
+        CredentialId, EnvironmentId, EnvironmentKind, IssuedSecret, PrincipalKind, PrincipalStatus,
+        ServiceAccountStatus,
     },
 };
 
@@ -232,10 +232,7 @@ fn stmt(sql: &str, values: Vec<sea_orm::Value>) -> Statement {
 
 fn uuid_list(row: &QueryResult, col: &str) -> Result<Vec<Uuid>, DbErr> {
     let raw: Vec<String> = row.try_get("", col)?;
-    Ok(raw
-        .iter()
-        .filter_map(|v| Uuid::parse_str(v).ok())
-        .collect())
+    Ok(raw.iter().filter_map(|v| Uuid::parse_str(v).ok()).collect())
 }
 
 fn text_list(ids: &[Uuid]) -> sea_orm::Value {
@@ -422,7 +419,9 @@ pub fn validate_redirect_uri(uri: &str, draft: bool) -> PlatformResult<()> {
             None => (authority, None),
         };
         if host != "localhost"
-            || port.is_some_and(|p| p.is_empty() || p.len() > 5 || !p.bytes().all(|b| b.is_ascii_digit()))
+            || port.is_some_and(|p| {
+                p.is_empty() || p.len() > 5 || !p.bytes().all(|b| b.is_ascii_digit())
+            })
         {
             return bad("may use http:// only as http://localhost[:port]");
         }
@@ -435,7 +434,9 @@ pub fn validate_redirect_uri(uri: &str, draft: bool) -> PlatformResult<()> {
 
 fn scope_list(values: &[String], allowed: &[Audience], field: &str) -> PlatformResult<Vec<String>> {
     if values.len() > oauth_scopes::MAX_REQUESTED {
-        return Err(PlatformError::Validation(format!("{field}: too many scopes")));
+        return Err(PlatformError::Validation(format!(
+            "{field}: too many scopes"
+        )));
     }
     let mut out = BTreeSet::new();
     for v in values {
@@ -646,7 +647,11 @@ fn valid_challenge(challenge: &str) -> bool {
 }
 
 impl PlatformService {
-    fn mint(&self, family: CredentialFamily, kind: EnvironmentKind) -> (credential_format::GeneratedCredential, Vec<u8>) {
+    fn mint(
+        &self,
+        family: CredentialFamily,
+        kind: EnvironmentKind,
+    ) -> (credential_format::GeneratedCredential, Vec<u8>) {
         let generated = credential_format::generate_as(family, kind);
         let message = credential_format::verifier_message_as(
             family,
@@ -733,7 +738,11 @@ impl PlatformService {
             "botScopes",
         )?;
         let test = id_list(&input.test_account_ids, MAX_TEST_ACCOUNTS, "testAccountIds")?;
-        let accounts = id_list(&input.allowed_account_ids, MAX_ALLOWED_IDS, "allowedAccountIds")?;
+        let accounts = id_list(
+            &input.allowed_account_ids,
+            MAX_ALLOWED_IDS,
+            "allowedAccountIds",
+        )?;
         let orgs = id_list(
             &input.allowed_organization_ids,
             MAX_ALLOWED_IDS,
@@ -1114,7 +1123,9 @@ impl PlatformService {
         let txn = self.db.begin().await?;
         let key = match v.target {
             Target::User => format!("account:{}", v.account_id),
-            Target::Organization => format!("organization:{}", req.organization_id.unwrap_or_default()),
+            Target::Organization => {
+                format!("organization:{}", req.organization_id.unwrap_or_default())
+            }
         };
         txn.execute(stmt(
             "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -1149,7 +1160,9 @@ impl PlatformService {
                 }
             }
         }
-        let service_account = self.ensure_installation_account(&txn, app_id, &scope).await?;
+        let service_account = self
+            .ensure_installation_account(&txn, app_id, &scope)
+            .await?;
         let existing = match v.target {
             Target::User => {
                 txn.query_one(stmt(
@@ -1172,8 +1185,10 @@ impl PlatformService {
         let grant_id = match existing {
             Some(row) => {
                 let id: Uuid = row.try_get("", "id")?;
-                let mut scopes: BTreeSet<String> =
-                    row.try_get::<Vec<String>>("", "scopes")?.into_iter().collect();
+                let mut scopes: BTreeSet<String> = row
+                    .try_get::<Vec<String>>("", "scopes")?
+                    .into_iter()
+                    .collect();
                 scopes.extend(requested.iter().cloned());
                 txn.execute(stmt(
                     "UPDATE platform_oauth_grants SET scopes = $2, updated_at = $3 WHERE id = $1",
@@ -1247,7 +1262,10 @@ impl PlatformService {
     pub async fn oauth_grant(&self, id: Uuid) -> PlatformResult<Option<GrantView>> {
         let row = self
             .db
-            .query_one(stmt(&format!("{GRANT_SELECT} WHERE g.id = $1"), vec![id.into()]))
+            .query_one(stmt(
+                &format!("{GRANT_SELECT} WHERE g.id = $1"),
+                vec![id.into()],
+            ))
             .await?;
         Ok(row.as_ref().map(grant_from_row).transpose()?)
     }
@@ -1262,7 +1280,10 @@ impl PlatformService {
     ) -> PlatformResult<(Vec<GrantView>, Option<Uuid>)> {
         let limit = limit.clamp(1, 200);
         let (clause, id) = match filter {
-            GrantFilter::Account(a) => ("g.target = 'USER' AND g.account_id = $1 AND g.status = 'ACTIVE'", a),
+            GrantFilter::Account(a) => (
+                "g.target = 'USER' AND g.account_id = $1 AND g.status = 'ACTIVE'",
+                a,
+            ),
             GrantFilter::Organization(o) => (
                 "g.target = 'ORGANIZATION' AND g.organization_id = $1 AND g.status = 'ACTIVE'",
                 o,
@@ -1276,7 +1297,10 @@ impl PlatformService {
         );
         let rows = self
             .db
-            .query_all(stmt(&sql, vec![id.into(), after.into(), (limit as i64 + 1).into()]))
+            .query_all(stmt(
+                &sql,
+                vec![id.into(), after.into(), (limit as i64 + 1).into()],
+            ))
             .await?;
         let mut items = rows
             .iter()
@@ -1339,7 +1363,10 @@ impl PlatformService {
             ))
             .await?;
         }
-        crate::metrics::inc("platform_access_oauth_grants_revoked_total", &[("reason", reason_label(reason))]);
+        crate::metrics::inc(
+            "platform_access_oauth_grants_revoked_total",
+            &[("reason", reason_label(reason))],
+        );
         tracing::info!(grant_id = %grant_id, reason, "OAuth grant revoked");
         Ok(true)
     }
@@ -1482,7 +1509,8 @@ impl PlatformService {
 
     /// The token endpoint backend (authorization_code / refresh_token).
     pub async fn oauth_token(&self, req: TokenRequest) -> OAuthResult<IssuedTokens> {
-        let non_empty = |v: &Option<String>| v.as_deref().filter(|s| !s.is_empty()).map(str::to_string);
+        let non_empty =
+            |v: &Option<String>| v.as_deref().filter(|s| !s.is_empty()).map(str::to_string);
         let (Some(client_id), Some(secret), Some(grant_type)) = (
             non_empty(&req.client_id),
             non_empty(&req.client_secret),
@@ -1524,7 +1552,10 @@ impl PlatformService {
         ))
         .await?;
         let row = txn
-            .query_one(stmt(&format!("{GRANT_SELECT} WHERE g.id = $1"), vec![grant_id.into()]))
+            .query_one(stmt(
+                &format!("{GRANT_SELECT} WHERE g.id = $1"),
+                vec![grant_id.into()],
+            ))
             .await?
             .ok_or(OAuthError::InvalidGrant)?;
         let grant = grant_from_row(&row)?;
@@ -1541,8 +1572,8 @@ impl PlatformService {
         redirect_uri: &str,
         code_verifier: &str,
     ) -> OAuthResult<IssuedTokens> {
-        let presented =
-            credential_format::parse_as(AUTHORIZATION_CODE, code).ok_or(OAuthError::InvalidGrant)?;
+        let presented = credential_format::parse_as(AUTHORIZATION_CODE, code)
+            .ok_or(OAuthError::InvalidGrant)?;
         let Some(row) = self
             .db
             .query_one(stmt(
@@ -1585,7 +1616,10 @@ impl PlatformService {
         let expires_at: DateTime<Utc> = row.try_get("", "expires_at")?;
         let bound_redirect: String = row.try_get("", "redirect_uri")?;
         let challenge: String = row.try_get("", "code_challenge")?;
-        if now >= expires_at || bound_redirect != redirect_uri || !pkce_matches(code_verifier, &challenge) {
+        if now >= expires_at
+            || bound_redirect != redirect_uri
+            || !pkce_matches(code_verifier, &challenge)
+        {
             return Err(OAuthError::InvalidGrant);
         }
         let txn = self.db.begin().await?;
@@ -1614,7 +1648,10 @@ impl PlatformService {
             None
         };
         txn.commit().await?;
-        crate::metrics::inc("platform_access_oauth_tokens_issued_total", &[("grant_type", "authorization_code")]);
+        crate::metrics::inc(
+            "platform_access_oauth_tokens_issued_total",
+            &[("grant_type", "authorization_code")],
+        );
         Ok(IssuedTokens {
             access,
             refresh,
@@ -1689,7 +1726,10 @@ impl PlatformService {
             .issue_token_credential(&txn, &grant, TokenKind::Access, now)
             .await?;
         txn.commit().await?;
-        crate::metrics::inc("platform_access_oauth_tokens_issued_total", &[("grant_type", "refresh_token")]);
+        crate::metrics::inc(
+            "platform_access_oauth_tokens_issued_total",
+            &[("grant_type", "refresh_token")],
+        );
         Ok(IssuedTokens {
             access,
             refresh,
@@ -1828,7 +1868,11 @@ mod tests {
         ] {
             assert!(validate_redirect_uri(ok, false).is_ok(), "{ok}");
         }
-        for ok in ["http://localhost/cb", "http://localhost:3000/cb", "http://localhost"] {
+        for ok in [
+            "http://localhost/cb",
+            "http://localhost:3000/cb",
+            "http://localhost",
+        ] {
             assert!(validate_redirect_uri(ok, true).is_ok(), "{ok}");
             assert!(validate_redirect_uri(ok, false).is_err(), "{ok}");
         }
@@ -1861,7 +1905,8 @@ mod tests {
 
     #[test]
     fn pairwise_subjects_are_stable_per_app_and_distinct_across_apps() {
-        let key = PairwiseKey::parse("K", "pairwise-unit-key-0123456789abcdefghijklmnopqrstuv").unwrap();
+        let key =
+            PairwiseKey::parse("K", "pairwise-unit-key-0123456789abcdefghijklmnopqrstuv").unwrap();
         let (a, b) = (Uuid::new_v4(), Uuid::new_v4());
         let account = Uuid::new_v4().to_string();
         assert_eq!(key.sub(a, &account), key.sub(a, &account));
@@ -1894,8 +1939,12 @@ mod tests {
 
     #[test]
     fn distribution_rules() {
-        let (tester, member, stranger, org) =
-            (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let (tester, member, stranger, org) = (
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        );
         let mut c = client(ClientStatus::Draft, Distribution::Public);
         c.test_account_ids = vec![tester];
         c.allowed_account_ids = vec![member];

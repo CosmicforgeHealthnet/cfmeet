@@ -680,7 +680,9 @@ fn evaluate(
         .transpose()
         .map_err(corrupt)?;
     let oauth_kind = match &oauth {
-        Some(o) => Some(OAuthCredentialKind::from_token_kind(&o.kind).ok_or(R::CorruptAuthorityChain)?),
+        Some(o) => {
+            Some(OAuthCredentialKind::from_token_kind(&o.kind).ok_or(R::CorruptAuthorityChain)?)
+        }
         None => None,
     };
     // A value of one family never authenticates as another (the verifier labels differ

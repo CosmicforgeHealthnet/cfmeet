@@ -93,10 +93,7 @@ async fn userinfo(State(s): State<UserinfoState>, request: Request) -> Response 
     let (Some(account), Some(scopes)) = (account, scopes) else {
         return error(StatusCode::BAD_REQUEST, "VALIDATION_ERROR", Some(&rid));
     };
-    let scopes: Vec<&str> = scopes
-        .split(|c: char| c == ' ' || c == ',')
-        .filter(|s| !s.is_empty())
-        .collect();
+    let scopes: Vec<&str> = scopes.split([' ', ',']).filter(|s| !s.is_empty()).collect();
     if !scopes
         .iter()
         .any(|s| *s == "profile:read" || *s == "profile:email")

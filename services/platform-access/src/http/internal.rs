@@ -40,8 +40,8 @@ use crate::{
     domain::{EnvironmentKind, PrincipalId, PrincipalKind},
     identity::{
         authentication::{
-            AuthenticationError, AuthorityChain, AuthorityMode, OAuthCredentialKind,
-            SuspendedLink, Throttle,
+            AuthenticationError, AuthorityChain, AuthorityMode, OAuthCredentialKind, SuspendedLink,
+            Throttle,
         },
         changes,
         credentials::CredentialEffectiveState,

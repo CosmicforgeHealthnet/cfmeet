@@ -340,7 +340,10 @@ mod tests {
         for (var, value) in [
             (OAUTH_ENABLED_VAR, "on"),
             (PERSONAL_ENVIRONMENT_VAR, "not-a-uuid"),
-            (PAIRWISE_KEY_VAR, "inline-pairwise-key-0123456789abcdefghijklmnop"),
+            (
+                PAIRWISE_KEY_VAR,
+                "inline-pairwise-key-0123456789abcdefghijklmnop",
+            ),
         ] {
             let err = PlatformBuildConfig::from_lookup(&lookup(&[(var, value)])).unwrap_err();
             assert!(!err.to_string().contains("inline-pairwise"), "{err}");

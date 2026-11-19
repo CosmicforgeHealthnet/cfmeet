@@ -241,9 +241,9 @@ async fn app_grants(
         return Err(AccessError::Refused(ErrorCode::NotFound));
     }
     let cursor = match q.get("cursor").filter(|c| !c.is_empty()) {
-        Some(c) => Some(
-            Uuid::parse_str(c).map_err(|_| AccessError::Refused(ErrorCode::ValidationError))?,
-        ),
+        Some(c) => {
+            Some(Uuid::parse_str(c).map_err(|_| AccessError::Refused(ErrorCode::ValidationError))?)
+        }
         None => None,
     };
     let limit = match q.get("limit") {
@@ -373,14 +373,7 @@ async fn authorize(
         .map_err(oauth_err)?;
     crate::metrics::inc(
         "platform_access_oauth_authorizations_total",
-        &[(
-            "target",
-            if user {
-                "USER"
-            } else {
-                "ORGANIZATION"
-            },
-        )],
+        &[("target", if user { "USER" } else { "ORGANIZATION" })],
     );
     let response = (
         StatusCode::CREATED,

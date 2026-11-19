@@ -137,8 +137,19 @@ async fn authorize(h: &Harness, ctx: Option<DelegatedPlatformContext>, body: Val
 }
 
 /// Authorizes for the user in `p`'s personal scope; returns `(code, grantId)`.
-async fn user_code(h: &Harness, p: &Consumer, app: Uuid, account: Uuid, scope: &str) -> (String, Uuid) {
-    let r = authorize(h, Some(p.delegated("PRODUCTION")), request(app, account, scope)).await;
+async fn user_code(
+    h: &Harness,
+    p: &Consumer,
+    app: Uuid,
+    account: Uuid,
+    scope: &str,
+) -> (String, Uuid) {
+    let r = authorize(
+        h,
+        Some(p.delegated("PRODUCTION")),
+        request(app, account, scope),
+    )
+    .await;
     assert_eq!(r.status, StatusCode::CREATED, "{}", r.body);
     assert_eq!(r.body["expiresIn"], 60);
     assert_eq!(r.headers["cache-control"], "no-store");
@@ -175,7 +186,9 @@ async fn refresh(h: &Harness, app: Uuid, secret: &str, refresh_token: &str) -> R
 }
 
 fn s(v: &Value, k: &str) -> String {
-    v[k].as_str().unwrap_or_else(|| panic!("{k} in {v}")).to_string()
+    v[k].as_str()
+        .unwrap_or_else(|| panic!("{k} in {v}"))
+        .to_string()
 }
 
 async fn introspect(h: &Harness, presented: &str) -> Value {
@@ -204,7 +217,9 @@ async fn principal_id(h: &Harness, reference: &str) -> Uuid {
     Uuid::parse_str(
         &scalar_text(
             h,
-            format!("SELECT id::text FROM platform_principals WHERE external_reference = '{reference}'"),
+            format!(
+                "SELECT id::text FROM platform_principals WHERE external_reference = '{reference}'"
+            ),
         )
         .await,
     )
@@ -253,7 +268,13 @@ async fn the_full_user_code_flow_validate_authorize_token_authenticate_refresh_r
     let (app, secret) = new_app(&h, "calsync", client("PUBLISHED", "PUBLIC")).await;
     let account = Uuid::new_v4();
 
-    let read_back = dev(&h, Method::GET, &format!("/internal/v1/oauth/clients/{app}"), None).await;
+    let read_back = dev(
+        &h,
+        Method::GET,
+        &format!("/internal/v1/oauth/clients/{app}"),
+        None,
+    )
+    .await;
     assert_eq!(read_back.status, StatusCode::OK, "{}", read_back.body);
     assert!(read_back.body["secretIssuedAt"].is_string());
     assert_eq!(read_back.body["developerName"], "calsync tenant");
@@ -299,7 +320,10 @@ async fn the_full_user_code_flow_validate_authorize_token_authenticate_refresh_r
     assert_eq!(chain["tenant"]["id"], p.tenant_id.to_string());
     assert_eq!(chain["tenant"]["classification"], "FIRST_PARTY");
     assert_eq!(chain["environment"]["id"], p.env("PRODUCTION").to_string());
-    assert_eq!(chain["serviceAccount"]["name"], format!("app-{}", app.simple()));
+    assert_eq!(
+        chain["serviceAccount"]["name"],
+        format!("app-{}", app.simple())
+    );
     assert_eq!(chain["authorityMode"], "FULL");
     // An API key's chain carries none of the OAuth fields.
     let c = h.consumer("plain", "EXTERNAL", &["calls.read"]).await;
@@ -335,7 +359,10 @@ async fn the_full_user_code_flow_validate_authorize_token_authenticate_refresh_r
     let (code2, grant2) = user_code(&h, &p, app, account, "meetings:write").await;
     assert_eq!(grant2, grant);
     let t2 = exchange(&h, app, &secret, &code2).await;
-    assert_eq!(t2.body["scope"], "meetings:read meetings:write profile:read");
+    assert_eq!(
+        t2.body["scope"],
+        "meetings:read meetings:write profile:read"
+    );
     let a = h.authenticate(&access).await;
     assert_eq!(
         a.body["authority"]["scopes"],
@@ -349,7 +376,10 @@ async fn the_full_user_code_flow_validate_authorize_token_authenticate_refresh_r
     let refresh2 = s(&r.body, "refreshToken");
     assert_ne!(refresh2, refresh1);
     assert!(r.body.get("botToken").is_none());
-    assert_eq!(h.authenticate(&access2).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&access2).await.body["outcome"],
+        "AUTHENTICATED"
+    );
 
     // Listings.
     let mine = meeting(
@@ -387,7 +417,10 @@ async fn the_full_user_code_flow_validate_authorize_token_authenticate_refresh_r
         .await;
         assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     }
-    assert_eq!(h.authenticate(&access).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&access).await.body["outcome"],
+        "AUTHENTICATED"
+    );
     let r = dev(
         &h,
         Method::POST,
@@ -463,10 +496,19 @@ async fn bad_client_redirect_scope_pkce_and_token_requests_are_refused() {
     let account = Uuid::new_v4();
     let ok = request(app, account, "meetings:read");
     for (body, code) in [
-        (with(ok.clone(), json!({ "clientId": Uuid::new_v4() })), "INVALID_CLIENT"),
-        (with(ok.clone(), json!({ "clientId": "not-a-uuid" })), "INVALID_CLIENT"),
         (
-            with(ok.clone(), json!({ "redirectUri": "https://app.example.com/other" })),
+            with(ok.clone(), json!({ "clientId": Uuid::new_v4() })),
+            "INVALID_CLIENT",
+        ),
+        (
+            with(ok.clone(), json!({ "clientId": "not-a-uuid" })),
+            "INVALID_CLIENT",
+        ),
+        (
+            with(
+                ok.clone(),
+                json!({ "redirectUri": "https://app.example.com/other" }),
+            ),
             "INVALID_REDIRECT_URI",
         ),
         (
@@ -474,14 +516,35 @@ async fn bad_client_redirect_scope_pkce_and_token_requests_are_refused() {
             "INVALID_REDIRECT_URI",
         ),
         (with(ok.clone(), json!({ "scope": "" })), "INVALID_SCOPE"),
-        (with(ok.clone(), json!({ "scope": "admin" })), "INVALID_SCOPE"),
+        (
+            with(ok.clone(), json!({ "scope": "admin" })),
+            "INVALID_SCOPE",
+        ),
         // Not requested by the client.
-        (with(ok.clone(), json!({ "scope": "chat:write" })), "INVALID_SCOPE"),
+        (
+            with(ok.clone(), json!({ "scope": "chat:write" })),
+            "INVALID_SCOPE",
+        ),
         // A bot scope for a USER grant.
-        (with(ok.clone(), json!({ "scope": "chat:read:bot" })), "INVALID_SCOPE"),
-        (with(ok.clone(), json!({ "codeChallengeMethod": "plain" })), "PKCE_REQUIRED"),
-        (with(ok.clone(), json!({ "codeChallenge": "short" })), "PKCE_REQUIRED"),
-        (with(ok.clone(), json!({ "codeChallenge": null, "codeChallengeMethod": null })), "PKCE_REQUIRED"),
+        (
+            with(ok.clone(), json!({ "scope": "chat:read:bot" })),
+            "INVALID_SCOPE",
+        ),
+        (
+            with(ok.clone(), json!({ "codeChallengeMethod": "plain" })),
+            "PKCE_REQUIRED",
+        ),
+        (
+            with(ok.clone(), json!({ "codeChallenge": "short" })),
+            "PKCE_REQUIRED",
+        ),
+        (
+            with(
+                ok.clone(),
+                json!({ "codeChallenge": null, "codeChallengeMethod": null }),
+            ),
+            "PKCE_REQUIRED",
+        ),
     ] {
         let r = validate(&h, body.clone()).await;
         assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body}: {}", r.body);
@@ -490,7 +553,11 @@ async fn bad_client_redirect_scope_pkce_and_token_requests_are_refused() {
         let r = authorize(&h, Some(p.delegated("PRODUCTION")), body.clone()).await;
         assert_eq!(r.code(), code, "{body}");
     }
-    let n = scalar_text(&h, "SELECT count(*)::text FROM platform_oauth_grants".into()).await;
+    let n = scalar_text(
+        &h,
+        "SELECT count(*)::text FROM platform_oauth_grants".into(),
+    )
+    .await;
     assert_eq!(n, "0");
     // A denial never reaches Platform Access; ORGANIZATION needs organizationId.
     let r = meeting(
@@ -544,11 +611,23 @@ async fn bad_client_redirect_scope_pkce_and_token_requests_are_refused() {
         assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.body);
         assert_eq!(r.code(), "invalid_client");
     }
-    let r = token(&h, json!({ "clientId": app, "clientSecret": secret, "grantType": "password" })).await;
+    let r = token(
+        &h,
+        json!({ "clientId": app, "clientSecret": secret, "grantType": "password" }),
+    )
+    .await;
     assert_eq!(r.code(), "unsupported_grant_type");
-    let r = token(&h, json!({ "clientId": app, "grantType": "authorization_code" })).await;
+    let r = token(
+        &h,
+        json!({ "clientId": app, "grantType": "authorization_code" }),
+    )
+    .await;
     assert_eq!(r.code(), "invalid_request");
-    let r = token(&h, json!({ "clientId": app, "clientSecret": secret, "grantType": "refresh_token" })).await;
+    let r = token(
+        &h,
+        json!({ "clientId": app, "clientSecret": secret, "grantType": "refresh_token" }),
+    )
+    .await;
     assert_eq!(r.code(), "invalid_request");
     // The grant is still ACTIVE (none of the above presented a consumed code twice).
     assert_eq!(grant_status(&h, grant).await, "ACTIVE:");
@@ -556,7 +635,10 @@ async fn bad_client_redirect_scope_pkce_and_token_requests_are_refused() {
     // Refresh tokens never authenticate; the wrong permission is refused.
     let (code, _) = user_code(&h, &p, app, account, "meetings:read").await;
     let t = exchange(&h, app, &secret, &code).await;
-    rejected(&h.authenticate(&s(&t.body, "refreshToken")).await, "malformed_credential");
+    rejected(
+        &h.authenticate(&s(&t.body, "refreshToken")).await,
+        "malformed_credential",
+    );
     let forged = s(&t.body, "accessToken").replacen("cfoa_", "cfob_", 1);
     assert_eq!(h.authenticate(&forged).await.body["outcome"], "REJECTED");
     let r = h
@@ -587,13 +669,25 @@ async fn bad_client_redirect_scope_pkce_and_token_requests_are_refused() {
     .await;
     let new_secret = s(&rotated.body, "clientSecret");
     for sec in [&secret, &new_secret] {
-        let r = token(&h, json!({ "clientId": app, "clientSecret": sec, "grantType": "password" })).await;
+        let r = token(
+            &h,
+            json!({ "clientId": app, "clientSecret": sec, "grantType": "password" }),
+        )
+        .await;
         assert_eq!(r.code(), "unsupported_grant_type", "authenticates");
     }
     h.clock.advance(chrono::Duration::hours(24));
-    let r = token(&h, json!({ "clientId": app, "clientSecret": secret, "grantType": "password" })).await;
+    let r = token(
+        &h,
+        json!({ "clientId": app, "clientSecret": secret, "grantType": "password" }),
+    )
+    .await;
     assert_eq!(r.code(), "invalid_client");
-    let r = token(&h, json!({ "clientId": app, "clientSecret": new_secret, "grantType": "password" })).await;
+    let r = token(
+        &h,
+        json!({ "clientId": app, "clientSecret": new_secret, "grantType": "password" }),
+    )
+    .await;
     assert_eq!(r.code(), "unsupported_grant_type");
 }
 
@@ -629,7 +723,10 @@ async fn reusing_a_code_or_a_superseded_refresh_token_revokes_the_grant() {
     // An expired code is refused too.
     let (late, _) = user_code(&h, &p, app, account, "meetings:read").await;
     h.clock.advance(chrono::Duration::seconds(61));
-    assert_eq!(exchange(&h, app, &secret, &late).await.code(), "invalid_grant");
+    assert_eq!(
+        exchange(&h, app, &secret, &late).await.code(),
+        "invalid_grant"
+    );
     assert_eq!(grant_status(&h, grant2).await, "ACTIVE:");
     // The access token expires after an hour.
     h.clock.advance(chrono::Duration::seconds(3600));
@@ -638,7 +735,10 @@ async fn reusing_a_code_or_a_superseded_refresh_token_revokes_the_grant() {
     let replay = refresh(&h, app, &secret, &refresh1).await;
     assert_eq!(replay.code(), "invalid_grant");
     assert_eq!(grant_status(&h, grant2).await, "REVOKED:REFRESH_REUSE");
-    assert_eq!(refresh(&h, app, &secret, &refresh2).await.code(), "invalid_grant");
+    assert_eq!(
+        refresh(&h, app, &secret, &refresh2).await.code(),
+        "invalid_grant"
+    );
 }
 
 #[tokio::test]
@@ -655,16 +755,25 @@ async fn draft_apps_admit_only_test_accounts_and_private_apps_their_allow_lists(
     let (app, secret) = new_app(&h, "drafty", draft.clone()).await;
     let path = format!("/internal/v1/oauth/clients/{app}");
     assert_eq!(
-        validate(&h, request(app, stranger, "meetings:read")).await.code(),
-        "APP_NOT_AVAILABLE"
-    );
-    assert_eq!(
-        authorize(&h, Some(p.delegated("PRODUCTION")), request(app, stranger, "meetings:read"))
+        validate(&h, request(app, stranger, "meetings:read"))
             .await
             .code(),
         "APP_NOT_AVAILABLE"
     );
-    let local = with(request(app, tester, "meetings:read"), json!({ "redirectUri": LOCALHOST }));
+    assert_eq!(
+        authorize(
+            &h,
+            Some(p.delegated("PRODUCTION")),
+            request(app, stranger, "meetings:read")
+        )
+        .await
+        .code(),
+        "APP_NOT_AVAILABLE"
+    );
+    let local = with(
+        request(app, tester, "meetings:read"),
+        json!({ "redirectUri": LOCALHOST }),
+    );
     assert_eq!(validate(&h, local.clone()).await.status, StatusCode::OK);
     // The test account completes the flow, localhost included.
     let r = authorize(&h, Some(p.delegated("PRODUCTION")), local).await;
@@ -681,10 +790,22 @@ async fn draft_apps_admit_only_test_accounts_and_private_apps_their_allow_lists(
     let published = with(draft.clone(), json!({ "status": "PUBLISHED" }));
     for bad in [
         published,
-        with(draft.clone(), json!({ "testAccountIds": (0..26).map(|_| Uuid::new_v4()).collect::<Vec<_>>() })),
-        with(draft.clone(), json!({ "redirectUris": ["https://x.example.com/#f"] })),
-        with(draft.clone(), json!({ "redirectUris": ["https://*.example.com/cb"] })),
-        with(draft.clone(), json!({ "redirectUris": (0..11).map(|i| format!("https://x.example.com/{i}")).collect::<Vec<_>>() })),
+        with(
+            draft.clone(),
+            json!({ "testAccountIds": (0..26).map(|_| Uuid::new_v4()).collect::<Vec<_>>() }),
+        ),
+        with(
+            draft.clone(),
+            json!({ "redirectUris": ["https://x.example.com/#f"] }),
+        ),
+        with(
+            draft.clone(),
+            json!({ "redirectUris": ["https://*.example.com/cb"] }),
+        ),
+        with(
+            draft.clone(),
+            json!({ "redirectUris": (0..11).map(|i| format!("https://x.example.com/{i}")).collect::<Vec<_>>() }),
+        ),
         with(draft.clone(), json!({ "userScopes": ["chat:read:bot"] })),
         with(draft.clone(), json!({ "botScopes": ["meetings:read"] })),
         with(draft.clone(), json!({ "userScopes": ["calls.write"] })),
@@ -696,7 +817,10 @@ async fn draft_apps_admit_only_test_accounts_and_private_apps_their_allow_lists(
     // Once published without localhost, a localhost redirect is refused.
     let r = dev(&h, Method::PUT, &path, Some(client("APPROVED", "PRIVATE"))).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
-    let local = with(request(app, tester, "meetings:read"), json!({ "redirectUri": LOCALHOST }));
+    let local = with(
+        request(app, tester, "meetings:read"),
+        json!({ "redirectUri": LOCALHOST }),
+    );
     assert_eq!(validate(&h, local).await.code(), "INVALID_REDIRECT_URI");
     // PRIVATE: the synced allow list.
     let private = with(
@@ -706,16 +830,25 @@ async fn draft_apps_admit_only_test_accounts_and_private_apps_their_allow_lists(
     let r = dev(&h, Method::PUT, &path, Some(private)).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     assert_eq!(r.body["allowedAccountIds"], json!([member]));
-    assert_eq!(validate(&h, request(app, member, "meetings:read")).await.status, StatusCode::OK);
     assert_eq!(
-        validate(&h, request(app, stranger, "meetings:read")).await.code(),
+        validate(&h, request(app, member, "meetings:read"))
+            .await
+            .status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        validate(&h, request(app, stranger, "meetings:read"))
+            .await
+            .code(),
         "APP_NOT_AVAILABLE"
     );
     // PUBLIC + APPROVED: not yet published, nobody but test accounts.
     let r = dev(&h, Method::PUT, &path, Some(client("APPROVED", "PUBLIC"))).await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(
-        validate(&h, request(app, member, "meetings:read")).await.code(),
+        validate(&h, request(app, member, "meetings:read"))
+            .await
+            .code(),
         "APP_NOT_AVAILABLE"
     );
 
@@ -810,16 +943,23 @@ async fn suspending_an_app_revokes_every_grant_and_token() {
     assert_eq!(r.body["revokedGrants"], 2);
     for (access, refresh_token) in &tokens {
         rejected(&h.authenticate(access).await, "credential_revoked");
-        assert_eq!(refresh(&h, app, &secret, refresh_token).await.code(), "invalid_client");
+        assert_eq!(
+            refresh(&h, app, &secret, refresh_token).await.code(),
+            "invalid_client"
+        );
     }
     assert_eq!(
-        validate(&h, request(app, Uuid::new_v4(), "meetings:read")).await.code(),
+        validate(&h, request(app, Uuid::new_v4(), "meetings:read"))
+            .await
+            .code(),
         "APP_NOT_AVAILABLE"
     );
     let revoked = feed(&h)
         .await
         .into_iter()
-        .filter(|c| c["snapshot"]["status"] == "REVOKED" && c["snapshot"]["revokeReason"] == "APP_SUSPENDED")
+        .filter(|c| {
+            c["snapshot"]["status"] == "REVOKED" && c["snapshot"]["revokeReason"] == "APP_SUSPENDED"
+        })
         .count();
     assert_eq!(revoked, 2);
     // Resuming does not resurrect grants.
@@ -850,7 +990,12 @@ async fn an_organization_install_creates_the_bot_the_installation_account_and_a_
             None,
         )
         .await;
-    assert_eq!(provisioned.status, StatusCode::CREATED, "{}", provisioned.body);
+    assert_eq!(
+        provisioned.status,
+        StatusCode::CREATED,
+        "{}",
+        provisioned.body
+    );
     let org_env = uuid(&provisioned.body["environmentId"]);
     let org_tenant = uuid(&provisioned.body["tenantId"]);
     let (app, secret) = new_app(&h, "botapp", client("PUBLISHED", "PUBLIC")).await;
@@ -866,7 +1011,9 @@ async fn an_organization_install_creates_the_bot_the_installation_account_and_a_
         .iter()
         .all(|s| s["who"] == "bot"));
     assert_eq!(
-        validate(&h, org_request(app, admin, org, "meetings:read")).await.code(),
+        validate(&h, org_request(app, admin, org, "meetings:read"))
+            .await
+            .code(),
         "INVALID_SCOPE"
     );
     let unprovisioned = validate(&h, org_request(app, admin, Uuid::new_v4(), scope)).await;
@@ -896,8 +1043,14 @@ async fn an_organization_install_creates_the_bot_the_installation_account_and_a_
         assert_eq!(chain["credentialKind"], kind);
         assert_eq!(chain["tenant"]["id"], org_tenant.to_string());
         assert_eq!(chain["environment"]["id"], org_env.to_string());
-        assert_eq!(chain["serviceAccount"]["name"], format!("app-{}", app.simple()));
-        assert_eq!(chain["serviceAccount"]["environmentId"], org_env.to_string());
+        assert_eq!(
+            chain["serviceAccount"]["name"],
+            format!("app-{}", app.simple())
+        );
+        assert_eq!(
+            chain["serviceAccount"]["environmentId"],
+            org_env.to_string()
+        );
         assert_eq!(chain["scopes"], json!(["messages.read", "messages.send"]));
         assert_eq!(chain["principalRestriction"], json!([bot_principal]));
         assert_eq!(chain["grantId"], grant.to_string());
@@ -916,7 +1069,10 @@ async fn an_organization_install_creates_the_bot_the_installation_account_and_a_
     )
     .await;
     assert_eq!(listed.body["items"].as_array().unwrap().len(), 1);
-    assert_eq!(listed.body["items"][0]["installedByAccountId"], admin.to_string());
+    assert_eq!(
+        listed.body["items"][0]["installedByAccountId"],
+        admin.to_string()
+    );
     assert!(listed.body["items"][0]["accountId"].is_null());
 
     // Uninstall, scoped to the owner: another owner sees NOT_FOUND.
@@ -939,7 +1095,11 @@ async fn an_organization_install_creates_the_bot_the_installation_account_and_a_
     .await;
     assert_eq!(del.status, StatusCode::OK, "{}", del.body);
     rejected(&h.authenticate(&bot).await, "credential_revoked");
-    let status = scalar_text(&h, format!("SELECT status FROM platform_principals WHERE id = '{bot_principal}'")).await;
+    let status = scalar_text(
+        &h,
+        format!("SELECT status FROM platform_principals WHERE id = '{bot_principal}'"),
+    )
+    .await;
     assert_eq!(status, "DEACTIVATED");
     // Reinstall: the bot comes back, with a new grant and a new bot token.
     let r = authorize(&h, None, org_request(app, admin, org, scope)).await;
@@ -984,7 +1144,10 @@ async fn the_principal_restriction_is_enforced_on_authenticate() {
         "INSERT INTO platform_credential_principal_restrictions \
            (credential_id, principal_id, tenant_id, application_id, environment_id) \
          VALUES ('{credential}', '{}', '{}', '{}', '{}')",
-        other.id, p.tenant_id, p.application_id, p.env("PRODUCTION")
+        other.id,
+        p.tenant_id,
+        p.application_id,
+        p.env("PRODUCTION")
     );
     h.conn().execute_unprepared(&insert).await.unwrap();
     rejected(&h.authenticate(&access).await, "corrupt_authority_chain");
@@ -996,15 +1159,23 @@ async fn the_principal_restriction_is_enforced_on_authenticate() {
         ))
         .await
         .unwrap();
-    assert_eq!(h.authenticate(&access).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&access).await.body["outcome"],
+        "AUTHENTICATED"
+    );
 
     // The account authority suspends / deactivates the account: the token follows.
-    for (status, reason) in [("SUSPENDED", "credential_suspended"), ("DEACTIVATED", "credential_revoked")] {
+    for (status, reason) in [
+        ("SUSPENDED", "credential_suspended"),
+        ("DEACTIVATED", "credential_revoked"),
+    ] {
         let r = meeting(
             &h,
             Method::POST,
             "/internal/v1/principals/account-status",
-            Some(json!({ "externalReference": format!("cfmeet-user:{account}"), "status": status })),
+            Some(
+                json!({ "externalReference": format!("cfmeet-user:{account}"), "status": status }),
+            ),
             Some(p.delegated("PRODUCTION")),
         )
         .await;
@@ -1012,7 +1183,12 @@ async fn the_principal_restriction_is_enforced_on_authenticate() {
         rejected(&h.authenticate(&access).await, reason);
     }
     // ... and the account cannot authorize again while inactive.
-    let r = authorize(&h, Some(p.delegated("PRODUCTION")), request(app, account, "chat:read")).await;
+    let r = authorize(
+        &h,
+        Some(p.delegated("PRODUCTION")),
+        request(app, account, "chat:read"),
+    )
+    .await;
     assert_eq!(r.code(), "INVALID_STATE", "{}", r.body);
 }
 
@@ -1045,7 +1221,10 @@ async fn introspection_returns_a_pairwise_sub_stable_per_app_and_different_acros
         let second = introspect(&h, &s(&r.body, "accessToken")).await;
         assert_eq!(second["sub"], first["sub"]);
         // Refresh tokens and garbage are never active.
-        assert_eq!(introspect(&h, &s(&r.body, "refreshToken")).await, json!({ "active": false }));
+        assert_eq!(
+            introspect(&h, &s(&r.body, "refreshToken")).await,
+            json!({ "active": false })
+        );
         subs.push(sub);
     }
     assert_ne!(subs[0], subs[1]);
@@ -1054,7 +1233,10 @@ async fn introspection_returns_a_pairwise_sub_stable_per_app_and_different_acros
     let again = Harness::on_build(h.db.clone(), oauth_on());
     let (code, _) = user_code(&again, &p, a, account, "profile:read").await;
     let t = exchange(&again, a, &secret_a, &code).await;
-    assert_eq!(introspect(&again, &s(&t.body, "accessToken")).await["sub"], json!(subs[0]));
+    assert_eq!(
+        introspect(&again, &s(&t.body, "accessToken")).await["sub"],
+        json!(subs[0])
+    );
 }
 
 #[tokio::test]
@@ -1078,11 +1260,26 @@ async fn with_the_flag_off_every_route_is_unknown_and_app_tokens_never_authentic
     let routes: Vec<(Method, String)> = vec![
         (Method::PUT, format!("/internal/v1/oauth/clients/{app}")),
         (Method::GET, format!("/internal/v1/oauth/clients/{app}")),
-        (Method::POST, format!("/internal/v1/oauth/clients/{app}/secret")),
-        (Method::GET, format!("/internal/v1/oauth/clients/{app}/grants")),
-        (Method::POST, "/internal/v1/oauth/authorization-requests/validate".to_string()),
-        (Method::POST, "/internal/v1/oauth/authorizations".to_string()),
-        (Method::GET, format!("/internal/v1/oauth/grants?accountId={account}")),
+        (
+            Method::POST,
+            format!("/internal/v1/oauth/clients/{app}/secret"),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/oauth/clients/{app}/grants"),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/oauth/authorization-requests/validate".to_string(),
+        ),
+        (
+            Method::POST,
+            "/internal/v1/oauth/authorizations".to_string(),
+        ),
+        (
+            Method::GET,
+            format!("/internal/v1/oauth/grants?accountId={account}"),
+        ),
         (Method::DELETE, format!("/internal/v1/oauth/grants/{grant}")),
         (Method::DELETE, format!("/internal/v1/oauth/grants/{id}")),
         (Method::POST, "/internal/v1/oauth/token".to_string()),
@@ -1091,13 +1288,27 @@ async fn with_the_flag_off_every_route_is_unknown_and_app_tokens_never_authentic
     ];
     for (method, path) in routes {
         for (signer, body) in [
-            (&off.peers.developer_platform, Some(client("PUBLISHED", "PUBLIC"))),
+            (
+                &off.peers.developer_platform,
+                Some(client("PUBLISHED", "PUBLIC")),
+            ),
             (&off.peers.meeting, Some(json!({ "garbage": true }))),
             (&off.peers.developer_platform, None),
         ] {
-            let body = if method == Method::GET || method == Method::DELETE { None } else { body };
-            let r = off.call(signer, method.clone(), &path, body, None, None).await;
-            assert_eq!(r.status, StatusCode::NOT_FOUND, "{method} {path}: {}", r.body);
+            let body = if method == Method::GET || method == Method::DELETE {
+                None
+            } else {
+                body
+            };
+            let r = off
+                .call(signer, method.clone(), &path, body, None, None)
+                .await;
+            assert_eq!(
+                r.status,
+                StatusCode::NOT_FOUND,
+                "{method} {path}: {}",
+                r.body
+            );
             assert_eq!(r.code(), "NOT_FOUND");
         }
     }
@@ -1124,7 +1335,13 @@ async fn with_the_flag_off_every_route_is_unknown_and_app_tokens_never_authentic
     // API keys are unaffected.
     let c = off.consumer("still", "EXTERNAL", &["calls.read"]).await;
     let (_, key) = off.issue(c.sa("SANDBOX"), &["calls.read"]).await;
-    assert_eq!(off.authenticate(&key).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        off.authenticate(&key).await.body["outcome"],
+        "AUTHENTICATED"
+    );
     // Nothing was revoked by the flag: on again, the token works.
-    assert_eq!(h.authenticate(&access).await.body["outcome"], "AUTHENTICATED");
+    assert_eq!(
+        h.authenticate(&access).await.body["outcome"],
+        "AUTHENTICATED"
+    );
 }

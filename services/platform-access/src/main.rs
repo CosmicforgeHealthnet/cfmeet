@@ -102,7 +102,11 @@ async fn main() -> anyhow::Result<()> {
         environment_origins = config.build.environment_origins_enabled,
         meeting_platform = config.build.meeting_platform_enabled,
         oauth = config.build.oauth_enabled,
-        oauth_pairwise_key = if config.build.oauth_pairwise_key.is_some() { "configured" } else { "derived" },
+        oauth_pairwise_key = if config.build.oauth_pairwise_key.is_some() {
+            "configured"
+        } else {
+            "derived"
+        },
         user_token_kid = config
             .build
             .user_token_keys

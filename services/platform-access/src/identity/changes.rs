@@ -13,9 +13,9 @@ use serde_json::Value;
 
 use super::{
     snapshots::{
-        camel_object, AppGrantSnapshot, ApplicationScopeSnapshot, ApplicationSnapshot, CredentialScopeSnapshot,
-        CredentialSnapshot, EnvironmentSnapshot, PrincipalSnapshot, ServiceAccountSnapshot,
-        TenantSnapshot,
+        camel_object, AppGrantSnapshot, ApplicationScopeSnapshot, ApplicationSnapshot,
+        CredentialScopeSnapshot, CredentialSnapshot, EnvironmentSnapshot, PrincipalSnapshot,
+        ServiceAccountSnapshot, TenantSnapshot,
     },
     PlatformError, PlatformResult,
 };

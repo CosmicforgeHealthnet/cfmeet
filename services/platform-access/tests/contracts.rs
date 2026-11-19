@@ -446,7 +446,14 @@ async fn oauth_responses_conform_to_the_identity_contract() {
         .await;
     assert!(put.status.is_success(), "{}", put.body);
     let secret = h
-        .call(dp, Method::POST, &format!("/internal/v1/oauth/clients/{app}/secret"), None, None, None)
+        .call(
+            dp,
+            Method::POST,
+            &format!("/internal/v1/oauth/clients/{app}/secret"),
+            None,
+            None,
+            None,
+        )
         .await
         .body["clientSecret"]
         .as_str()
@@ -492,7 +499,10 @@ async fn oauth_responses_conform_to_the_identity_contract() {
     let status = h
         .as_calling(
             Method::GET,
-            &format!("/internal/v1/credentials/{}", chain["credential"]["id"].as_str().unwrap()),
+            &format!(
+                "/internal/v1/credentials/{}",
+                chain["credential"]["id"].as_str().unwrap()
+            ),
             None,
             Some(ctx),
         )
