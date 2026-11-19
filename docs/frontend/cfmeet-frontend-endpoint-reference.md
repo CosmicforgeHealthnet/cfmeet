@@ -14,7 +14,7 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.7.0 | 307 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.8.0 | 307 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.8.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.30.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.22.0 | 108 |
@@ -23,7 +23,7 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
-Contract `packages/contracts/openapi/meeting-service.json` version **1.7.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
+Contract `packages/contracts/openapi/meeting-service.json` version **1.8.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
 
 ### API Keys
 
@@ -50,7 +50,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.7.0**; ba
 | POST | `/api/v2/me/device-links/{linkId}/reject` | account session | Reject a link request | 200, 403, 410 | DEVICE_LINK_INVALID, DEVICE_NOT_TRUSTED | `openapi/meeting-service.json#v2_reject_device_link` |
 | GET | `/api/v2/me/device-policy` | account session | Read my device policy and state | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_my_device_policy` |
 | GET | `/api/v2/me/devices` | account session | List my devices | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_devices` |
-| POST | `/api/v2/me/devices/current` | account session | Declare this sign-in's device | 200, 400, 401, 409 | AUTHENTICATION_REQUIRED, DEVICE_DECLARATION_REFUSED, DEVICE_KEY_IN_USE, DEVICE_PROOF_INVALID, VALIDATION_ERROR, WEB_DEVICE_LIMIT_REACHED | `openapi/meeting-service.json#v2_declare_my_device` |
+| POST | `/api/v2/me/devices/current` | account session | Declare this sign-in's device | 200, 400, 401, 409 | AUTHENTICATION_REQUIRED, DEVICE_DECLARATION_REFUSED, DEVICE_KEY_IN_USE, DEVICE_PROOF_INVALID, VALIDATION_ERROR | `openapi/meeting-service.json#v2_declare_my_device` |
 | POST | `/api/v2/me/devices/{deviceId}/revoke` | account session | Revoke a device | 200, 401, 403, 404 | AUTHENTICATION_REQUIRED, DEVICE_NOT_FOUND, DEVICE_NOT_TRUSTED, DEVICE_PROOF_INVALID | `openapi/meeting-service.json#v2_revoke_my_device` |
 | GET | `/api/v2/me/security-events` | account session | Read my security log | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_list_my_security_events` |
 

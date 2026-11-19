@@ -120,9 +120,6 @@ export type IncomingTransfer = {
   expiresAt: string;
 };
 
-/** A new browser's request to be linked to the account (multi-device policy). */
-export type AccountLink = { linkId: string; comparisonCode: string; expiresAt: string; emailCodeSent?: boolean };
-
 /** A link request from a new device, shown on a trusted device (code typed by the user). */
 export type IncomingLink = { linkId: string; platform: string; label: string | null; expiresAt: string; keyThumbprint: string };
 
@@ -130,8 +127,8 @@ export type EngineSnapshot = {
   /** Per conversation: who is online and when others were last seen. */
   presence: Record<string, Record<string, { online: boolean; lastSeenAt: string | null }>>;
   phase: Phase;
-  /** This browser waits for a trusted device to approve it (shows the code). */
-  accountLink: AccountLink | null;
+  /** When this browser's messaging device was registered (messages sent earlier never reach it). */
+  deviceRegisteredAt: string | null;
   /** New devices of the account waiting for this (trusted) browser's approval. */
   incomingLinks: IncomingLink[];
   /** Encrypted conversations in which no other member has a messaging device yet. */
@@ -196,7 +193,7 @@ type ServerMessage = {
 /** What the server knows about a private message (never its content): deletion, reply and edit links. */
 type E2eeMeta = { lifecycle: string; replyTo: string | null; target: string | null };
 
-type ServerDevice = { deviceId: string; status: string; signaturePublicKey: string; displayLabel: string | null; keyPackagesAvailable?: number };
+type ServerDevice = { deviceId: string; status: string; signaturePublicKey: string; displayLabel: string | null; keyPackagesAvailable?: number; registeredAt?: string | null };
 
 /** The Delivery Service's view of a group (`GET …/mls/state`). */
 type MlsState = {
@@ -230,9 +227,6 @@ const SEND_DEVICE_CHECK_MS = 10_000;
 const UNCLAIMABLE_RETRY_MS = 5 * 60_000;
 
 const POLL_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_POLL_MS) || 15_000);
-/** A new browser checks whether a trusted device approved it. */
-const LINK_POLL_MS = 2_000;
-const PENDING_SETUP_NOTE = "Waiting for secure setup. It will be sent automatically.";
 
 /** The API error code of an Account authority call (axios), if any. */
 function accountErrorCode(e: unknown): string | null {
@@ -288,7 +282,7 @@ export class MessagingEngine {
   private snapshot: EngineSnapshot = {
     presence: {},
     phase: "loading",
-    accountLink: null,
+    deviceRegisteredAt: null,
     incomingLinks: [],
     awaitingSetup: {},
     detail: null,
@@ -349,6 +343,8 @@ export class MessagingEngine {
   private groupInfoChecks = new Map<string, number>();
   /** Per chat this device is not (yet) in: the latest messages, shown as placeholders. */
   private waiting = new Map<string, ServerMessage[]>();
+  /** Private messages written while this browser was still being set up (sent once ready). */
+  private beforeReady: { conversationId: string; key: string; text: string; options: { replyToMessageId?: string | null; mentionedPrincipalIds?: string[] } }[] = [];
   /** Devices whose claim returned no KeyPackage (none published): not claimed again for a while. */
   private unclaimable = new Map<string, number>();
   /** Members' device lists (cached briefly: adding new devices before every send). */
@@ -380,6 +376,16 @@ export class MessagingEngine {
   getSnapshot = (): EngineSnapshot => this.snapshot;
   private set(patch: Partial<EngineSnapshot>): void {
     this.snapshot = { ...this.snapshot, ...patch };
+    // Setup stopped for a reason the user must act on: messages written meanwhile are "Not sent".
+    if (this.beforeReady.length && this.snapshot.phase !== "ready" && !MessagingEngine.settingUp(this.snapshot)) {
+      const note = `Not sent (${this.snapshot.detail ?? "private messaging isn't available in this browser"})`;
+      const messages = { ...this.snapshot.messages };
+      for (const q of this.beforeReady.splice(0)) {
+        this.settlePending(q.conversationId, q.key, note);
+        messages[q.conversationId] = (messages[q.conversationId] ?? []).map((m) => (m.key === q.key ? { ...m, state: "failed" as const, note } : m));
+      }
+      this.snapshot = { ...this.snapshot, messages };
+    }
     for (const l of this.listeners) l();
   }
 
@@ -474,7 +480,7 @@ export class MessagingEngine {
       void this.flush();
       this.timers.push(setInterval(() => void this.poll(), POLL_MS));
       // No manual step: this browser's encryption device is set up on its own (account
-      // device, link when needed, MLS enrollment, KeyPackages, realtime).
+      // device trusted by the sign-in, MLS enrollment, KeyPackages, realtime).
       if (this.snapshot.phase === "needs-device") void this.autoEnroll();
     } catch (e) {
       this.fail(e);
@@ -483,7 +489,6 @@ export class MessagingEngine {
 
   stop(): void {
     this.stopped = true;
-    this.stopLinkWatch();
     if (MessagingEngine.active === this) MessagingEngine.active = null;
     if (typeof window !== "undefined") {
       window.removeEventListener("offline", this.onOffline);
@@ -530,7 +535,7 @@ export class MessagingEngine {
       // devices and commit pending removals of encrypted groups.
       for (const id of this.server.keys()) this.scheduleSync(id);
       void this.flush();
-      if (this.snapshot.phase === "needs-device" && !this.snapshot.accountLink && Date.now() >= this.nextEnrollAt) void this.autoEnroll();
+      if (this.snapshot.phase === "needs-device" && Date.now() >= this.nextEnrollAt) void this.autoEnroll();
       for (const id of Object.keys(this.snapshot.awaitingSetup)) void this.flushDrafts(id);
       await this.ensureKeyPackageStock().catch(() => {});
       if (this.snapshot.phase === "ready" && this.snapshot.deviceId && !(await this.deviceIsActive(this.snapshot.deviceId))) {
@@ -546,6 +551,8 @@ export class MessagingEngine {
   private async ownDevices(): Promise<ServerDevice[]> {
     const me = this.snapshot.identity!.principalId;
     const r = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${me}/devices`);
+    const self = r.devices.find((d) => d.deviceId === this.snapshot.deviceId);
+    if (self?.registeredAt && self.registeredAt !== this.snapshot.deviceRegisteredAt) this.set({ deviceRegisteredAt: self.registeredAt });
     return r.devices;
   }
 
@@ -584,9 +591,10 @@ export class MessagingEngine {
       // Publish this device's KeyPackages BEFORE it reports ready: from then on others may
       // start chats with it while it is offline, adding it from these (WhatsApp). A failed
       // publication is retried by the stock check.
-      this.set({ deviceId: device.deviceId });
+      this.set({ deviceId: device.deviceId, deviceRegisteredAt: device.registeredAt ?? null });
       await this.topUpKeyPackages(KEY_PACKAGE_TARGET).catch(() => {});
       this.set({ phase: "ready", deviceId: device.deviceId, detail: null });
+      this.flushBeforeReady();
       this.enrollBackoff = 15_000;
       this.connect();
       await this.refreshConversations();
@@ -603,7 +611,8 @@ export class MessagingEngine {
       if (status === 0 || status === 408 || status === 429 || status >= 500 || e instanceof TypeError) {
         this.nextEnrollAt = Date.now() + this.enrollBackoff;
         this.enrollBackoff = Math.min(this.enrollBackoff * 2, 5 * 60_000);
-        this.set({ phase: "needs-device", detail: "Setting up private messaging… (retrying)" });
+        // Silent: setup keeps going on its own; nothing is shown to the user.
+        this.set({ phase: "needs-device", detail: null });
         return;
       }
       this.fail(e);
@@ -806,7 +815,7 @@ export class MessagingEngine {
     // would create a fresh wrapping key after the sign-out's wipe).
     if (this.stopped) return;
     await this.reopenCrypto();
-    this.set({ phase: "revoked", detail, deviceId: null, messages: {}, connection: "disconnected" });
+    this.set({ phase: "revoked", detail, deviceId: null, deviceRegisteredAt: null, messages: {}, connection: "disconnected" });
     this.managed.clear();
     this.loadedManaged.clear();
     await this.refreshConversations();
@@ -1784,7 +1793,12 @@ export class MessagingEngine {
     const meta = this.metaFor(conversationId);
     // Older history comes from another device of this account (history transfer), if any.
     let olderNote = beforeJoinNote(false);
-    if (records.some((r) => r.status === "BEFORE_JOIN")) {
+    // A message sent before this browser's messaging device existed can never reach it:
+    // it is shown as "sent before this browser joined", never as an endless wait.
+    const joinedAt = this.snapshot.deviceRegisteredAt ? Date.parse(this.snapshot.deviceRegisteredAt) : NaN;
+    const waitingHere = this.waiting.get(conversationId) ?? [];
+    const sentBeforeJoin = (createdAt: string | null | undefined) => !!createdAt && Number.isFinite(joinedAt) && Date.parse(createdAt) < joinedAt;
+    if (records.some((r) => r.status === "BEFORE_JOIN" || (r.status === "FAILED" && sentBeforeJoin(r.createdAt))) || waitingHere.some((m) => m.lifecycle === "ACTIVE" && sentBeforeJoin(m.createdAt))) {
       const own = await this.ownDeviceIds().catch(() => new Set<string>());
       olderNote = beforeJoinNote([...own].some((d) => d !== this.snapshot.deviceId));
     }
@@ -1857,6 +1871,10 @@ export class MessagingEngine {
       } else if (r.status === "REMOVED") {
         base.state = "removed";
         base.note = "Message removed";
+      } else if (sentBeforeJoin(r.createdAt)) {
+        // Encrypted before this browser joined: it can never be read here.
+        base.state = "before-join";
+        base.note = olderNote;
       } else {
         base.state = "unreadable";
         base.note = `This message could not be decrypted on this device (${r.error ?? "FAILED"})`;
@@ -1865,9 +1883,10 @@ export class MessagingEngine {
     }
     // Not in this chat's group yet: its latest messages wait (placeholders, never nothing).
     const local = new Set(records.map((r) => r.sequence));
-    for (const m of this.waiting.get(conversationId) ?? []) {
+    for (const m of waitingHere) {
       if (local.has(m.sequence)) continue;
       const removed = m.lifecycle !== "ACTIVE";
+      const early = !removed && sentBeforeJoin(m.createdAt);
       views.push({
         key: `s${m.sequence}`,
         sequence: m.sequence,
@@ -1875,10 +1894,10 @@ export class MessagingEngine {
         mine: m.senderPrincipalId === me,
         createdAt: m.createdAt,
         profile: "PRIVATE_E2EE",
-        state: removed ? "removed" : "unreadable",
+        state: removed ? "removed" : early ? "before-join" : "unreadable",
         text: null,
         file: null,
-        note: removed ? "Message deleted" : WAITING_NOTE,
+        note: removed ? "Message deleted" : early ? olderNote : WAITING_NOTE,
         transferred: false,
         messageId: m.messageId,
         reactions: [],
@@ -1907,7 +1926,7 @@ export class MessagingEngine {
           continue;
         }
         if (pending.some((m) => m.key === key)) continue;
-        pending.push({ key, sequence: null, senderPrincipalId: me, mine: true, createdAt: d.createdAt, profile: "PRIVATE_E2EE", state: "pending-setup", text: d.text, file: null, note: PENDING_SETUP_NOTE, transferred: false });
+        pending.push({ key, sequence: null, senderPrincipalId: me, mine: true, createdAt: d.createdAt, profile: "PRIVATE_E2EE", state: "pending-setup", text: d.text, file: null, note: null, transferred: false });
       }
       this.pendingSends.set(conversationId, pending);
       const conv = this.server.get(conversationId);
@@ -2375,6 +2394,12 @@ export class MessagingEngine {
     }
     const key = `p${uuid()}`;
     this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text, file: null, note: null, transferred: false });
+    // This browser's private messaging is still being set up (silently): the message shows
+    // as sending and goes out as soon as setup finishes.
+    if (conv.securityProfile === "PRIVATE_E2EE" && this.snapshot.phase !== "ready" && MessagingEngine.settingUp(this.snapshot)) {
+      this.beforeReady.push({ conversationId, key, text, options });
+      return;
+    }
     // Not in the chat's encryption group yet: join it by itself first (nobody else has to be online).
     let notInGroup = conv.securityProfile === "PRIVATE_E2EE" && !this.snapshot.conversations.find((c) => c.id === conversationId)?.groupReady;
     if (notInGroup && this.crypto && this.snapshot.phase === "ready") notInGroup = !(await this.joinBySelf(conv, true).catch(() => false));
@@ -2389,12 +2414,33 @@ export class MessagingEngine {
       const clientMessageId = uuid();
       const createdAt = new Date().toISOString();
       await this.crypto.call("holdDraft", { conversationId, clientMessageId, text, createdAt });
-      this.addPending(conversationId, { key: `d${clientMessageId}`, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt, profile: conv.securityProfile, state: "pending-setup", text, file: null, note: PENDING_SETUP_NOTE, transferred: false });
+      this.addPending(conversationId, { key: `d${clientMessageId}`, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt, profile: conv.securityProfile, state: "pending-setup", text, file: null, note: null, transferred: false });
       this.deviceChecks.delete(conversationId);
       this.scheduleSync(conversationId);
       return;
     }
     return this.enqueue(conversationId, () => this.deliver(conv, conversationId, key, text, options.replyToMessageId ?? null));
+  }
+
+  /**
+   * Whether this browser's private messaging is only being set up (no user action needed):
+   * private messages written meanwhile are sent once it is ready.
+   */
+  static settingUp(s: Pick<EngineSnapshot, "phase" | "detail" | "identity">): boolean {
+    return !!s.identity && (s.phase === "registering" || s.phase === "revoked" || (s.phase === "needs-device" && !s.detail));
+  }
+
+  /** Sends the private messages written while this browser was being set up. */
+  private flushBeforeReady(): void {
+    const queued = this.beforeReady.splice(0);
+    if (!queued.length) return;
+    const messages = { ...this.snapshot.messages };
+    for (const q of queued) {
+      this.settlePending(q.conversationId, q.key, null);
+      messages[q.conversationId] = (messages[q.conversationId] ?? []).filter((m) => m.key !== q.key);
+    }
+    this.set({ messages });
+    for (const q of queued) void this.send(q.conversationId, q.text, q.options).catch(() => {});
   }
 
   private async deliver(conv: ServerConversation, conversationId: string, key: string, text: string, replyToMessageId: string | null = null): Promise<void> {
@@ -2599,14 +2645,12 @@ export class MessagingEngine {
     if (conv?.securityProfile === "PRIVATE_E2EE") await this.renderE2ee(id);
   }
 
-  // ------------------------------------------------------- account device (ADR 0060)
-
-  private linkTimer: ReturnType<typeof setInterval> | null = null;
+  // ------------------------------------------------- account device (ADR 0060, ADR 0067)
 
   /**
-   * Declares this browser's account device for the current sign-in. Trusted: continue.
-   * Untrusted: start a link request (the user approves it from a trusted device by typing
-   * the code shown here) and finish the registration once approved.
+   * Declares this browser's account device for the current sign-in. Signing in is enough
+   * (ADR 0067): the Account authority trusts a browser declared from a fresh sign-in, so
+   * there is no verification step. Anything else is retried quietly.
    */
   private async ensureTrustedAccountDevice(label: string): Promise<boolean> {
     const token = await accountSession.getAccessToken();
@@ -2617,99 +2661,29 @@ export class MessagingEngine {
     } catch (e) {
       const code = accountErrorCode(e);
       if (code === "DEVICE_DECLARATION_REFUSED") {
-        // This sign-in predates the device flow (or another key holds it): a fresh sign-in
-        // registers the browser. The page hands over to the standard sign-in flow.
+        // This sign-in predates the device flow (or this browser's key was reset): only a
+        // fresh sign-in can register the browser. The page hands over to the sign-in flow.
         this.set({ phase: "needs-signin", detail: "For your security, sign in again to finish setting up private messaging on this browser." });
         return false;
       }
       if (code === "WEB_DEVICE_LIMIT_REACHED") {
-        this.set({ phase: "needs-device", detail: "Your account already uses the maximum number of browsers. Remove one under Security & devices on another device." });
+        // Older servers only; the Account authority now makes room on its own.
+        this.set({ phase: "needs-device", detail: "Your account is signed in on too many browsers. Sign out of one you no longer use, then reload this page." });
         return false;
       }
       throw e;
     }
     if (!view) {
-      this.set({ phase: "needs-device", detail: "This browser cannot keep a secure device key. Use an up-to-date browser for private messaging." });
+      this.set({ phase: "needs-device", detail: "This browser can't keep a secure key for private messages. Use an up-to-date browser." });
       return false;
     }
     if (view.trust === "TRUSTED" && view.state === "ACTIVE") return true;
-    const link = await accountDevice.requestLink();
-    this.set({
-      phase: "needs-device",
-      accountLink: { linkId: link.linkId, comparisonCode: link.comparisonCode ?? "", expiresAt: link.expiresAt },
-      detail: "Approve this browser on a device where you already use CF Meet messaging by entering the code shown here, or use a code sent to your email.",
-    });
-    this.watchLink(link.linkId, label);
+    // Not trusted yet (an older server, or a sign-in being replaced): try again shortly,
+    // silently. Never a verification step on the web.
+    this.nextEnrollAt = Date.now() + this.enrollBackoff;
+    this.enrollBackoff = Math.min(this.enrollBackoff * 2, 5 * 60_000);
+    this.set({ phase: "needs-device", detail: null });
     return false;
-  }
-
-  private watchLink(linkId: string, label: string): void {
-    if (this.linkTimer) clearInterval(this.linkTimer);
-    this.linkTimer = setInterval(() => void (async () => {
-      if (this.stopped) return this.stopLinkWatch();
-      try {
-        const link = await accountDevice.linkStatus(linkId);
-        if (link.status === "APPROVED") {
-          this.stopLinkWatch();
-          await accountDevice.completeLink(linkId);
-          this.set({ accountLink: null, detail: null });
-          void label;
-          await this.autoEnroll();
-        } else if (link.status !== "PENDING") {
-          // Rejected, cancelled or expired: a new request starts on its own shortly.
-          this.stopLinkWatch();
-          this.nextEnrollAt = Date.now() + LINK_POLL_MS * 5;
-          this.set({ accountLink: null, phase: "needs-device", detail: link.status === "REJECTED" ? "This browser was not approved." : null });
-        }
-      } catch {
-        // retried on the next tick; an expired link answers DEVICE_LINK_INVALID
-        if (Date.parse(this.snapshot.accountLink?.expiresAt ?? "") < Date.now()) {
-          this.stopLinkWatch();
-          this.nextEnrollAt = Date.now() + LINK_POLL_MS * 5;
-          this.set({ accountLink: null, phase: "needs-device", detail: null });
-        }
-      }
-    })(), LINK_POLL_MS);
-  }
-
-  private stopLinkWatch(): void {
-    if (this.linkTimer) clearInterval(this.linkTimer);
-    this.linkTimer = null;
-  }
-
-  /** No trusted device at hand (web-only account, lost device): email a step-up code. */
-  /** Withdraw this browser's link request (the code stops working on the other device). */
-  async cancelLink(): Promise<void> {
-    const link = this.snapshot.accountLink;
-    this.stopLinkWatch();
-    if (link) await accountDevice.cancelLink(link.linkId).catch(() => undefined);
-    this.set({ accountLink: null, phase: "needs-device", detail: null });
-  }
-
-  async sendLinkEmailCode(): Promise<void> {
-    const link = this.snapshot.accountLink;
-    if (!link) return;
-    try {
-      await accountDevice.sendEmailCode(link.linkId);
-      this.set({ accountLink: { ...link, emailCodeSent: true } });
-    } catch (e) {
-      const code = accountErrorCode(e);
-      throw new MessagingApiError(0, code ?? "EMAIL_CODE_UNAVAILABLE", code === "RATE_LIMITED" ? "Wait a minute before asking for another code." : "The email code could not be sent.");
-    }
-  }
-
-  /** Completes this browser's link with the emailed code, then enrolls it. */
-  async completeLinkWithEmailCode(emailCode: string): Promise<void> {
-    const link = this.snapshot.accountLink;
-    if (!link || !/^\d{6}$/.test(emailCode.trim())) throw new MessagingApiError(0, "EMAIL_CODE_INVALID", "Enter the 6-digit code from the email.");
-    try {
-      await accountDevice.completeLink(link.linkId, emailCode.trim());
-    } catch (e) {
-      throw new MessagingApiError(0, accountErrorCode(e) ?? "EMAIL_CODE_INVALID", "That code is not valid. Check the latest email and try again.");
-    }
-    this.stopLinkWatch();
-    this.set({ accountLink: null, detail: null });
-    await this.autoEnroll();
   }
 
   /** TRUSTED browser: new devices of the account waiting for approval. */

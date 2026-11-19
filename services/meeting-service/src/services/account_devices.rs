@@ -19,8 +19,10 @@
 //! account that never had a trusted device), approval from a trusted device (the approver
 //! types the comparison code shown on the new device and signs with its own device key),
 //! or an email step-up code (account recovery; proves control of the account mailbox).
-//! A sign-in code alone gives a usable but untrusted web sign-in (Meetings and
-//! Calling keep working; E2EE enrollment and approvals do not).
+//! ADR 0067: a browser (WEB device) is trusted by the fresh sign-in it is declared from
+//! (recorded as `BOOTSTRAP`), with no verification step; the per-account browser limit
+//! signs out the least recently used browser instead of refusing. A new mobile still
+//! completes a link (primary-mobile replacement).
 //!
 //! Every proof is an Ed25519 signature over a domain-separated statement with a purpose,
 //! the device key thumbprint, a purpose-specific context, a timestamp (±window) and a
@@ -224,7 +226,8 @@ pub struct DeviceView {
     pub state: String,
     /// `TRUSTED` or `UNTRUSTED`.
     pub trust: String,
-    /// `BOOTSTRAP`, `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).
+    /// `BOOTSTRAP` (trusted by its own sign-in: the account's first device, or any browser,
+    /// ADR 0067), `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).
     pub trusted_via: Option<String>,
     /// True for the account's ACTIVE mobile.
     pub primary: bool,
@@ -730,6 +733,105 @@ async fn end_unclassified_sessions(
 /// sessions; Calling endpoint incl. live invitations and signaling) through the durable
 /// account outbox, and only this sign-in's meeting media. Never fails the caller: every
 /// queue is durable and retried.
+/// ADR 0067: an ACTIVE web device bound to a sign-in is trusted by that sign-in (recorded
+/// as `BOOTSTRAP`, the existing "trusted by its own sign-in" value, with the reason in the
+/// security log). Called under the account lock.
+async fn trust_web_by_sign_in(
+    txn: &DatabaseTransaction,
+    user_id: Uuid,
+    session_id: Uuid,
+    device_id: Uuid,
+) -> ApiResult<()> {
+    let r = txn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_devices SET trust = 'TRUSTED', trusted_via = 'BOOTSTRAP', \
+                    trusted_at = now(), updated_at = now(), last_seen_at = now() \
+             WHERE id = $1 AND user_id = $2 AND device_class = 'WEB' AND state = 'ACTIVE' \
+               AND trust = 'UNTRUSTED'",
+            [device_id.into(), user_id.into()],
+        ))
+        .await?;
+    if r.rows_affected() == 1 {
+        security::record_event(
+            txn,
+            SecurityEvent::new("DEVICE_DECLARED", Outcome::Success)
+                .by_user(user_id)
+                .session(session_id)
+                .detail(json!({
+                    "deviceId": device_id, "deviceClass": "WEB", "platform": "WEB",
+                    "trust": "TRUSTED", "state": "ACTIVE", "trustedBy": "SIGN_IN",
+                })),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// ADR 0067: the per-account browser limit never blocks a sign-in. When it is reached, the
+/// least recently used ACTIVE web device(s) are revoked (`USER_REVOKED`: the user's own
+/// sign-in caused it; logged with reason `WEB_DEVICE_LIMIT_REACHED`) until one slot is
+/// free. Their sign-ins end and the usual fan-out ends their downstream credentials.
+/// Called under the account lock (which serializes every device change of the account);
+/// returns the ended sign-ins.
+async fn evict_least_recent_web_device(
+    txn: &DatabaseTransaction,
+    user_id: Uuid,
+    session_id: Uuid,
+    max_web_devices: i64,
+) -> ApiResult<Vec<Uuid>> {
+    let rows = txn
+        .query_all(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT d.id FROM account_devices d \
+               JOIN account_sessions s ON s.device_id = d.id \
+                AND s.revoked_at IS NULL AND s.absolute_expires_at > now() \
+              WHERE d.user_id = $1 AND d.device_class = 'WEB' AND d.state = 'ACTIVE' \
+              GROUP BY d.id, d.last_seen_at \
+              ORDER BY GREATEST(d.last_seen_at, max(COALESCE(s.last_refreshed_at, s.created_at))) ASC, d.id",
+            [user_id.into()],
+        ))
+        .await?;
+    let ids = rows
+        .iter()
+        .map(|r| r.try_get::<Uuid>("", "id"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let excess = (ids.len() as i64 - max_web_devices + 1).max(0) as usize;
+    let mut ended = vec![];
+    for id in ids.into_iter().take(excess) {
+        let sessions = end_device_sessions(txn, id, "DEVICE_REVOKED", None).await?;
+        txn.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_devices SET state = 'REVOKED', revoked_at = now(), \
+                    revoke_reason = 'USER_REVOKED', updated_at = now() \
+             WHERE id = $1 AND state <> 'REVOKED'",
+            [id.into()],
+        ))
+        .await?;
+        txn.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_device_links SET status = 'CANCELLED', finished_at = now() \
+             WHERE device_id = $1 AND status IN ('PENDING', 'APPROVED')",
+            [id.into()],
+        ))
+        .await?;
+        security::record_event(
+            txn,
+            SecurityEvent::new("DEVICE_REVOKED", Outcome::Success)
+                .by_user(user_id)
+                .session(session_id)
+                .detail(json!({
+                    "deviceId": id, "deviceClass": "WEB", "wasPrimary": false, "self": false,
+                    "reason": "WEB_DEVICE_LIMIT_REACHED", "limit": max_web_devices,
+                    "sessionsEnded": sessions.len(),
+                })),
+        )
+        .await?;
+        ended.extend(sessions);
+    }
+    Ok(ended)
+}
+
 pub async fn session_effects(state: &AppState, user_id: Uuid, session_ids: &[Uuid]) {
     for sid in session_ids {
         // `session_ended` also ends this sign-in's meeting media.
@@ -951,6 +1053,31 @@ pub async fn declare(
             .await?
             .ok_or_else(|| err(ErrorCode::DeviceNotFound, "Device not found"))?;
         if d.key_thumbprint == tp && d.state != "REVOKED" {
+            if d.device_class == "WEB" && d.trust != "TRUSTED" && d.state == "ACTIVE" {
+                // ADR 0067: a browser declared (from a fresh sign-in) before signing in was
+                // enough is trusted now, once it proves possession of its key again.
+                verify_proof(
+                    &state.db,
+                    policy,
+                    &public_key,
+                    ProofPurpose::Declare,
+                    &caller.session_id.to_string(),
+                    &req.proof,
+                )
+                .await?;
+                let txn = state.db.begin().await?;
+                lock_account(&txn, user.id).await?;
+                trust_web_by_sign_in(&txn, user.id, caller.session_id, d.id).await?;
+                txn.commit().await?;
+                let d = find_device(&state.db, user.id, d.id, false)
+                    .await?
+                    .ok_or_else(|| ApiError::InternalError("declared device vanished".into()))?;
+                return Ok(DeviceOutcome {
+                    device: d.view(Some(d.id)),
+                    replaced_device_id: None,
+                    ended_sessions: 0,
+                });
+            }
             return Ok(DeviceOutcome {
                 device: d.view(Some(d.id)),
                 replaced_device_id: None,
@@ -1007,6 +1134,10 @@ pub async fn declare(
             }
             superseded =
                 end_device_sessions(&txn, d.id, "SUPERSEDED", Some(caller.session_id)).await?;
+            if d.device_class == "WEB" && d.trust != "TRUSTED" && d.state == "ACTIVE" {
+                // ADR 0067: a fresh sign-in on this browser is enough to trust it.
+                trust_web_by_sign_in(&txn, user.id, caller.session_id, d.id).await?;
+            }
             txn.execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
                 "UPDATE account_devices SET last_seen_at = now(), updated_at = now(), \
@@ -1056,30 +1187,29 @@ pub async fn declare(
                     .transpose()?
                     .unwrap_or(0);
                 if web >= policy.max_web_devices {
-                    security::record_event(
+                    // ADR 0067: signing in never blocks. The least recently used browser
+                    // of the account is signed out (revoked) to make room.
+                    let evicted = evict_least_recent_web_device(
                         &txn,
-                        SecurityEvent::new("DEVICE_DECLARED", Outcome::Denied)
-                            .by_user(user.id)
-                            .session(caller.session_id)
-                            .detail(json!({"reason": "WEB_DEVICE_LIMIT_REACHED", "limit": policy.max_web_devices})),
+                        user.id,
+                        caller.session_id,
+                        policy.max_web_devices,
                     )
                     .await?;
-                    txn.commit().await?;
-                    return Err(err(
-                        ErrorCode::WebDeviceLimitReached,
-                        &format!(
-                            "This account already has {} active web devices; revoke one from a trusted device first",
-                            policy.max_web_devices
-                        ),
-                    ));
+                    superseded.extend(evicted);
                 }
             }
+            // ADR 0067: a browser is trusted by the fresh sign-in it is declared from
+            // (recorded as `BOOTSTRAP`: trusted by its own sign-in, no other device). A new
+            // mobile still waits for a link (primary-mobile replacement, ADR 0060).
             let (trust, state_value) = match (mobile, bootstrap) {
                 (_, true) => ("TRUSTED", "ACTIVE"),
-                (false, false) => ("UNTRUSTED", "ACTIVE"),
+                (false, false) => ("TRUSTED", "ACTIVE"),
                 (true, false) => ("UNTRUSTED", "REPLACEMENT_PENDING"),
             };
-            bootstrapped = trust == "TRUSTED";
+            // Only the account's very first trusted device is announced by email
+            // (a new browser sign-in already sends the new sign-in alert).
+            bootstrapped = bootstrap;
             let id = Uuid::new_v4();
             txn.execute(Statement::from_sql_and_values(
                 DbBackend::Postgres,
@@ -1111,6 +1241,7 @@ pub async fn declare(
                     .detail(json!({
                         "deviceId": id, "deviceClass": req.device_class, "platform": req.platform,
                         "trust": trust, "state": state_value, "bootstrap": bootstrap,
+                        "trustedBy": if bootstrap { Some("BOOTSTRAP") } else if trust == "TRUSTED" { Some("SIGN_IN") } else { None },
                     })),
             )
             .await?;

@@ -18,10 +18,12 @@ export const KEY_PACKAGE_TARGET = 20;
 /** The most KeyPackages one publication may carry (Messaging `MAX_KEY_PACKAGES_PER_REQUEST`). */
 const MAX_PER_REQUEST = 20;
 
-/** Shown in a chat for a message this device cannot read (yet). */
+/** Shown in a chat for a message this device cannot read yet but can still receive. */
 export const WAITING_NOTE = "Waiting for this message. This may take a while.";
 /** Chat-list preview of such a message (short, never a blank bar). */
 export const WAITING_PREVIEW = "Waiting for this message";
+/** A message sent before this browser joined the chat: it will never arrive here. */
+export const BEFORE_JOIN_PREVIEW = "Sent before this browser joined";
 
 export type DeviceLike = { deviceId: string; status: string; keyPackagesAvailable?: number };
 export type MemberLike = { principalId: string; state?: string };
@@ -80,11 +82,14 @@ export function joinerEntry(deviceId: string, signatureKey: Uint8Array): string 
   return `${deviceId}:${Array.from(signatureKey, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** The note on a message sent before this device was linked (older history). */
+/**
+ * The note on a message sent before this browser joined the chat (older history never
+ * reaches a new device). With another device of the account, history can be brought over.
+ */
 export function beforeJoinNote(hasOtherDevice: boolean): string {
   return hasOtherDevice
-    ? "Sent before this device was linked. Open CF Meet on your other device to transfer older messages."
-    : "Sent before this device was linked, so it can't be shown here.";
+    ? `${BEFORE_JOIN_PREVIEW}. You can bring over older messages from your other device under Security & devices.`
+    : `${BEFORE_JOIN_PREVIEW}.`;
 }
 
 /** What the chat list shows under a chat's title. */
@@ -95,7 +100,9 @@ export type PreviewInput = {
   /** The chat's messages were rendered at least once on this device. */
   loaded: boolean;
   latest: { text: string | null; file: { name: string } | null; note: string | null; state: string } | null | undefined;
-  summary: { lifecycle: string; previewText: string | null; attachmentCount: number } | null | undefined;
+  summary: { lifecycle: string; previewText: string | null; attachmentCount: number; createdAt?: string | null } | null | undefined;
+  /** When this browser's messaging device was registered (earlier messages never reach it). */
+  joinedAt?: string | null;
 };
 
 /**
@@ -103,15 +110,25 @@ export type PreviewInput = {
  * brief placeholder bar). A private message this device cannot read (yet) is shown as
  * WAITING_PREVIEW, never as an empty or endless placeholder.
  */
-export function chatPreview({ e2ee, groupReady, loaded, latest, summary }: PreviewInput): string | null {
+export function chatPreview({ e2ee, groupReady, loaded, latest, summary, joinedAt }: PreviewInput): string | null {
   if (latest) {
     if (latest.text) return latest.text;
     if (latest.file) return `📎 ${latest.file.name}`;
-    if (latest.state === "unreadable" || latest.state === "before-join") return WAITING_PREVIEW;
+    if (latest.state === "before-join") return BEFORE_JOIN_PREVIEW;
+    if (latest.state === "unreadable") return WAITING_PREVIEW;
     return latest.note ?? "";
   }
   if (!summary) return "No messages yet";
   if (summary.lifecycle !== "ACTIVE") return "Message deleted";
   if (!e2ee) return summary.previewText ?? (summary.attachmentCount ? "📎 Attachment" : "");
-  return groupReady && !loaded ? null : WAITING_PREVIEW;
+  if (groupReady && !loaded) return null;
+  return sentBeforeJoin(summary.createdAt, joinedAt) ? BEFORE_JOIN_PREVIEW : WAITING_PREVIEW;
+}
+
+/** Whether a message was sent before this browser's messaging device existed (it can never arrive). */
+export function sentBeforeJoin(createdAt: string | null | undefined, joinedAt: string | null | undefined): boolean {
+  if (!createdAt || !joinedAt) return false;
+  const c = Date.parse(createdAt);
+  const j = Date.parse(joinedAt);
+  return Number.isFinite(c) && Number.isFinite(j) && c < j;
 }

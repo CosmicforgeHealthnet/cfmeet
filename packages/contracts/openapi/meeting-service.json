@@ -10,7 +10,7 @@
     "license": {
       "name": ""
     },
-    "version": "1.7.0"
+    "version": "1.8.0"
   },
   "paths": {
     "/": {
@@ -12801,7 +12801,7 @@
           "Account devices (v2)"
         ],
         "summary": "Declare this sign-in's device",
-        "description": "Binds the calling sign-in to a device right after signing in on it (within the\nre-authentication window). The device proves possession of its Ed25519 key (purpose\n`DECLARE`, context = the session id). The same installation signing in again reuses\nits device (older sign-ins of it end: `SUPERSEDED`), never a new one.\n\n* WEB: refused with `WEB_DEVICE_LIMIT_REACHED` beyond `maxWebDevices` active web devices.\n* The first device of an account that never had a trusted device is trusted\n(`BOOTSTRAP`); a first mobile then becomes the primary mobile.\n* Any other new device is `UNTRUSTED`; a new MOBILE is `REPLACEMENT_PENDING` (its\nsign-in is refused elsewhere with `DEVICE_REPLACEMENT_PENDING`) until it completes a\nlink: approval by a trusted device or an email step-up.",
+        "description": "Binds the calling sign-in to a device right after signing in on it (within the\nre-authentication window). The device proves possession of its Ed25519 key (purpose\n`DECLARE`, context = the session id). The same installation signing in again reuses\nits device (older sign-ins of it end: `SUPERSEDED`), never a new one.\n\n* WEB: trusted and active right away (`BOOTSTRAP`: the fresh sign-in is the proof; no\nverification step, ADR 0067). An existing untrusted browser declaring again is\ntrusted the same way. Beyond `maxWebDevices` active web devices, the least recently\nused browser of the account is revoked (its sign-ins end) instead of refusing.\n* The first device of an account that never had a trusted device is trusted\n(`BOOTSTRAP`); a first mobile then becomes the primary mobile.\n* Any other new MOBILE is `UNTRUSTED` and `REPLACEMENT_PENDING` (its sign-in is refused\nelsewhere with `DEVICE_REPLACEMENT_PENDING`) until it completes a link: approval by a\ntrusted device or an email step-up.",
         "operationId": "v2_declare_my_device",
         "requestBody": {
           "content": {
@@ -12845,7 +12845,7 @@
             }
           },
           "409": {
-            "description": "WEB_DEVICE_LIMIT_REACHED / DEVICE_DECLARATION_REFUSED / DEVICE_KEY_IN_USE",
+            "description": "DEVICE_DECLARATION_REFUSED / DEVICE_KEY_IN_USE",
             "content": {
               "application/json": {
                 "schema": {
@@ -28083,7 +28083,7 @@
           },
           "trustedVia": {
             "type": "string",
-            "description": "`BOOTSTRAP`, `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).",
+            "description": "`BOOTSTRAP` (trusted by its own sign-in: the account's first device, or any browser,\nADR 0067), `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).",
             "nullable": true
           }
         }
