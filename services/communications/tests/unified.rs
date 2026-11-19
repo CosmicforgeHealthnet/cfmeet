@@ -402,6 +402,60 @@ async fn chat_controls_require_membership_and_clear_for_me_is_monotonic() {
     h.close().await;
 }
 
+/// Owner report (2026-11-19): a contact added directly by CF Meet ID (AUTOMATIC approval,
+/// no request) could not be called ("Calling…" forever) while her call to the adder rang.
+/// The Hub side is symmetric: after a direct add each of them has the other as a contact,
+/// the full personal policy allows the call both ways, and each launch asks Calling to
+/// ring exactly the other person. (Calling's side: tests/communications_owner_routes.rs
+/// `hub_launch_rings_the_callee_both_ways_between_directly_added_contacts`.)
+#[tokio::test]
+async fn a_directly_added_contact_can_be_called_both_ways() {
+    let h = Harness::new().await;
+    let adder = {
+        let account = h.account();
+        let profile = h.direct_profile(&account).await;
+        User { account, profile }
+    };
+    let added = {
+        let account = h.account();
+        let profile = h.direct_profile(&account).await;
+        User { account, profile }
+    };
+    let r = h
+        .state
+        .send_request(
+            &h.scope,
+            &adder.profile,
+            json!({"cfMeetId": h.public_id(&added.profile).await}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r["relationship"], "CONNECTED", "{r}");
+    for (from, to) in [(&adder, &added), (&added, &adder)] {
+        let contact = contact_id(&h, &from.profile, &to.profile).await;
+        let request = Uuid::new_v4().to_string();
+        let launched = h
+            .state
+            .call_contact(
+                &h.delegated(&from.account),
+                &from.profile,
+                contact,
+                json!({"kind":"VOICE","clientRequestId":request,"endpointId":endpoint(&h, from)}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(launched["contactId"], json!(contact));
+        let world = h.world.read().unwrap();
+        let (call, initiator, targets, kind) = world.launches.get(&request).unwrap();
+        assert_eq!(launched["callId"], json!(call));
+        assert_eq!(*initiator, from.profile.principal_id);
+        assert_eq!(targets, &vec![to.profile.principal_id]);
+        assert_eq!(kind, "VOICE");
+    }
+    h.close().await;
+}
+
 #[tokio::test]
 async fn calls_launch_through_policy_once_and_project_safe_timeline_cards() {
     let h = Harness::new().await;

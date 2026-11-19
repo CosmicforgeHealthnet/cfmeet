@@ -295,6 +295,15 @@ impl AppWorld {
         .await
     }
 
+    /// CF1 on, as in the service (the shared harness turns it off).
+    pub fn busy_on_another_call(mut self) -> Self {
+        let app = (*self.w.h.state.app)
+            .clone()
+            .with_busy_on_another_call(true);
+        self.w.h.state.app = std::sync::Arc::new(app);
+        self
+    }
+
     pub fn h(&self) -> &Harness {
         &self.w.h
     }

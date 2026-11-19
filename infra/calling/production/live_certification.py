@@ -56,21 +56,28 @@ READINESS_PROVES_DB = {
 
 # One credential-free GET per service that its authentication layer must reject before any
 # handler runs (401). Placeholder IDs cannot match data.
+#
+# Audit C6 / D2: Calling and the Developer Platform are not probed on an internal route. Each
+# such probe was recorded by the service as a failed internal call (missing_service_token,
+# Calling's GET /internal/v1/webhook-migration/inventory) and looked like a misconfigured job. Calling is probed on its customer API instead (customer-credential authentication, 401);
+# the Developer Platform has no listener without service authentication, so it is not probed
+# (None): its route tests prove the internal-service and gateway-caller layers.
 NIL = '00000000-0000-0000-0000-000000000000'
+NOT_PROBED = 'service-token-only listener: a credential-free probe would record a failed internal call'
 AUTH_PROBES = {
     'platform-access': '/internal/v1/scopes',
     'organizations': '/internal/v1/admin/event-delivery',
     'notifications': '/internal/v1/admin/routing',
     'notifications-2': '/internal/v1/admin/routing',
     'messaging': '/v1/messaging/sms-bridge/disclosure',
-    'calling': '/internal/v1/webhook-migration/inventory',
+    'calling': '/v1/calls',
     'communications': '/internal/v1/communications/metrics',
     'numbering': '/internal/v1/number-resources/' + NIL,
     'privacy-relay': '/internal/v1/contexts/' + NIL,
     'sms-gateway': '/internal/v1/sms-bridge/messages/' + NIL,
     'telephony': '/internal/v1/routes/availability',
     'meeting-service': '/api/v1/users/me',
-    'developer-platform': '/internal/v1/operator/activity',
+    'developer-platform': None,
     'api-gateway': '/v1/calls',
 }
 
@@ -184,6 +191,8 @@ def readiness(name, container):
 
 
 def authentication(name, container):
+    if name in AUTH_PROBES and AUTH_PROBES[name] is None:
+        return dict(result='N/A', reason=NOT_PROBED)
     path = AUTH_PROBES.get(name)
     if not path:
         return dict(result='N/A', reason='no listener (worker)')

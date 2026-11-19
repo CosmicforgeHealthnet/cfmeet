@@ -1228,6 +1228,20 @@ def create_args(name, image_id, env_path, sha):
     return args + [image_id] + s['command']
 
 
+# Settings every release makes sure a running service has (added only when absent: an
+# operator's own value is kept). C4: Calling's call counters on its separate metrics
+# listener, on the private network only (no published port); monitoring_stack scrapes it
+# (METRICS_ENV) once it is set, so cfmeet-prometheus has calling_* counters.
+RELEASE_ENV_DEFAULTS = {
+    'calling': {'CALLING_METRICS_ADDRESS': '0.0.0.0:9464'},
+}
+
+
+def release_env_defaults(name, env):
+    """The RELEASE_ENV_DEFAULTS `name`'s current env lacks (what the release adds)."""
+    return {k: v for k, v in RELEASE_ENV_DEFAULTS.get(name, {}).items() if not (env.get(k) or '').strip()}
+
+
 def deploy(name, image_id, sha, run_id, entry):
     s = SERVICES[name]
     notif_ops.rollback_floor(sys.modules[__name__], name, image_id)
@@ -1242,7 +1256,8 @@ def deploy(name, image_id, sha, run_id, entry):
             return
         if not c['State']['Running']:
             raise RuntimeError('Existing service container is not running; refusing to replace it: ' + container)
-        cfg = release.clone(c, container, image_id, {}, False)
+        added = release_env_defaults(name, p.env_of(c)) if name in RELEASE_ENV_DEFAULTS else {}
+        cfg = release.clone(c, container, image_id, added, False)
         labels = cfg.setdefault('Labels', {}) or {}
         cfg['Labels'] = labels
         # The cloned container labels would shadow the new image's OCI labels (Docker keeps

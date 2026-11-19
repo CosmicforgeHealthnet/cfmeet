@@ -221,7 +221,14 @@ class PerServiceChecks(unittest.TestCase):
             self.assertIn(name, lc.READINESS_PROVES_DB)
             if cr.SERVICES[name]['port']:
                 self.assertIn(name, lc.AUTH_PROBES)
-                self.assertTrue(lc.AUTH_PROBES[name].startswith('/'))
+                if lc.AUTH_PROBES[name] is not None:
+                    self.assertTrue(lc.AUTH_PROBES[name].startswith('/'))
+
+    def test_calling_and_developer_platform_are_not_probed_on_internal_routes(self):
+        # Audit C6 / D2: a credential-free probe of an internal route is recorded by the
+        # service as a failed internal call (missing_service_token).
+        self.assertEqual(lc.AUTH_PROBES['calling'], '/v1/calls')
+        self.assertIsNone(lc.AUTH_PROBES['developer-platform'])
 
     def test_upstream_owner_resolves_private_tls_and_container_routes(self):
         from urllib.parse import urlsplit
