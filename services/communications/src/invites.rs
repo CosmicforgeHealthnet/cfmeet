@@ -175,12 +175,12 @@ impl State {
         {
             return Err(Error::NotFound);
         }
+        // K7: the same person opening an invite they already claimed (still unrevoked and
+        // unexpired, checked above) sees the profile again whatever the idempotency key:
+        // the web makes a new key per page view, so a refresh must not read "not found".
+        // A claim never uses the invite twice.
         let old:Option<Value>=one(&txn,"SELECT jsonb_build_object('key',idempotency_key) doc FROM communication_invite_claims WHERE invite_id=$1 AND requester_profile_id=$2",vec![invite.id.into(),p.id.into()]).await?;
-        if let Some(v) = old {
-            if v["key"] != key.to_string() {
-                return Err(Error::NotFound);
-            }
-        } else {
+        if old.is_none() {
             if invite.uses >= invite.max_uses {
                 return Err(Error::NotFound);
             }

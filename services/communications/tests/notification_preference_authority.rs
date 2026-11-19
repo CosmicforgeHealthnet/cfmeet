@@ -117,6 +117,8 @@ async fn seeded(h: &Harness) -> (User, User, Uuid) {
         .await
         .unwrap();
     let conv = conversation(h, &[&a, &b]);
+    // "Mentions only" needs a MANAGED conversation (K11).
+    h.world.write().unwrap().managed.insert(conv);
     let until = (chrono::Utc::now() + chrono::Duration::hours(8)).to_rfc3339();
     h.state.put_conversation_preferences(&h.delegated(&a.account), &a.profile, conv,
         json!({"expectedVersion":0,"notifications":"MUTED","mutedUntil":until,"mediaAutoDownload":"NEVER"}), Uuid::new_v4()).await.unwrap();

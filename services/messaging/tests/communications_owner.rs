@@ -154,6 +154,57 @@ async fn access_reports_members_and_tells_non_members_nothing() {
         assert_eq!(r.status, StatusCode::OK, "{}", r.text);
         assert_eq!(r.json, json!({"schemaVersion": 1, "member": false}));
     }
+
+    // MS-1b (contacts audit K9): many references in one call, in request order.
+    let missing = Uuid::new_v4();
+    let elsewhere = Uuid::new_v4();
+    let r = hub(
+        &h,
+        &c,
+        alice.principal,
+        "conversations/messages/access",
+        json!({"principalId": alice.principal, "items": [
+            {"conversationId": cid(&conv), "messageId": mid},
+            {"conversationId": cid(&conv), "messageId": missing},
+            {"conversationId": elsewhere, "messageId": mid},
+        ]}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["schemaVersion"], 1);
+    conforms_internal("MessagesAccess", &r.json);
+    let items = r.json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0]["member"], true);
+    assert_eq!(items[0]["state"], "VISIBLE");
+    assert_eq!(items[0]["messageId"], mid);
+    assert_eq!(items[1]["state"], "NOT_FOUND");
+    assert_eq!(
+        items[2],
+        json!({"conversationId": elsewhere, "messageId": mid, "member": false})
+    );
+    assert!(!r.text.contains("ciphertext"));
+    let r = hub(
+        &h,
+        &c,
+        outsider,
+        "conversations/messages/access",
+        json!({"principalId": outsider, "items": [{"conversationId": cid(&conv), "messageId": mid}]}),
+    )
+    .await;
+    assert_eq!(r.json["items"][0]["member"], false, "{}", r.text);
+    let too_many: Vec<Value> = (0..51)
+        .map(|_| json!({"conversationId": cid(&conv), "messageId": mid}))
+        .collect();
+    let r = hub(
+        &h,
+        &c,
+        alice.principal,
+        "conversations/messages/access",
+        json!({"principalId": alice.principal, "items": too_many}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
 }
 
 #[tokio::test]

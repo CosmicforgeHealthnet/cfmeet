@@ -84,7 +84,7 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 256 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
@@ -95,7 +95,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 
 | `FIRST_PARTY_APP_BACKEND` | 16 | meetings | The CF Meet app's own backend-for-frontend to Messaging; customers use the Messaging API directly. |
 | `FIRST_PARTY_APP_CONSENT` | 6 | meetings | The CF Meet app's own consent and connected-apps screens for CF Meet Apps (OAuth authorize context / decision, the account's and an organization's connected apps; ADR 0064): account session only, first-party direct ingress, never a partner route. |
 | `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
-| `FIRST_PARTY_COMMUNICATIONS_HUB` | 74 | communications | The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential. |
+| `FIRST_PARTY_COMMUNICATIONS_HUB` | 76 | communications | The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential. |
 | `FIRST_PARTY_IN_MEETING_APPS` | 2 | meetings | The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress. |
 | `FIRST_PARTY_ORGANIZATIONS` | 49 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
@@ -103,7 +103,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 6 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **254** | | |
+| **Total** | **256** | | |
 
 #### `APP_CONTEXT_KEYS_DIRECT` (1)
 
@@ -213,7 +213,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 
 | GET | `/api/v2/notifications/unread-count` | `v2_notifications_unread_count` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/notifications/{notificationId}` | `v2_notifications_update` | `cfmeet.meeting-service.http-api` |
 
-#### `FIRST_PARTY_COMMUNICATIONS_HUB` (74)
+#### `FIRST_PARTY_COMMUNICATIONS_HUB` (76)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -264,6 +264,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 
 | POST | `/api/v2/communications/devices/{deviceId}/revoke` | `revokeCommunicationsDevice` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/devices/{deviceId}/sync-state` | `getCommunicationsDeviceSyncState` | `cfmeet.communications.http-api` |
 | PUT | `/api/v2/communications/devices/{deviceId}/sync-state` | `acknowledgeCommunicationsDeviceSync` | `cfmeet.communications.http-api` |
+| POST | `/api/v2/communications/discovery/email/resolve` | `resolveCommunicationsEmail` | `cfmeet.communications.http-api` |
 | POST | `/api/v2/communications/discovery/invites/resolve` | `resolveCommunicationsInvitation` | `cfmeet.communications.http-api` |
 | POST | `/api/v2/communications/discovery/public-id/resolve` | `resolveCommunicationsPublicId` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/events` | `listCommunicationsEvents` | `cfmeet.communications.http-api` |
@@ -272,6 +273,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 
 | POST | `/api/v2/communications/invites` | `createCommunicationsInvitation` | `cfmeet.communications.http-api` |
 | DELETE | `/api/v2/communications/invites/{inviteId}` | `revokeCommunicationsInvitation` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/me` | `getCommunicationsProfile` | `cfmeet.communications.http-api` |
+| PATCH | `/api/v2/communications/me` | `updateCommunicationsProfile` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/me/capabilities` | `getCommunicationsCapabilities` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/me/notification-delivery-status` | `getNotificationDeliveryStatus` | `cfmeet.communications.http-api` |
 | GET | `/api/v2/communications/me/notification-preferences` | `getNotificationPreferences` | `cfmeet.communications.http-api` |

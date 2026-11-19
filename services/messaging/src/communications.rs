@@ -170,6 +170,10 @@ pub fn routes() -> Router<AppState> {
             post(owner::conversation_access),
         )
         .route(
+            "/communications/conversations/messages/access",
+            post(owner::conversation_messages_access),
+        )
+        .route(
             "/communications/conversations/attachments",
             post(owner::conversation_attachments),
         )

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Communications API",
-    "version": "1.8.0",
-    "description": "Personal communications identity, contacts, privacy and (Sections 9-23) unified Chats, Calls, Contacts, Meetings and Settings facades. Existing Account authentication is authoritative. Calling, Messaging and Meetings remain the owners of calls, messages and meetings; these operations are authorized facades, per-user preferences and read models. No phone OTP or phone-number discovery. Internal policy, principal, lifecycle and operator APIs are private and excluded. 1.3.0 (final closure): phone verification and phone recovery report the canonical PROVIDER_BLOCKED (was DEFERRED), the label the account profile uses. 1.5.0: POST /api/v2/communications/calls/{callId}/participants adds connected personal contacts to a running call by contact id. 1.6.0: privacy groupInvitationPolicy (who may add the person to groups), independent of contactRequestPermissions. CommonGroup.title and MediaItem.fileName document that they are null for PRIVATE_E2EE conversations by design. 1.8.0: short CF Meet IDs (CF- plus 6 characters without look-alikes; long IDs no longer resolve; IDs are typed case-insensitively, with or without the hyphen) and direct contact (privacy contactApproval: AUTOMATIC, the default, connects anyone who has the person's CF Meet ID straight away, so chat and calls work at once; MANUAL keeps contact requests)."
+    "version": "1.9.0",
+    "description": "Personal communications identity, contacts, privacy and (Sections 9-23) unified Chats, Calls, Contacts, Meetings and Settings facades. Existing Account authentication is authoritative. Calling, Messaging and Meetings remain the owners of calls, messages and meetings; these operations are authorized facades, per-user preferences and read models. No phone OTP or phone-number discovery. Internal policy, principal, lifecycle and operator APIs are private and excluded. 1.3.0 (final closure): phone verification and phone recovery report the canonical PROVIDER_BLOCKED (was DEFERRED), the label the account profile uses. 1.5.0: POST /api/v2/communications/calls/{callId}/participants adds connected personal contacts to a running call by contact id. 1.6.0: privacy groupInvitationPolicy (who may add the person to groups), independent of contactRequestPermissions. CommonGroup.title and MediaItem.fileName document that they are null for PRIVATE_E2EE conversations by design. 1.8.0: short CF Meet IDs (CF- plus 6 characters without look-alikes; long IDs no longer resolve; IDs are typed case-insensitively, with or without the hyphen) and direct contact (privacy contactApproval: AUTOMATIC, the default, connects anyone who has the person's CF Meet ID straight away, so chat and calls work at once; MANUAL keeps contact requests). 1.9.0 (contacts audit): adding someone whose request to you is pending accepts it (both connected); the 24-hour wait after a decline or cancel applies only to the person whose request it was; a valid invite (link or QR) from the person lets a request through even with contactRequestPermissions NOBODY; re-opening an invite you already claimed shows the profile again; unblocking restores a contact that was connected before the block (unless either person removed it meanwhile); contact-list member counts and the member limit count connected contacts only; saved messages Messaging cannot check right now are marked TEMPORARILY_UNAVAILABLE instead of failing the list; MENTIONS is refused for a contact and for end-to-end encrypted conversations (mentions cannot be read there yet; ConversationPreferences.mentionsAvailable says where it works); POST /api/v2/communications/discovery/email/resolve finds people by verified email when they turned on privacy emailDiscoverable (off by default); PATCH /api/v2/communications/me edits the About line (Profile.about) that contacts see (Contact.about)."
   },
   "servers": [
     {
@@ -207,6 +207,177 @@
                     "message": "A required service, authoritative policy or database is unavailable. Nothing is authorized by fallback."
                   }
                 }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateCommunicationsProfile",
+        "summary": "Edit the About line contacts see",
+        "description": "Edit the short About line (at most 140 characters, no control characters; null or empty clears it). Only CONNECTED contacts see it (Contact.about); discovery never shows it. The display name and avatar stay owned by the Account profile.",
+        "tags": [
+          "Identity"
+        ],
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-capability": "personal-communications-foundation",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Owner-scoped UUID, bound to method, resource and canonical request for 24 hours. Reusing it for different input is rejected. Invitation secrets are returned only once; replay returns metadata.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versioned result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, version or missing UUID Idempotency-Key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Invalid request, version or missing UUID Idempotency-Key."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A registered, non-revoked account session is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "AUTHENTICATION_REQUIRED",
+                    "message": "A registered, non-revoked account session is required."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account or requested action is not permitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "PERMISSION_DENIED",
+                    "message": "The account or requested action is not permitted."
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource is unavailable to this account. Foreign-scope, hidden and blocked profiles use the same neutral error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "The resource is unavailable to this account. Foreign-scope, hidden and blocked profiles use the same neutral error."
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State, optimistic version or idempotency binding conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "VERSION_CONFLICT",
+                    "message": "State, optimistic version or idempotency binding conflicts."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The operation rate or contact cooldown is exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "The operation rate or contact cooldown is exceeded."
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service, authoritative policy or database is unavailable. Nothing is authorized by fallback.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "COMMUNICATIONS_UNAVAILABLE",
+                    "message": "A required service, authoritative policy or database is unavailable. Nothing is authorized by fallback."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfilePatch"
+              },
+              "example": {
+                "expectedVersion": 3,
+                "about": "Night shift this week"
               }
             }
           }
@@ -1469,6 +1640,178 @@
               },
               "example": {
                 "cfMeetId": "CF-AB7K3Q"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/communications/discovery/email/resolve": {
+      "post": {
+        "operationId": "resolveCommunicationsEmail",
+        "summary": "Find a person by their verified email address",
+        "description": "Find a person by their verified email address. Only people who turned on privacy emailDiscoverable (off by default) can be found; then exactly the CF Meet ID discovery rules apply (active account, discoverable ID, profile visibility, no block either way). Every miss is the same neutral 404 as an unknown address, and lookups are limited per person and hour (429). The address is matched by the Account, never stored or returned. Tenant, application, environment and acting account come from the existing authenticated CF Meet session. Internal principal IDs and private account details are never returned.",
+        "tags": [
+          "Discovery"
+        ],
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ],
+        "x-cfmeet-capability": "personal-communications-foundation",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Owner-scoped UUID, bound to method, resource and canonical request for 24 hours. Reusing it for different input is rejected. Invitation secrets are returned only once; replay returns metadata.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versioned result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request, version or missing UUID Idempotency-Key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Invalid request, version or missing UUID Idempotency-Key."
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "A registered, non-revoked account session is required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "AUTHENTICATION_REQUIRED",
+                    "message": "A registered, non-revoked account session is required."
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The account or requested action is not permitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "PERMISSION_DENIED",
+                    "message": "The account or requested action is not permitted."
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The resource is unavailable to this account. Foreign-scope, hidden and blocked profiles use the same neutral error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "NOT_FOUND",
+                    "message": "The resource is unavailable to this account. Foreign-scope, hidden and blocked profiles use the same neutral error."
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State, optimistic version or idempotency binding conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "VERSION_CONFLICT",
+                    "message": "State, optimistic version or idempotency binding conflicts."
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The operation rate or contact cooldown is exceeded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "RATE_LIMITED",
+                    "message": "The operation rate or contact cooldown is exceeded."
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "A required service, authoritative policy or database is unavailable. Nothing is authorized by fallback.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "schemaVersion": 1,
+                  "error": {
+                    "code": "COMMUNICATIONS_UNAVAILABLE",
+                    "message": "A required service, authoritative policy or database is unavailable. Nothing is authorized by fallback."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailResolve"
+              },
+              "example": {
+                "email": "alex@example.com"
               }
             }
           }
@@ -13294,6 +13637,18 @@
             ],
             "format": "uuid",
             "description": "The contact's calling principal id while the relationship is CONNECTED (null otherwise). Lets a client match a contact to a call participant, for example to hide people already in a call from \"Add people\"."
+          },
+          "about": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 140
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The contact's About line while the relationship is CONNECTED (null otherwise or when they wrote none)."
           }
         },
         "required": [
@@ -13490,7 +13845,8 @@
               "ALL",
               "MUTED",
               "MENTIONS"
-            ]
+            ],
+            "description": "MENTIONS is refused (400) while mentions cannot be read in private, end-to-end encrypted chats: it would behave like MUTED. Existing MENTIONS values read back unchanged."
           }
         },
         "required": [
@@ -13825,6 +14181,10 @@
           "disappearingMessages": {
             "type": "object",
             "additionalProperties": true
+          },
+          "mentionsAvailable": {
+            "type": "boolean",
+            "description": "Whether notifications MENTIONS can be chosen for this conversation (false for end-to-end encrypted conversations, where mentions cannot be read yet; an update to MENTIONS is then refused with 400)."
           }
         },
         "required": [
@@ -14171,6 +14531,21 @@
         "required": [
           "schemaVersion",
           "data"
+        ]
+      },
+      "EmailResolve": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 254,
+            "description": "An email address as typed (trimmed and compared case-insensitively)."
+          }
+        },
+        "required": [
+          "email"
         ]
       },
       "Error": {
@@ -15269,6 +15644,10 @@
               "MANUAL"
             ],
             "description": "Direct contact: AUTOMATIC (default) connects anyone who has this person's CF Meet ID as soon as they add them, so they can chat and call straight away (sharing the ID is the consent); MANUAL keeps contact requests. Blocks and contactRequestPermissions NOBODY still refuse. Optional on update: absent keeps the current value. Always present when read."
+          },
+          "emailDiscoverable": {
+            "type": "boolean",
+            "description": "Whether people who know this person's verified email address can find them with POST /discovery/email/resolve (then the same rules as finding them by CF Meet ID apply). Off by default (opt-in): a match would confirm the address belongs to a CF Meet user. Optional on update: absent keeps the current value. Always present when read."
           }
         },
         "required": [
@@ -15371,6 +15750,18 @@
           },
           "phoneVerification": {
             "$ref": "#/components/schemas/PhoneVerification"
+          },
+          "about": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 140
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A short About line (at most 140 characters, no control characters) the person wrote for their contacts."
           }
         },
         "required": [
@@ -15384,6 +15775,32 @@
           "createdAt",
           "updatedAt",
           "phoneVerification"
+        ]
+      },
+      "ProfilePatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "about": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 140
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The new About line; null or an empty string clears it. At most 140 characters, no control characters."
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "about"
         ]
       },
       "PublicId": {
@@ -15677,8 +16094,10 @@
               "EXPIRED",
               "HIDDEN_FOR_ME",
               "NOT_FOUND",
-              "NOT_A_MEMBER"
-            ]
+              "NOT_A_MEMBER",
+              "TEMPORARILY_UNAVAILABLE"
+            ],
+            "description": "Why the message cannot be shown. TEMPORARILY_UNAVAILABLE: Messaging could not be asked right now (try again later); the rest of the list is still returned."
           }
         },
         "required": [

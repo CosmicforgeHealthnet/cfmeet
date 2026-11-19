@@ -13,6 +13,8 @@ export interface CommunicationsProfile {
   cfMeetId: string;
   displayName: string;
   avatarReference: string | null;
+  /** 1.9.0: the short About line contacts see (absent from an older Hub). */
+  about?: string | null;
   activationState: ActivationState;
   version: number;
   createdAt: string;
@@ -115,6 +117,8 @@ export interface Contact {
   favorite: boolean;
   notifications: ContactNotifications;
   version: number;
+  /** 1.9.0: their About line while connected (null otherwise; absent from an older Hub). */
+  about?: string | null;
 }
 
 export interface Page<T> {
@@ -147,6 +151,8 @@ export interface Privacy {
   groupInvitationPolicy?: "CONNECTIONS" | "NOBODY";
   /** Direct contact: AUTOMATIC lets anyone with the CF Meet ID add, chat and call straight away. */
   contactApproval?: "AUTOMATIC" | "MANUAL";
+  /** 1.9.0: people who know this person's verified email can find them (opt-in, off by default). */
+  emailDiscoverable?: boolean;
 }
 
 export interface PrivacyView {

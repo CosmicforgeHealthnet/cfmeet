@@ -389,6 +389,13 @@ impl State {
         Ok(result)
     }
 }
+/// K11: whether "Mentions only" can be chosen for private chats (a contact's level, and
+/// the level of an end-to-end encrypted conversation). Mentions cannot be read from
+/// encrypted messages yet, so the level would silently behave like MUTED; it is refused
+/// (and not offered by the clients, which read `mentionsAvailable`) until encrypted
+/// mentions exist. Flip this, and pass the mention signal to the notification checks, to
+/// offer it again.
+pub const MENTIONS_IN_PRIVATE_CHATS: bool = false;
 pub fn decide(action: Action, connected: bool, p: &Privacy) -> bool {
     match action {
         Action::DirectCall => connected && p.incoming_call_policy == Audience::Connections,

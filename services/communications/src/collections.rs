@@ -3,7 +3,6 @@
 use crate::{
     error::{Error, Result},
     model::*,
-    relationships::uuid_field,
     store::{execute, one, rows},
     State,
 };
@@ -14,6 +13,9 @@ use uuid::Uuid;
 pub const MAX_FAVORITES: i64 = 200;
 pub const MAX_LISTS: i64 = 50;
 pub const MAX_LIST_MEMBERS: i64 = 500;
+/// K10: a list member row `m` whose contact is still CONNECTED, the same rule as the
+/// member list (counts and the member limit use it).
+const CONNECTED_MEMBER: &str = "EXISTS(SELECT 1 FROM communication_contact_aliases a JOIN communication_connections c ON c.id=a.connection_id WHERE a.id=m.contact_id AND c.state='CONNECTED')";
 
 fn valid_name(name: &str) -> bool {
     let n = name.trim();
@@ -36,14 +38,16 @@ impl State {
 
     // ---- C07–C09 favorites ----
     pub async fn list_favorites(&self, p: &Profile) -> Result<Value> {
-        let ids:Vec<Value>=rows(&self.store.db,"SELECT jsonb_build_object('id',a.id) doc FROM communication_contact_aliases a JOIN communication_connections c ON c.id=a.connection_id WHERE a.owner_profile_id=$1 AND a.favorite AND c.state='CONNECTED' ORDER BY a.favorite_rank NULLS LAST,a.id LIMIT $2",vec![p.id.into(),MAX_FAVORITES.into()]).await?;
-        let mut data = Vec::new();
-        for v in ids {
-            let mut view = self.contact_view(p, uuid_field(&v, "id")?).await?;
-            let rank:Value=one(&self.store.db,"SELECT jsonb_build_object('rank',favorite_rank) doc FROM communication_contact_aliases WHERE id=$1",vec![uuid_field(&v,"id")?.into()]).await?.ok_or(Error::Unavailable)?;
-            view["favoriteRank"] = rank["rank"].clone();
-            data.push(view);
-        }
+        // K1: the whole list in one joined query.
+        let data = self
+            .contact_views(
+                p,
+                "a.favorite AND c.state='CONNECTED'",
+                "ORDER BY a.favorite_rank NULLS LAST,a.id LIMIT $5",
+                vec![MAX_FAVORITES.into()],
+                true,
+            )
+            .await?;
         Ok(json!({"schemaVersion":1,"data":data,"limit":MAX_FAVORITES}))
     }
     pub async fn set_favorite(
@@ -109,7 +113,7 @@ impl State {
 
     // ---- C10–C16 contact lists ----
     pub async fn list_lists(&self, p: &Profile) -> Result<Value> {
-        let lists:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(l)||jsonb_build_object('members',(SELECT count(*) FROM communication_contact_list_members m WHERE m.list_id=l.id)) doc FROM communication_contact_lists l WHERE owner_profile_id=$1 ORDER BY position,id LIMIT $2",vec![p.id.into(),MAX_LISTS.into()]).await?;
+        let lists:Vec<Value>=rows(&self.store.db,&format!("SELECT to_jsonb(l)||jsonb_build_object('members',(SELECT count(*) FROM communication_contact_list_members m WHERE m.list_id=l.id AND {CONNECTED_MEMBER})) doc FROM communication_contact_lists l WHERE owner_profile_id=$1 ORDER BY position,id LIMIT $2"),vec![p.id.into(),MAX_LISTS.into()]).await?;
         let data: Vec<Value> = lists
             .iter()
             .map(|l| list_view(l, l["members"].as_i64().unwrap_or(0)))
@@ -125,8 +129,11 @@ impl State {
     ) -> Result<Value> {
         one(db,&format!("SELECT to_jsonb(l) doc FROM communication_contact_lists l WHERE id=$1 AND owner_profile_id=$2{}",if lock {" FOR UPDATE"} else {""}),vec![list.into(),p.id.into()]).await?.ok_or(Error::NotFound)
     }
+    /// K10: members whose contact is still CONNECTED (what the member list shows);
+    /// removed or blocked people keep their row but are not counted, nor held against
+    /// the member limit.
     async fn member_count<C: sea_orm::ConnectionTrait>(&self, db: &C, list: Uuid) -> Result<i64> {
-        let v:Value=one(db,"SELECT jsonb_build_object('n',count(*)) doc FROM communication_contact_list_members WHERE list_id=$1",vec![list.into()]).await?.ok_or(Error::Unavailable)?;
+        let v:Value=one(db,&format!("SELECT jsonb_build_object('n',count(*)) doc FROM communication_contact_list_members m WHERE m.list_id=$1 AND {CONNECTED_MEMBER}"),vec![list.into()]).await?.ok_or(Error::Unavailable)?;
         v["n"].as_i64().ok_or(Error::Unavailable)
     }
     pub async fn create_list(&self, p: &Profile, body: Value, key: Uuid) -> Result<Value> {
@@ -177,15 +184,19 @@ impl State {
         cursor: Uuid,
     ) -> Result<Value> {
         let l = self.owned_list(&self.store.db, p, list, false).await?;
-        let members:Vec<Value>=rows(&self.store.db,"SELECT jsonb_build_object('id',m.contact_id) doc FROM communication_contact_list_members m JOIN communication_contact_aliases a ON a.id=m.contact_id JOIN communication_connections c ON c.id=a.connection_id WHERE m.list_id=$1 AND m.contact_id>$2 AND c.state='CONNECTED' ORDER BY m.contact_id LIMIT $3",vec![list.into(),cursor.into(),(limit+1).into()]).await?;
-        let more = members.len() > limit as usize;
-        let mut data = Vec::new();
-        let mut last = None;
-        for m in members.into_iter().take(limit as usize) {
-            let id = uuid_field(&m, "id")?;
-            data.push(self.contact_view(p, id).await?);
-            last = Some(id);
-        }
+        // K1: the page in one joined query.
+        let mut data = self
+            .contact_views(
+                p,
+                "a.id IN (SELECT m.contact_id FROM communication_contact_list_members m WHERE m.list_id=$5) AND a.id>$6 AND c.state='CONNECTED'",
+                "ORDER BY a.id LIMIT $7",
+                vec![list.into(), cursor.into(), (limit + 1).into()],
+                false,
+            )
+            .await?;
+        let more = data.len() > limit as usize;
+        data.truncate(limit as usize);
+        let last = data.last().map(|v| v["contactId"].clone());
         let mut view = list_view(&l, self.member_count(&self.store.db, list).await?);
         view["members"] = json!(data);
         view["nextCursor"] = json!(if more { last } else { None });

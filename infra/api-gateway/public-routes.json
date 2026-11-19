@@ -4416,6 +4416,13 @@
     },
     {
       "domain": "communications",
+      "method": "PATCH",
+      "path": "/api/v2/communications/me",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
+    },
+    {
+      "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/activation",
       "class": "EXCLUDED",
@@ -4467,6 +4474,13 @@
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/discovery/public-id/resolve",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/discovery/email/resolve",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },

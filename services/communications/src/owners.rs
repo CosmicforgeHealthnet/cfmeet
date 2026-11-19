@@ -115,6 +115,43 @@ pub struct Conversation {
     pub raw: Value,
 }
 impl State {
+    /// K9 (MS-1b): the access view of up to 50 messages in one Messaging call, keyed by
+    /// (conversation, message): `None` for a conversation the profile is not an ACTIVE
+    /// member of, otherwise the message state MS-1 reports. A reference Messaging did not
+    /// answer is absent. `NotFound` means an older Messaging image without the route.
+    pub async fn messages_access(
+        &self,
+        scope: &DelegatedPlatformContext,
+        p: &Profile,
+        items: &[(Uuid, Uuid)],
+    ) -> Result<std::collections::HashMap<(Uuid, Uuid), Option<String>>> {
+        let refs: Vec<Value> = items
+            .iter()
+            .map(|(c, m)| json!({"conversationId":c,"messageId":m}))
+            .collect();
+        let v = self
+            .messaging(scope)?
+            .call(
+                "/internal/v1/communications/conversations/messages/access",
+                &json!({"principalId":p.principal_id,"items":refs}),
+            )
+            .await?;
+        let answered = v["items"].as_array().ok_or(Error::Unavailable)?;
+        let mut out = std::collections::HashMap::new();
+        for a in answered {
+            let id = |k: &str| a[k].as_str().and_then(|s| Uuid::parse_str(s).ok());
+            let (Some(c), Some(m)) = (id("conversationId"), id("messageId")) else {
+                return Err(Error::Unavailable);
+            };
+            let state = if a["member"] == true {
+                Some(a["state"].as_str().unwrap_or("NOT_FOUND").to_owned())
+            } else {
+                None
+            };
+            out.insert((c, m), state);
+        }
+        Ok(out)
+    }
     /// Fails with `NotFound` unless the profile is an ACTIVE member right now.
     pub async fn conversation(
         &self,
