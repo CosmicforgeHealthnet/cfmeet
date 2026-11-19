@@ -14,7 +14,7 @@ use sea_orm_migration::prelude::*;
 pub struct Migration;
 
 const UP: &str = r#"
-CREATE TABLE IF NOT EXISTS messaging_mls_group_infos (
+CREATE TABLE messaging_mls_group_infos (
     conversation_id      UUID         NOT NULL,
     mls_epoch            BIGINT       NOT NULL,
     group_info           BYTEA        NOT NULL,
