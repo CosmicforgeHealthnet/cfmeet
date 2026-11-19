@@ -224,10 +224,12 @@ pub async fn member_accounts<C: ConnectionTrait>(
 }
 
 /// The Platform Access client profile of `row` (contract §2: `{name, redirectUris,
-/// userScopes, botScopes, distribution, status, testAccountIds}`, plus, for PRIVATE apps,
-/// `allowedAccountIds`: the workspace members' CF Meet accounts). Organizations owned by a
-/// member (`allowedOrganizationIds`) are not known to the Developer Console and are left
-/// empty.
+/// userScopes, botScopes, distribution, status, testAccountIds}`, the consent-page and
+/// in-meeting fields `developerName` (the workspace display name), `logoUrl` and
+/// `meetingSurface: {url, origins}` (omitted when the live manifest has none), and, for
+/// PRIVATE apps, `allowedAccountIds`: the workspace members' CF Meet accounts).
+/// Organizations owned by a member (`allowedOrganizationIds`) are not known to the
+/// Developer Console and are left out.
 pub async fn client_profile<C: ConnectionTrait>(db: &C, row: &AppRow) -> Result<Value, ApiError> {
     let live = manifest_of(db, row.app_id, row.live_version()).await?;
     let mut body = json!({
@@ -239,6 +241,22 @@ pub async fn client_profile<C: ConnectionTrait>(db: &C, row: &AppRow) -> Result<
         "status": row.client_status(),
         "testAccountIds": row.test_account_ids,
     });
+    let developer: Option<String> = db
+        .query_one(stmt(
+            "SELECT display_name FROM devplat_organizations WHERE tenant_id = $1",
+            vec![row.tenant_id.into()],
+        ))
+        .await?
+        .map(|r| r.try_get("", "display_name"))
+        .transpose()?;
+    if let Some(d) = developer {
+        body["developerName"] = json!(d);
+    }
+    for key in ["logoUrl", "meetingSurface"] {
+        if !live[key].is_null() {
+            body[key] = live[key].clone();
+        }
+    }
     if live["distribution"] == "PRIVATE" {
         body["allowedAccountIds"] = json!(member_accounts(db, row.tenant_id).await?);
     }

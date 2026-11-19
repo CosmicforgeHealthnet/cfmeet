@@ -13,7 +13,10 @@
     "FIRST_PARTY_ORGANIZATIONS": "The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations).",
     "FIRST_PARTY_SESSION_DEVICES": "First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens.",
     "FIRST_PARTY_APP_NOTIFICATIONS": "The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API.",
-    "FIRST_PARTY_COMMUNICATIONS_HUB": "The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential."
+    "FIRST_PARTY_COMMUNICATIONS_HUB": "The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential.",
+    "FIRST_PARTY_APP_CONSENT": "The CF Meet app's own consent and connected-apps screens for CF Meet Apps (OAuth authorize context / decision, the account's and an organization's connected apps; ADR 0064): account session only, first-party direct ingress, never a partner route.",
+    "FIRST_PARTY_IN_MEETING_APPS": "The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress.",
+    "APP_CONTEXT_KEYS_DIRECT": "Public JWKS that verifies in-meeting app-context tokens (ADR 0065): anonymous, served directly by the Meeting Service at /api/v2/app-context-keys; apps fetch it without a credential."
   },
   "operations": [
     {
@@ -5067,6 +5070,69 @@
       "method": "GET",
       "path": "/v1/app-directory/{appId}",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/app-context-keys",
+      "class": "EXCLUDED",
+      "reason": "APP_CONTEXT_KEYS_DIRECT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/apps",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_IN_MEETING_APPS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/apps/{appId}/context",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_IN_MEETING_APPS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/apps",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/me/apps/{grantId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/oauth/authorize/approve",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/oauth/authorize/context",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/apps",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/organizations/{id}/apps/{grantId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
     }
   ]
 }

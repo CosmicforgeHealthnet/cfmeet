@@ -468,7 +468,15 @@ async fn registration_keeps_immutable_versions_syncs_platform_access_and_shows_t
     // PRIVATE: the workspace members' CF Meet accounts are the allow list.
     let allowed = synced["allowedAccountIds"].as_array().unwrap();
     assert!(allowed.contains(&json!(owner_id)) && allowed.contains(&json!(admin_id)));
-    assert!(synced.get("developerName").is_none());
+    // The consent-page and in-meeting fields come from the live manifest and workspace.
+    assert_eq!(synced["developerName"], "Calendar Co");
+    assert_eq!(synced["logoUrl"], "https://calendar.example.com/logo.png");
+    assert_eq!(
+        synced["meetingSurface"],
+        json!({ "url": "https://panel.calendar.example.com/meet",
+                "origins": ["https://panel.calendar.example.com"] })
+    );
+    assert!(synced.get("allowedOrganizationIds").is_none());
     // The same manifest again adds no version.
     let r = c
         .req(As::User(&admin), Method::PUT, &base, Some(draft.clone()))
