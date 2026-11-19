@@ -429,6 +429,9 @@ impl AppCallService {
             .await?;
         self.enterprise_transfer_step_in(txn, call, None, "TRANSFER_FAILED")
             .await?;
+        // C14: an attended transfer that failed goes back to consulting.
+        self.consultation_transfer_failed_in(txn, call.id, transfer.id)
+            .await?;
         for invitation in self.calls.live_invitations(txn, call, None).await? {
             if invitation.transfer_id == Some(transfer.id) {
                 self.calls
@@ -669,6 +672,8 @@ impl AppCallService {
                     .await?;
             }
         }
+        let transfer_id = transfer.id;
+        let held_before = transfer.pre_transfer_state == CallState::Held;
         self.calls
             .transfer_completed_in(&txn, &cmd, &call, transfer)
             .await?;
@@ -709,6 +714,20 @@ impl AppCallService {
         self.publish(pending).await;
         // Provider enforcement of the retired party's removal.
         self.enforce_removals(&call, retired).await;
+        // A transfer that started from HELD ran under the hold mask: the now CONNECTED
+        // Call's parties get their authorized permissions back at the provider (best
+        // effort; reconciliation repairs).
+        if held_before {
+            if let Err(failure) = self
+                .apply_effective_permissions(&call, CallState::Connected)
+                .await
+            {
+                tracing::warn!(call_id = %call.id, %failure, "permissions after a held transfer not applied");
+            }
+        }
+        // C14: an attended transfer completed: its consultation Call ends.
+        self.consultation_transfer_completed(call.id, transfer_id)
+            .await;
         tracing::info!(call_id = %call.id, "application transfer completed");
         // CAL-001: the retired transferor never counts; the target and the remaining
         // party (both verified connected) keep the Call — evaluated for completeness.

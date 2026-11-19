@@ -89,8 +89,7 @@ async function startChat(page, contactLabel) {
   await page.click("[data-testid=new-conversation]");
   const box = page.locator(`[data-testid=colleague][data-name="${contactLabel}"]`);
   await box.waitFor({ timeout: T, state: "attached" });
-  await page.locator("label", { has: box }).click();
-  await page.click("[data-testid=create-conversation]");
+  await box.click();
   const dialog = page.locator("[data-testid=new-conversation-form]");
   try {
     await dialog.waitFor({ state: "detached", timeout: T });

@@ -389,6 +389,45 @@ Fix: PR #103. Both replicas join a dedicated non-internal bridge, `cfmeet-notifi
 | `AUTH_PASSWORD_RESET`, `SECURITY_PASSWORD_CHANGED` | `LEGACY_ONLY` | — | no producer since PR #97 |
 | preferences | Hub authority `SERVICE` | — | Notification Service (U6/U7) |
 
+### 4.5 Account notices through the service (owner decision "A", 2026-11-18)
+
+**What moved.** The five account emails Meeting still sent only through its legacy ledger:
+- welcome;
+- new sign-in alert;
+- email-change attempt;
+- email changed, to the old address (with undo link) and to the new address;
+- the support-assisted variant.
+
+They now go through the CRITICAL lane under the new fence category `ACCOUNT_NOTICES` (PR #109, catalogue events #35–#38).
+
+**Privacy (option A).** The undo token, the masked new address and the sign-in request details travel only in the HPKE-sealed part. The contract refuses them in clear data, and they are never stored readable. Meeting's own email is the sealed fallback.
+
+**Release problems found and fixed on the way**
+
+| Problem | Fix |
+|---|---|
+| `real-services` red on main since #107/#108: a certification test still asserted that Hub contacts carry no principal | PR #111 aligns the test with contract 1.7.0 |
+| `lettre` 0.11.23 hit by four new advisories (RUSTSEC-2026-0561…0564) | 0.11.24 in Meeting and the Notification Service (PR #109) |
+| Release 44349243334 stopped at `communications-migration`. The S9 backfill updated existing privacy rows without advancing their version, and the version guard aborted it (fresh test databases have no rows) | PR #113 suspends the guard for that one statement inside the migration transaction, leaving versions untouched. New test upgrades a database that holds data. Failed migrations now report a scrubbed reason. |
+| Certify 44383311893 `NOT_CERTIFIED`: the Developer Platform trust bundle lacked Calling `developer-usage.record`, which b7eb510 (P6) added to the grants | `activate-developer-webhooks` re-run 44384654616 |
+
+**Production record**
+
+| Step | Run |
+|---|---|
+| Release `b5cfff6` | 44377114507 |
+| Certify | 44385990238, `CERTIFIED_READ_ONLY` |
+| `ACCOUNT_NOTICES` EMAIL `ACTIVE` | 44387129349 |
+| Fence `SHADOW` | 44387947134 |
+| Fence `FENCED_NEW` | 44388333817 |
+| OTP acceptance | 44389225488: every check PASS, code `NEW` |
+
+`diagnose` 44389784759:
+- **Welcome email:** the acceptance account's welcome email was decided `NEW`, leased once, completed, and **DELIVERED** at 20:18:49. No legacy email was written for `ACCOUNT_NOTICES` since the change, so there was no duplicate.
+- **Same run:** the sign-in code and the cleanup step-up code were delivered through the service.
+- **Earlier the same day:** one device-linked security notice was DELIVERED through the service (ledger category `NOTIFICATION`, 10:01).
+- **Sign-in email totals:** 7 DELIVERED, 6 DELAYED and 6 BOUNCED. A bounce is the receiving server refusing the address (mistyped or nonexistent addresses), not a sending failure.
+
 ---
 
 ## 5. What is not done, and why
@@ -399,7 +438,6 @@ Fix: PR #103. Both replicas join a dedicated non-internal bridge, `cfmeet-notifi
 | FCM (Android push) | adapter built, not configured | an FCM service-account JSON for the Firebase project of the Android app |
 | Web inbox / preference UI (FE2, FE3), web call push in the browser (FE4, FE5) | client work, not backend | a web / mobile release; the backend APIs (U1–U9 relay) are live |
 | N13 alert delivery to a person | rules built and tested | Prometheus / Alertmanager with receivers (owner decision D-9) |
-| Non-critical account notices (`new-sign-in`, `email-in-use`, `email-changed`) | still sent by Meeting's legacy path | a fence category of their own, and a decision on the masked address and undo token they carry |
 | Multi-envelope events | an audience over 40 (message wake-ups) or one envelope (Meeting) stays `OLD` (`RECIPIENT_LIMIT`), so the legacy path still reaches everyone | a contract decision on splitting one event across envelopes |
 | Call push cancel | not built | a catalogue event for "call answered elsewhere / ended" |
 
@@ -435,6 +473,6 @@ The OTP acceptance 44227457993 passed every check with the code decided `NEW`. T
 **Qualified, and not claimed beyond this:**
 - **Web Push is live but has no delivery evidence.** Production has no browser push registration to deliver to.
 - **APNs and FCM are not configured.** Their credentials do not exist (§5).
-- **No delivery is evidenced yet for meeting invitations, organization invitations, meeting notifications or the device-linked notice.** They run on the service, but no real one has occurred since the re-promotion. Sign-in and step-up codes are evidenced.
+- **No delivery is evidenced yet for meeting invitations, organization invitations or meeting notifications.** They run on the service, but no real one has occurred since the re-promotion. Sign-in codes, step-up codes, the device-linked notice and the welcome email are evidenced (§4.4, §4.5).
 - **No time-based acceptance window has passed (§6).** `OPERATIONALLY_ACCEPTED` and `LEGACY_RETIRED` are not claimed.
 

@@ -281,8 +281,9 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// The public API Gateway: `calling-request.forward` only (Part VI §51).
     pub api_gateway: Arc<ServiceTokenSigner>,
-    /// The Meeting Service: `calling-request.act-for-organization` only (Blueprint
-    /// Section 12 follow-up, CAL-007; accepted only while the Calling flag is on).
+    /// The Meeting Service: `calling-request.act-for-organization` (Blueprint Section 12
+    /// follow-up, CAL-007; accepted only while the Calling flag is on) and the gap audit
+    /// G3 organization member permissions `calling-organization-member.act` / `.offboard`.
     pub meeting_service: Arc<ServiceTokenSigner>,
     /// The Developer Platform: the webhook migration export and rollback only
     /// (`webhook-migration.export`, `webhook-migration.import`; Part VI §53).
@@ -391,7 +392,11 @@ pub fn service_auth_fixture_targeting(
                 (
                     cf_service_auth::services::MEETING_SERVICE,
                     vec![meeting_service_key.public_jwk()],
-                    &["calling-request.act-for-organization"],
+                    &[
+                        "calling-request.act-for-organization",
+                        "calling-organization-member.act",
+                        "calling-organization-member.offboard",
+                    ],
                 ),
                 (
                     cf_service_auth::services::DEVELOPER_PLATFORM,
@@ -563,6 +568,7 @@ pub struct RecordingPush {
     sent: std::sync::Mutex<Vec<(uuid::Uuid, Value)>>,
     offers: std::sync::Mutex<Vec<calling::signaling::PushOffer>>,
     partner_offers: std::sync::Mutex<Vec<calling::signaling::PartnerPushOffer>>,
+    cancels: std::sync::Mutex<Vec<calling::signaling::PushCancel>>,
 }
 
 impl RecordingPush {
@@ -579,6 +585,11 @@ impl RecordingPush {
     pub fn partner_offers(&self) -> Vec<calling::signaling::PartnerPushOffer> {
         self.partner_offers.lock().unwrap().clone()
     }
+
+    /// Every ring cancellation Calling dispatched (gap audit C1).
+    pub fn cancels(&self) -> Vec<calling::signaling::PushCancel> {
+        self.cancels.lock().unwrap().clone()
+    }
 }
 
 #[async_trait::async_trait]
@@ -594,6 +605,10 @@ impl calling::signaling::PushDispatcher for RecordingPush {
 
     async fn dispatch_partner_offer(&self, offer: calling::signaling::PartnerPushOffer) {
         self.partner_offers.lock().unwrap().push(offer);
+    }
+
+    async fn dispatch_cancel(&self, cancel: calling::signaling::PushCancel) {
+        self.cancels.lock().unwrap().push(cancel);
     }
 }
 

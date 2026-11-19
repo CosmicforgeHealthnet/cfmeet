@@ -20,6 +20,7 @@ pub mod invitations;
 pub mod members;
 pub mod notifications;
 pub mod organization_calling;
+pub mod organization_member_calling;
 pub mod organization_messaging;
 pub mod organizations;
 pub mod participants;

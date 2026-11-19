@@ -23,6 +23,7 @@
 //! | `CALLING_INTERNAL_BASE_URL` | no | Calling's internal API (normalized events, inbound offers) |
 //! | `PRIVACY_RELAY_INTERNAL_BASE_URL` | no | Privacy Relay's internal API (contact resolution, inbound mapping) |
 //! | `NUMBERING_INTERNAL_BASE_URL` | no | Numbering's internal API (DCN inbound resolution, caller-identity grants, voice route readiness); unset: every DCN call fails closed |
+//! | `TELEPHONY_NUMBERING_USAGE_REPORTS_ENABLED` / `TELEPHONY_NUMBERING_RISK_SIGNALS_ENABLED` | no | gap C10: DCN usage / risk reports to Numbering (default `false`; thresholds in `src/numbering_reports.rs`) |
 //!
 //! Disabling Telephony or public calling never affects application RTC (Calling serves it
 //! without Telephony). Without `PRIVACY_RELAY_INTERNAL_BASE_URL` every protected

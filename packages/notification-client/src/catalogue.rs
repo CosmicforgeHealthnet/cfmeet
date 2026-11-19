@@ -1,7 +1,8 @@
-//! The closed event catalogue (Document 4 §5.2): 38 inbound types (30 core, the optional
+//! The closed event catalogue (Document 4 §5.2): 40 inbound types (30 core, the optional
 //! `operator.alert.fired` approved under D-15, since contract 1.2.0 the three
-//! passwordless account codes #32–#34 of PR #97, and since 1.3.0 the four account notices
-//! #35–#38: welcome, new sign-in, email-in-use and email-changed) and the control event
+//! passwordless account codes #32–#34 of PR #97, since 1.3.0 the four account notices
+//! #35–#38: welcome, new sign-in, email-in-use and email-changed, and since 1.4.0 the
+//! organization lifecycle notices #39–#40: archived and reactivated) and the control event
 //! `notifications.cancel`. It mirrors `x-cfmeet-catalogue` in the contract
 //! `packages/contracts/notifications/events/v1.schema.json`; `tests/contract.rs` fails if
 //! the two ever differ.
@@ -427,7 +428,7 @@ const CONNECTION: &[&str] = &["actorRef", "connectionId"];
 const CONFERENCE: &[&str] = &["conferenceId", "startsAt"];
 const CREDENTIAL: &[&str] = &["applicationId", "credentialId", "expiresAt"];
 
-/// The catalogue, in contract order (#1–#38, then the control event).
+/// The catalogue, in contract order (#1–#40, then the control event).
 pub const CATALOGUE: &[EventSpec] = &[
     EventSpec {
         optional_data: &["role"],
@@ -888,6 +889,27 @@ pub const CATALOGUE: &[EventSpec] = &[
             &["changedAt", "side"],
         )
     },
+    // Gap audit G19 (contract 1.4.0): organization lifecycle notices, mirroring
+    // #10 organizations.organization.suspended. Organizations publishes them only with
+    // ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED (default off).
+    e(
+        39,
+        "organizations.organization.archived",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION",
+        &["organizationId"],
+    ),
+    e(
+        40,
+        "organizations.organization.reactivated",
+        ORG,
+        Normal,
+        "ORGANIZATION_UPDATES",
+        "ORGANIZATION",
+        &["organizationId"],
+    ),
     EventSpec {
         number: 0,
         event_type: CONTROL_EVENT,

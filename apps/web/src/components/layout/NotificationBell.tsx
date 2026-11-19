@@ -7,6 +7,7 @@ import { Popover } from "radix-ui";
 import { notificationsService } from "@/services/v2/notifications.service";
 import type { NotificationItem } from "@/types/generated/notifications";
 import { cn } from "@/lib/utils";
+import { getErrorMessage } from "@/utils/error";
 
 const KEY = ["notifications"] as const;
 const COUNT_KEY = ["notifications", "unread-count"] as const;
@@ -45,8 +46,6 @@ export default function NotificationBell() {
   const refresh = () => { void client.invalidateQueries({ queryKey: KEY }); void client.invalidateQueries({ queryKey: COUNT_KEY }); };
   const readAll = useMutation({ mutationFn: () => notificationsService.markRead(), onSuccess: refresh });
   const dismiss = useMutation({ mutationFn: (id: string) => notificationsService.dismiss([id]), onSuccess: refresh });
-  // The server may not offer notifications here: no bell rather than a broken one.
-  if (count.isError) return null;
   const unread = count.data?.unreadCount ?? 0;
   const items = (list.data?.items ?? []).filter((n) => !n.dismissedAt);
 
@@ -73,6 +72,7 @@ export default function NotificationBell() {
           </div>
           <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
             {list.isFetching && !list.data ? [0, 1, 2].map((i) => <li key={i} className="mx-4 my-3 h-12 animate-pulse rounded-xl bg-muted" />) : null}
+            {list.isError ? <li role="alert" className="px-6 py-10 text-center text-sm text-muted-foreground">Notifications couldn&apos;t load ({getErrorMessage(list.error)}). <button type="button" className="font-semibold text-primary underline" onClick={() => void list.refetch()}>Try again</button></li> : null}
             {list.data && items.length === 0 ? <li className="px-6 py-10 text-center text-sm text-muted-foreground">You&apos;re all caught up.</li> : null}
             {items.map((n) => (
               <li key={n.id} className={cn("group relative border-b border-border last:border-b-0", !n.readAt && "bg-primary/5")}>

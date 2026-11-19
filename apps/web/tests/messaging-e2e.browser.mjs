@@ -123,12 +123,11 @@ async function phase(page, p) {
 const violations = (page) => page.evaluate(() => window.__violations);
 const connection = (page, sel) => page.locator(`[data-testid=connection-state]${sel}`).waitFor({ timeout: T, state: "attached" });
 
-/** Picks a person in the new-chat dialog: the checkbox is visually hidden inside its row. */
+/** New chat: tapping a person starts the chat with them (WhatsApp-style). */
 async function pick(page, name) {
-  const box = page.locator(`[data-testid=colleague][data-name="${name}"]`);
-  await box.waitFor({ timeout: T, state: "attached" });
-  await page.locator("label", { has: box }).click();
-  assert.ok(await box.isChecked(), `${name} selected`);
+  const row = page.locator(`[data-testid=colleague][data-name="${name}"]`);
+  await row.waitFor({ timeout: T, state: "attached" });
+  await row.click();
 }
 
 /** Private messaging sets itself up after sign-in: no activation control exists. */
@@ -221,7 +220,6 @@ async function journey() {
   // ---- 2. Alice starts an end-to-end encrypted conversation with Bob in the UI.
   await alice.page.click("[data-testid=new-conversation]");
   await pick(alice.page, USERS.bob.name);
-  await alice.page.click("[data-testid=create-conversation]");
   await alice.page.waitForSelector("[data-testid=conversation][data-profile=PRIVATE_E2EE]", { timeout: T });
   // Presence/typing replaces the header badge. Chat info always exposes the security
   // profile, so verify it through the same control a user opens.

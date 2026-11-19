@@ -58,6 +58,10 @@ pub fn app(state: AppState) -> Router {
         .route("/notifications/dispatch", post(user::dispatch))
         .route("/push/call-invitations", post(internal::call_push))
         .route(
+            "/push/call-invitations/cancellations",
+            post(internal::call_push_cancel),
+        )
+        .route(
             "/push/registrations/sync",
             post(internal::push_registrations_sync),
         )

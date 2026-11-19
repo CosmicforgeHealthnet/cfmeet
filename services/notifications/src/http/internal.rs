@@ -154,6 +154,45 @@ async fn partner_call_push(
     Ok(json_ok(out))
 }
 
+/// I3c (gap audit C1): cancels the ring of an invitation that was answered elsewhere,
+/// cancelled, expired or whose Call ended. Same permission and bounds as I3.
+pub async fn call_push_cancel(
+    State(state): State<AppState>,
+    caller: Caller,
+    body: Bytes,
+) -> ApiResult<Response> {
+    caller.require(InternalPermission::NotificationsCallPushDispatch)?;
+    let req: push::CallPushCancelRequest = parse(&body)?;
+    if req.push_target_refs.is_empty() || req.push_target_refs.len() > 20 {
+        return Err(ApiError::validation(
+            "pushTargetRefs holds 1 to 20 references",
+        ));
+    }
+    if !crate::preferences::account_ref_ok(&req.recipient_account_ref) {
+        return Err(ApiError::validation(
+            "recipientAccountRef is cfmeet-user:<uuid>",
+        ));
+    }
+    let modes = routing::category(&state.db, "CALL_INVITATIONS").await?;
+    if routing::highest(&modes) != routing::Mode::Active {
+        let results: Vec<Value> = req
+            .push_target_refs
+            .iter()
+            .map(|r| json!({ "pushTargetRef": r, "outcome": "NOT_CONFIGURED" }))
+            .collect();
+        return Ok(json_ok(json!({ "results": results })));
+    }
+    let out = push::call_push_cancel(
+        &state.db,
+        &state.keys,
+        state.push.as_ref(),
+        &req,
+        Utc::now(),
+    )
+    .await?;
+    Ok(json_ok(out))
+}
+
 /// I13 (roadmap N9, D-1b): Messaging mirrors the push registrations of CF Meet
 /// first-party accounts (the one-off copy and every later change through its facade).
 /// Each item is applied in its own transaction and answered with an outcome class and the

@@ -1,5 +1,5 @@
 //! Service-side routing of the closed event catalogue (Document 4 §5.2, §7): for each of
-//! the 38 inbound types, the routing category (the unit of the cutover: one row per
+//! the 40 inbound types, the routing category (the unit of the cutover: one row per
 //! channel in `notif_routing`, and the producer-side `notification_routing_state`
 //! category), the user preference category, the channels, the template, the inbox action
 //! and the email ledger category.
@@ -308,6 +308,25 @@ pub const ROUTES: &[TypeRoute] = &[
         "OPEN_ORGANIZATION",
         Some("organizationId"),
     ),
+    // Gap audit G19 (event contract 1.4.0): mirrors organization.suspended.
+    r(
+        "organizations.organization.archived",
+        "ORGANIZATION_UPDATES",
+        C::OrganizationUpdates,
+        &[I, P],
+        "org.organization.archived",
+        "OPEN_ORGANIZATION",
+        Some("organizationId"),
+    ),
+    r(
+        "organizations.organization.reactivated",
+        "ORGANIZATION_UPDATES",
+        C::OrganizationUpdates,
+        &[I, P],
+        "org.organization.reactivated",
+        "OPEN_ORGANIZATION",
+        Some("organizationId"),
+    ),
     r(
         "communications.connection.requested",
         "CONTACT_REQUESTS",
@@ -375,13 +394,15 @@ pub const ROUTES: &[TypeRoute] = &[
         "OPEN_RECORDING",
         Some("recordingId"),
     ),
+    // Gap audit M12: meeting notices also reach the in-app inbox and push (routing row
+    // MEETING_NOTIFICATION / PUSH, seeded OFF), under the meeting preference categories.
     TypeRoute {
         email_category: Some("MEETING_NOTIFICATION"),
         ..r(
             "meeting-service.conference.scheduled",
             "MEETING_NOTIFICATION",
             C::MeetingReminders,
-            &[E, I],
+            &[E, I, P],
             "meeting.reminder",
             "OPEN_MEETING",
             Some("conferenceId"),
@@ -393,7 +414,7 @@ pub const ROUTES: &[TypeRoute] = &[
             "meeting-service.conference.rescheduled",
             "MEETING_NOTIFICATION",
             C::MeetingInvitations,
-            &[E, I],
+            &[E, I, P],
             "meeting.rescheduled",
             "OPEN_MEETING",
             Some("conferenceId"),
@@ -405,7 +426,7 @@ pub const ROUTES: &[TypeRoute] = &[
             "meeting-service.conference.cancelled",
             "MEETING_NOTIFICATION",
             C::MeetingInvitations,
-            &[E, I],
+            &[E, I, P],
             "meeting.cancelled",
             "NONE",
             None,
@@ -648,8 +669,8 @@ pub fn routing_rows() -> Vec<(&'static str, Channel)> {
             }
         }
     }
-    // Push is routable for meeting notices (FE4 mobile reminders) and every in-app
-    // category with a push channel already listed above.
+    // Push for meeting notices (M12) is listed by their routes above; the extra rows stay
+    // so the seed matches even if a route changes.
     for extra in [
         ("MEETING_NOTIFICATION", Channel::Push),
         ("CALL_INVITATIONS", Channel::Push),
@@ -684,7 +705,7 @@ mod tests {
             .filter(|s| !s.is_control())
             .map(|s| s.event_type)
             .collect();
-        assert_eq!(inbound.len(), 38);
+        assert_eq!(inbound.len(), 40);
         for t in &inbound {
             assert_eq!(
                 ROUTES.iter().filter(|r| r.event_type == *t).count(),
@@ -692,7 +713,7 @@ mod tests {
                 "{t}"
             );
         }
-        assert_eq!(ROUTES.len(), 38);
+        assert_eq!(ROUTES.len(), 40);
     }
 
     #[test]
@@ -717,6 +738,44 @@ mod tests {
                     r.event_type
                 );
             }
+        }
+    }
+
+    /// Gap audit G19: archive / reactivation route exactly like organization.suspended
+    /// (ORGANIZATION_UPDATES, in-app + push, OPEN_ORGANIZATION on organizationId).
+    #[test]
+    fn organization_lifecycle_types_mirror_suspension() {
+        let base = route("organizations.organization.suspended").unwrap();
+        for (t, template) in [
+            (
+                "organizations.organization.archived",
+                "org.organization.archived",
+            ),
+            (
+                "organizations.organization.reactivated",
+                "org.organization.reactivated",
+            ),
+        ] {
+            let r = route(t).expect(t);
+            assert_eq!(r.route_category, base.route_category, "{t}");
+            assert_eq!(r.pref, PrefCategory::OrganizationUpdates, "{t}");
+            assert_eq!(r.channels, &[Channel::InApp, Channel::Push], "{t}");
+            assert_eq!(r.template, template);
+            assert_eq!(r.action, "OPEN_ORGANIZATION");
+            assert_eq!(r.action_ref, Some("organizationId"));
+            assert_eq!(r.email_category, None);
+            let spec = r.spec();
+            assert_eq!(
+                spec.producer,
+                Some(cf_notification_client::Producer::Organizations)
+            );
+            assert_eq!(spec.priority, base.spec().priority);
+            assert_eq!(spec.category, Some("ORGANIZATION_UPDATES"));
+            assert_eq!(spec.subject_kind, Some("ORGANIZATION"));
+            assert_eq!(spec.required_data, &["organizationId"]);
+            let (title, body) = crate::templates::inbox_text(template, &serde_json::json!({}));
+            assert_ne!(title, "Notification", "{template} has its own text");
+            assert!(!body.is_empty());
         }
     }
 

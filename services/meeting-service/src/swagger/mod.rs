@@ -283,6 +283,10 @@ use utoipa::OpenApi;
         crate::handlers::v2::organization_messaging::moderation_post,
         crate::handlers::v2::organization_messaging::team_channel,
         crate::handlers::v2::organization_messaging::messaging_resolve_members,
+        crate::handlers::v2::organization_member_calling::endpoints_list,
+        crate::handlers::v2::organization_member_calling::endpoints_register,
+        crate::handlers::v2::organization_member_calling::endpoints_revoke,
+        crate::handlers::v2::organization_member_calling::signaling_credential,
         crate::handlers::v2::account_profile::get_my_profile,
         crate::handlers::v2::account_profile::update_my_profile,
         crate::handlers::v2::account_profile::upload_my_avatar,
@@ -858,7 +862,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.6.0",
+        version = "1.7.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",

@@ -1769,9 +1769,13 @@ async fn contact_names_journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         .find(|x| x["cfMeetId"] == json!(b.public_id))
         .context("b in a's contacts")?
         .clone();
-    assert!(
-        row.get("principalId").is_none(),
-        "Hub contacts never carry principal ids"
+    // A CONNECTED contact carries the other person's calling principal (so clients can
+    // tell which contacts are already in a call); the same pairing principal-names below
+    // already discloses, and only for connected contacts.
+    assert_eq!(
+        row["principalId"],
+        json!(b.principal),
+        "a connected contact names its calling principal"
     );
     let shown = row["displayName"]
         .as_str()

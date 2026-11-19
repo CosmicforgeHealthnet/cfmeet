@@ -167,6 +167,20 @@ fn every_v2_route_is_documented() {
             "put",
             "/api/v2/organizations/{id}/teams/{teamId}/messaging-channel",
         ),
+        // Gap audit G3 — a member's own calling endpoints and signaling credentials
+        ("get", "/api/v2/organizations/{id}/member-calling/endpoints"),
+        (
+            "post",
+            "/api/v2/organizations/{id}/member-calling/endpoints",
+        ),
+        (
+            "delete",
+            "/api/v2/organizations/{id}/member-calling/endpoints/{endpointId}",
+        ),
+        (
+            "post",
+            "/api/v2/organizations/{id}/member-calling/signaling-credentials",
+        ),
         // Section 17 (ORG-006): Section 6 teams and policies through the Organizations relay
         ("get", "/api/v2/organizations/{id}/teams"),
         ("post", "/api/v2/organizations/{id}/teams"),

@@ -84,7 +84,7 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 250 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
@@ -97,13 +97,13 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 250 
 | `FIRST_PARTY_APP_NOTIFICATIONS` | 9 | meetings | The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API. |
 | `FIRST_PARTY_COMMUNICATIONS_HUB` | 74 | communications | The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential. |
 | `FIRST_PARTY_IN_MEETING_APPS` | 2 | meetings | The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress. |
-| `FIRST_PARTY_ORGANIZATIONS` | 45 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
+| `FIRST_PARTY_ORGANIZATIONS` | 49 | meetings | The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations). |
 | `FIRST_PARTY_SESSION_DEVICES` | 2 | messaging | First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens. |
 | `LEGACY_DIRECT_INGRESS` | 43 | meetings | Legacy Meeting Service /api/v1 surface: kept on its direct ingress for existing clients, not advertised to new customers. |
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 6 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **250** | | |
+| **Total** | **254** | | |
 
 #### `APP_CONTEXT_KEYS_DIRECT` (1)
 
@@ -299,7 +299,7 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 250 
 | GET | `/api/v2/conferences/{id}/apps` | `v2_list_conference_apps` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/conferences/{id}/apps/{appId}/context` | `v2_create_app_context` | `cfmeet.meeting-service.http-api` |
 
-#### `FIRST_PARTY_ORGANIZATIONS` (45)
+#### `FIRST_PARTY_ORGANIZATIONS` (49)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
@@ -321,6 +321,10 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 250 
 | GET | `/api/v2/organizations/{id}/invitations` | `v2_list_organization_invitations` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/invitations` | `v2_create_organization_invitation` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/invitations/{invitationId}/revoke` | `v2_revoke_organization_invitation` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/organizations/{id}/member-calling/endpoints` | `v2_organization_member_calling_endpoints_list` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/organizations/{id}/member-calling/endpoints` | `v2_organization_member_calling_endpoints_register` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/organizations/{id}/member-calling/endpoints/{endpointId}` | `v2_organization_member_calling_endpoints_revoke` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/organizations/{id}/member-calling/signaling-credentials` | `v2_organization_member_calling_signaling_credential` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/members/me/leave` | `v2_leave_organization` | `cfmeet.meeting-service.http-api` |
 | PATCH | `/api/v2/organizations/{id}/members/{userId}` | `v2_update_organization_membership` | `cfmeet.meeting-service.http-api` |
 | POST | `/api/v2/organizations/{id}/messaging/members/resolve` | `v2_organization_messaging_resolve_members` | `cfmeet.meeting-service.http-api` |

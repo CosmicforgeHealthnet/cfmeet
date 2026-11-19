@@ -6,6 +6,11 @@
 //! overflow destination (extension, ring group, another queue, IVR, voicemail) — or ends
 //! it (BUSY when full, NO_ANSWER after the wait). Agents are principals of the scope; a
 //! PAUSED agent stays a member but receives no offers.
+//!
+//! C15: `wrapUpSeconds` (0-600) keeps an agent out of the queue's distribution for that
+//! long after their previous call answered from the queue ended, and `holdMusic` names a
+//! built-in hold-music choice for the waiting caller (`null` = none; no audio or URL is
+//! stored — the media plane / client maps each choice to its own audio).
 
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, FromQueryResult};
@@ -49,6 +54,27 @@ text_enum!(
     }
 );
 
+/// Longest wrap-up time of a queue (seconds).
+pub const MAX_WRAP_UP_SECONDS: i32 = 600;
+
+text_enum!(
+    /// The controlled built-in hold-music catalogue (C15). The media plane and the
+    /// application client map each to their own audio; Calling never names a file or URL.
+    BuiltinHoldMusic {
+        Default = "DEFAULT",
+        Calm = "CALM",
+        Bright = "BRIGHT",
+    }
+);
+
+/// A queue's hold-music reference: a built-in choice (customer audio is not accepted by
+/// this deployment, as for IVR prompts).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HoldMusicRef {
+    pub builtin: BuiltinHoldMusic,
+}
+
 /// Kinds a queue's overflow may be (as configured kinds become available).
 pub fn overflow_types() -> &'static [DestinationType] {
     &[
@@ -69,6 +95,8 @@ pub(crate) struct QueueRow {
     pub capacity: i32,
     pub overflow_type: Option<String>,
     pub overflow_id: Option<Uuid>,
+    pub wrap_up_seconds: i32,
+    pub hold_music: Option<String>,
     pub status: String,
     pub version: i64,
     pub created_at: DateTime<Utc>,
@@ -77,6 +105,12 @@ pub(crate) struct QueueRow {
 }
 
 impl QueueRow {
+    pub(crate) fn hold_music(&self) -> Option<HoldMusicRef> {
+        Some(HoldMusicRef {
+            builtin: BuiltinHoldMusic::parse(self.hold_music.as_deref()?)?,
+        })
+    }
+
     pub(crate) fn overflow(&self) -> Option<Destination> {
         Some(Destination::new(
             DestinationType::parse(self.overflow_type.as_deref()?)?,
@@ -87,7 +121,7 @@ impl QueueRow {
 
 const COLUMNS: &str =
     "id, name, max_wait_seconds, offer_timeout_seconds, capacity, overflow_type, \
-    overflow_id, status, version, created_at, updated_at, disabled_at";
+    overflow_id, wrap_up_seconds, hold_music, status, version, created_at, updated_at, disabled_at";
 
 #[derive(Debug, Clone, FromQueryResult)]
 pub(crate) struct QueueMemberRow {
@@ -125,6 +159,8 @@ pub struct QueueView {
     pub offer_timeout_seconds: i32,
     pub capacity: i32,
     pub overflow: Option<Destination>,
+    pub wrap_up_seconds: i32,
+    pub hold_music: Option<HoldMusicRef>,
     pub members: Vec<QueueMemberView>,
     pub waiting: i64,
     pub status: String,
@@ -170,6 +206,8 @@ pub struct QueueSettings {
     pub offer_timeout_seconds: i32,
     pub capacity: i32,
     pub overflow: Option<Destination>,
+    pub wrap_up_seconds: i32,
+    pub hold_music: Option<HoldMusicRef>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -180,6 +218,18 @@ pub struct QueueChange {
     pub capacity: Option<i32>,
     /// `Some(None)` removes the overflow.
     pub overflow: Option<Option<Destination>>,
+    pub wrap_up_seconds: Option<i32>,
+    /// `Some(None)` removes the hold music.
+    pub hold_music: Option<Option<HoldMusicRef>>,
+}
+
+fn validate_wrap_up(wrap_up: i32) -> EnterpriseResult<()> {
+    if !(0..=MAX_WRAP_UP_SECONDS).contains(&wrap_up) {
+        return Err(EnterpriseError::Validation(
+            "wrapUpSeconds must be between 0 and 600.",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_limits(max_wait: i32, offer: i32, capacity: i32) -> EnterpriseResult<()> {
@@ -267,6 +317,8 @@ async fn view<C: ConnectionTrait>(db: &C, row: QueueRow) -> EnterpriseResult<Que
     let waiting = waiting_count(db, row.id).await?;
     Ok(QueueView {
         overflow: row.overflow(),
+        hold_music: row.hold_music(),
+        wrap_up_seconds: row.wrap_up_seconds,
         queue_id: row.id,
         name: row.name,
         max_wait_seconds: row.max_wait_seconds,
@@ -307,6 +359,7 @@ impl EnterpriseService {
             settings.offer_timeout_seconds,
             settings.capacity,
         )?;
+        validate_wrap_up(settings.wrap_up_seconds)?;
         let txn = self.begin().await?;
         policy::require_capability(&txn, actor.scope, AdminCapability::ManageRouting).await?;
         if let Some(overflow) = settings.overflow {
@@ -324,13 +377,15 @@ impl EnterpriseService {
             settings.overflow.map(|f| f.kind.as_str()).into(),
             settings.overflow.map(|f| f.id).into(),
             now.into(),
+            settings.wrap_up_seconds.into(),
+            settings.hold_music.map(|m| m.builtin.as_str()).into(),
         ]);
         exec(
             &txn,
             "INSERT INTO enterprise_call_queues (id, tenant_id, application_id, environment_id, name, \
              max_wait_seconds, offer_timeout_seconds, capacity, overflow_type, overflow_id, status, \
-             version, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVE', 1, $11, $11)",
+             version, created_at, updated_at, wrap_up_seconds, hold_music) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVE', 1, $11, $11, $12, $13)",
             values,
         )
         .await?;
@@ -345,7 +400,9 @@ impl EnterpriseService {
                 new_version: Some(1),
                 details: AuditDetails::new()
                     .with("capacity", settings.capacity as usize)
-                    .with("overflow", settings.overflow.is_some()),
+                    .with("overflow", settings.overflow.is_some())
+                    .with("wrap_up_seconds", settings.wrap_up_seconds as usize)
+                    .with("hold_music", settings.hold_music.is_some()),
             },
             now,
         )
@@ -438,6 +495,9 @@ impl EnterpriseService {
             .unwrap_or(row.offer_timeout_seconds);
         let capacity = change.capacity.unwrap_or(row.capacity);
         validate_limits(max_wait, offer, capacity)?;
+        let wrap_up = change.wrap_up_seconds.unwrap_or(row.wrap_up_seconds);
+        validate_wrap_up(wrap_up)?;
+        let hold_music = change.hold_music.unwrap_or(row.hold_music());
         let overflow = change.overflow.unwrap_or(row.overflow());
         if let Some(o) = overflow {
             if o.id == id {
@@ -452,6 +512,7 @@ impl EnterpriseService {
             &txn,
             "UPDATE enterprise_call_queues SET name = $2, max_wait_seconds = $3, \
              offer_timeout_seconds = $4, capacity = $5, overflow_type = $6, overflow_id = $7, \
+             wrap_up_seconds = $9, hold_music = $10, \
              version = version + 1, updated_at = GREATEST(updated_at, $8) WHERE id = $1",
             vec![
                 id.into(),
@@ -462,6 +523,8 @@ impl EnterpriseService {
                 overflow.map(|f| f.kind.as_str()).into(),
                 overflow.map(|f| f.id).into(),
                 now.into(),
+                wrap_up.into(),
+                hold_music.map(|m| m.builtin.as_str()).into(),
             ],
         )
         .await?;
@@ -476,7 +539,9 @@ impl EnterpriseService {
                 new_version: Some(row.version + 1),
                 details: AuditDetails::new()
                     .with("capacity", capacity as usize)
-                    .with("overflow", overflow.is_some()),
+                    .with("overflow", overflow.is_some())
+                    .with("wrap_up_seconds", wrap_up as usize)
+                    .with("hold_music", hold_music.is_some()),
             },
             now,
         )

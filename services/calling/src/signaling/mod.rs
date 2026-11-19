@@ -35,7 +35,8 @@ pub use bus::{InMemorySignalBus, PgNotifySignalBus, RealtimeSignalBus, SignalEnv
 pub use credentials::{SignalingClaims, SignalingCredentialError, SignalingKeys};
 pub use push::{
     CallPushSink, NoPushTransport, NotificationServiceCallPush, NotificationsPushTransport,
-    PartnerPushOffer, PlatformPrincipalRecipient, PushDispatcher, PushOffer, PushTransportSetting,
+    PartnerPushOffer, PlatformPrincipalRecipient, PushCancel, PushDispatcher, PushOffer,
+    PushTransportSetting,
 };
 
 use crate::{
@@ -105,7 +106,9 @@ pub struct SignalingAuthority {
 
 /// The signaling credential's authority, re-checked on every use: endpoint ACTIVE,
 /// principal ACTIVE, minting credential holding `calls.write`, and its service account,
-/// environment, application and tenant ACTIVE — all in the credential's scope.
+/// environment, application and tenant ACTIVE — all in the credential's scope. An
+/// organization member credential (gap audit G3, `$9`) instead requires `calls.read` (the
+/// organization credential's closed scope set) AND a FIRST_PARTY organization tenant.
 const AUTHORITY_SQL: &str = r#"
 SELECT c.status AS credential_status, c.not_before, c.expires_at, c.supersession_valid_until
   FROM call_endpoints ep
@@ -127,6 +130,8 @@ SELECT c.status AS credential_status, c.not_before, c.expires_at, c.supersession
          JOIN platform_application_scopes aps
            ON aps.application_id = cs.application_id AND aps.scope = cs.scope
         WHERE cs.credential_id = c.id AND cs.scope = $8)
+   AND (NOT $9::boolean
+        OR (t.classification = 'FIRST_PARTY' AND t.slug ~ '^org-[0-9a-f]{32}$'))
 "#;
 
 impl SignalingAuthority {
@@ -188,7 +193,13 @@ impl SignalingAuthority {
                     claims.minted_by_credential_id.as_uuid().into(),
                     claims.minted_by_service_account_id.as_uuid().into(),
                     claims.principal_id.as_uuid().into(),
-                    names::CALLS_WRITE.into(),
+                    if claims.organization_member {
+                        names::CALLS_READ
+                    } else {
+                        names::CALLS_WRITE
+                    }
+                    .into(),
+                    claims.organization_member.into(),
                 ],
             ))
             .await

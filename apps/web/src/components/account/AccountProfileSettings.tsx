@@ -9,7 +9,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { NiceSelect } from "@/components/ui/nice-select";
 import { TimeZoneField } from "@/components/meetings/ScheduleFields";
 import { viewerTimeZone } from "@/lib/meeting-time";
-import { BadgeCheck, Check, Mail } from "lucide-react";
+import { BadgeCheck, Check, Copy, Hash, Mail } from "lucide-react";
+import { useHubProfile } from "@/hooks/v2/useCommunications";
 import EmailCodeConfirm from "./EmailCodeConfirm";
 import { getErrorMessage } from "@/utils/error";
 import {
@@ -108,6 +109,7 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-lg font-semibold">{name}</p>
           <p className="flex items-center gap-1.5 truncate text-sm text-muted-foreground"><Mail className="size-3.5 shrink-0" />{profile.email}{profile.emailVerified ? <BadgeCheck className="size-4 shrink-0 text-primary" aria-label="Verified" /> : null}</p>
+          <MyCfMeetId />
           <p className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
             <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">Signs in with {profile.authType.toLowerCase() === "google" ? "Google" : "an email code"}</span>
             <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">{accountStatusLabel(normalizeAccountStatus(profile.status))}</span>
@@ -184,6 +186,22 @@ const LANGUAGES = [
 ];
 
 /** Tap the photo to upload a new one (PNG, JPEG or WebP, up to 512 KB). */
+/** Your CF Meet ID: what people type to add you as a contact. */
+function MyCfMeetId() {
+  const profile = useHubProfile();
+  const [copied, setCopied] = useState(false);
+  const id = profile.data?.cfMeetId;
+  if (!id) return null;
+  return (
+    <button type="button" title="Copy your CF Meet ID" data-testid="profile-cfmeet-id"
+      onClick={() => void navigator.clipboard?.writeText(id).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}
+      className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground">
+      <Hash className="size-3.5 shrink-0" /><span className="truncate font-mono">{id}</span>
+      {copied ? <Check className="size-3.5 shrink-0 text-primary" /> : <Copy className="size-3.5 shrink-0" />}
+    </button>
+  );
+}
+
 function AvatarUpload({ avatar, initials, onUploaded }: { avatar: string | null; initials: string; onUploaded: (url: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

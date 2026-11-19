@@ -14,11 +14,11 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.6.0"
+      "description": "cfmeet.meeting-service.http-api 1.7.0"
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.27.0"
+      "description": "cfmeet.calling.http-api 1.30.0"
     },
     {
       "name": "privacy-relay",
@@ -13429,6 +13429,270 @@
         },
         "x-cfmeet-service": "calling",
         "x-cfmeet-route-id": "calling.cancelCall",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/consultations": {
+      "post": {
+        "operationId": "startConsultation",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Consult a target before transferring (attended transfer)",
+        "description": "Requires calls.write and an Idempotency-Key (1.28.0, C14). The transferring participant (an active participant of this CONNECTED or HELD Call) consults the target before handing its place over: a CONNECTED Call is first HELD (canonical hold), then an ordinary application Call (the consultation Call, exactly as POST /v1/calls: authorization, personal policy, blocks, limits, ringing) is placed from initiatorEndpointId to the target. The target is a principal, or (enterprise.calls.use) an extension / destination resolved to one principal like a transfer target; an enterprise Call's policy must permit transfers (else 403). One consultation at a time per Call (409); no transfer in flight (409); the target must not already be a participant (409). If the consultation Call cannot be created the hold is undone. A replay with the same key returns the same consultation.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.IdempotencyKeyRequired"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.ConsultationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The consultation (or the recorded consultation of an identical earlier request).",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/calling.IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.ConsultationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/calling.Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.startConsultation",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/consultations/{consultation_id}/cancel": {
+      "post": {
+        "operationId": "cancelConsultation",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Cancel an attended transfer",
+        "description": "Requires calls.write (1.28.0, C14). The consultation Call ends (or is cancelled before it was answered) and, when the consultation held this Call, this Call is resumed (canonical resume: provider-confirmed media-path evidence; resumed false when that is not possible, the Call then stays HELD). Idempotent on a cancelled consultation; a consultation whose transfer is in flight or that completed: 409.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.ConsultationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.EmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The cancelled consultation and the original Call.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/calling.IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.ConsultationCancelResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/calling.Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.cancelConsultation",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL"
+        ]
+      }
+    },
+    "/v1/calls/{call_id}/consultations/{consultation_id}/complete": {
+      "post": {
+        "operationId": "completeConsultation",
+        "tags": [
+          "calling"
+        ],
+        "summary": "Complete an attended transfer",
+        "description": "Requires calls.write (1.28.0, C14). The consultation Call must be CONNECTED (the target answered; else 409). Starts the canonical transfer of this Call (POST /v1/calls/{call_id}/transfer semantics: TRANSFERRING, the target's endpoints get TRANSFER ring offers) from the transferring participant to the consulted target; the parties of the consultation Call also receive call.consultation_transfer (data consultationId, originalCallId, transferId) so the target's client answers that offer. When the target joins, the transferring participant is retired, this Call is CONNECTED (the original party and the target; the hold is lifted at the media provider), the consultation Call ends and the consultation is COMPLETED. If the transfer fails, this Call returns to HELD and the consultation to CONSULTING (complete or cancel again). Idempotent: a repeat while the transfer is in flight or after it completed returns the current consultation. A cancelled consultation: 409.",
+        "security": [
+          {
+            "calling.platformCredential": [
+              "calls.write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "calls.write",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/calling.CallId"
+          },
+          {
+            "$ref": "#/components/parameters/calling.ConsultationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/calling.calling.control.v1.ConsultationCompleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The consultation and the transfer of the original Call.",
+            "headers": {
+              "x-request-id": {
+                "$ref": "#/components/headers/calling.XRequestId"
+              },
+              "cache-control": {
+                "$ref": "#/components/headers/calling.CacheControlNoStore"
+              },
+              "idempotent-replayed": {
+                "$ref": "#/components/headers/calling.IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/calling.calling.control.v1.ConsultationCompletion"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/calling.InvalidRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/calling.AuthenticationFailed"
+          },
+          "403": {
+            "$ref": "#/components/responses/calling.InsufficientScope"
+          },
+          "404": {
+            "$ref": "#/components/responses/calling.NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/calling.CommandConflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/calling.Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/calling.RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/calling.Unavailable"
+          }
+        },
+        "x-cfmeet-service": "calling",
+        "x-cfmeet-route-id": "calling.completeConsultation",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL"
         ]
@@ -48097,6 +48361,267 @@
           }
         }
       },
+      "calling.calling.control.v1.Consultation": {
+        "description": "C14: an attended transfer's consultation: the original Call, the consultation Call the transferring participant placed to the target, and its state. CONSULTING (the consultation Call is going on; the original Call is held) -> COMPLETING (the canonical transfer of the original Call to the target is ringing) -> COMPLETED (the target joined the original Call, the transferring participant was retired and the consultation Call ended); a failed transfer goes back to CONSULTING; CANCELLED (the consultation Call ended, the original Call resumed when the consultation had held it). COMPLETED and CANCELLED are final.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "consultationId",
+          "callId",
+          "consultationCallId",
+          "transferringParticipantId",
+          "targetPrincipalId",
+          "state",
+          "heldOriginal",
+          "transferId",
+          "version",
+          "createdAt",
+          "updatedAt",
+          "endedAt"
+        ],
+        "properties": {
+          "consultationId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "callId": {
+            "description": "The original Call.",
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "consultationCallId": {
+            "description": "The consultation Call (an ordinary canonical Call).",
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "transferringParticipantId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "targetPrincipalId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "CONSULTING",
+              "COMPLETING",
+              "COMPLETED",
+              "CANCELLED"
+            ]
+          },
+          "heldOriginal": {
+            "description": "The consultation put the original Call on hold (it was CONNECTED); cancelling resumes it.",
+            "type": "boolean"
+          },
+          "transferId": {
+            "description": "The latest transfer of the original Call that completes (or completed) this consultation.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "calling.calling.control.v1.ConsultationCancelResult": {
+        "description": "C14: result of cancelling a consultation: the consultation (CANCELLED), the original Call and whether it was resumed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "consultation",
+          "call",
+          "resumed"
+        ],
+        "properties": {
+          "consultation": {
+            "$ref": "#/components/schemas/calling.calling.control.v1.Consultation"
+          },
+          "call": {
+            "$ref": "#/components/schemas/calling.calling.common.v1.CallSummary"
+          },
+          "resumed": {
+            "description": "The original Call was resumed (it was held by this consultation and resuming succeeded).",
+            "type": "boolean"
+          }
+        }
+      },
+      "calling.calling.control.v1.ConsultationCompleteRequest": {
+        "description": "C14: body of POST /v1/calls/{call_id}/consultations/{consultation_id}/complete: the original Call's version.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "calling.calling.control.v1.ConsultationCompletion": {
+        "description": "C14: result of completing a consultation: the consultation (COMPLETING), the original Call (TRANSFERRING) and its transfer to the target. A repeat after the transfer started returns the consultation and the Call without the transfer.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "consultation",
+          "call"
+        ],
+        "properties": {
+          "consultation": {
+            "$ref": "#/components/schemas/calling.calling.control.v1.Consultation"
+          },
+          "call": {
+            "$ref": "#/components/schemas/calling.calling.common.v1.CallSummary"
+          },
+          "transfer": {
+            "$ref": "#/components/schemas/calling.calling.control.v1.CallTransfer"
+          }
+        }
+      },
+      "calling.calling.control.v1.ConsultationRequest": {
+        "description": "C14: body of POST /v1/calls/{call_id}/consultations (Idempotency-Key required): the participant who consults, the target (exactly one of a principal, an enterprise extension or a typed enterprise destination, resolved like a transfer target) and the participant's own endpoint the consultation Call is placed from. A CONNECTED Call is held first; an enterprise Call's policy must permit transfers (else 403).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "transferringParticipantId",
+          "initiatorEndpointId",
+          "expectedVersion"
+        ],
+        "properties": {
+          "transferringParticipantId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "targetPrincipalId": {
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "targetExtension": {
+            "description": "Part F: an enterprise extension number resolved in the credential's scope (requires enterprise.calls.use). It is followed to ONE principal: a member directly, a ring group's first eligible member, a queue's first available agent, a schedule's current route.",
+            "$ref": "#/components/schemas/calling.calling.enterprise.v1.ExtensionNumber"
+          },
+          "targetDestination": {
+            "description": "Part F: a typed enterprise destination (ENTERPRISE_MEMBER, PRINCIPAL, EXTENSION, RING_GROUP, QUEUE or SCHEDULE of the same scope; requires enterprise.calls.use), resolved like targetExtension. A PUBLIC_CONTACT is refused: 403 when the enterprise policy forbids public forwarding, 422 CAPABILITY_UNAVAILABLE otherwise (public transfer of an established call is not offered by this deployment).",
+            "$ref": "#/components/schemas/calling.calling.enterprise.v1.Destination"
+          },
+          "initiatorEndpointId": {
+            "description": "The transferring participant's own ACTIVE endpoint the consultation Call is placed from.",
+            "$ref": "#/components/schemas/calling.platform.common.v1.Uuid"
+          },
+          "kind": {
+            "description": "The consultation Call's kind (default VOICE).",
+            "type": "string",
+            "enum": [
+              "VOICE",
+              "VIDEO"
+            ]
+          },
+          "expectedVersion": {
+            "description": "The Call version the command was decided on (optimistic concurrency). A different current version is refused with 409 STALE_CALL_VERSION.",
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "targetPrincipalId"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "targetExtension"
+                  ]
+                },
+                {
+                  "required": [
+                    "targetDestination"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "targetExtension"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "targetPrincipalId"
+                  ]
+                },
+                {
+                  "required": [
+                    "targetDestination"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "targetDestination"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "targetPrincipalId"
+                  ]
+                },
+                {
+                  "required": [
+                    "targetExtension"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "calling.calling.control.v1.ConsultationResult": {
+        "description": "C14: result of POST /v1/calls/{call_id}/consultations: the consultation, the original Call (HELD) and the consultation Call as created by POST /v1/calls.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "consultation",
+          "call",
+          "consultationCall"
+        ],
+        "properties": {
+          "consultation": {
+            "$ref": "#/components/schemas/calling.calling.control.v1.Consultation"
+          },
+          "call": {
+            "$ref": "#/components/schemas/calling.calling.common.v1.CallSummary"
+          },
+          "consultationCall": {
+            "$ref": "#/components/schemas/calling.calling.control.v1.CreateCallResult"
+          }
+        }
+      },
       "calling.calling.control.v1.ControlResult": {
         "description": "Result of cancel, end, hold, resume and upgrade: the Call after the command. END answers with ENDING until provider cleanup is confirmed, or ENDED once it is. UPGRADE answers with the Call's new kind (VIDEO); its state and version are unchanged.",
         "type": "object",
@@ -49465,6 +49990,15 @@
           }
         }
       },
+      "calling.calling.enterprise.v1.BuiltinHoldMusic": {
+        "description": "C15: the controlled built-in hold-music catalogue. The media plane / application client plays its own copy of each; never a URL, path or file name.",
+        "type": "string",
+        "enum": [
+          "DEFAULT",
+          "CALM",
+          "BRIGHT"
+        ]
+      },
       "calling.calling.enterprise.v1.BuiltinPrompt": {
         "description": "The controlled built-in prompt catalog. The media plane plays its own copy (Telephony maps it to edge-local audio; an application client to its own asset). Never a URL, path, file name or synthesized text. Each prompt has a nominal length the media plane's audio must fit (WELCOME, MENU, NO_INPUT, GOODBYE 2 s; PLEASE_HOLD, TRANSFERRING, CLOSED 3 s; INVALID_OPTION 4 s; VOICEMAIL_GREETING 6 s; BEEP 1 s): a menu's input timer starts after the prompts it queued, and a HANGUP node's prompt plays for its nominal length before the platform ends the Call.",
         "type": "string",
@@ -50192,6 +50726,23 @@
               }
             ],
             "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+          },
+          "wrapUpSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up."
+          },
+          "holdMusic": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/calling.calling.enterprise.v1.HoldMusicRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment."
           }
         }
       },
@@ -50749,6 +51300,17 @@
           "enteredAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "holdMusic": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/calling.calling.enterprise.v1.HoldMusicRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "C15: the queue's built-in hold music the caller's application plays while it waits (null = none)."
           }
         }
       },
@@ -50961,6 +51523,19 @@
               "null"
             ],
             "description": "Opaque keyset cursor of the next page; null on the last page."
+          }
+        }
+      },
+      "calling.calling.enterprise.v1.HoldMusicRef": {
+        "description": "C15: a queue's hold music: a built-in choice (customer audio artifacts are not accepted by this deployment).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "builtin"
+        ],
+        "properties": {
+          "builtin": {
+            "$ref": "#/components/schemas/calling.calling.enterprise.v1.BuiltinHoldMusic"
           }
         }
       },
@@ -51726,6 +52301,8 @@
           "offerTimeoutSeconds",
           "capacity",
           "overflow",
+          "wrapUpSeconds",
+          "holdMusic",
           "members",
           "waiting",
           "status",
@@ -51769,6 +52346,23 @@
               }
             ],
             "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+          },
+          "wrapUpSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up."
+          },
+          "holdMusic": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/calling.calling.enterprise.v1.HoldMusicRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment."
           },
           "members": {
             "type": "array",
@@ -53104,7 +53698,7 @@
         }
       },
       "calling.calling.enterprise.v1.UpdateQueueRequest": {
-        "description": "Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline.",
+        "description": "Body of PATCH /v1/enterprise/queues/{queue_id}; overflow null removes it. Calls already waiting keep their entry time and deadline. holdMusic null removes the hold music.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -53147,6 +53741,23 @@
               }
             ],
             "description": "Where a Call goes when the queue is full or its maximum wait elapses: an EXTENSION, RING_GROUP, another QUEUE, IVR or VOICEMAIL of the same scope (never the queue itself). Without one a full queue ends the Call BUSY and an elapsed wait NO_ANSWER."
+          },
+          "wrapUpSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "C15: wrap-up time. An agent whose previous call answered from this queue ended less than this many seconds ago is not offered another of the queue's calls (nor chosen as a QUEUE transfer target) yet. 0 = no wrap-up."
+          },
+          "holdMusic": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/calling.calling.enterprise.v1.HoldMusicRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "C15: built-in hold music for the waiting caller; null = none. The application caller reads it from its Call's enterprise.queue.holdMusic; the SIP edge's own music on hold is not driven by Calling in this deployment."
           }
         }
       },
@@ -82539,6 +83150,15 @@
         "in": "path",
         "required": true,
         "description": "CF Meet call id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "calling.ConsultationId": {
+        "name": "consultation_id",
+        "in": "path",
+        "required": true,
+        "description": "Consultation id (C14).",
         "schema": {
           "type": "string"
         }

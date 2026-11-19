@@ -62,6 +62,17 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("CF_NOTIFICATIONS_BASE_URL is not set: no notification is published");
     }
     let db = organizations::connect(config.database_url(), config.database_max_connections).await?;
+    // Gap audit G19: the lifecycle switch needs the pending schema change (rollback-safe
+    // releases keep it out of the migration history until it is turned on).
+    if config.lifecycle_notifications
+        && !organizations::notification_publications::lifecycle_types_admitted(&db).await?
+    {
+        fatal(
+            "notification publication configuration error",
+            "ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED=true needs the pending migration \
+             m20261118_000007_lifecycle_notification_types (see migration/pending/)",
+        );
+    }
     let worker_db = db.clone();
     let interval = config.worker_interval;
     let provisioning_enabled = platform_scopes.is_some();

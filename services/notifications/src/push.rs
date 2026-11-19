@@ -758,6 +758,16 @@ pub struct CallPushRequest {
     pub recipient_account_ref: Option<String>,
 }
 
+/// I3c (gap audit C1): cancels the ring of one invitation on the invited account's
+/// endpoints. Only the account's own endpoints are reached (another account's reference
+/// answers `UNKNOWN_TARGET`); no call detail is accepted or forwarded.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CallPushCancelRequest {
+    pub push_target_refs: Vec<Uuid>,
+    pub recipient_account_ref: String,
+}
+
 /// The collapse id of call alerts (a newer call alert replaces an older one).
 pub const CALL_COLLAPSE_ID: &str = "cfmeet-call";
 
@@ -776,12 +786,102 @@ pub fn call_send_options(
     }
 }
 
+/// The device payload of a call alert and of its cancellation (metadata only: the call id
+/// travels through Calling's own channels, the WebSocket ring and the recovery API).
+pub fn call_device_payload(kind: CallPushKind) -> Value {
+    match kind {
+        CallPushKind::Ring => json!({ "v": 1, "type": "call" }),
+        CallPushKind::Cancel => json!({ "v": 1, "type": "call-cancel" }),
+    }
+}
+
+/// A ring (I3) or the cancellation of an earlier ring (I3c, gap audit C1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallPushKind {
+    Ring,
+    Cancel,
+}
+
+/// How long a cancellation may wait at the provider: long enough to reach a device that
+/// is ringing from the earlier alert, never a day-old surprise.
+pub const CALL_CANCEL_TTL_SECONDS: u64 = 60;
+
+/// The delivery options of an I3c cancellation: the same collapse id as the ring (a ring
+/// still waiting at the provider is replaced by its cancellation, so the device never
+/// rings), a short TTL and never a PushKit VoIP push.
+pub fn call_cancel_send_options() -> SendOptions {
+    SendOptions {
+        ttl_seconds: Some(CALL_CANCEL_TTL_SECONDS),
+        collapse_id: Some(CALL_COLLAPSE_ID.into()),
+        voip: false,
+    }
+}
+
+/// Gap audit S15: whether the account allows incoming-call pushes (the Hub's
+/// `incomingCalls` switch, copied into `notif_preferences`, and the push channel of the
+/// INCOMING_CALLS category). No row: allowed (the defaults are on).
+pub async fn incoming_calls_allowed<C: ConnectionTrait>(
+    conn: &C,
+    account_ref: &str,
+) -> Result<bool, DbErr> {
+    use crate::catalogue::{Channel, PrefCategory};
+    let prefs = crate::preferences::load(conn, account_ref).await?;
+    Ok(prefs.category_enabled(PrefCategory::IncomingCalls)
+        && prefs.channel_enabled(PrefCategory::IncomingCalls, Channel::Push))
+}
+
 /// I3: best-effort call push, bounded to one second overall, never queued or retried.
 pub async fn call_push(
     conn: &DatabaseConnection,
     keys: &DataKeys,
     provider: Option<&Arc<dyn PushProvider>>,
     req: &CallPushRequest,
+    now: DateTime<Utc>,
+) -> Result<Value, DbErr> {
+    call_wake(
+        conn,
+        keys,
+        provider,
+        &req.push_target_refs,
+        req.recipient_account_ref.as_deref(),
+        req.expires_at,
+        CallPushKind::Ring,
+        now,
+    )
+    .await
+}
+
+/// I3c (gap audit C1): the cancellation of an earlier ring, when the invitation was
+/// answered elsewhere, cancelled, expired or the Call ended. Same bounds as I3.
+pub async fn call_push_cancel(
+    conn: &DatabaseConnection,
+    keys: &DataKeys,
+    provider: Option<&Arc<dyn PushProvider>>,
+    req: &CallPushCancelRequest,
+    now: DateTime<Utc>,
+) -> Result<Value, DbErr> {
+    call_wake(
+        conn,
+        keys,
+        provider,
+        &req.push_target_refs,
+        Some(req.recipient_account_ref.as_str()),
+        now + Duration::seconds(CALL_CANCEL_TTL_SECONDS as i64),
+        CallPushKind::Cancel,
+        now,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn call_wake(
+    conn: &DatabaseConnection,
+    keys: &DataKeys,
+    provider: Option<&Arc<dyn PushProvider>>,
+    push_target_refs: &[Uuid],
+    recipient_account_ref: Option<&str>,
+    expires_at: DateTime<Utc>,
+    kind: CallPushKind,
     now: DateTime<Utc>,
 ) -> Result<Value, DbErr> {
     #[derive(Debug, FromQueryResult)]
@@ -792,10 +892,16 @@ pub async fn call_push(
         account_ref: Option<String>,
     }
     let mut results = Vec::new();
-    let expired = req.expires_at <= now;
+    let expired = expires_at <= now;
+    // S15: the recipient's incoming-call switch. Off: nothing rings — and nothing needs
+    // cancelling, since no ring was sent.
+    let preference_off = match recipient_account_ref {
+        Some(r) => !incoming_calls_allowed(conn, r).await?,
+        None => false,
+    };
     let rows: Vec<(Uuid, Option<EndpointRow>)> = {
         let mut v = Vec::new();
-        for id in &req.push_target_refs {
+        for id in push_target_refs {
             let row: Option<CallTarget> = db::one(
                 conn,
                 "SELECT platform, handle_sealed, enabled, account_ref FROM notif_push_endpoints WHERE id = $1",
@@ -804,7 +910,7 @@ pub async fn call_push(
             .await?;
             // Another account's endpoint is indistinguishable from an unknown one.
             let row = row
-                .filter(|r| match req.recipient_account_ref.as_deref() {
+                .filter(|r| match recipient_account_ref {
                     Some(recipient) => r.account_ref.as_deref() == Some(recipient),
                     None => true,
                 })
@@ -817,22 +923,30 @@ pub async fn call_push(
         }
         v
     };
-    // Metadata only: the call id travels through Calling's own channels (WS ring and
-    // recovery API); the push only wakes the device.
-    let payload = json!({ "v": 1, "type": "call" });
+    let payload = call_device_payload(kind);
     let deadline = tokio::time::Instant::now() + StdDuration::from_millis(1000);
     for (id, row) in rows {
         let outcome = match (&row, provider) {
             _ if expired => "EXPIRED",
             (None, _) => "UNKNOWN_TARGET",
             (Some(r), _) if !r.enabled => "DISABLED",
+            _ if preference_off => "PREFERENCE_OFF",
+            // A PushKit token takes VoIP pushes only, and every VoIP push must report a new
+            // call to CallKit: a cancellation never goes there (the app ends its CallKit
+            // call when signaling / recovery says the invitation ended).
+            (Some(r), _) if kind == CallPushKind::Cancel && r.platform == "APNS_VOIP" => {
+                "SKIPPED_VOIP"
+            }
             (Some(_), None) => "NOT_CONFIGURED",
             (Some(r), Some(p)) => {
                 let platform = adapter_platform(&r.platform);
                 if !p.supports(platform) {
                     "NOT_CONFIGURED"
                 } else if let Ok(handle) = keys.open(&r.handle_sealed, &format!("push:{id}")) {
-                    let options = call_send_options(&r.platform, req.expires_at, now);
+                    let options = match kind {
+                        CallPushKind::Ring => call_send_options(&r.platform, expires_at, now),
+                        CallPushKind::Cancel => call_cancel_send_options(),
+                    };
                     match tokio::time::timeout_at(
                         deadline,
                         p.send_with(platform, &handle, &payload, &options),

@@ -309,6 +309,24 @@
     {
       "domain": "calling",
       "method": "POST",
+      "path": "/v1/calls/{call_id}/consultations",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/consultations/{consultation_id}/complete",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calls/{call_id}/consultations/{consultation_id}/cancel",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
       "path": "/v1/calls/{call_id}/upgrade",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -3073,6 +3091,34 @@
       "domain": "meetings",
       "method": "POST",
       "path": "/api/v2/organizations/{id}/messaging/members/resolve",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/member-calling/endpoints",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/member-calling/endpoints",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/organizations/{id}/member-calling/endpoints/{endpointId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_ORGANIZATIONS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/organizations/{id}/member-calling/signaling-credentials",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_ORGANIZATIONS"
     },

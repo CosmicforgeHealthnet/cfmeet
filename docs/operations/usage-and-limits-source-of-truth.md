@@ -27,7 +27,7 @@ Those stay at `GET /v1/calling/usage` and `GET /v1/calling/limits`, which no swi
    customer sent straight to Calling. Calling now counts its direct-route requests into the same
    endpoint and format (`services/calling/src/usage/direct.rs`): the direct authentication path
    only, so a gateway-forwarded request is never counted twice. On by default when the
-   Developer Platform is a configured target; opt out with `CALLING_DIRECT_USAGE_ACCOUNTING=off`.
+   Developer Platform is a configured target and `CALLING_DIRECT_USAGE_ACCOUNTING=on` (off by default; set with the `developer-usage.record` grant by `activate-usage-export`).
    The Developer Platform grants Calling `developer-usage.record` in the same release step that
    gives Calling its Developer Platform target (`activate-developer-webhooks`).
 2. **`/v1/usage` and `/v1/limits` are still Calling's legacy views until the switch.** Before

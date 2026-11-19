@@ -363,6 +363,20 @@ pub enum InternalPermission {
     /// Meeting Service only; FIRST_PARTY organization tenants only.
     #[serde(rename = "calling-request.act-for-organization")]
     CallingRequestActForOrganization,
+    /// Calling (gap audit G3): act for one first-party organization MEMBER on their own
+    /// calling presence — register, list and revoke the member's own endpoints and mint
+    /// their signaling credentials — in the organization's FIRST_PARTY scope. The signed
+    /// delegated context names the organization's Calling credential (id only, re-verified
+    /// live with Platform Access) and the member's NATIVE_CF_USER principal; never another
+    /// principal, never administration. Meeting Service only.
+    #[serde(rename = "calling-organization-member.act")]
+    CallingOrganizationMemberAct,
+    /// Calling (gap audit G3): apply an organization membership change to the enterprise
+    /// extensions routed to the member's principal in the organization's FIRST_PARTY
+    /// scope — disable them when the member is removed or suspended, restore exactly the
+    /// ones disabled that way when the member is reactivated. Meeting Service only.
+    #[serde(rename = "calling-organization-member.offboard")]
+    CallingOrganizationMemberOffboard,
     /// Meeting Service (final closure, organization event delivery): receive the
     /// Organizations Service's transactional-outbox events (organization lifecycle,
     /// memberships, ownership, policy, scope mappings; ids, roles and statuses only) at
@@ -1096,6 +1110,22 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Receive a first-party organization request Meeting Service authenticated for a human member: the organization's Calling credential (id only) re-verified live with Platform Access, the acting principal signed in; FIRST_PARTY organization tenants only",
     },
     PermissionDefinition {
+        permission: InternalPermission::CallingOrganizationMemberAct,
+        name: "calling-organization-member.act",
+        receiver: services::CALLING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: true,
+        description: "Register, list and revoke an organization member's own Calling endpoints and mint their signaling credentials in the organization's FIRST_PARTY scope: the organization's Calling credential (id only) re-verified live with Platform Access, the acting NATIVE_CF_USER principal only; never another principal or administration",
+    },
+    PermissionDefinition {
+        permission: InternalPermission::CallingOrganizationMemberOffboard,
+        name: "calling-organization-member.offboard",
+        receiver: services::CALLING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Disable the enterprise extensions routed to a removed or suspended organization member's principal, and restore exactly those on reactivation, in the organization's FIRST_PARTY scope (system-audited)",
+    },
+    PermissionDefinition {
         permission: InternalPermission::MeetingOrganizationEventsApply,
         name: "meeting-organization-events.apply",
         receiver: services::MEETING_SERVICE,
@@ -1423,6 +1453,8 @@ impl InternalPermission {
         InternalPermission::PlatformIdentityProvisionFirstParty,
         InternalPermission::PlatformIdentityBindOrganizationServices,
         InternalPermission::CallingRequestActForOrganization,
+        InternalPermission::CallingOrganizationMemberAct,
+        InternalPermission::CallingOrganizationMemberOffboard,
         InternalPermission::MeetingOrganizationEventsApply,
         InternalPermission::NotificationsEventPublish,
         InternalPermission::NotificationsUserForward,
@@ -1977,6 +2009,7 @@ mod tests {
                 "organization.administer",
                 "organization.migrate",
                 "calling-request.act-for-organization",
+                "calling-organization-member.act",
                 "platform-principal.ensure-meeting-platform",
                 "platform-oauth.authorize"
             ]
@@ -1985,7 +2018,10 @@ mod tests {
             .iter()
             .filter(|d| d.sensitive && d.grantable_to.contains(&services::MEETING_SERVICE))
         {
-            let expected = if d.permission == CallingRequestActForOrganization {
+            let expected = if matches!(
+                d.permission,
+                CallingRequestActForOrganization | CallingOrganizationMemberAct
+            ) {
                 services::CALLING
             } else if d.permission == PlatformPrincipalEnsureMeetingPlatform
                 || d.permission == PlatformOauthAuthorize
@@ -2149,6 +2185,31 @@ mod tests {
                 .grantable_to,
             &[services::API_GATEWAY]
         );
+        // Gap audit G3: the member's own calling presence and the offboarding of their
+        // extensions, both Meeting Service only.
+        for (p, name, sensitive) in [
+            (
+                InternalPermission::CallingOrganizationMemberAct,
+                "calling-organization-member.act",
+                true,
+            ),
+            (
+                InternalPermission::CallingOrganizationMemberOffboard,
+                "calling-organization-member.offboard",
+                false,
+            ),
+        ] {
+            let d = p.definition();
+            assert_eq!(
+                (d.name, d.receiver, d.grantable_to, d.sensitive),
+                (
+                    name,
+                    services::CALLING,
+                    &[services::MEETING_SERVICE][..],
+                    sensitive
+                )
+            );
+        }
     }
 
     #[test]

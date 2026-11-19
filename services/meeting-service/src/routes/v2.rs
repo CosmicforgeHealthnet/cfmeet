@@ -627,6 +627,21 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
                     crate::services::organization_calling::MAX_BODY_BYTES,
                 )),
         )
+        // Gap audit G3: a member's own calling endpoints and signaling credentials in the
+        // organization's Calling scope.
+        .route(
+            "/organizations/:id/member-calling/endpoints",
+            get(crate::handlers::v2::organization_member_calling::endpoints_list)
+                .post(crate::handlers::v2::organization_member_calling::endpoints_register),
+        )
+        .route(
+            "/organizations/:id/member-calling/endpoints/:endpoint_id",
+            delete(crate::handlers::v2::organization_member_calling::endpoints_revoke),
+        )
+        .route(
+            "/organizations/:id/member-calling/signaling-credentials",
+            post(crate::handlers::v2::organization_member_calling::signaling_credential),
+        )
         // Final closure (J-10): organization-scope Messaging relay and realtime tokens.
         .route(
             "/organizations/:id/messaging/relay/*path",

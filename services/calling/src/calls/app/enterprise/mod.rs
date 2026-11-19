@@ -1234,8 +1234,10 @@ impl AppCallService {
                     "SELECT e.queue_id, e.state, e.entered_at, CASE WHEN e.state IN ('WAITING', 'OFFERING') \
                        THEN (SELECT count(*) FROM enterprise_queue_entries o \
                               WHERE o.queue_id = e.queue_id AND o.state IN ('WAITING', 'OFFERING') \
-                                AND (o.entered_at, o.seq) <= (e.entered_at, e.seq)) END AS position \
-                       FROM enterprise_queue_entries e WHERE e.id = $1",
+                                AND (o.entered_at, o.seq) <= (e.entered_at, e.seq)) END AS position, \
+                           q.hold_music \
+                       FROM enterprise_queue_entries e JOIN enterprise_call_queues q ON q.id = e.queue_id \
+                      WHERE e.id = $1",
                     vec![entry.into()],
                 ))
                 .await?
@@ -1244,10 +1246,13 @@ impl AppCallService {
                 let state: String = row.try_get("", "state")?;
                 let entered: chrono::DateTime<chrono::Utc> = row.try_get("", "entered_at")?;
                 let position: Option<i64> = row.try_get("", "position")?;
+                // C15: the queue's built-in hold music for the waiting caller (null = none).
+                let hold_music: Option<String> = row.try_get("", "hold_music")?;
                 view["queue"] = json!({
                     "queueId": queue_id,
                     "state": state,
                     "position": position,
+                    "holdMusic": hold_music.map(|b| json!({ "builtin": b })),
                     "enteredAt": entered.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                 });
             }

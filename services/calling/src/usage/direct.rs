@@ -22,9 +22,11 @@
 //!   wait for the next batch. Counts still in memory when the process stops are lost (as
 //!   at the gateway); they are bounded by one flush interval.
 //!
-//! On by default when the Developer Platform is a configured target
-//! (`CF_DEVELOPER_PLATFORM_BASE_URL`); `CALLING_DIRECT_USAGE_ACCOUNTING=off` disables it.
-//! The Developer Platform must grant Calling `developer-usage.record` in its trust bundle.
+//! Off unless `CALLING_DIRECT_USAGE_ACCOUNTING=on` and the Developer Platform is a
+//! configured target (`CF_DEVELOPER_PLATFORM_BASE_URL`). Production turns it on in the
+//! `activate-usage-export` step, which also has the Developer Platform grant Calling
+//! `developer-usage.record`: on by default, an un-granted Calling would only send batches
+//! the Developer Platform refuses.
 //!
 //! Not done here (owner decision): ENFORCING the platform API quota on direct routes.
 //! Direct routes keep Calling's own request-rate limit; the gateway's shared quota
@@ -55,12 +57,12 @@ pub const ENV_SWITCH: &str = "CALLING_DIRECT_USAGE_ACCOUNTING";
 /// Entries per batch (the Developer Platform accepts at most 10 000).
 const MAX_BATCH_ENTRIES: usize = 5_000;
 
-/// Whether direct-route accounting is on (`on` unless the variable says `off`).
+/// Whether direct-route accounting is on (`off` unless the variable says `on`).
 pub fn enabled_from(value: Option<&str>) -> Result<bool, String> {
     match value.map(|v| v.trim().to_ascii_lowercase()) {
-        None => Ok(true),
-        Some(v) if v.is_empty() || v == "on" || v == "true" => Ok(true),
-        Some(v) if v == "off" || v == "false" => Ok(false),
+        None => Ok(false),
+        Some(v) if v == "on" || v == "true" => Ok(true),
+        Some(v) if v.is_empty() || v == "off" || v == "false" => Ok(false),
         Some(_) => Err(format!("{ENV_SWITCH} must be on or off")),
     }
 }
@@ -358,7 +360,8 @@ mod tests {
 
     #[test]
     fn the_switch_is_on_unless_off() {
-        assert_eq!(enabled_from(None), Ok(true));
+        assert_eq!(enabled_from(None), Ok(false));
+        assert_eq!(enabled_from(Some("")), Ok(false));
         assert_eq!(enabled_from(Some("off")), Ok(false));
         assert_eq!(enabled_from(Some("ON")), Ok(true));
         assert!(enabled_from(Some("maybe")).is_err());

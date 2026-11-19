@@ -38,15 +38,21 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **Part IV Workstream L** Calls to and from Digital Communications Numbers (DCNs) owned by `services/numbering` (inbound DCN offers verified against Numbering, outbound DCN presentation with enterprise membership policy and single-use caller-identity grants) | **Implemented** (ADR 0041; summary below) |
 | **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → service account → credential limits and the principal axis, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
 
-**Push (current state):** Calling builds the transport-neutral
-`cfmeet.calling.push-invitation` payload for endpoints that registered a `pushTargetRef`,
-but the service runs with `NoPushTransport` (`src/main.rs`), so nothing is pushed. The
-Notification Service's internal call-push route (`POST /internal/v1/push/call-invitations`)
-exists, but Calling is not wired to it yet. Incoming calls therefore reach a device only
-through its open signaling WebSocket or the recovery API (see [Flow](#flow)).
+**Push (current state, gap audit C1):** Calling builds the transport-neutral
+`cfmeet.calling.push-invitation` payload for endpoints that registered a `pushTargetRef`.
+`CALLING_PUSH_TRANSPORT` selects the transport: `none` (default, `NoPushTransport`: nothing
+is pushed; incoming calls reach a device through its open signaling WebSocket or the
+recovery API, see [Flow](#flow)) or `notifications` (with `CF_NOTIFICATIONS_BASE_URL`): the
+offer of a CF Meet first-party recipient goes to the Notification Service's call fast lane
+(I3, `POST /internal/v1/push/call-invitations`, `notifications-call-push.dispatch`) — a
+high-priority push living only as long as the invitation, metadata `{v, type: call}` only
+(never a number, name or call detail). When the ring ends unanswered on that endpoint
+(answered elsewhere, cancelled, expired, the Call ended) Calling cancels it through I3c
+(`POST /internal/v1/push/call-invitations/cancellations`, same permission). Both are
+fire-and-forget after commit, bounded by `CALLING_PUSH_TIMEOUT_MS`; ringing never waits
+for push.
 
-**Deferred (later sections / services):** wiring Calling's push dispatcher to the
-Notification Service, a message-broker transport for
+**Deferred (later sections / services):** a message-broker transport for
 platform events, quality metrics from providers that do not offer them, Numbering's own
 lifecycle and number administration (it is a separate service), billing / invoicing / pricing, and the Part F items listed below.
 
@@ -298,10 +304,10 @@ Meeting Service dependency; Telephony only executes edge primitives.
 | §52–§53 | Typed enterprise call policy, departments, admin audit, enterprise scopes, kill switches; Tenant is the organization boundary | ADR 0018 |
 | §54 | Extensions (scoped namespace), extension-to-extension Calls, enterprise SIP desk devices offered by Telephony | ADR 0018, 0020 |
 | §55 | Ring groups: SIMULTANEOUS / ORDERED, group single winner, bounded fan-out, fallback | ADR 0019 |
-| §56 | Queues: FIFO, authoritative positions, one offer per entry / agent, timeouts, overflow, abandonment | ADR 0019 |
+| §56 | Queues: FIFO, authoritative positions, one offer per entry / agent, timeouts, overflow, abandonment. C15: `wrapUpSeconds` (0–600; an agent is not offered another of the queue's calls, nor picked as a QUEUE transfer target, until that long after their previous call answered from the queue ended) and built-in `holdMusic` (DEFAULT / CALM / BRIGHT or none; shown to the waiting application caller as `enterprise.queue.holdMusic`; the SIP edge's own music on hold is not driven by Calling) | ADR 0019 |
 | §57 | Declarative versioned IVR (keys never stored or logged), built-in prompts, RTC keypad and SIP DTMF | ADR 0020 |
 | §58 | Business hours (IANA zones, DST, exceptions), typed forwarding (`/v1/enterprise/forwarding-rules`), loop / hop protection; public forwarding only through every Part E gate. Forwarding and voicemail also apply to an ordinary one-to-one application call (C3, `calls/app/enterprise/direct.rs`, gap-closure migration 000054): when the callee has an ACTIVE rule or mailbox, the call gets a context without entry extension (`direct`) and the router applies ALWAYS / UNAVAILABLE / BUSY / NO_ANSWER, else the callee's mailbox; off with `ENTERPRISE_CALLING_ENABLED`; voicemail only in Communications-governed personal scopes | ADR 0021 |
-| §59 | Hold / resume / transfer to enterprise targets on the same Call | ADR 0022 |
+| §59 | Hold / resume / transfer to enterprise targets on the same Call. C14 (CAL-019) attended transfer: `POST /v1/calls/{id}/consultations` holds the Call and places an ordinary consultation Call from the transferring participant to the target (principal, extension or destination); `…/consultations/{cid}/complete` (consultation Call CONNECTED) runs the canonical transfer of the original Call to the target (`call.consultation_transfer` on the consultation Call names the transfer for the target's client), and when the target joins the transferring participant is retired, the original Call is CONNECTED with the hold lifted at the provider and the consultation Call ends; a failed transfer leaves the Call HELD and the consultation CONSULTING; `…/cancel` ends the consultation Call and resumes the original. `call_consultations` (gap-closure 000056) links the two Calls; `calling_consultations_total{result}` | ADR 0022, 0009 |
 | §60 | Voicemail: mailboxes, edge (SIP) / LiveKit Egress (RTC) capture, protected object storage (`packages/object-storage`), READY, authorized signed retrieval, read state, deletion, retention | ADR 0023, 0027 |
 | §61 | Call recording: separate policy, server-issued notice, per-participant consent, immutable decisions, bridge (SIP) / audio-only room-composite (RTC) capture, protected artifacts, audited access. A participant who joins while a recording runs (answered transfer, later answer, rejoin) gets the notice at once (`call.recording_started`, `lateJoin`) and, when the policy requires its consent, 60 s to grant it; a decline or no grant stops the recording (CONSENT_WITHDRAWN) | ADR 0024, 0027 |
 | §62 | Missed calls and history derived per logical participant from Call evidence; `GET /v1/calls?principalId=`, `GET /v1/calling/history` | ADR 0025 |
@@ -370,7 +376,7 @@ S3-compatible store; it certifies internal enterprise SIP only. Results:
   (not gateway-forwarded) are counted into the Developer Platform's API request accounting
   (`src/usage/direct.rs`; daily totals and API_OPERATION counts, flushed every 30 s in
   idempotent batches; `developer-usage.record`). On when `CF_DEVELOPER_PLATFORM_BASE_URL` is
-  set; `CALLING_DIRECT_USAGE_ACCOUNTING=off` disables it.
+  set and `CALLING_DIRECT_USAGE_ACCOUNTING=on` (off by default; production turns it on in `activate-usage-export`, which grants `developer-usage.record`).
 * **Configuration** — `CALLING_WEBHOOK_SECRET_KEY` (32 bytes, base64, from the secret
   manager; without it webhook creation is refused) and
   `CALLING_WEBHOOK_ALLOW_PRIVATE_ENDPOINTS` (honoured only when `CF_RUNTIME_ENVIRONMENT=local`).

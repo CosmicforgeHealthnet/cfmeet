@@ -20,6 +20,13 @@
 //! * Every use re-checks persisted state: the endpoint must still be ACTIVE and its
 //!   principal active, and the minting API credential (and its whole authority chain)
 //!   must still be valid and hold `calls.write`.
+//! * Gap audit G3 — an ORGANIZATION MEMBER credential (claim `orm`) is minted through the
+//!   Meeting Service's `calling-organization-member.act` grant for a member's own endpoint
+//!   in a FIRST_PARTY organization scope, with the organization's Calling credential as
+//!   the minting credential. That credential's closed scope set holds `calls.read` (never
+//!   `calls.write`), so such a credential requires `calls.read` and, on every use, a
+//!   FIRST_PARTY organization tenant (`org-<32 hex>`) instead. It grants exactly the same
+//!   endpoint-only signaling as any other signaling credential.
 
 use std::fmt;
 
@@ -78,6 +85,9 @@ struct Claims {
     prn: Uuid,
     sva: Uuid,
     crd: Uuid,
+    /// Organization member credential (gap audit G3); absent on every other credential.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    orm: bool,
 }
 
 /// What a valid signaling credential asserts (before the persisted-state re-check).
@@ -90,6 +100,8 @@ pub struct SignalingClaims {
     pub minted_by_credential_id: CredentialId,
     pub issued_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+    /// Minted for an organization member through the Meeting Service (gap audit G3).
+    pub organization_member: bool,
 }
 
 /// A freshly minted credential. The token is redacted from `Debug`.
@@ -180,7 +192,7 @@ impl SignalingKeys {
         minted_by_credential_id: CredentialId,
         now: DateTime<Utc>,
     ) -> Result<MintedSignalingCredential, SignalingCredentialError> {
-        self.mint_until(
+        self.mint_with(
             scope,
             principal_id,
             endpoint_id,
@@ -188,6 +200,7 @@ impl SignalingKeys {
             minted_by_credential_id,
             now,
             now + self.ttl,
+            false,
         )
     }
 
@@ -204,6 +217,54 @@ impl SignalingKeys {
         minted_by_credential_id: CredentialId,
         now: DateTime<Utc>,
         not_after: DateTime<Utc>,
+    ) -> Result<MintedSignalingCredential, SignalingCredentialError> {
+        self.mint_with(
+            scope,
+            principal_id,
+            endpoint_id,
+            minted_by_service_account_id,
+            minted_by_credential_id,
+            now,
+            not_after,
+            false,
+        )
+    }
+
+    /// Mints an organization member credential (gap audit G3; see the module docs):
+    /// minted by the organization's Calling credential for the member's own endpoint.
+    #[allow(clippy::too_many_arguments)]
+    pub fn mint_organization_member(
+        &self,
+        scope: CallScope,
+        principal_id: PrincipalId,
+        endpoint_id: CallEndpointId,
+        minted_by_service_account_id: ServiceAccountId,
+        minted_by_credential_id: CredentialId,
+        now: DateTime<Utc>,
+    ) -> Result<MintedSignalingCredential, SignalingCredentialError> {
+        self.mint_with(
+            scope,
+            principal_id,
+            endpoint_id,
+            minted_by_service_account_id,
+            minted_by_credential_id,
+            now,
+            now + self.ttl,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn mint_with(
+        &self,
+        scope: CallScope,
+        principal_id: PrincipalId,
+        endpoint_id: CallEndpointId,
+        minted_by_service_account_id: ServiceAccountId,
+        minted_by_credential_id: CredentialId,
+        now: DateTime<Utc>,
+        not_after: DateTime<Utc>,
+        organization_member: bool,
     ) -> Result<MintedSignalingCredential, SignalingCredentialError> {
         let expires_at = (now + self.ttl).min(not_after);
         if expires_at.timestamp() <= now.timestamp() {
@@ -226,6 +287,7 @@ impl SignalingKeys {
             prn: principal_id.as_uuid(),
             sva: minted_by_service_account_id.as_uuid(),
             crd: minted_by_credential_id.as_uuid(),
+            orm: organization_member,
         };
         let mut header = Header::new(Algorithm::HS256);
         header.typ = Some(TOKEN_TYPE.to_string());
@@ -295,6 +357,7 @@ impl SignalingKeys {
             minted_by_credential_id: CredentialId::from_uuid(claims.crd),
             issued_at: Utc.timestamp_opt(claims.iat, 0).single().ok_or(invalid)?,
             expires_at: Utc.timestamp_opt(claims.exp, 0).single().ok_or(invalid)?,
+            organization_member: claims.orm,
         })
     }
 }
@@ -318,6 +381,28 @@ mod tests {
             ApplicationId::from_uuid(Uuid::from_u128(2)),
             EnvironmentId::from_uuid(Uuid::from_u128(3)),
         )
+    }
+
+    #[test]
+    fn organization_member_credentials_are_marked_and_others_are_not() {
+        let k = keys();
+        let now = Utc::now();
+        let args = (
+            scope(),
+            PrincipalId::from_uuid(Uuid::from_u128(4)),
+            CallEndpointId::from_uuid(Uuid::from_u128(5)),
+            ServiceAccountId::from_uuid(Uuid::from_u128(6)),
+            CredentialId::from_uuid(Uuid::from_u128(7)),
+        );
+        let plain = k.mint(args.0, args.1, args.2, args.3, args.4, now).unwrap();
+        let member = k
+            .mint_organization_member(args.0, args.1, args.2, args.3, args.4, now)
+            .unwrap();
+        let plain = k.verify(plain.token.expose_secret(), now).unwrap();
+        let member = k.verify(member.token.expose_secret(), now).unwrap();
+        assert!(!plain.organization_member);
+        assert!(member.organization_member);
+        assert_eq!(plain.endpoint_id, member.endpoint_id);
     }
 
     #[test]

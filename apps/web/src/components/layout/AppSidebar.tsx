@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useDashboardNavigation } from "@/lib/use-dashboard-navigation";
 import ProfileMenu from "./ProfileMenu";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
+import { UnreadBadge, useUnreadChats } from "@/hooks/useUnreadChats";
 
 /** Is this nav item the current page? Home matches exactly; others match their section. */
 export function isActivePath(pathname: string, href: string) {
@@ -22,6 +23,7 @@ export function isActivePath(pathname: string, href: string) {
 export default function AppSidebar() {
   const menu = useDashboardNavigation();
   const pathname = usePathname();
+  const unreadChats = useUnreadChats();
   // Collapse to an icon rail; remembered per browser.
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
@@ -89,8 +91,12 @@ export default function AppSidebar() {
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   )}
                 >
-                  <Icon className="size-5 shrink-0" strokeWidth={active ? 2.4 : 2} aria-hidden />
-                  <span className={collapsed ? "hidden" : "hidden lg:inline"}>{label}</span>
+                  <span className="relative shrink-0">
+                    <Icon className="size-5" strokeWidth={active ? 2.4 : 2} aria-hidden />
+                    {href === "/dashboard/messages" && unreadChats ? <span className={cn("absolute -right-1 -top-1 size-2.5 rounded-full bg-primary ring-2 ring-background", !collapsed && "lg:hidden")} /> : null}
+                  </span>
+                  <span className={cn("flex-1", collapsed ? "hidden" : "hidden lg:inline")}>{label}</span>
+                  {href === "/dashboard/messages" && !collapsed ? <UnreadBadge count={unreadChats} className="hidden lg:flex" /> : null}
                 </Link>
               </li>
             );

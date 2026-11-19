@@ -897,3 +897,137 @@ async fn abandon_and_answer_race_is_consistent() {
         tick(&e).await;
     }
 }
+
+/// C15: a queue's wrap-up time keeps an agent out of distribution after their previous
+/// queue call ended (server time), and its built-in hold music is configured, validated
+/// and shown to the waiting caller.
+#[tokio::test]
+async fn wrap_up_time_and_hold_music() {
+    let Some(e) = EnterpriseWorld::new().await else {
+        return;
+    };
+    let ag = desk(&e, "agent").await;
+    // Bounds and the controlled catalogue (never a URL).
+    for extra in [
+        json!({ "wrapUpSeconds": -1 }),
+        json!({ "wrapUpSeconds": 601 }),
+        json!({ "holdMusic": { "builtin": "JAZZ" } }),
+        json!({ "holdMusic": { "url": "https://music.example.com/hold.mp3" } }),
+        json!({ "holdMusic": "CALM" }),
+    ] {
+        let mut body = json!({ "name": format!("Queue {}", tag()), "maxWaitSeconds": 600,
+                               "offerTimeoutSeconds": 20, "capacity": 10 });
+        for (k, v) in extra.as_object().unwrap() {
+            body[k] = v.clone();
+        }
+        let r = e
+            .admin(Method::POST, "/v1/enterprise/queues", Some(body.clone()))
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{body} -> {}", r.text);
+    }
+    // Defaults: no wrap-up, no hold music.
+    let plain = queue(&e, 60, 10, 5, None).await;
+    conforms("Queue", &plain);
+    assert_eq!(plain["wrapUpSeconds"], 0);
+    assert!(plain["holdMusic"].is_null());
+
+    let q = e
+        .create(
+            "/v1/enterprise/queues",
+            json!({ "name": format!("Queue {}", tag()), "maxWaitSeconds": 600,
+                    "offerTimeoutSeconds": 20, "capacity": 10, "wrapUpSeconds": 30,
+                    "holdMusic": { "builtin": "CALM" } }),
+        )
+        .await;
+    conforms("Queue", &q);
+    assert_eq!(q["wrapUpSeconds"], 30);
+    assert_eq!(q["holdMusic"]["builtin"], "CALM");
+    let id = id_of(&q, "queueId");
+    // PATCH: hold music removed (null), then set again; wrap-up bounded.
+    let r = e
+        .admin(
+            Method::PATCH,
+            &format!("/v1/enterprise/queues/{id}"),
+            Some(json!({ "expectedVersion": 1, "holdMusic": null })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert!(r.json["holdMusic"].is_null());
+    assert_eq!(r.json["wrapUpSeconds"], 30, "unchanged when absent");
+    let r = e
+        .admin(
+            Method::PATCH,
+            &format!("/v1/enterprise/queues/{id}"),
+            Some(json!({ "expectedVersion": 2, "wrapUpSeconds": 900 })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text);
+    let r = e
+        .admin(
+            Method::PATCH,
+            &format!("/v1/enterprise/queues/{id}"),
+            Some(json!({ "expectedVersion": 2, "holdMusic": { "builtin": "BRIGHT" } })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    conforms("Queue", &r.json);
+    assert_eq!(r.json["holdMusic"]["builtin"], "BRIGHT");
+
+    set_agents(&e, &q, vec![agent(&ag.principal)]).await;
+    e.extension("5090", "QUEUE", id).await;
+    let first = desk(&e, "caller-one").await;
+    let second = desk(&e, "caller-two").await;
+    let (call1, created) = dial(&e, &first, "5090").await;
+    // The waiting caller's Call shows the queue's hold music.
+    assert_eq!(
+        created["enterprise"]["queue"]["holdMusic"]["builtin"],
+        "BRIGHT"
+    );
+    let (call2, _) = dial(&e, &second, "5090").await;
+    let invitation = e.a.invitation_for(call1, ag.phone.endpoint).await.unwrap();
+    let (_, v) = e.a.state(call1).await;
+    let r = e.a.accept(call1, invitation, &ag.phone, v).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let (_, v) = e.a.state(call1).await;
+    let r = e.a.command(call1, "end", v).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    // Wrap-up: the agent is not offered the next caller yet.
+    tick(&e).await;
+    e.h().state.app.dispatch_queue(id).await;
+    assert_eq!(entry_state(&e, call2).await, "WAITING");
+    assert!(e.a.invitation_for(call2, ag.phone.endpoint).await.is_none());
+    e.h().clock.advance(chrono::Duration::seconds(20));
+    tick(&e).await;
+    assert_eq!(entry_state(&e, call2).await, "WAITING");
+    // Wrap-up over (30 s after the agent left the call): offered.
+    e.h().clock.advance(chrono::Duration::seconds(11));
+    tick(&e).await;
+    assert_eq!(entry_state(&e, call2).await, "OFFERING");
+    assert!(e.a.invitation_for(call2, ag.phone.endpoint).await.is_some());
+}
+
+/// C15: a queue without wrap-up offers the next caller as soon as the agent is free.
+#[tokio::test]
+async fn no_wrap_up_offers_the_next_caller_at_once() {
+    let Some(e) = EnterpriseWorld::new().await else {
+        return;
+    };
+    let ag = desk(&e, "agent").await;
+    let q = queue(&e, 600, 20, 10, None).await;
+    set_agents(&e, &q, vec![agent(&ag.principal)]).await;
+    e.extension("5091", "QUEUE", id_of(&q, "queueId")).await;
+    let first = desk(&e, "caller-one").await;
+    let second = desk(&e, "caller-two").await;
+    let (call1, created) = dial(&e, &first, "5091").await;
+    assert!(created["enterprise"]["queue"]["holdMusic"].is_null());
+    let (call2, _) = dial(&e, &second, "5091").await;
+    let invitation = e.a.invitation_for(call1, ag.phone.endpoint).await.unwrap();
+    let (_, v) = e.a.state(call1).await;
+    let r = e.a.accept(call1, invitation, &ag.phone, v).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let (_, v) = e.a.state(call1).await;
+    let r = e.a.command(call1, "end", v).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    tick(&e).await;
+    assert_eq!(entry_state(&e, call2).await, "OFFERING");
+}

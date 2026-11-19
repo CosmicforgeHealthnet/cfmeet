@@ -167,6 +167,9 @@ pub enum Effect {
         user_id: Uuid,
         desired: &'static str,
     },
+    /// A team's membership changed or the team was archived: its team chat (if a
+    /// manager created one) is re-synced by the team chat worker.
+    TeamChannel { team_id: Uuid, archived: bool },
     /// Recorded only (no local effect).
     Record,
 }
@@ -194,6 +197,15 @@ pub fn effect_of(envelope: &Envelope) -> Result<Effect, &'static str> {
         "membership.removed" => Effect::MemberAccess {
             user_id: user()?,
             desired: "REMOVED",
+        },
+        "team.member_added" | "team.member_removed" | "team.archived" => Effect::TeamChannel {
+            team_id: envelope
+                .payload
+                .get("teamId")
+                .and_then(Value::as_str)
+                .and_then(|t| Uuid::try_parse(t).ok())
+                .ok_or("payload.teamId is required for team events")?,
+            archived: envelope.event_type == "team.archived",
         },
         "organization.created"
         | "organization.profile_updated"
@@ -425,6 +437,16 @@ async fn apply_effect<C: ConnectionTrait>(
 ) -> Result<Outcome, ApplyError> {
     match effect {
         Effect::Record => Ok(Outcome::Recorded),
+        Effect::TeamChannel { team_id, archived } => {
+            if super::team_channels::mark_due(txn, envelope.organization_id, *team_id, *archived)
+                .await?
+            {
+                Ok(Outcome::Applied)
+            } else {
+                // No team chat for this team: nothing to follow.
+                Ok(Outcome::Recorded)
+            }
+        }
         Effect::RefreshProjection => {
             let Some(authority) = app
                 .meeting

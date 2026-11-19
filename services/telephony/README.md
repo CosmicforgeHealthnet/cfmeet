@@ -32,6 +32,7 @@ Edge topology, segmentation, toll-fraud boundary and carrier peer configuration:
 | §44–§47 App-to-phone, phone-to-app, phone-to-phone relay, callback relay (with Calling and Privacy Relay) | **Implemented and simulated end to end** |
 | §48 Unknown provider outcome; §49 provider event normalization; §50 reconciliation; §51 failover | **Implemented** |
 | Paid-action safety (spend reservations in Calling; duration limit, operator disable, circuits, abuse signals here) and bounded metrics | **Implemented** |
+| Gap C10: DCN voice usage (`number-usage.report`) and DCN call-pattern risk signals (`number-risk.report`) to Numbering, through a durable, non-blocking report outbox | **Implemented; off by default** (`TELEPHONY_NUMBERING_USAGE_REPORTS_ENABLED`, `TELEPHONY_NUMBERING_RISK_SIGNALS_ENABLED`) |
 | Real lawful telecom interconnect certification (Nigeria first) | **BLOCKED.** It needs a contracted carrier / SIP trunk, a public number and staging credentials. `tests/real_interconnect_certification.rs` prints `NOT RUN` without them and never fakes success |
 
 ## Internal API
@@ -93,6 +94,25 @@ See `src/config.rs` for the full table. Highlights:
   enterprise calls never depend on it. `telephony-admin dcn acknowledge` (and the
   worker's reconciliation) confirms Numbering's VOICE route only while the DCN is
   routable locally.
+* `TELEPHONY_NUMBERING_USAGE_REPORTS_ENABLED`, `TELEPHONY_NUMBERING_RISK_SIGNALS_ENABLED`
+  (both default `false`; gap C10, ADR 0043 decisions 7 and 8; `src/numbering_reports.rs`):
+  Telephony is the voice carrier that reports to Numbering. A finalized, billable DCN leg
+  queues one `POST /internal/v1/number-usage` report (`VOICE_INBOUND_SECONDS` /
+  `VOICE_OUTBOUND_SECONDS`, its billable seconds, the provider cost only when the
+  provider reported it; source key `voice-leg:<leg>`) in the usage transaction. The abuse
+  scan's DCN patterns — too many outbound calls from one DCN
+  (`TELEPHONY_DCN_CALL_VELOCITY_THRESHOLD` / `…_WINDOW_MINUTES`, 30 / 10) or too many
+  unanswered / sub-6-second ones (`TELEPHONY_DCN_NUISANCE_THRESHOLD` / `…_WINDOW_MINUTES`,
+  20 / 60) — always raise a local `ABUSE_SIGNAL` incident and, when enabled, queue a
+  `POST /internal/v1/number-risk-signals` (`SPAM_CALLS` / `NUISANCE_CALLS`, magnitude 50
+  at the threshold up to 100 at twice it); Numbering scores and decides. Reports never
+  block a call: they sit in `telephony_numbering_reports` and the workers deliver them
+  with capped backoff (`401` / `403` / `429` / outages are retried; a permanent refusal or
+  200 attempts dead-letters them with one `OUTBOX_DEAD_LETTER` incident per reason;
+  gauges `telephony_numbering_reports_backlog` / `…_dead_lettered`). Enabling either
+  switch requires `NUMBERING_INTERNAL_BASE_URL` (start-up refuses otherwise) and
+  Numbering's trust bundle to grant `cfmeet.telephony` `number-usage.report` /
+  `number-risk.report` (operator step; until then reports wait and are retried).
 * `TELEPHONY_SYNTHETIC_INTERCONNECT_ENABLED` (default `false`; ADR 0041 decision 7):
   enables `SYNTHETIC_TEST` routes, the test-only interconnect that carries Numbering's
   SYNTHETIC DCNs in local / test runtimes. Refused at start-up outside local / test; any
@@ -152,6 +172,7 @@ make telephony-integration  # Calling <-> Telephony <-> Privacy Relay against re
 | `operator_admin` | `telephony-admin` provider / route disable and incident resolve each write exactly one operator audit row; refusals write none |
 | `sip_edge_outage` | SIP / media edge down (deterministic): public SIP originations fail definitely with nothing dialled and no usage, one `SIP_EDGE_UNAVAILABLE` incident, gauge and readiness; enterprise commands stop at their cap; a TERMINATE completes once the edge is back |
 | `disaster_recovery` | Backup (`backup.sh --service telephony`) and restore into a fresh database; the restored workers run PENDING commands exactly once, never re-send a post-fence command, create no unauthorized leg or usage duplicate; no secret or destination number in the dump (SKIPPED without `pg_dump` unless `DISASTER_RECOVERY_CERT_REQUIRED=1`); a stopped-worker backlog drained by two workers exactly once in per-leg order |
+| `numbering_reports` | Gap C10: a billable DCN leg reports its voice seconds to Numbering exactly once (ids and counts only, no estimate as cost); relay-number, unanswered and switched-off legs report nothing; a Numbering outage delays the report, never the call or Calling's events; a permanent refusal dead-letters with one incident; a DCN calling too fast becomes one `SPAM_CALLS` signal per window bucket (only a local incident while risk signals are off) |
 | `migration_upgrade` | Previous head (all migrations but the newest) with data → head → one step down → head |
 | `load` | Intake / execution, event ingestion and duplicate dedupe, reconciliation (and SIP signalling on the certification edge when installed) with `LOAD` lines: percentiles, error rate, DB connections, lock waits, worker lag |
 | `http_contract` | The OpenAPI lists exactly the routes; real bodies validate |

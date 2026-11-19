@@ -20,7 +20,7 @@ import {
   ArrowLeft, BellOff, Check, Star, Forward, Flag, CheckCheck, ChevronDown, CornerUpLeft, FileText, History, Info, Lock, LockOpen, LogOut, MessageSquarePlus,
   MoreHorizontal, Paperclip, Pencil, Phone, Pin, PinOff, Search, SendHorizontal, Shield, ShieldCheck, ShieldAlert, SmilePlus, Smartphone,
   Trash2, EyeOff, Video, WifiOff, X,
-  UserPlus,
+  UserPlus, Users,
 } from "lucide-react";
 import { Popover } from "radix-ui";
 
@@ -364,102 +364,177 @@ function usePeoplePicker(enabled: boolean, search: string) {
 
 /* ─── New chat ────────────────────────────────────────────────────────── */
 
+type Step = "chat" | "members" | "name";
+
+/**
+ * WhatsApp-style New chat: "New group" and "New contact" on top, then people (tap one to chat).
+ * New group: pick people → name the group → create.
+ */
 function NewConversation({ engine, onCreated, open, setOpen }: { engine: MessagingEngine; onCreated: (id: string) => void; open: boolean; setOpen: (v: boolean) => void }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+  const [step, setStep] = useState<Step>("chat");
   const [search, setSearch] = useState("");
   const picker = usePeoplePicker(open && !!s.identity, search);
   const [chosen, setChosen] = useState<string[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
+  const [groupName, setGroupName] = useState("");
   // The messaging policy only allows private (end-to-end encrypted) chats, so there's no choice to offer.
   const profile: SecurityProfile = "PRIVATE_E2EE";
+  const ready = s.phase === "ready";
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const toggle = (id: string, name: string, on: boolean) => {
-    setChosen(on ? [...chosen, id] : chosen.filter((x) => x !== id));
+  const [busy, setBusy] = useState<string | null>(null);
+  const toggle = (id: string, name: string) => {
+    setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
     setNames((n) => ({ ...n, [id]: name }));
   };
-  const close = () => { setOpen(false); setChosen([]); setSearch(""); setError(null); };
-  const create = async () => {
-    setBusy(true);
+  const close = () => { setOpen(false); setStep("chat"); setChosen([]); setSearch(""); setGroupName(""); setError(null); };
+  const go = (next: Step) => { setStep(next); setSearch(""); setError(null); };
+  const create = async (ids: string[], title?: string) => {
+    setBusy(ids.length === 1 && !title ? ids[0] : "group");
     setError(null);
     try {
-      const userIds = chosen.filter((x) => x.startsWith("u:")).map((x) => x.slice(2));
-      const cfMeetIds = chosen.filter((x) => x.startsWith("cf:")).map((x) => x.slice(3));
-      onCreated(await engine.createConversation(userIds, profile, { cfMeetIds }));
+      const userIds = ids.filter((x) => x.startsWith("u:")).map((x) => x.slice(2));
+      const cfMeetIds = ids.filter((x) => x.startsWith("cf:")).map((x) => x.slice(3));
+      const id = await engine.createConversation(userIds, profile, { cfMeetIds, title });
+      // Private groups get their name after they exist (the server only takes a title on create for managed chats).
+      if (title) await engine.renameConversation(id, title).catch(() => {});
+      onCreated(id);
       close();
     } catch (e) {
       setError(messagingErrorMessage(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
+
+  const title = step === "chat" ? "New chat" : step === "members" ? "Add group members" : "New group";
+  const row = "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted/60 disabled:opacity-50";
+  const people = (
+    <>
+      {picker.pending ? <li className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground"><Spinner /> Loading…</li>
+        : picker.error ? <li role="alert" className="px-3 py-4 text-sm text-destructive">{messagingErrorMessage(picker.error)} <button className="underline" onClick={picker.retry}>Retry</button></li>
+          : picker.people.length === 0 ? <li className="px-3 py-8 text-center text-sm text-muted-foreground">{search ? "No one matches." : "No one to message yet."}</li> : null}
+      {picker.people.length > 0 ? <li className="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground" data-testid="people-source">{picker.heading}</li> : null}
+      {picker.people.map((p) => {
+        const on = chosen.includes(p.id);
+        return (
+          <li key={p.id}>
+            {step === "chat" ? (
+              <button type="button" className={row} data-testid="colleague" data-kind={p.kind} data-name={p.name} disabled={!ready || !!busy} onClick={() => void create([p.id])}>
+                <Avatar name={p.name} seed={p.id} size="size-11" />
+                <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{p.name}</span>
+                {busy === p.id ? <Spinner /> : null}
+              </button>
+            ) : (
+              <button type="button" className={row} data-testid="colleague" data-kind={p.kind} data-name={p.name} aria-pressed={on} onClick={() => toggle(p.id, p.name)}>
+                <span className="relative">
+                  <Avatar name={p.name} seed={p.id} size="size-11" />
+                  {on ? <span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full border-2 border-background bg-primary text-primary-foreground"><Check className="size-3" strokeWidth={3} /></span> : null}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{p.name}</span>
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </>
+  );
+
   return (
     <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : close())}>
-      <DialogContent className="gap-0 p-0 sm:max-w-md" data-testid="new-conversation-form">
-        <DialogHeader className="border-b border-border px-5 pb-4 pt-5 text-left">
-          <DialogTitle>New chat</DialogTitle>
-          <DialogDescription data-testid="people-source">{picker.heading}</DialogDescription>
+      <DialogContent className="flex h-[min(720px,92dvh)] flex-col gap-0 p-0 sm:max-w-lg" data-testid="new-conversation-form">
+        <DialogHeader className="flex-row items-center gap-2 space-y-0 border-b border-border px-3 py-3 text-left">
+          {step !== "chat" ? (
+            <button type="button" aria-label="Back" onClick={() => go(step === "name" ? "members" : "chat")} className="flex size-9 items-center justify-center rounded-full hover:bg-muted"><ArrowLeft className="size-5" /></button>
+          ) : <span className="w-2" />}
+          <div className="min-w-0 flex-1">
+            <DialogTitle className="text-lg">{title}</DialogTitle>
+            <DialogDescription className="text-xs">{step === "members" ? (chosen.length ? `${chosen.length} selected` : "Pick people to add") : step === "name" ? `${chosen.length} ${chosen.length === 1 ? "member" : "members"}` : "Private chats are end-to-end encrypted"}</DialogDescription>
+          </div>
         </DialogHeader>
-        <div className="space-y-3 px-5 pt-4">
-          <label className="flex h-10 items-center gap-2 rounded-full bg-muted px-3.5 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
-            <Search className="size-4 shrink-0" />
-            <input autoFocus aria-label="Search people" placeholder="Search people" maxLength={64} value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
-          </label>
-          {chosen.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {chosen.map((id) => (
-                <button key={id} type="button" onClick={() => toggle(id, names[id] ?? "", false)} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-primary/10 pl-1 pr-2.5 text-sm font-medium text-primary hover:bg-primary/15">
-                  <Avatar name={names[id] ?? "?"} seed={id} size="size-6" className="text-[10px]" />{names[id]}<X className="size-3.5" />
-                </button>
-              ))}
+
+        {step !== "name" ? (
+          <div className="space-y-3 px-4 pt-3">
+            <label className="flex h-10 items-center gap-2 rounded-full bg-muted px-3.5 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
+              <Search className="size-4 shrink-0" />
+              <input autoFocus aria-label="Search people" placeholder="Search name" maxLength={64} value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground" />
+            </label>
+            {step === "members" && chosen.length > 0 ? (
+              <div className="no-scrollbar flex gap-3 overflow-x-auto pb-1">
+                {chosen.map((id) => (
+                  <button key={id} type="button" onClick={() => toggle(id, names[id] ?? "")} aria-label={`Remove ${names[id]}`} className="flex w-14 shrink-0 flex-col items-center gap-1">
+                    <span className="relative"><Avatar name={names[id] ?? "?"} seed={id} size="size-12" /><span className="absolute -bottom-0.5 -right-0.5 flex size-5 items-center justify-center rounded-full border-2 border-background bg-muted-foreground text-background"><X className="size-3" strokeWidth={3} /></span></span>
+                    <span className="w-full truncate text-center text-[11px]">{names[id]?.split(" ")[0]}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {step === "name" ? (
+          <div className="flex-1 space-y-5 overflow-y-auto px-5 py-6">
+            <div className="flex items-center gap-4">
+              <span className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"><Users className="size-7" /></span>
+              <input autoFocus aria-label="Group name" placeholder="Group name" maxLength={120} value={groupName} onChange={(e) => setGroupName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && groupName.trim() && ready && !busy) void create(chosen, groupName.trim()); }}
+                className="h-11 min-w-0 flex-1 border-b-2 border-primary bg-transparent text-base outline-none" />
             </div>
-          )}
-        </div>
-        <ul className="no-scrollbar mt-2 max-h-64 overflow-y-auto px-3">
-          {!search ? (
-            <li>
-              <Link href="/dashboard/contacts?add=1" onClick={close} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/60">
-                <span className="flex size-9 items-center justify-center rounded-full bg-primary text-primary-foreground"><UserPlus className="size-4" /></span>
-                <span className="text-sm font-semibold">New contact</span>
-              </Link>
-            </li>
-          ) : null}
-          {picker.pending ? <li className="flex items-center gap-2 px-2 py-4 text-sm text-muted-foreground"><Spinner /> Loading…</li>
-            : picker.error ? <li role="alert" className="px-2 py-4 text-sm text-destructive">{messagingErrorMessage(picker.error)} <button className="underline" onClick={picker.retry}>Retry</button></li>
-              : picker.people.length === 0 ? <li className="px-2 py-6 text-center text-sm text-muted-foreground">{search ? "No one matches." : "No one to message yet."}</li> : null}
-          {picker.people.map((p) => {
-            const on = chosen.includes(p.id);
-            return (
-              <li key={p.id}>
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/60">
-                  <input type="checkbox" className="sr-only" data-testid="colleague" data-kind={p.kind} data-name={p.name} checked={on} onChange={(e) => toggle(p.id, p.name, e.target.checked)} />
-                  <Avatar name={p.name} seed={p.id} size="size-9" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</span>
-                  <span className={cn("flex size-5 shrink-0 items-center justify-center rounded-full border", on ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40")}>{on && <Check className="size-3.5" strokeWidth={3} />}</span>
-                </label>
-              </li>
-            );
-          })}
-        </ul>
-        <div className="space-y-3 border-t border-border px-5 py-4">
-          {s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering" || s.phase === "needs-signin" ? (
+            <div>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Members: {chosen.length}</p>
+              <div className="flex flex-wrap gap-4">
+                {chosen.map((id) => (
+                  <span key={id} className="flex w-14 flex-col items-center gap-1"><Avatar name={names[id] ?? "?"} seed={id} size="size-12" /><span className="w-full truncate text-center text-[11px]">{names[id]?.split(" ")[0]}</span></span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <ul className="no-scrollbar mt-2 flex-1 overflow-y-auto px-2 pb-3">
+            {step === "chat" && !search ? (
+              <>
+                <li>
+                  <button type="button" className={row} data-testid="new-group" onClick={() => go("members")}>
+                    <span className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground"><Users className="size-5" /></span>
+                    <span className="text-[15px] font-semibold">New group</span>
+                  </button>
+                </li>
+                <li>
+                  <Link href="/dashboard/contacts?add=1" onClick={close} className={row}>
+                    <span className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground"><UserPlus className="size-5" /></span>
+                    <span className="text-[15px] font-semibold">New contact</span>
+                  </Link>
+                </li>
+              </>
+            ) : null}
+            {people}
+          </ul>
+        )}
+
+        <div className="space-y-3 border-t border-border px-5 py-3">
+          {!ready ? (
             <div className="flex items-center gap-3 rounded-xl bg-muted/60 p-3" data-testid="new-chat-setup">
               <Shield className="size-4 shrink-0 text-emerald-600" />
-              <p className="min-w-0 flex-1 text-xs text-muted-foreground">{s.accountLink ? "Verify this browser (code above) to start a chat." : "Setting up private messaging in this browser…"}</p>
-              {s.phase === "registering" ? <Spinner /> : null}
+              <p className="min-w-0 flex-1 text-xs text-muted-foreground">{
+                s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering" || s.phase === "needs-signin"
+                  ? (s.accountLink ? "Verify this browser (code above) to start a chat." : "Setting up private messaging in this browser…")
+                  : s.phase === "loading" ? "Loading private messaging…"
+                  : s.phase === "locked" ? "Messages are open in another tab. Close it, or use them here from the Messages page."
+                  : s.phase === "unavailable" ? "New chats can't be started yet: private messaging isn't turned on for CF Meet. Your existing chats still work."
+                  : `Private messaging couldn't start (${s.detail ?? "unknown error"}). Reload the page to try again.`}</p>
+              {s.phase === "registering" || s.phase === "loading" ? <Spinner /> : null}
             </div>
-          ) : (
-            <p className="flex items-center gap-2 text-xs text-muted-foreground"><Lock className="size-3.5 shrink-0 text-emerald-600" />{s.phase === "ready" ? "Private · only people in the chat can read it"
-              : s.phase === "loading" ? "Loading private messaging…"
-              : s.phase === "locked" ? "Messages are open in another tab. Close it, or use them here from the Messages page."
-              : s.phase === "unavailable" ? "New chats can't be started yet: private messaging isn't turned on for CF Meet. Your existing chats still work."
-              : `Private messaging couldn't start (${s.detail ?? "unknown error"}). Reload the page to try again.`}</p>
-          )}
+          ) : null}
           {error ? <p className="text-sm text-destructive" data-testid="create-error">{error}</p> : null}
-          <button type="button" data-testid="create-conversation" disabled={busy || chosen.length === 0 || (profile === "PRIVATE_E2EE" && s.phase !== "ready")} onClick={() => void create()}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            {busy ? <Spinner /> : null}{chosen.length > 1 ? `Start group with ${chosen.length}` : "Start chat"}
-          </button>
+          {step === "members" ? (
+            <button type="button" data-testid="group-next" disabled={chosen.length === 0} onClick={() => go("name")}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">Next</button>
+          ) : step === "name" ? (
+            <button type="button" data-testid="create-conversation" disabled={!!busy || !groupName.trim() || !ready} onClick={() => void create(chosen, groupName.trim())}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+              {busy ? <Spinner /> : null}Create group
+            </button>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
@@ -508,7 +583,8 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
 }) {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
-  const live = managed && !!m.messageId && m.state === "delivered";
+  // Private chats get the same actions as managed ones (the server holds no content, only ids).
+  const live = !!m.messageId && (m.state === "delivered" || m.state === "sent");
   const mine = m.mine;
   const status = m.state === "queued" ? "Waiting…" : m.state === "pending-setup" ? "Waiting for secure setup" : m.state === "sending" ? "Sending…" : m.state === "failed" ? "Not sent" : clock(m.createdAt);
   const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted";
@@ -848,6 +924,13 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   useEffect(() => {
     if (lastSequence !== null && typeof document !== "undefined" && document.visibilityState === "visible") void engine.markRead(conversation.id);
   }, [engine, conversation.id, lastSequence]);
+  // Coming back to the tab or window reads what arrived while it was in the background.
+  useEffect(() => {
+    const read = () => { if (document.visibilityState === "visible") void engine.markRead(conversation.id); };
+    document.addEventListener("visibilitychange", read);
+    window.addEventListener("focus", read);
+    return () => { document.removeEventListener("visibilitychange", read); window.removeEventListener("focus", read); };
+  }, [engine, conversation.id]);
   // Keep the newest message in view.
   useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [items.length]);
   // Composer grows with the text, up to ~6 lines.
@@ -898,12 +981,13 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   const send = () => {
     const t = text;
     if (!t.trim() || !canSend) return;
-    const reply = managed ? replyTo?.messageId ?? null : null;
+    const reply = replyTo?.messageId ?? null;
     setText("");
     setReplyTo(null);
     setError(null);
     engine.typing(conversation.id, false);
-    void engine.send(conversation.id, t, managed ? { replyToMessageId: reply, mentionedPrincipalIds: mentions(t) } : {}).catch((cause) => {
+    // The server takes @mentions only in managed chats; replies work in both.
+    void engine.send(conversation.id, t, { replyToMessageId: reply, mentionedPrincipalIds: managed ? mentions(t) : [] }).catch((cause) => {
       setText((draft) => draft || t);
       setError(messagingErrorMessage(cause));
     });
@@ -1042,7 +1126,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 maxLength={16384}
                 disabled={!canSend}
                 placeholder={canSend ? (e2ee ? "Message" : "Message (CF Meet can read this chat)") : adminsOnly ? "Only admins can send messages" : "You can't send messages from this browser"}
-                onChange={(e) => { setText(e.target.value); if (managed) engine.typing(conversation.id, e.target.value.length > 0); }}
+                onChange={(e) => { setText(e.target.value); engine.typing(conversation.id, e.target.value.length > 0); }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
                 className="max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
               />
@@ -1099,6 +1183,9 @@ function PersonalMessages() {
   }, [engine, requested, s.conversations, s.phase]);
   const current = s.conversations.find((c) => c.id === selected) ?? null;
   const unreadTotal = s.conversations.filter((c) => c.unreadCount > 0 && c.id !== selected).length;
+  // Keep the number on the Chats tab in step with this list.
+  const tabCounter = useQueryClient();
+  useEffect(() => { tabCounter.setQueryData(["messaging", "unread-chats"], unreadTotal); }, [tabCounter, unreadTotal]);
   const conversations = s.conversations.filter((conversation) => {
     const matchesSearch = conversation.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
     const matchesFilter = filter === "ALL" || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected : conversation.securityProfile === filter);
@@ -1193,11 +1280,13 @@ function PersonalMessages() {
                       </span>
                       <span className="mt-0.5 flex items-center justify-between gap-2">
                         <span className={cn("flex min-w-0 items-center gap-1 text-sm", unread ? "font-medium text-foreground" : "text-muted-foreground")}>
+                          {s.typing[c.id]?.length ? <span className="truncate font-medium text-primary">{c.contextClass === "GROUP" ? `${s.names[s.typing[c.id][0]]?.split(" ")[0] ?? "Someone"} is typing…` : "typing…"}</span> : <>
                           {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Ticks receipt={latest.seenBy?.length ? "read" : latest.receipt ?? "sent"} list /> : null}
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
                           {!latest && summary && summary.lifecycle === "ACTIVE" && c.securityProfile === "PRIVATE_E2EE"
                             ? <span aria-label="Loading message" className="h-3 w-32 animate-pulse rounded-full bg-muted" />
                             : <span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span>}
+                          </>}
                         </span>
                         {unread ? (
                           <span className="flex shrink-0 items-center gap-1">

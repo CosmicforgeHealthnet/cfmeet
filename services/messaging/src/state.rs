@@ -57,6 +57,10 @@ pub struct AppState {
     /// ADR 0064 CF Meet Apps (`MESSAGING_APPS_ENABLED`, default off: OAuth credentials
     /// are refused and nothing app-specific happens).
     pub apps: crate::apps::AppsSettings,
+    /// Gap audit S1 (`MESSAGING_ORGANIZATION_WAKEUPS=on`, default off): message wake-ups of
+    /// conversations in an organization's own first-party scope go to the Notification
+    /// Service (route `NEW`), addressed to the members' CF Meet accounts.
+    pub organization_wakeups: bool,
 }
 
 impl AppState {
@@ -94,6 +98,7 @@ impl AppState {
             push_mirror: None,
             partner: Arc::new(crate::partner::Partner::disabled()),
             apps: crate::apps::AppsSettings::default(),
+            organization_wakeups: false,
         }
     }
 
