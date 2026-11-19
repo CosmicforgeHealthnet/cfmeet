@@ -114,24 +114,37 @@ fn risky_commands_need_two_people_versions_and_idempotency() {
 }
 
 #[test]
-fn nothing_is_served_before_the_runtime_exists() {
-    // A0: the contract only. A1 flips the platform reads to served.
+fn a1_serves_exactly_the_platform_reads() {
+    let served: Vec<&str> = catalog()
+        .iter()
+        .filter(|c| c.served)
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(
+        served,
+        [
+            "bridge.capabilities.read",
+            "bridge.health.read",
+            "bridge.datasets.read",
+            "hq.projections.status"
+        ]
+    );
     for c in catalog() {
-        assert!(
-            !c.served,
-            "{} is marked served before the runtime exists",
-            c.id
-        );
-        assert!(
-            c.blocker().is_some(),
-            "{}: unserved capability needs a blocker",
-            c.id
-        );
-        assert!(
-            matches!(c.state(), State::Disabled | State::BlockedDependency),
-            "{}",
-            c.id
-        );
+        if c.served {
+            assert_eq!(c.state(), State::ReadOnly, "{}", c.id);
+            assert!(c.blocker().is_none() && !c.tests.is_empty(), "{}", c.id);
+        } else {
+            assert!(
+                c.blocker().is_some(),
+                "{}: unserved capability needs a blocker",
+                c.id
+            );
+            assert!(
+                matches!(c.state(), State::Disabled | State::BlockedDependency),
+                "{}",
+                c.id
+            );
+        }
     }
 }
 

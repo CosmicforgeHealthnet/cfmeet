@@ -1,0 +1,636 @@
+//! PostgreSQL behaviour of `PgStore` and the schema guards (triggers, constraints).
+//!
+//! Requires PostgreSQL (no Docker): `TEST_DATABASE_URL` is an admin URL; each test gets its
+//! own database cloned from a freshly migrated template. Without it the tests FAIL, unless
+//! `CFMEET_SKIP_DB_TESTS=1` (explicit SKIPPED line).
+
+use admin_bridge::store::{
+    chain_hash,
+    pg::{verify_audit_chain, PgStore},
+    AuditDraft, Claim, ClaimKind, ClaimOutcome, PolicyRow, PrincipalKind, RateKey, Store,
+    GENESIS_HASH,
+};
+use admin_bridge_migration::MigratorTrait;
+use chrono::{Duration, NaiveDate, TimeZone, Utc};
+use sea_orm::{
+    ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement, Value as DbValue,
+};
+use serde_json::json;
+use tokio::sync::{Mutex, OnceCell};
+use uuid::Uuid;
+
+fn admin_url() -> Option<String> {
+    match std::env::var("TEST_DATABASE_URL") {
+        Ok(u) if !u.is_empty() => Some(u),
+        _ => {
+            if std::env::var("CFMEET_SKIP_DB_TESTS").as_deref() == Ok("1") {
+                eprintln!("SKIPPED: database integration test (CFMEET_SKIP_DB_TESTS=1, TEST_DATABASE_URL unset)");
+                None
+            } else {
+                panic!(
+                    "TEST_DATABASE_URL is not set. Admin bridge store tests require PostgreSQL \
+                     (e.g. TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres). \
+                     Set CFMEET_SKIP_DB_TESTS=1 to skip explicitly."
+                )
+            }
+        }
+    }
+}
+
+fn with_db(admin: &str, db: &str) -> String {
+    let (base, _) = admin
+        .rsplit_once('/')
+        .expect("TEST_DATABASE_URL must include a database name");
+    format!("{base}/{db}")
+}
+
+static TEMPLATE: OnceCell<String> = OnceCell::const_new();
+static CREATE_LOCK: Mutex<()> = Mutex::const_new(());
+
+async fn template(admin: &str) -> String {
+    TEMPLATE
+        .get_or_init(|| async {
+            let name = format!(
+                "abr_tmpl_{}_{}",
+                std::process::id(),
+                Uuid::new_v4().simple()
+            );
+            let conn = Database::connect(admin).await.expect("connect admin db");
+            conn.execute_unprepared(&format!("CREATE DATABASE {name}"))
+                .await
+                .unwrap();
+            conn.close().await.ok();
+            let tmpl = Database::connect(with_db(admin, &name)).await.unwrap();
+            admin_bridge_migration::Migrator::up(&tmpl, None)
+                .await
+                .expect("migrations apply");
+            tmpl.close().await.ok();
+            name
+        })
+        .await
+        .clone()
+}
+
+struct TestDb {
+    store: PgStore,
+    admin: String,
+    name: String,
+}
+
+impl TestDb {
+    async fn new() -> Option<Self> {
+        let admin = admin_url()?;
+        let tmpl = template(&admin).await;
+        let name = format!("abr_t_{}_{}", std::process::id(), Uuid::new_v4().simple());
+        {
+            // CREATE DATABASE ... TEMPLATE needs the template without other sessions.
+            let _g = CREATE_LOCK.lock().await;
+            let conn = Database::connect(&admin).await.unwrap();
+            conn.execute_unprepared(&format!("CREATE DATABASE {name} TEMPLATE {tmpl}"))
+                .await
+                .unwrap();
+            conn.close().await.ok();
+        }
+        let store = PgStore::connect(&with_db(&admin, &name), 5)
+            .await
+            .expect("connect test db");
+        Some(Self { store, admin, name })
+    }
+
+    fn db(&self) -> &DatabaseConnection {
+        self.store.connection()
+    }
+
+    async fn exec(&self, sql: &str, values: Vec<DbValue>) -> Result<u64, sea_orm::DbErr> {
+        self.db()
+            .execute(Statement::from_sql_and_values(
+                DbBackend::Postgres,
+                sql,
+                values,
+            ))
+            .await
+            .map(|r| r.rows_affected())
+    }
+
+    async fn drop(self) {
+        self.store.connection().clone().close().await.ok();
+        if let Ok(conn) = Database::connect(&self.admin).await {
+            let _ = conn
+                .execute_unprepared(&format!(
+                    "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+                    self.name
+                ))
+                .await;
+            conn.close().await.ok();
+        }
+    }
+}
+
+const HEX_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const HEX_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+fn draft(n: u16) -> AuditDraft {
+    AuditDraft {
+        correlation_id: Uuid::new_v4(),
+        // Nanoseconds on purpose: the store hashes the microsecond value it stores.
+        occurred_at: Utc.timestamp_opt(1_795_000_000, 123_456_789).unwrap()
+            + Duration::seconds(n.into()),
+        actor: "hq:staff-0001".into(),
+        session_id: Some("sess-1".into()),
+        capability: Some("bridge.datasets.read".into()),
+        method: "GET".into(),
+        path: "/internal/cfmeet-admin/v1/datasets/cfmeet.engagement_daily".into(),
+        purpose: Some("metrics-read".into()),
+        // Key order that jsonb would rewrite (it sorts by length): kept exact by `json`.
+        scope: json!({"market": "GLOBAL", "organization": "cfmeet", "zone": "production", "tenant": "t1"}),
+        decision: "ALLOWED".into(),
+        http_status: 200,
+        request_digest: Some(HEX_A.into()),
+        approval_id: None,
+        approver: None,
+        detail: json!({"role": "cfmeet.viewer", "risk": "R0", "policy_revision": 1}),
+    }
+}
+
+async fn enroll_cert(db: &TestDb, fp: &str) {
+    db.exec(
+        "INSERT INTO admin_remote_principals (principal, kind, key_id, material, not_before, expires_at, created_by) \
+         VALUES ('cosmicforge-hq-cfmeet-admin', 'CLIENT_CERT', $1, $1, now() - interval '1 hour', now() + interval '1 day', 'test')",
+        vec![fp.into()],
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn principals_are_looked_up_and_revoked_only_once() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    enroll_cert(&db, HEX_A).await;
+    let p = db
+        .store
+        .principal(PrincipalKind::ClientCert, HEX_A)
+        .await
+        .unwrap()
+        .expect("enrolled");
+    assert!(p.live_at(Utc::now()));
+    assert!(db
+        .store
+        .principal(PrincipalKind::HmacKey, HEX_A)
+        .await
+        .unwrap()
+        .is_none());
+
+    // Only revoked_at may change, and only once.
+    assert!(db
+        .exec(
+            "UPDATE admin_remote_principals SET material = $1 WHERE key_id = $2",
+            vec![HEX_B.into(), HEX_A.into()]
+        )
+        .await
+        .is_err());
+    assert!(db.exec("UPDATE admin_remote_principals SET expires_at = now() + interval '9 days' WHERE key_id = $1", vec![HEX_A.into()]).await.is_err());
+    assert_eq!(
+        db.exec(
+            "UPDATE admin_remote_principals SET revoked_at = now() WHERE key_id = $1",
+            vec![HEX_A.into()]
+        )
+        .await
+        .unwrap(),
+        1
+    );
+    assert!(db
+        .exec(
+            "UPDATE admin_remote_principals SET revoked_at = now() WHERE key_id = $1",
+            vec![HEX_A.into()]
+        )
+        .await
+        .is_err());
+    assert!(db
+        .exec(
+            "UPDATE admin_remote_principals SET revoked_at = NULL WHERE key_id = $1",
+            vec![HEX_A.into()]
+        )
+        .await
+        .is_err());
+    assert!(db
+        .exec("DELETE FROM admin_remote_principals", vec![])
+        .await
+        .is_err());
+    assert!(db
+        .exec("TRUNCATE admin_remote_principals", vec![])
+        .await
+        .is_err());
+    let p = db
+        .store
+        .principal(PrincipalKind::ClientCert, HEX_A)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!p.live_at(Utc::now() + Duration::seconds(1)));
+
+    // A staff key needs issuer and audience; others must not carry them.
+    assert!(db
+        .exec(
+            "INSERT INTO admin_remote_principals (principal, kind, key_id, material, not_before, expires_at, created_by) \
+             VALUES ('cosmicforge-hq-cfmeet-admin', 'STAFF_KEY', 'kid-1', $1, now(), now() + interval '1 day', 'test')",
+            vec![HEX_B.into()],
+        )
+        .await
+        .is_err());
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn claims_are_all_or_nothing_and_replays_refused() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let keep = Utc::now() + Duration::minutes(11);
+    let c = |kind, v: &str| Claim {
+        kind,
+        value: v.into(),
+        keep_until: keep,
+    };
+    assert_eq!(
+        db.store
+            .claim_once(&[c(ClaimKind::Nonce, "n1"), c(ClaimKind::Jti, "j1")])
+            .await
+            .unwrap(),
+        ClaimOutcome::Recorded
+    );
+    assert_eq!(
+        db.store
+            .claim_once(&[c(ClaimKind::Nonce, "n2"), c(ClaimKind::Jti, "j1")])
+            .await
+            .unwrap(),
+        ClaimOutcome::Replay(ClaimKind::Jti)
+    );
+    // n2 was rolled back with the refused batch.
+    assert_eq!(
+        db.store
+            .claim_once(&[c(ClaimKind::Nonce, "n2")])
+            .await
+            .unwrap(),
+        ClaimOutcome::Recorded
+    );
+    // The same value under another kind is a different claim; a duplicate inside one batch is a replay.
+    assert_eq!(
+        db.store
+            .claim_once(&[c(ClaimKind::Approval, "n1")])
+            .await
+            .unwrap(),
+        ClaimOutcome::Recorded
+    );
+    assert_eq!(
+        db.store
+            .claim_once(&[c(ClaimKind::Nonce, "n3"), c(ClaimKind::Nonce, "n3")])
+            .await
+            .unwrap(),
+        ClaimOutcome::Replay(ClaimKind::Nonce)
+    );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn rate_windows_count_per_bucket() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let w = Utc.with_ymd_and_hms(2026, 11, 19, 10, 0, 0).unwrap();
+    let k = RateKey {
+        bucket: HEX_A.into(),
+        window_start: w,
+    };
+    assert!(db.store.rate_allow(&k, 2).await.unwrap());
+    assert!(db.store.rate_allow(&k, 2).await.unwrap());
+    assert!(!db.store.rate_allow(&k, 2).await.unwrap());
+    let next = RateKey {
+        bucket: HEX_A.into(),
+        window_start: w + Duration::minutes(1),
+    };
+    assert!(db.store.rate_allow(&next, 2).await.unwrap());
+    let other = RateKey {
+        bucket: HEX_B.into(),
+        window_start: w,
+    };
+    assert!(db.store.rate_allow(&other, 1).await.unwrap());
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn revocations_by_staff_member_and_by_session() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let now = Utc::now();
+    assert!(!db.store.is_revoked("staff-1", "sess-1", now).await.unwrap());
+    db.exec(
+        "INSERT INTO admin_revocations (sub, session_id, revoked_at, reason_code, created_by) VALUES ('staff-1', 'sess-1', $1, 'LOST_DEVICE', 'test')",
+        vec![now.into()],
+    )
+    .await
+    .unwrap();
+    assert!(db.store.is_revoked("staff-1", "sess-1", now).await.unwrap());
+    assert!(
+        !db.store.is_revoked("staff-1", "sess-2", now).await.unwrap(),
+        "only that session"
+    );
+    db.exec(
+        "INSERT INTO admin_revocations (sub, session_id, revoked_at, reason_code, created_by) VALUES ('staff-2', NULL, $1, 'OFFBOARDED', 'test')",
+        vec![(now + Duration::minutes(5)).into()],
+    )
+    .await
+    .unwrap();
+    assert!(
+        !db.store.is_revoked("staff-2", "any", now).await.unwrap(),
+        "not yet effective"
+    );
+    assert!(db
+        .store
+        .is_revoked("staff-2", "any", now + Duration::minutes(5))
+        .await
+        .unwrap());
+    assert!(db
+        .exec("DELETE FROM admin_revocations", vec![])
+        .await
+        .is_err());
+    assert!(db
+        .exec("UPDATE admin_revocations SET reason_code = 'X_Y'", vec![])
+        .await
+        .is_err());
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn policy_revisions_round_trip_and_are_immutable() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let doc = br#"{"policy":"cfmeet-admin-bridge.access-policy.v1","revision":1}"#.to_vec();
+    let sig = "ab".repeat(64);
+    let digest = admin_bridge::wire::sha256_hex(&doc);
+    // The stored digest must match the stored bytes.
+    assert!(db
+        .exec(
+            "INSERT INTO admin_policy_revisions (revision, document, signature, key_id, document_sha256, created_by) VALUES (1, $1, $2, 'policy-1', $3, 'test')",
+            vec![doc.clone().into(), sig.clone().into(), HEX_A.into()],
+        )
+        .await
+        .is_err());
+    db.exec(
+        "INSERT INTO admin_policy_revisions (revision, document, signature, key_id, document_sha256, created_by) VALUES (1, $1, $2, 'policy-1', $3, 'test')",
+        vec![doc.clone().into(), sig.clone().into(), digest.into()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        db.store.policy_revision(1).await.unwrap(),
+        Some(PolicyRow {
+            revision: 1,
+            document: doc,
+            signature: sig,
+            key_id: "policy-1".into()
+        })
+    );
+    assert_eq!(db.store.policy_revision(2).await.unwrap(), None);
+    assert!(db
+        .exec("UPDATE admin_policy_revisions SET key_id = 'other'", vec![])
+        .await
+        .is_err());
+    assert!(db
+        .exec("DELETE FROM admin_policy_revisions", vec![])
+        .await
+        .is_err());
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn audit_is_hash_chained_and_append_only() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let (d1, d2, d3) = (draft(1), draft(2), draft(3));
+    let r1 = db.store.append_audit(&d1).await.unwrap();
+    let r2 = db.store.append_audit(&d2).await.unwrap();
+    let r3 = db.store.append_audit(&d3).await.unwrap();
+    // Hashes cover the microsecond timestamp actually stored.
+    let stored = |d: &AuditDraft| {
+        let mut d = d.clone();
+        d.occurred_at = Utc
+            .timestamp_opt(
+                d.occurred_at.timestamp(),
+                d.occurred_at.timestamp_subsec_micros() * 1000,
+            )
+            .unwrap();
+        d
+    };
+    assert_eq!(r1.entry_hash, chain_hash(GENESIS_HASH, &stored(&d1)));
+    assert_eq!(r2.entry_hash, chain_hash(&r1.entry_hash, &stored(&d2)));
+    assert_eq!(r3.entry_hash, chain_hash(&r2.entry_hash, &stored(&d3)));
+    assert!(r1.sequence < r2.sequence && r2.sequence < r3.sequence);
+    // Read-back reproduces every hash (exact json text, microsecond timestamps).
+    assert_eq!(verify_audit_chain(&db.store).await.unwrap(), Ok(3));
+
+    assert!(db
+        .exec(
+            "UPDATE admin_audit_entries SET decision = 'PERMISSION_DENIED'",
+            vec![]
+        )
+        .await
+        .is_err());
+    assert!(db
+        .exec("DELETE FROM admin_audit_entries", vec![])
+        .await
+        .is_err());
+    assert!(db
+        .exec("TRUNCATE admin_audit_entries", vec![])
+        .await
+        .is_err());
+
+    // A row that does not continue the chain is refused by the trigger.
+    let forged = db
+        .exec(
+            "INSERT INTO admin_audit_entries (entry_hash, previous_hash, correlation_id, occurred_at, actor, method, path, scope, decision, http_status, detail) \
+             VALUES ($1, $2, $3, now(), 'hq:x', 'GET', '/x', 'null'::json, 'ALLOWED', 200, 'null'::json)",
+            vec![HEX_B.into(), r1.entry_hash.clone().into(), Uuid::new_v4().into()],
+        )
+        .await;
+    assert!(
+        forged.is_err(),
+        "previous_hash must be the last entry's hash"
+    );
+    assert_eq!(verify_audit_chain(&db.store).await.unwrap(), Ok(3));
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn concurrent_audit_appends_keep_one_chain() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let mut tasks = Vec::new();
+    for i in 0..12u16 {
+        let store = db.store.clone();
+        tasks.push(tokio::spawn(async move {
+            store.append_audit(&draft(i)).await.unwrap()
+        }));
+    }
+    for t in tasks {
+        t.await.unwrap();
+    }
+    assert_eq!(verify_audit_chain(&db.store).await.unwrap(), Ok(12));
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn cleanup_removes_expired_claims_and_old_buckets() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let now = Utc::now();
+    let claim = |v: &str, keep| Claim {
+        kind: ClaimKind::Jti,
+        value: v.into(),
+        keep_until: keep,
+    };
+    db.store
+        .claim_once(&[
+            claim("old", now - Duration::seconds(1)),
+            claim("live", now + Duration::minutes(5)),
+        ])
+        .await
+        .unwrap();
+    db.store
+        .rate_allow(
+            &RateKey {
+                bucket: HEX_A.into(),
+                window_start: now - Duration::hours(2),
+            },
+            10,
+        )
+        .await
+        .unwrap();
+    db.store
+        .rate_allow(
+            &RateKey {
+                bucket: HEX_A.into(),
+                window_start: now - Duration::minutes(1),
+            },
+            10,
+        )
+        .await
+        .unwrap();
+    let stats = db.store.cleanup(now).await.unwrap();
+    assert_eq!((stats.claims, stats.rate_buckets), (1, 1));
+    // The expired jti may be used again; the live one may not.
+    assert_eq!(
+        db.store
+            .claim_once(&[claim("old", now + Duration::minutes(5))])
+            .await
+            .unwrap(),
+        ClaimOutcome::Recorded
+    );
+    assert_eq!(
+        db.store
+            .claim_once(&[claim("live", now + Duration::minutes(5))])
+            .await
+            .unwrap(),
+        ClaimOutcome::Replay(ClaimKind::Jti)
+    );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn dataset_days_are_ordered_and_limited() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    for day in [3, 1, 2, 5] {
+        db.exec(
+            "INSERT INTO admin_dataset_days (dataset_id, day, metrics, sources_reported) \
+             VALUES ('cfmeet.engagement_daily', $1, '{\"dau\": 10, \"mau\": null}'::jsonb, ARRAY['meeting-service:PULL'])",
+            vec![NaiveDate::from_ymd_opt(2026, 11, day).unwrap().into()],
+        )
+        .await
+        .unwrap();
+    }
+    let d = |n| NaiveDate::from_ymd_opt(2026, 11, n).unwrap();
+    let days = db
+        .store
+        .dataset_days("cfmeet.engagement_daily", d(1), d(4), 2)
+        .await
+        .unwrap();
+    assert_eq!(
+        days.iter().map(|x| x.day).collect::<Vec<_>>(),
+        vec![d(1), d(2)]
+    );
+    assert_eq!(days[0].metrics["dau"], json!(10));
+    assert_eq!(days[0].metrics["mau"], json!(null));
+    assert_eq!(
+        days[0].sources_reported,
+        vec!["meeting-service:PULL".to_string()]
+    );
+    assert!(db
+        .store
+        .dataset_days("cfmeet.meetings_daily", d(1), d(30), 100)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(db
+        .exec("INSERT INTO admin_dataset_days (dataset_id, day, metrics) VALUES ('cfmeet.x', $1, '[]'::jsonb)", vec![d(9).into()])
+        .await
+        .is_err());
+
+    db.exec("INSERT INTO admin_projections (name, open_gaps, quarantined) VALUES ('cfmeet.verification_queue', 0, 2), ('cfmeet.apps_daily', 1, 0)", vec![])
+        .await
+        .unwrap();
+    let names: Vec<String> = db
+        .store
+        .projections()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+    assert_eq!(
+        names,
+        vec!["cfmeet.apps_daily", "cfmeet.verification_queue"]
+    );
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn migrations_create_only_admin_tables_and_roll_back() {
+    let Some(admin) = admin_url() else { return };
+    let name = format!("abr_m_{}_{}", std::process::id(), Uuid::new_v4().simple());
+    let conn = Database::connect(&admin).await.unwrap();
+    conn.execute_unprepared(&format!("CREATE DATABASE {name}"))
+        .await
+        .unwrap();
+    let db = Database::connect(with_db(&admin, &name)).await.unwrap();
+    admin_bridge_migration::Migrator::up(&db, None)
+        .await
+        .unwrap();
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT count(*) AS n FROM pg_tables WHERE schemaname = 'public' \
+             AND tablename <> 'admin_bridge_seaql_migrations' AND tablename !~ '^admin_'",
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.try_get::<i64>("", "n").unwrap(), 0);
+    admin_bridge_migration::Migrator::down(&db, None)
+        .await
+        .unwrap();
+    admin_bridge_migration::Migrator::up(&db, None)
+        .await
+        .unwrap();
+    db.close().await.ok();
+    let _ = conn
+        .execute_unprepared(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
+        .await;
+}

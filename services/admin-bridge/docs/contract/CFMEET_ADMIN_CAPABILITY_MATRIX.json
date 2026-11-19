@@ -6,7 +6,7 @@
     "method": "GET",
     "bridge_endpoint": "/capabilities",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "bridge.capabilities.read",
     "risk": "R0",
     "privacy": "INTERNAL",
@@ -15,8 +15,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED",
-    "blocker": "Phase A1: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "discovery_reports_runtime_states_and_the_openapi_hash"
+    ]
   },
   {
     "id": "bridge.health.read",
@@ -25,7 +27,7 @@
     "method": "GET",
     "bridge_endpoint": "/health/aggregate",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "bridge.health.read",
     "risk": "R0",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -34,8 +36,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED",
-    "blocker": "Phase A1: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "health_reports_unconfigured_owners_honestly"
+    ]
   },
   {
     "id": "bridge.datasets.read",
@@ -44,7 +48,7 @@
     "method": "GET",
     "bridge_endpoint": "/datasets/{dataset_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "bridge.datasets.read",
     "risk": "R0",
     "privacy": "INTERNAL",
@@ -53,8 +57,11 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED",
-    "blocker": "Phase A1: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "datasets_are_null_not_zero_until_sources_report",
+      "worker_identity_reads_datasets_with_the_workload_acr"
+    ]
   },
   {
     "id": "hq.events.feed",
@@ -101,7 +108,7 @@
     "method": "GET",
     "bridge_endpoint": "/hq/projections/status",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "hq.projections.read",
     "risk": "R0",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -110,8 +117,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED",
-    "blocker": "Phase A1: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "projection_status_is_unavailable_until_owner_events"
+    ]
   },
   {
     "id": "accounts.users.search",

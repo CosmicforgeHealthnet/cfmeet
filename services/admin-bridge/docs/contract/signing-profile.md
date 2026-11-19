@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.0.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.1.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -112,6 +112,7 @@ Every command needs `Idempotency-Key` (UUID). HQ never retries; the bridge sends
 | Code | HTTP | Meaning |
 |---|---|---|
 | `BRIDGE_DISABLED` | 503 | ADMIN_BRIDGE_ENABLED is off |
+| `BRIDGE_UNAVAILABLE` | 503 | the bridge's own database is unavailable; nothing was done |
 | `REQUEST_SHAPE_INVALID` | 400 | path too long, encoded or dot segments, or a malformed request line |
 | `BODY_TOO_LARGE` | 413 | body over 32 KiB |
 | `CLIENT_CERTIFICATE_REFUSED` | 401 | no client certificate, wrong URI name, or fingerprint not enrolled and live |
@@ -148,4 +149,7 @@ Every command needs `Idempotency-Key` (UUID). HQ never retries; the bridge sends
 
 ## Served in this contract version
 
-None: the bridge runtime ships in phase A1.
+- `bridge.capabilities.read`
+- `bridge.health.read`
+- `bridge.datasets.read`
+- `hq.projections.status`

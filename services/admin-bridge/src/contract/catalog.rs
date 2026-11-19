@@ -230,7 +230,6 @@ impl B {
         self.0.source_endpoint = Some(endpoint);
         self
     }
-    #[allow(dead_code)]
     fn served(mut self, tests: &[&'static str]) -> B {
         self.0.served = true;
         self.0.tests = tests.to_vec();
@@ -273,7 +272,8 @@ pub fn catalog() -> Vec<Capability> {
             .perm("bridge.capabilities.read")
             .roles(ALL_STAFF)
             .purposes(&[U::AdminUiCapabilities])
-            .result("Discovery"),
+            .result("Discovery")
+            .served(&["discovery_reports_runtime_states_and_the_openapi_hash"]),
     );
     c.push(
         get("bridge.health.read", "/health/aggregate", Q::Scoped)
@@ -287,7 +287,8 @@ pub fn catalog() -> Vec<Capability> {
                 L::SecurityAdmin,
             ])
             .purposes(&[U::MetricsRead, U::OpsIncident])
-            .result("Health"),
+            .result("Health")
+            .served(&["health_reports_unconfigured_owners_honestly"]),
     );
     c.push(
         get(
@@ -301,7 +302,11 @@ pub fn catalog() -> Vec<Capability> {
         .param("dataset_id", ParamFormat::DatasetId)
         .roles(&[ALL_STAFF, &[L::SourceSync]].concat())
         .purposes(&[U::MetricsRead])
-        .result("Dataset"),
+        .result("Dataset")
+        .served(&[
+            "datasets_are_null_not_zero_until_sources_report",
+            "worker_identity_reads_datasets_with_the_workload_acr",
+        ]),
     );
     c.push(
         get("hq.events.feed", "/hq/events", Q::ScopedWindow)
@@ -332,7 +337,8 @@ pub fn catalog() -> Vec<Capability> {
             .perm("hq.projections.read")
             .roles(&[L::SourceSync, L::PlatformOps])
             .purposes(&[U::EventSync, U::OpsIncident])
-            .result("ProjectionStatus"),
+            .result("ProjectionStatus")
+            .served(&["projection_status_is_unavailable_until_owner_events"]),
     );
 
     // ---- 6.1 Accounts (Meeting Service) ------------------------------------------
