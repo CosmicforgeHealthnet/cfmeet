@@ -175,9 +175,9 @@ async fn insert<C: ConnectionTrait>(
         "INSERT INTO messaging_messages (id, conversation_id, tenant_id, application_id, environment_id, sequence, \
            message_kind, security_profile, sender_principal_id, client_message_id, managed_sealed, managed_seal_nonce, \
            managed_seal_key_id, managed_search, attachment_count, created_at, managed_presentation, \
-           forwarded_from_message_id, forwarded_from_conversation_id, forwarded_sender_principal_id) \
+           forwarded_from_message_id, forwarded_from_conversation_id, forwarded_sender_principal_id, via_application_id) \
          VALUES ($1, $2, $3, $4, $5, $6, 'APPLICATION', 'MANAGED', $7, $8, $9, $10, $11, to_tsvector('simple', $12), $13, $14, $15, \
-                 $16, $17, $18)",
+                 $16, $17, $18, $19)",
         vec![
             id.into(),
             conversation.id.into(),
@@ -197,6 +197,8 @@ async fn insert<C: ConnectionTrait>(
             forwarded.map(|f| f.from_message).into(),
             forwarded.map(|f| f.from_conversation).into(),
             forwarded.and_then(|f| f.sender).into(),
+            // ADR 0064: the sending app of an OAuth credential.
+            ctx.oauth.map(|o| o.app_id).into(),
         ],
     )
     .await?;
@@ -360,6 +362,9 @@ pub(crate) async fn send_with(
         effective.abuse.managed_links_per_hour,
     )
     .await?;
+    // ADR 0064: the CF Meet App bots this message concerns (mentions, DIRECT).
+    let bots =
+        crate::apps::bot_targets(state, ctx, conversation, acting.principal_id, &mentions).await?;
     let st = state.clone();
     let ctx2 = ctx.clone();
     let acting = acting.clone();
@@ -414,6 +419,9 @@ pub(crate) async fn send_with(
                 let row = crate::engagement::set_reply(txn, &conversation, row, reply_to, threads).await?;
                 super::record_mentions(txn, &row, &mentions).await?;
                 super::record_created_notify(txn, &ctx2, &row, &request_ctx, now, notify).await?;
+                if !bots.is_empty() {
+                    crate::apps::record_bot_events(txn, &ctx2, &bots, &row, &request_ctx, now).await?;
+                }
                 // A bridged conversation: queue the SMS copy in the same transaction.
                 crate::sms_bridge::enqueue_outbound(txn, &conversation, &row, now).await?;
                 Ok((201, row))

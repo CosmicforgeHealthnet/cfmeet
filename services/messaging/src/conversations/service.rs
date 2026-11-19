@@ -485,6 +485,12 @@ pub async fn create(
             }
         }
     }
+    // ADR 0064: a CF Meet App's bot (creator or DIRECT counterpart) takes part in
+    // MANAGED conversations only; the profile is decided in the transaction below.
+    // (The counterpart's kind is not kept above: it is looked up when the flag is on.)
+    let mut parties = vec![(acting.principal_id, Some(acting.kind.as_str()))];
+    parties.extend(counterpart.map(|p| (p, None)));
+    let app_bot = crate::apps::involves_bot(state, ctx, &parties).await?;
     let digest = hex::encode(Sha256::digest(
         canonical_json(&json!({
             "request": serde_json::to_value(&request).expect("serializes"),
@@ -508,6 +514,7 @@ pub async fn create(
                     &acting,
                     request,
                     counterpart,
+                    app_bot,
                     &key,
                     &digest,
                     &request_ctx,
@@ -534,6 +541,7 @@ async fn create_in(
     acting: &Acting,
     request: CreateRequest,
     counterpart: Option<Uuid>,
+    app_bot: bool,
     key: &str,
     digest: &str,
     request_ctx: &RequestContext,
@@ -599,6 +607,9 @@ async fn create_in(
             ))
         }
     };
+    if app_bot && profile == SecurityProfile::PrivateE2ee {
+        return Err(crate::apps::bot_managed_only());
+    }
     if !context_policy.allowed_profiles.contains(&profile) {
         return Err(Error::reason(
             ErrorCode::SecurityProfileNotAllowed,

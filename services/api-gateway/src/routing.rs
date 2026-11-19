@@ -174,12 +174,14 @@ pub struct RouteDefinition {
     ///
     /// Only on an ANONYMOUS-only Developer Platform REST route (refused otherwise at
     /// construction) and only while `API_GATEWAY_OAUTH_ENABLED` is on: a presented
-    /// `Bearer cfoa_…` / `Bearer cfob_…` is transported unchanged to the Developer Console,
-    /// which introspects it live with Platform Access (`platform-oauth.token`) before
-    /// answering. Safe because the gateway grants the request no authority of its own
-    /// (no delegated context, no scope), the token reaches only the Developer Console
-    /// (itself a Platform Access client verifying it), and a platform credential or a
-    /// refresh token is never transported (refused 401 before forwarding).
+    /// `Bearer cfoa_…` / `Bearer cfob_…` (userinfo) or `Basic` OAuth client credentials
+    /// (`client_secret_basic` on token / revoke) is transported unchanged to the Developer
+    /// Console, which verifies it live with Platform Access (`platform-oauth.token`:
+    /// introspection, client-secret check) before answering. Safe because the gateway grants the request no authority of its own
+    /// (no delegated context, no scope), the value reaches only the Developer Console
+    /// (itself a Platform Access client verifying it), and a platform credential, a
+    /// refresh token or any other bearer value is never transported (refused 401 before
+    /// forwarding).
     pub forward_authorization: bool,
 }
 

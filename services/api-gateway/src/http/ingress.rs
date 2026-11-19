@@ -38,9 +38,12 @@
 //!      `BOT_OR_SERVICE` for bot tokens) — never the token. A `cfor_` refresh token is
 //!      refused 401 everywhere; an OAuth token on a route that does not list
 //!      OAUTH_ACCESS_TOKEN is refused `403 CREDENTIAL_NOT_ACCEPTED` (never transported),
-//!      except on a `forwardAuthorization` route (the OAuth userinfo of the Developer
-//!      Console, ANONYMOUS): there `Authorization` is transported unchanged and the
-//!      Developer Console introspects the token with Platform Access.
+//!      except on a `forwardAuthorization` route (the OAuth endpoints of the Developer
+//!      Console, ANONYMOUS): there `Authorization` — an OAuth access / bot bearer token
+//!      (userinfo) or `Basic` client credentials (`client_secret_basic` on token /
+//!      revoke) — is transported unchanged and the Developer Console verifies it with
+//!      Platform Access. Nothing else is transported there (a platform credential, a
+//!      refresh token or any other bearer value is refused 401).
 //!
 //!      Quotas: the authority chain of an OAuth token is the INSTALL TARGET (the user's
 //!      or organization's FIRST_PARTY environment and the installation service account),
@@ -258,6 +261,17 @@ pub fn select_mode(
             } else {
                 Err(ApiError::Code(ErrorCode::AuthenticationFailed))
             }
+        }
+        // OAuth client authentication (`client_secret_basic`) on the token / revoke
+        // endpoints: transported to the Developer Console, which verifies the client
+        // secret with Platform Access.
+        Some(p)
+            if oauth
+                && p.scheme.eq_ignore_ascii_case("basic")
+                && d.forward_authorization
+                && d.allows(AuthMode::Anonymous) =>
+        {
+            Ok(AuthMode::Anonymous)
         }
         Some(_) => Err(ApiError::Code(ErrorCode::AuthenticationFailed)),
         None => {
@@ -744,10 +758,12 @@ pub fn forwarded_headers(
             }
         }
         // The dedicated OAuth pass-through ([`RouteDefinition::forward_authorization`]):
-        // only an OAuth access / bot bearer token, only on the marked route.
+        // only an OAuth access / bot bearer token or OAuth client credentials (Basic),
+        // only on the marked route.
         Some(AuthMode::Anonymous) if route.definition.forward_authorization => {
             if let Some(a) = auth.filter(|a| {
-                a.scheme.eq_ignore_ascii_case("bearer") && oauth_token_kind(&a.token).is_some()
+                (a.scheme.eq_ignore_ascii_case("bearer") && oauth_token_kind(&a.token).is_some())
+                    || a.scheme.eq_ignore_ascii_case("basic")
             }) {
                 out.insert(header::AUTHORIZATION, a.raw.clone());
             }

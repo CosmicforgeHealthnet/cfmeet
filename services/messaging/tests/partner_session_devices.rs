@@ -1373,7 +1373,7 @@ async fn partner_meeting_chat_is_synchronised_in_the_partner_scope() {
     assert_eq!(r.code(), "DELEGATED_CONTEXT_INVALID", "{}", r.text);
 }
 
-/// The additive migration rolls back and re-applies cleanly (it is the newest of the
+/// The additive migration rolls back and re-applies cleanly (with every newer one of the
 /// gap-closure history), and widens the baseline CHECK without touching existing rows.
 #[tokio::test]
 async fn the_partner_migration_rolls_back_and_reapplies() {
@@ -1381,13 +1381,15 @@ async fn the_partner_migration_rolls_back_and_reapplies() {
     let Some(db) = TestDb::new().await else {
         return;
     };
-    let last = messaging_migration::GapClosureMigrator::migrations()
-        .last()
-        .unwrap()
-        .name()
-        .to_string();
-    assert_eq!(last, "m20261208_000036_partner_session_devices");
-    messaging_migration::GapClosureMigrator::down(&db.conn, Some(1))
+    let names: Vec<String> = messaging_migration::GapClosureMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
+    let at = names
+        .iter()
+        .position(|n| n == "m20261208_000036_partner_session_devices")
+        .expect("the partner migration is part of the gap-closure history");
+    messaging_migration::GapClosureMigrator::down(&db.conn, Some((names.len() - at) as u32))
         .await
         .unwrap();
     let present = |t: &'static str| {

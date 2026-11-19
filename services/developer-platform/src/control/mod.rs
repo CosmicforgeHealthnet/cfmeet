@@ -143,6 +143,8 @@ pub fn machine_scope(action: Action) -> Option<&'static str> {
         AllowedOriginsManage => Some("credentials.manage"),
         // ADR 0063: push credentials are uploaded from the console only.
         PushCredentialsRead | PushCredentialsManage => None,
+        // ADR 0064: apps are registered from the console only.
+        AppsRead | AppsManage => None,
         // Membership, ownership, closure and billing are role-gated human operations.
         OrganizationClose | MembersManage | OwnershipTransfer | CommercialRead
         | BillingAccountManage => None,

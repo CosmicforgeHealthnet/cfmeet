@@ -5,6 +5,13 @@ use std::sync::Arc;
 use sea_orm::DatabaseConnection;
 
 use crate::{
+    apps::{
+        port::{
+            AccountProfiles, PlatformOAuthPort, UnconfiguredAccountProfiles,
+            UnconfiguredPlatformOAuth,
+        },
+        AppSettings,
+    },
     config::{service_auth::ServiceAuthRuntime, BuildFeatures, FeatureFlags},
     notification_publications::Publishing,
     platform_access::{PlatformAccessPort, UnconfiguredPlatformAccess},
@@ -38,6 +45,12 @@ pub struct AppState {
     /// ADR 0063 N-P1: the Notification Service's push provider vault and sealing key;
     /// `None`: push credential uploads are 503 `CAPABILITY_UNAVAILABLE`.
     pub push: Option<PushProviders>,
+    /// ADR 0064: Platform Access as the OAuth token authority (unconfigured: fail closed).
+    pub oauth: Arc<dyn PlatformOAuthPort>,
+    /// ADR 0064: the Meeting Service account profiles behind `/v1/oauth/userinfo`.
+    pub account_profiles: Arc<dyn AccountProfiles>,
+    /// ADR 0064 / 0065: reviewers and the advertised OAuth endpoints.
+    pub apps: Arc<AppSettings>,
 }
 
 impl AppState {
@@ -54,7 +67,25 @@ impl AppState {
             notifications: Publishing::default(),
             build: BuildFeatures::default(),
             push: None,
+            oauth: Arc::new(UnconfiguredPlatformOAuth),
+            account_profiles: Arc::new(UnconfiguredAccountProfiles),
+            apps: Arc::new(AppSettings::default()),
         }
+    }
+
+    pub fn with_oauth(mut self, oauth: Arc<dyn PlatformOAuthPort>) -> Self {
+        self.oauth = oauth;
+        self
+    }
+
+    pub fn with_account_profiles(mut self, profiles: Arc<dyn AccountProfiles>) -> Self {
+        self.account_profiles = profiles;
+        self
+    }
+
+    pub fn with_app_settings(mut self, settings: AppSettings) -> Self {
+        self.apps = Arc::new(settings);
+        self
     }
 
     pub fn with_build(mut self, build: BuildFeatures) -> Self {

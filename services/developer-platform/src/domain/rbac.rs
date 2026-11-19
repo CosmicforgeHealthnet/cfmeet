@@ -107,6 +107,11 @@ pub enum Action {
     PushCredentialsRead,
     /// ADR 0063: upload, verify and delete push credentials — OWNER, ADMIN.
     PushCredentialsManage,
+    /// ADR 0064: read a project's app registration and grants — OWNER, ADMIN.
+    AppsRead,
+    /// ADR 0064: register / change an app, rotate its client secret, submit it for review
+    /// and set its test accounts — OWNER, ADMIN.
+    AppsManage,
 }
 
 impl Action {
@@ -144,6 +149,8 @@ impl Action {
         Action::AllowedOriginsManage,
         Action::PushCredentialsRead,
         Action::PushCredentialsManage,
+        Action::AppsRead,
+        Action::AppsManage,
     ];
 
     /// Whether the action changes state (refused for RESTRICTED organizations unless
@@ -166,6 +173,7 @@ impl Action {
                 | Action::EndUsersRead
                 | Action::AllowedOriginsRead
                 | Action::PushCredentialsRead
+                | Action::AppsRead
         )
     }
 
@@ -215,6 +223,8 @@ pub fn allows(role: Role, action: Action) -> bool {
         AllowedOriginsManage | PushCredentialsRead | PushCredentialsManage => {
             matches!(role, Owner | Admin)
         }
+        // ADR 0064: apps are registered and managed by OWNER / ADMIN.
+        AppsRead | AppsManage => matches!(role, Owner | Admin),
         WebhooksRead | LimitsRead => matches!(role, Owner | Admin | Developer | Analyst),
         UsageRead | UsageExport => true,
         ActivityRead => matches!(role, Owner | Admin | Analyst),
@@ -387,6 +397,11 @@ mod tests {
             }
         }
         assert!(!allows(Developer, SupportProfileManage));
+        for a in [AppsRead, AppsManage] {
+            for r in [Developer, Analyst, Billing] {
+                assert!(!allows(r, a), "{r:?} {a:?}");
+            }
+        }
         // ANALYST is read-only.
         for a in Action::ALL.iter().filter(|a| a.is_mutation()) {
             assert!(!allows(Analyst, *a), "{a:?}");

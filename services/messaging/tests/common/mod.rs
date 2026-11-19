@@ -285,6 +285,8 @@ impl CustomerAuthority for FakeAuthority {
 pub struct FakePrincipals {
     pub known: StdMutex<HashMap<(Uuid, Uuid), PrincipalStatus>>,
     pub down: StdMutex<bool>,
+    /// ADR 0064 app bots: (environment, principal) -> app id (`app:<appId>`).
+    pub bots: StdMutex<HashMap<(Uuid, Uuid), Uuid>>,
 }
 
 #[async_trait]
@@ -304,6 +306,26 @@ impl PrincipalDirectory for FakePrincipals {
             .get(&(scope.environment_id, principal_id))
             .cloned()
             .unwrap_or(PrincipalStatus::NotFound))
+    }
+
+    async fn application_bots(
+        &self,
+        scope: &OwnerScope,
+        principals: &[Uuid],
+    ) -> Result<HashMap<Uuid, Uuid>, AuthorityUnavailable> {
+        if *self.down.lock().unwrap() {
+            return Err(AuthorityUnavailable("down".into()));
+        }
+        let known = self.known.lock().unwrap();
+        let bots = self.bots.lock().unwrap();
+        Ok(principals
+            .iter()
+            .filter(|p| {
+                matches!(known.get(&(scope.environment_id, **p)),
+                    Some(PrincipalStatus::Active { kind }) if kind == "BOT_OR_SERVICE")
+            })
+            .filter_map(|p| bots.get(&(scope.environment_id, *p)).map(|a| (*p, *a)))
+            .collect())
     }
 }
 

@@ -71,6 +71,7 @@ impl MigratorTrait for GapClosureMigrator {
         vec![
             Box::new(gap::m20261206_000001_retention_purge::Migration),
             Box::new(gap::m20261207_000002_platform_build::Migration),
+            Box::new(gap::m20261208_000003_apps::Migration),
         ]
     }
 

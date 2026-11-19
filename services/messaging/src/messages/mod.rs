@@ -107,6 +107,8 @@ pub struct MessageRow {
     pub forwarded_sender_principal_id: Option<Uuid>,
     /// S2: the sender's franking commitment (PRIVATE_E2EE, optional).
     pub franking_commitment: Option<String>,
+    /// ADR 0064: the CF Meet App whose OAuth credential sent this message (MANAGED).
+    pub via_application_id: Option<Uuid>,
 }
 
 pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.message_kind, m.security_profile, \
@@ -115,7 +117,7 @@ pub const MESSAGE_COLUMNS: &str = "m.id, m.conversation_id, m.sequence, m.messag
      m.managed_seal_key_id, m.attachment_count, m.lifecycle, m.lifecycle_reason, m.edit_count, m.edited_at, \
      m.created_at, m.tenant_id, m.application_id, m.environment_id, m.security_provenance, m.original_created_at, \
      m.managed_presentation, m.channel, m.reply_to_message_id, m.thread_root_id, \
-     m.forwarded_from_message_id, m.forwarded_sender_principal_id, \
+     m.forwarded_from_message_id, m.forwarded_sender_principal_id, m.via_application_id, \
      (SELECT f.commitment FROM messaging_message_frankings f WHERE f.message_id = m.id) AS franking_commitment";
 
 impl MessageRow {
@@ -164,6 +166,11 @@ pub async fn render(state: &AppState, row: &MessageRow, hidden: bool) -> Value {
         "forwarded": row.forwarded_from_message_id.is_some(),
         "forwardedFromPrincipalId": row.forwarded_sender_principal_id,
     });
+    // ADR 0064: "sent by App X" (only on messages a CF Meet App sent; absent otherwise,
+    // so every other message renders exactly as before).
+    if let Some(app) = row.via_application_id {
+        v["viaApplicationId"] = json!(app);
+    }
     match row.profile() {
         SecurityProfile::PrivateE2ee => {
             v["e2ee"] = json!({

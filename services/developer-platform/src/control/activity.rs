@@ -161,6 +161,8 @@ fn action_name(action: Action) -> &'static str {
         Action::AllowedOriginsManage => "allowed_origins.manage",
         Action::PushCredentialsRead => "push_credential.read",
         Action::PushCredentialsManage => "push_credential.manage",
+        Action::AppsRead => "app.read",
+        Action::AppsManage => "app.manage",
     }
 }
 

@@ -18,6 +18,8 @@ import 'retry.dart';
 import 'transport.dart';
 import 'transport_io.dart' if (dart.library.js_interop) 'transport_stub.dart'
     as platform_transport;
+import 'user_token.dart';
+import 'users.dart';
 
 /// A request body that is not JSON (e.g. sealed bytes uploaded with PUT).
 class RawBody {
@@ -424,6 +426,7 @@ class CfMeetClient {
     CancelToken? cancel,
   ) async {
     final retries = op.retry == RetryClass.never ? 0 : retryOptions.maxRetries;
+    var userTokenRetried = false;
     for (var attempt = 1;; attempt++) {
       if (cancel?.isCancelled ?? false) {
         throw CfMeetCancelledError('cancelled before attempt $attempt',
@@ -462,6 +465,20 @@ class CfMeetClient {
             headers: resp.headers,
             body: decoded,
             retryAfter: retryAfter);
+        // A refused user token (expired, revoked, ...): nothing was done; retry ONCE with
+        // a fresh token from the provider (any retry class: a 401 is a refusal).
+        final tokens = auth?.userTokenCache;
+        if (resp.status == 401 &&
+            tokens != null &&
+            !userTokenRetried &&
+            userTokenRefreshCodes.contains(error.code)) {
+          userTokenRetried = true;
+          final sent = h['authorization'];
+          tokens.invalidate(sent != null && sent.startsWith('Bearer ')
+              ? sent.substring('Bearer '.length)
+              : null);
+          continue;
+        }
         if (op.retry == RetryClass.never &&
             unknownOutcomeStatuses.contains(resp.status)) {
           throw UnknownOutcomeError(
@@ -604,6 +621,11 @@ class CfMeetClient {
       cursor = next;
     }
   }
+
+  /// Partner users and user tokens (`/v1/users*`, ADR 0062): server-side, with a
+  /// platform credential holding `principals.read` / `principals.write` /
+  /// `user_tokens.issue`.
+  UsersClient get users => UsersClient(this);
 
   /// Releases the transport's connections.
   void close({bool force = false}) => _transport.close(force: force);

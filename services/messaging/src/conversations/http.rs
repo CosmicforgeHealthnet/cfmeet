@@ -118,7 +118,8 @@ async fn list(
     headers: HeaderMap,
     Query(mut q): Query<ListQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    q.managed_only = partner.is_some();
+    // Partner session devices and CF Meet Apps (OAuth credentials) see MANAGED only.
+    q.managed_only = partner.is_some() || caller.context().oauth.is_some();
     let reader = reader(&state, &caller, &headers).await?;
     Ok(Json(
         service::list(&state, caller.context(), &reader, q).await?,

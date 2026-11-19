@@ -362,6 +362,25 @@ async fn main() -> anyhow::Result<()> {
         public_events_destination = destination.as_str(),
         "webhook relay receivers"
     );
+    // ADR 0064 (CF Meet Apps): OAuth credentials and app bots (default off). Bot events
+    // travel only to the Developer Platform's central event ingestion.
+    {
+        let developer_platform = destination
+            .destinations()
+            .contains(&messaging::webhook_relay::EventDestination::DeveloperPlatform);
+        let apps = messaging::apps::AppsSettings::from_env(
+            |k| std::env::var(k).ok(),
+            developer_platform,
+        )
+        .map_err(|e| anyhow!("apps configuration: {e}"))?;
+        if apps.enabled {
+            tracing::info!(bot_events = apps.bot_events, "CF Meet Apps are enabled (MESSAGING_APPS_ENABLED)");
+            if !apps.bot_events {
+                tracing::warn!("MESSAGING_APPS_ENABLED is set but MESSAGING_PUBLIC_EVENTS_DESTINATION does not include developer-platform: bot events are not recorded");
+            }
+        }
+        state.apps = apps;
+    }
     // ADR 0062 / 0063 (CF Meet Platform "Build"): partner session devices, partner push
     // and MESSAGE_SENT facts, each behind its own default-off flag.
     let partner_settings = messaging::partner::PartnerSettings::from_env(|k| std::env::var(k).ok())

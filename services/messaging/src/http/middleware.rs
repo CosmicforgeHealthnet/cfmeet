@@ -17,6 +17,9 @@
 //! inside the credential's principal restriction and when Platform Access resolves it
 //! ACTIVE and messaging-capable in the credential's own environment — always fresh.
 //!
+//! ADR 0064: an OAuth credential (CF Meet Apps; `MESSAGING_APPS_ENABLED`) always acts as
+//! its single restricted principal, on a closed MANAGED-only allowlist (`admit_oauth`).
+//!
 //! Spans carry the matched ROUTE PATTERN, never the path; credentials, tokens, keys and
 //! content are never logged.
 
@@ -395,6 +398,13 @@ async fn authenticated_customer(
 ) -> Response {
     match authentication {
         Ok(Authentication::Authenticated(ctx)) if ctx.full_authority => {
+            // ADR 0064: a CF Meet App's OAuth credential acts only as its restricted
+            // principal, on the closed MANAGED-only allowlist (refused with the flag off).
+            if ctx.oauth.is_some() {
+                if let Err(e) = admit_oauth(state, &ctx, &mut request).await {
+                    return e.into_response();
+                }
+            }
             // ADR 0062 / build contract §5: with partner session devices on, an EXTERNAL
             // environment gets the CFMEET_PLATFORM_PARTNER baseline (once; never
             // replacing another baseline; its own application policy still wins).
@@ -495,7 +505,15 @@ async fn client_token_request(
             )
             .into_response();
         }
-        if let Err(e) = require_managed_target(state, &session, request.uri().path()).await {
+        if let Err(e) =
+            require_managed_target(state, session.environment_id, request.uri().path()).await
+        {
+            if e.error_code() == ErrorCode::NotFound {
+                crate::metrics::inc(
+                    "messaging_client_token_rest_total",
+                    &[("outcome", "partner_e2ee_refused")],
+                );
+            }
             return e.into_response();
         }
         request.extensions_mut().insert(PartnerSessionDevice);
@@ -550,11 +568,76 @@ async fn client_token_request(
     response
 }
 
-/// A partner session device is MANAGED-only: a conversation route whose conversation is
-/// PRIVATE_E2EE answers `NOT_FOUND` (indistinguishable from a foreign conversation).
+/// ADR 0064 (integrate contract §7): an OAuth credential (`credentialKind`
+/// `OAUTH_ACCESS` / `OAUTH_BOT`). With `MESSAGING_APPS_ENABLED` it reaches only
+/// [`crate::apps::oauth_route`], acts only as the ONE principal its restriction names
+/// (`CF-Acting-Principal` is set to it; a different one is refused) and sees MANAGED
+/// conversations only (a PRIVATE_E2EE target is `NOT_FOUND`). With the flag off it is
+/// refused: it never acts like an ordinary credential.
+async fn admit_oauth(
+    state: &AppState,
+    ctx: &TrustedContext,
+    request: &mut Request,
+) -> Result<(), ApiError> {
+    let refused = |outcome: &'static str, e: ApiError| {
+        crate::metrics::inc("messaging_oauth_requests_total", &[("outcome", outcome)]);
+        tracing::info!(outcome, "OAuth credential refused");
+        Err(e)
+    };
+    if !state.apps.enabled {
+        return refused(
+            "not_enabled",
+            ApiError::reason(ErrorCode::InsufficientScope, "OAUTH_NOT_ENABLED"),
+        );
+    }
+    if !crate::apps::oauth_route(request.method(), request.uri().path()) {
+        return refused(
+            "route_not_allowed",
+            ApiError::reason(ErrorCode::InsufficientScope, "OAUTH_ROUTE_NOT_ALLOWED"),
+        );
+    }
+    let Some(principal) = ctx.oauth_principal() else {
+        return refused(
+            "restriction_invalid",
+            ApiError::reason(ErrorCode::PrincipalNotAuthorized, "CREDENTIAL_RESTRICTION"),
+        );
+    };
+    match acting_header(request.headers()) {
+        Ok(None) => {
+            let value = HeaderValue::from_str(&principal.hyphenated().to_string())
+                .expect("uuid is a valid header value");
+            request.headers_mut().insert(ACTING_PRINCIPAL, value);
+        }
+        Ok(Some(p)) if p == principal => {}
+        Ok(Some(_)) => {
+            return refused(
+                "acting_mismatch",
+                ApiError::reason(
+                    ErrorCode::PrincipalNotAuthorized,
+                    "ACTING_PRINCIPAL_MISMATCH",
+                ),
+            )
+        }
+        Err(e) => return Err(e),
+    }
+    if let Err(e) =
+        require_managed_target(state, ctx.scope.environment_id, request.uri().path()).await
+    {
+        if e.error_code() == ErrorCode::NotFound {
+            crate::metrics::inc("messaging_oauth_requests_total", &[("outcome", "e2ee_refused")]);
+        }
+        return Err(e);
+    }
+    crate::metrics::inc("messaging_oauth_requests_total", &[("outcome", "accepted")]);
+    Ok(())
+}
+
+/// A partner session device and an OAuth credential are MANAGED-only: a conversation
+/// route whose conversation is PRIVATE_E2EE answers `NOT_FOUND` (indistinguishable from
+/// a foreign conversation).
 async fn require_managed_target(
     state: &AppState,
-    session: &crate::realtime::sessions::SessionRow,
+    environment_id: Uuid,
     path: &str,
 ) -> Result<(), ApiError> {
     let Some(id) = path
@@ -570,14 +653,10 @@ async fn require_managed_target(
         &state.db,
         "SELECT count(*) FROM messaging_conversations WHERE id = $1 AND environment_id = $2 \
            AND security_profile <> 'MANAGED'",
-        vec![id.into(), session.environment_id.into()],
+        vec![id.into(), environment_id.into()],
     )
     .await?;
     if e2ee > 0 {
-        crate::metrics::inc(
-            "messaging_client_token_rest_total",
-            &[("outcome", "partner_e2ee_refused")],
-        );
         return Err(ApiError::code(ErrorCode::NotFound));
     }
     Ok(())
