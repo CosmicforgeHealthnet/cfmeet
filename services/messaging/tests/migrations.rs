@@ -116,3 +116,71 @@ async fn other_databases_are_untouched() {
         0
     );
 }
+
+/// MLS self-join lives in its OWN history: the previous image (which fails closed on any
+/// gap-closure migration it does not know) still finds exactly its histories after this
+/// one is applied, and this image requires the new history before it reports ready.
+#[tokio::test]
+async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
+    let Some(db) = TestDb::empty().await else {
+        return;
+    };
+    messaging_migration::Migrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::GapClosureMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        messaging_migration::pending_migrations(&db.conn)
+            .await
+            .unwrap(),
+        vec!["m20261210_000038_mls_group_infos".to_string()]
+    );
+    messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::pending_migrations(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    // What the previous image checks is untouched by this history.
+    assert!(messaging_migration::gap_closure_pending(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM messaging_gap_closure_seaql_migrations"
+        )
+        .await,
+        messaging_migration::GapClosureMigrator::migrations().len() as i64
+    );
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM messaging_mls_join_seaql_migrations"
+        )
+        .await,
+        1
+    );
+    messaging_migration::MlsJoinMigrator::reset(&db.conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM pg_tables WHERE tablename = 'messaging_mls_group_infos'"
+        )
+        .await,
+        0
+    );
+    messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::pending_migrations(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+}

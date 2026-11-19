@@ -360,12 +360,14 @@ impl WebDevice {
                 plaintext,
                 epoch,
             },
-            Processed::CommitMerged { epoch } => ProcessResult {
-                kind: "COMMIT".into(),
-                aad: vec![],
-                plaintext: vec![],
-                epoch,
-            },
+            Processed::CommitMerged { epoch } | Processed::ExternalJoin { epoch, .. } => {
+                ProcessResult {
+                    kind: "COMMIT".into(),
+                    aad: vec![],
+                    plaintext: vec![],
+                    epoch,
+                }
+            }
             Processed::Proposal => ProcessResult {
                 kind: "PROPOSAL".into(),
                 aad: vec![],

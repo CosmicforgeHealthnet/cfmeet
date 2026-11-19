@@ -37,10 +37,19 @@ export interface CommitResult extends Freeable {
   readonly epoch: bigint;
 }
 export interface ProcessResult extends Freeable {
-  /** `APPLICATION`, `COMMIT` or `PROPOSAL`. */
+  /**
+   * `APPLICATION`, `COMMIT` (an external join included: see `joiner`), `PROPOSAL`, or
+   * `JOINER_UNVERIFIED`: an external commit (a member's device joining by itself) whose
+   * device is not in `allowedJoiners` — nothing was merged; verify `joiner` against the
+   * device directory and process it again.
+   */
   readonly kind: string;
   readonly plaintext: Uint8Array;
   readonly epoch: bigint;
+  /** The device that joined (or asks to join) by an external commit. */
+  readonly joiner: string | undefined;
+  /** The joining device's signature public key, as its leaf carries it. */
+  readonly joinerKey: Uint8Array;
 }
 export interface EncryptedFile extends Freeable {
   readonly ciphertext: Uint8Array;
@@ -74,7 +83,19 @@ export interface WebDevice extends Freeable {
   addDevices(groupId: Uint8Array, packedKeyPackages: Uint8Array): CommitResult;
   removeDevices(groupId: Uint8Array, deviceIds: string[]): CommitResult;
   encrypt(groupId: Uint8Array, aad: Uint8Array, plaintext: Uint8Array): Uint8Array;
-  process(groupId: Uint8Array, message: Uint8Array, expectedAad?: Uint8Array | null): ProcessResult;
+  /**
+   * Decrypts an application message (only under exactly `expectedAad`) or verifies and
+   * merges a commit. An external commit is merged only when its joining device is in
+   * `allowedJoiners` (`"<device id>:<hex signature key>"`, devices verified as registered,
+   * ACTIVE devices of members); otherwise the result is `JOINER_UNVERIFIED`.
+   */
+  process(groupId: Uint8Array, message: Uint8Array, expectedAad: Uint8Array | null | undefined, allowedJoiners: string[]): ProcessResult;
+  /** Joins the group by itself from its GroupInfo (MLS external commit); submit the commit. */
+  externalJoin(groupId: Uint8Array, groupInfo: Uint8Array): CommitResult;
+  /** The group's current GroupInfo, signed by this device (public material only). */
+  groupInfo(groupId: Uint8Array): Uint8Array;
+  /** Commits a fresh leaf for this device (no membership change). */
+  updateKeys(groupId: Uint8Array): CommitResult;
   epoch(groupId: Uint8Array): bigint;
   members(groupId: Uint8Array): string[];
   beginTransfer(): Uint8Array;

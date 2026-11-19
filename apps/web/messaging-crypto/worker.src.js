@@ -301,13 +301,31 @@ const ops = {
       at += 4 + k.length;
     }
     const r = device.addDevices(bytes(groupId), packed);
-    return { commit: r.commit, welcome: r.welcome ?? null, epoch: Number(r.epoch) };
+    return { commit: r.commit, welcome: r.welcome ?? null, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
   },
   async removeDevices({ groupId, deviceIds }) {
     const device = requireDevice();
     ctx.snapshot ??= device.exportState();
     const r = device.removeDevices(bytes(groupId), deviceIds.map((d) => uuid(d)));
-    return { commit: r.commit, epoch: Number(r.epoch) };
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
+  },
+  /** A commit with a fresh leaf for this device and no membership change (publishes a GroupInfo, attests moot removals). */
+  async updateKeys({ groupId }) {
+    const device = requireDevice();
+    ctx.snapshot ??= device.exportState();
+    const r = device.updateKeys(bytes(groupId));
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
+  },
+  /**
+   * Joins a group BY ITSELF from its GroupInfo (an MLS external commit): no other member
+   * has to be online. Like every group change it is undone (`rollback`) if the Delivery
+   * Service refuses the commit.
+   */
+  async externalJoin({ groupId, groupInfo }) {
+    const device = requireDevice();
+    ctx.snapshot ??= device.exportState();
+    const r = device.externalJoin(bytes(groupId), bytes(groupInfo));
+    return { commit: r.commit, epoch: Number(r.epoch), groupInfo: device.groupInfo(bytes(groupId)) };
   },
   /** The Delivery Service accepted the change: make it durable. */
   async confirm() {
@@ -431,19 +449,21 @@ const ops = {
    * messages decrypted under the CF Meet AAD of their envelope. Every outcome, the new
    * group state and the cursor are stored in ONE IndexedDB transaction.
    */
-  async processMessages({ conversationId, groupId, messages }) {
+  async processMessages({ conversationId, groupId, messages, allowedJoiners = [], rejectedJoiners = [] }) {
     const device = requireDevice();
     uuid(conversationId);
     const gid = bytes(groupId);
     const cursor = ctx.meta.cursors[conversationId] ?? 0;
     const sorted = [...messages].sort((a, b) => a.sequence - b.sequence);
+    const allowed = Array.isArray(allowedJoiners) ? allowedJoiners.filter((a) => typeof a === "string") : [];
+    const rejected = new Set(Array.isArray(rejectedJoiners) ? rejectedJoiners : []);
     const out = [];
     const puts = [];
     const deletes = [];
     let last = cursor;
+    let joiner = null;
     for (const m of sorted) {
       if (!Number.isSafeInteger(m.sequence) || m.sequence <= last) continue;
-      last = m.sequence;
       const base = { sequence: m.sequence, messageId: m.messageId, senderPrincipalId: m.senderPrincipalId, senderDeviceId: m.senderDeviceId, createdAt: m.createdAt, kind: m.kind };
       let record;
       try {
@@ -455,9 +475,21 @@ const ops = {
           if (own || m.epoch < epoch) {
             record = { ...base, status: "COMMIT", epoch };
           } else {
-            const r = device.process(gid, b64u.dec(m.ciphertext), undefined);
+            // An external commit (a member's device joining by itself) is merged only for
+            // the device that sent it, verified by the page (registered, ACTIVE, of a
+            // member, with exactly its logged key).
+            const sender = typeof m.senderDeviceId === "string" ? m.senderDeviceId : "";
+            const r = device.process(gid, b64u.dec(m.ciphertext), undefined, allowed.filter((a) => a.startsWith(`${sender}:`)));
+            if (r.kind === "JOINER_UNVERIFIED") {
+              if (!rejected.has(r.joiner) && r.joiner === sender) {
+                // Stop before it: the page verifies the joiner and processes it again.
+                joiner = { deviceId: r.joiner, sequence: m.sequence, senderPrincipalId: m.senderPrincipalId };
+                break;
+              }
+              fail("JOINER_REJECTED");
+            }
             if (r.kind !== "COMMIT") fail("UNEXPECTED_MESSAGE");
-            record = { ...base, status: "COMMIT", epoch: Number(r.epoch) };
+            record = { ...base, status: "COMMIT", epoch: Number(r.epoch), ...(r.joiner ? { joiner: r.joiner } : {}) };
           }
         } else if (m.senderDeviceId === ctx.deviceId) {
           const sealed = await req((await db()).transaction("pending").objectStore("pending").get([ctx.account, m.clientMessageId]));
@@ -471,7 +503,7 @@ const ops = {
         } else if (m.epoch < Number(device.epoch(gid))) {
           record = { ...base, status: "BEFORE_JOIN" };
         } else {
-          const r = device.process(gid, b64u.dec(m.ciphertext), aadFor(conversationId, uuid(m.clientMessageId), uuid(m.senderDeviceId)));
+          const r = device.process(gid, b64u.dec(m.ciphertext), aadFor(conversationId, uuid(m.clientMessageId), uuid(m.senderDeviceId)), []);
           if (r.kind !== "APPLICATION") fail("UNEXPECTED_MESSAGE");
           const payload = parsePayload(r.plaintext);
           r.plaintext.fill(0);
@@ -486,12 +518,13 @@ const ops = {
       } catch (e) {
         record = { ...base, status: "FAILED", error: e instanceof Error ? String(e.message).slice(0, 64) : "FAILED" };
       }
+      last = m.sequence;
       puts.push(["records", [ctx.account, conversationId, m.sequence], await seal(ctx.key, recordAad(ctx.account, conversationId, m.sequence), enc.encode(JSON.stringify(record)))]);
       out.push(view(record));
     }
     ctx.meta.cursors[conversationId] = last;
     await persistDevice(puts, deletes);
-    return { cursor: last, records: out };
+    return { cursor: last, records: out, joiner };
   },
 
   async cursor({ conversationId }) {

@@ -821,18 +821,19 @@ class ClientTokenRequest {
   Map<String, Object?> toJson() => json;
 }
 
-/// An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all.
+/// An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. An external commit (a PublicMessage whose sender is new_member_commit, RFC 9420 section 12.4.3.2) is a member's own ACTIVE device joining by itself: accepted only from the acting principal's own device, without welcome or …
 class CommitRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const CommitRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory CommitRequest.create({required Uuid clientMessageId, required String commit, required Uuid deviceId, required int epoch, List<Uuid>? removedDeviceIds, String? welcome, List<Uuid>? welcomeDeviceIds}) =>
+  factory CommitRequest.create({required Uuid clientMessageId, required String commit, required Uuid deviceId, required int epoch, String? groupInfo, List<Uuid>? removedDeviceIds, String? welcome, List<Uuid>? welcomeDeviceIds}) =>
       CommitRequest.fromJson(<String, Object?>{
         'clientMessageId': clientMessageId,
         'commit': commit,
         'deviceId': deviceId,
         'epoch': epoch,
+        if (groupInfo != null) 'groupInfo': groupInfo,
         if (removedDeviceIds != null) 'removedDeviceIds': removedDeviceIds,
         if (welcome != null) 'welcome': welcome,
         if (welcomeDeviceIds != null) 'welcomeDeviceIds': welcomeDeviceIds,
@@ -848,6 +849,9 @@ class CommitRequest {
   Uuid get deviceId => json['deviceId']! as String;
 
   int get epoch => (json['epoch']! as num).toInt();
+
+  /// base64url MLSMessage (wire format mls_group_info) of the epoch this commit creates, signed by the committer, with the ratchet tree and external_pub extensions: PUBLIC material that lets a member's new device join by itself (RFC 9420 section 12.4.3.2). Its group id must be the conversation's and its epoch the commit's epoch + 1.
+  String? get groupInfo => json['groupInfo'] as String?;
 
   List<Uuid>? get removedDeviceIds => json['removedDeviceIds'] == null ? null : (json['removedDeviceIds']! as List<Object?>).map((e) => e! as String).toList();
 
@@ -1335,13 +1339,14 @@ class Device {
   const Device.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Device.create({required Ciphersuite ciphersuite, required String credentialIdentity, required Uuid deviceId, required String? displayLabel, required String keyFingerprint, required Uuid principalId, required String protocol, required String registeredAt, required RevocationReason? revocationReason, required String? revokedAt, required String signaturePublicKey, required DeviceStatus status, required Map<String, Object?> transparency, required int version}) =>
+  factory Device.create({required Ciphersuite ciphersuite, required String credentialIdentity, required Uuid deviceId, required String? displayLabel, required String keyFingerprint, int? keyPackagesAvailable, required Uuid principalId, required String protocol, required String registeredAt, required RevocationReason? revocationReason, required String? revokedAt, required String signaturePublicKey, required DeviceStatus status, required Map<String, Object?> transparency, required int version}) =>
       Device.fromJson(<String, Object?>{
         'ciphersuite': ciphersuite,
         'credentialIdentity': credentialIdentity,
         'deviceId': deviceId,
         'displayLabel': displayLabel,
         'keyFingerprint': keyFingerprint,
+        if (keyPackagesAvailable != null) 'keyPackagesAvailable': keyPackagesAvailable,
         'principalId': principalId,
         'protocol': protocol,
         'registeredAt': registeredAt,
@@ -1365,6 +1370,9 @@ class Device {
   String? get displayLabel => json['displayLabel'] as String?;
 
   String get keyFingerprint => json['keyFingerprint']! as String;
+
+  /// Published, unexpired, unclaimed KeyPackages of this device. Only in the acting principal's view of its OWN devices, so each device keeps a stock that others can add it from while it is offline.
+  int? get keyPackagesAvailable => (json['keyPackagesAvailable'] as num?)?.toInt();
 
   Uuid get principalId => json['principalId']! as String;
 
@@ -1973,13 +1981,17 @@ class KeyPackageClaimRequest {
   const KeyPackageClaimRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory KeyPackageClaimRequest.create({required List<Uuid> principalIds}) =>
+  factory KeyPackageClaimRequest.create({List<Uuid>? deviceIds, required List<Uuid> principalIds}) =>
       KeyPackageClaimRequest.fromJson(<String, Object?>{
+        if (deviceIds != null) 'deviceIds': deviceIds,
         'principalIds': principalIds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Only these devices of the listed principals: a member adding a principal's NEW device leaves the KeyPackages of the devices already in the tree untouched.
+  List<Uuid>? get deviceIds => json['deviceIds'] == null ? null : (json['deviceIds']! as List<Object?>).map((e) => e! as String).toList();
 
   List<Uuid> get principalIds => (json['principalIds']! as List<Object?>).map((e) => e! as String).toList();
 
@@ -2442,10 +2454,12 @@ class MlsGroupState {
   const MlsGroupState.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory MlsGroupState.create({required int commitsAccepted, required Uuid conversationId, required int mlsEpoch, required List<Map<String, Object?>> pendingRemovals, required String? rekeyReason, required bool rekeyRequired}) =>
+  factory MlsGroupState.create({required int commitsAccepted, required Uuid conversationId, String? groupInfo, int? groupInfoEpoch, required int mlsEpoch, required List<Map<String, Object?>> pendingRemovals, required String? rekeyReason, required bool rekeyRequired}) =>
       MlsGroupState.fromJson(<String, Object?>{
         'commitsAccepted': commitsAccepted,
         'conversationId': conversationId,
+        if (groupInfo != null) 'groupInfo': groupInfo,
+        if (groupInfoEpoch != null) 'groupInfoEpoch': groupInfoEpoch,
         'mlsEpoch': mlsEpoch,
         'pendingRemovals': pendingRemovals,
         'rekeyReason': rekeyReason,
@@ -2458,6 +2472,12 @@ class MlsGroupState {
   int get commitsAccepted => (json['commitsAccepted']! as num).toInt();
 
   Uuid get conversationId => json['conversationId']! as String;
+
+  /// base64url GroupInfo of the CURRENT epoch (as its committer published it), or null when none was published for this epoch. A member's device that is not in the tree joins from it by an external commit.
+  String? get groupInfo => json['groupInfo'] as String?;
+
+  /// The epoch of groupInfo (always mlsEpoch when present).
+  int? get groupInfoEpoch => (json['groupInfoEpoch'] as num?)?.toInt();
 
   int get mlsEpoch => (json['mlsEpoch']! as num).toInt();
 

@@ -6823,7 +6823,7 @@ export namespace Messaging {
     /** First-party relays only (others: INSUFFICIENT_SCOPE). The relay's opaque reference of the VERIFIED account session the token is issued for; ending that account session (POST /v1/messaging/session-devices/revoke) ends this client session too, and no other. */
     accountSessionRef?: string;
   };
-  /** An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. */
+  /** An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. An external commit (a PublicMessage whose sender is new_member_commit, RFC 9420 section 12.4.3.2) is a member's own ACTIVE device joining by itself: accepted only from the acting principal's own device, without welcome or … */
   export type CommitRequest = {
     clientMessageId: Uuid;
     deviceId: Uuid;
@@ -6832,6 +6832,8 @@ export namespace Messaging {
     welcome?: string;
     welcomeDeviceIds?: Array<Uuid>;
     removedDeviceIds?: Array<Uuid>;
+    /** base64url MLSMessage (wire format mls_group_info) of the epoch this commit creates, signed by the committer, with the ratchet tree and external_pub extensions: PUBLIC material that lets a member's new device join by itself (RFC 9420 section 12.4.3.2). Its group id must be the conversation's and its epoch the commit's epoch + 1. */
+    groupInfo?: string;
   };
   /** Generic context classes; a product's order, trip, consultation or case is only an opaque ContextRef. */
   export type ContextClass = "DIRECT" | "GROUP" | "MEETING" | "TRANSACTION" | "CONSULTATION" | "SUPPORT" | "ENTERPRISE" | "DEVELOPER_DEFINED";
@@ -7009,6 +7011,8 @@ export namespace Messaging {
       revocationLeafIndex: number | null;
     };
     version: number;
+    /** Published, unexpired, unclaimed KeyPackages of this device. Only in the acting principal's view of its OWN devices, so each device keeps a stock that others can add it from while it is offline. */
+    keyPackagesAvailable?: number;
   };
   export type DeviceDirectory = {
     principalId: Uuid;
@@ -7243,6 +7247,8 @@ export namespace Messaging {
   };
   export type KeyPackageClaimRequest = {
     principalIds: Array<Uuid>;
+    /** Only these devices of the listed principals: a member adding a principal's NEW device leaves the KeyPackages of the devices already in the tree untouched. */
+    deviceIds?: Array<Uuid>;
   };
   /** A legal / compliance hold: held items are never purged or deleted. For PRIVATE_E2EE it preserves ciphertext and metadata only; it never creates a decryption capability. */
   export type LegalHold = {
@@ -7407,6 +7413,10 @@ export namespace Messaging {
         principalId: Uuid;
         reason: string;
       }>;
+    /** base64url GroupInfo of the CURRENT epoch (as its committer published it), or null when none was published for this epoch. A member's device that is not in the tree joins from it by an external commit. */
+    groupInfo?: string | null;
+    /** The epoch of groupInfo (always mlsEpoch when present). */
+    groupInfoEpoch?: number | null;
   };
   /** Append-only; audited. No action reads PRIVATE_E2EE content. */
   export type ModerationAction = {

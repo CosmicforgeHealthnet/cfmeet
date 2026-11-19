@@ -1360,11 +1360,16 @@ pub unsafe extern "C" fn cfm_device_process(
                             epoch,
                         }
                     }
-                    Processed::CommitMerged { epoch } => CfmProcessResult {
-                        kind: CFM_PROCESSED_COMMIT,
-                        plaintext: buffer(Vec::new()),
-                        epoch,
-                    },
+                    // An external join (a member's own new device, RFC 9420 §12.4.3.2)
+                    // passed the protocol checks of the core; the native SDK verifies the
+                    // joiner against the device directory like any added device.
+                    Processed::CommitMerged { epoch } | Processed::ExternalJoin { epoch, .. } => {
+                        CfmProcessResult {
+                            kind: CFM_PROCESSED_COMMIT,
+                            plaintext: buffer(Vec::new()),
+                            epoch,
+                        }
+                    }
                     Processed::Proposal => CfmProcessResult {
                         kind: CFM_PROCESSED_PROPOSAL,
                         plaintext: buffer(Vec::new()),

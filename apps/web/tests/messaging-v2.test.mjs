@@ -197,6 +197,8 @@ test("revoke-all pauses reconnects, preserves client keys, and resumes only on r
     "./crypto-client": { CryptoClient: class {}, CryptoWorkerError: class extends Error {} },
     "./urls": urls,
     "@/lib/auth/device-label": load("../src/lib/auth/device-label.ts"),
+    "./conversation-title": load("../src/lib/messaging/conversation-title.ts"),
+    "./e2ee-membership": load("../src/lib/messaging/e2ee-membership.ts"),
     "@/lib/auth/account-device": { accountDevice: {} },
     "@/lib/auth/session": { accountSession: {} },
   }, { process: { env: { NEXT_PUBLIC_MESSAGING_URL: "https://messaging.example" } },

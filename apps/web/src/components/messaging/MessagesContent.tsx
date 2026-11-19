@@ -30,6 +30,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from "@/lib/utils";
 import { MessagingEngine, type ConversationView, type MessageView, type SearchHit, type SecurityProfile } from "@/lib/messaging/engine";
 import { mergeTimeline, type TimelineCard } from "@/lib/messaging/managed-store";
+import { chatPreview } from "@/lib/messaging/e2ee-membership";
 import { useMessagingDirectory, useMessagingDevices, useRemoveCurrentMessagingDevice } from "@/hooks/v2/useMessaging";
 import { hubKeys, useConversationContext, useConversationTimeline, useHubCapabilities, useHubContacts, useHubInbox } from "@/hooks/v2/useCommunications";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -38,6 +39,7 @@ import { organizationsService } from "@/services/v2/organizations.service";
 import { communicationsService as hub } from "@/services/v2/communications.service";
 import { messagingErrorMessage } from "@/lib/messaging/errors";
 import { communicationsErrorMessage } from "@/lib/communications/errors";
+import { directCounterpartLabel } from "@/lib/messaging/conversation-title";
 import {
   attachmentAvailability,
   attachmentSizeRefusal,
@@ -395,9 +397,8 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
     try {
       const userIds = ids.filter((x) => x.startsWith("u:")).map((x) => x.slice(2));
       const cfMeetIds = ids.filter((x) => x.startsWith("cf:")).map((x) => x.slice(3));
+      // Managed groups send the name with the create request; private groups carry it inside their encrypted group.
       const id = await engine.createConversation(userIds, profile, { cfMeetIds, title });
-      // Private groups get their name after they exist (the server only takes a title on create for managed chats).
-      if (title) await engine.renameConversation(id, title).catch(() => {});
       onCreated(id);
       close();
     } catch (e) {
@@ -734,7 +735,7 @@ function TimelineCardView({ card }: { card: TimelineCard }) {
 function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { engine: MessagingEngine; conversation: ConversationView; title: string; onClose: () => void; shareEnabled: boolean }) {
   const s = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState(conversation.serverTitle ?? "");
+  const [name, setName] = useState(conversation.serverTitle ?? conversation.groupTitle ?? "");
   const [cfMeetId, setCfMeetId] = useState("");
   const me = s.identity?.principalId;
   const manager = conversation.myRole === "OWNER" || conversation.myRole === "ADMIN";
@@ -759,7 +760,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
           <p className="mt-3 text-lg font-semibold">{title}</p>
           <div className="mt-1"><ProfileBadge profile={conversation.securityProfile} /></div>
         </div>
-        {managed && isGroup ? (
+        {isGroup && (managed || manager) ? (
           <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); run(engine.renameConversation(conversation.id, name)); }}>
             <input aria-label="Group name" placeholder="Group name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} className={field} />
             <button type="submit" className={small} data-testid="rename-group">Rename</button>
@@ -907,7 +908,8 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     [messages, timeline.data, cleared],
   );
   const counterpart = context.data?.counterpart;
-  const title = conversation.contextClass === "DIRECT" && conversation.title === "CF Meet user" && counterpart ? counterpart.alias || counterpart.displayName || conversation.title : conversation.title;
+  // A direct chat is named after the other person (your alias for them first), never a member list.
+  const title = conversation.contextClass === "DIRECT" ? directCounterpartLabel({ counterpart, members: conversation.members, me: s.identity?.principalId, names: s.names }) ?? conversation.title : conversation.title;
   const typing = (s.typing[conversation.id] ?? []).map((p) => s.names[p] ?? (counterpart?.displayName || "Someone"));
   const pins = s.pins[conversation.id] ?? [];
   const actions = context.data?.actions ?? {};
@@ -1050,7 +1052,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
           {e2ee && !conversation.groupReady ? (
             <p className="mx-auto my-4 flex max-w-md items-start gap-3 rounded-2xl bg-muted/60 p-4 text-sm" data-testid="e2ee-unavailable">
               <Lock className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-              {s.phase === "ready" ? "Securing this chat on this browser. It finishes when someone in the chat is online. You can still write; your messages are sent automatically." : "Setting up private messaging in this browser…"}
+              {s.phase === "ready" ? "Securing this chat on this browser. This only takes a moment. You can already write; your messages are sent automatically." : "Setting up private messaging in this browser…"}
             </p>
           ) : null}
           <ol className="mx-auto max-w-3xl pb-2" data-testid="messages">
@@ -1248,11 +1250,9 @@ function PersonalMessages() {
             ) : conversations.map((c) => {
               const latest = s.messages[c.id]?.at(-1);
               const summary = c.lastMessage;
-              const preview = latest
-                ? (latest.text ?? (latest.file ? `📎 ${latest.file.name}` : null) ?? latest.note ?? "")
-                : summary
-                  ? summary.lifecycle !== "ACTIVE" ? "Message deleted" : c.securityProfile === "PRIVATE_E2EE" ? "" : (summary.previewText ?? (summary.attachmentCount ? "📎 Attachment" : ""))
-                  : "No messages yet";
+              // A private message this browser can't read (yet) reads "Waiting for this message";
+              // the bar only shows while a readable chat is still loading.
+              const preview = chatPreview({ e2ee: c.securityProfile === "PRIVATE_E2EE", groupReady: c.groupReady, loaded: s.messages[c.id] !== undefined, latest, summary });
               const at = latest?.createdAt ?? summary?.createdAt ?? null;
               const mine = latest ? latest.mine : summary?.senderPrincipalId === s.identity?.principalId;
               const unread = c.id === selected ? 0 : c.unreadCount;
@@ -1285,7 +1285,7 @@ function PersonalMessages() {
                           {s.typing[c.id]?.length ? <span className="truncate font-medium text-primary">{c.contextClass === "GROUP" ? `${s.names[s.typing[c.id][0]]?.split(" ")[0] ?? "Someone"} is typing…` : "typing…"}</span> : <>
                           {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Ticks receipt={latest.seenBy?.length ? "read" : latest.receipt ?? "sent"} list /> : null}
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
-                          {!latest && summary && summary.lifecycle === "ACTIVE" && c.securityProfile === "PRIVATE_E2EE"
+                          {preview === null
                             ? <span aria-label="Loading message" className="h-3 w-32 animate-pulse rounded-full bg-muted" />
                             : <span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span>}
                           </>}
