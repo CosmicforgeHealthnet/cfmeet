@@ -242,8 +242,8 @@ jobs:
           # Applied = registered migrations (derived from the migrator, never hand-counted).
           test "$(q "SELECT count(*) FROM telephony_seaql_migrations")" = "$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           # 17 Part E / F tables + Part H operator audit, destination classes, retention
-          # holds and retention audit.
-          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'telephony_seaql_migrations'")" = "21"
+          # holds and retention audit + the Numbering report outbox (gap audit C10).
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'telephony_seaql_migrations'")" = "22"
           # No Calling / Privacy Relay authority tables.
           test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename IN \
             ('calls', 'call_participants', 'call_sessions', 'call_legs', 'communication_contexts', \

@@ -32,7 +32,11 @@
 //!   and trust Meeting Service's key with the new grant.
 //!
 //! Scope: the organization's Enterprise administration surface (the routes the web
-//! adapter gates with `CALLING_ADMIN_PRINCIPAL_IDS`). Personal calls keep the governed
+//! adapter gates with `CALLING_ADMIN_PRINCIPAL_IDS`), plus (gap audit G3) each member's
+//! OWN endpoints and signaling credentials ([`OrganizationCalling::member_calling`], Calling
+//! `calling-organization-member.act`) and the offboarding of the extensions routed to a
+//! removed member ([`OrganizationCalling::set_member_extension_status`],
+//! `calling-organization-member.offboard`). Personal calls keep the governed
 //! personal scope (ADR 0056 §4). Nothing here weakens PRIVATE_E2EE or touches Messaging.
 
 use std::{
@@ -547,6 +551,81 @@ impl OrganizationCalling {
         }
     }
 
+    /// Gap audit G3: applies the member's organization status to the Enterprise Calling
+    /// extensions routed to their organization principal (Calling
+    /// `POST /internal/v1/organization-members/extension-status`, permission
+    /// `calling-organization-member.offboard`, signed with the organization's delegated
+    /// context). `SUSPENDED` disables them; `ACTIVE` restores exactly the ones disabled
+    /// that way. 429 / 5xx / transport failures are retried; any other refusal (the grant
+    /// missing from Calling's trust bundle, a Calling without the route) is permanent and
+    /// reported until an operator fixes it.
+    pub async fn set_member_extension_status(
+        &self,
+        scope: &crate::services::organization_access::ScopeEnvironment,
+        principal_id: Uuid,
+        status: &str,
+    ) -> Result<(), crate::services::organization_access::PortError> {
+        use crate::services::organization_access::PortError;
+        let context = DelegatedPlatformContext::new(
+            scope.tenant_id,
+            scope.application_id,
+            scope.environment_id,
+            ApplicationEnvironmentKind::Production,
+            scope.service_account_id,
+        );
+        let status = if status == "ACTIVE" {
+            "ACTIVE"
+        } else {
+            "SUSPENDED"
+        };
+        let (code, value) = self
+            .exchange(
+                ServiceId::calling(),
+                &self.calling,
+                Method::POST,
+                "/internal/v1/organization-members/extension-status",
+                &[],
+                None,
+                Some(&json!({ "principalId": principal_id, "status": status })),
+                context,
+            )
+            .await
+            .map_err(|why| PortError {
+                class: format!("CALLING_{}", why.to_ascii_uppercase().replace(' ', "_")),
+                permanent: false,
+            })?;
+        match code {
+            200..=299 => {
+                let changed =
+                    ["disabled", "restored", "notRestored"].map(|k| value[k].as_u64().unwrap_or(0));
+                if changed.iter().any(|n| *n > 0) {
+                    tracing::info!(
+                        organization_id = %scope.organization_id,
+                        disabled = changed[0],
+                        restored = changed[1],
+                        not_restored = changed[2],
+                        "organization member extensions brought in line"
+                    );
+                }
+                Ok(())
+            }
+            429 | 500..=599 => Err(PortError {
+                class: format!("CALLING_{code}"),
+                permanent: false,
+            }),
+            _ => Err(PortError {
+                class: format!(
+                    "CALLING_REFUSED_{}",
+                    value["error"]["code"].as_str().unwrap_or("UNKNOWN")
+                )
+                .chars()
+                .take(64)
+                .collect(),
+                permanent: true,
+            }),
+        }
+    }
+
     /// The member's NATIVE_CF_USER principal in the organization's environment (created
     /// on first use through Platform Access; cached in `communication_principal_links`,
     /// which is keyed by environment, so a personal-scope principal is never reused).
@@ -750,23 +829,41 @@ impl OrganizationCalling {
                 "Your session cannot be verified right now; retry shortly",
             ));
         }
+        self.messaging_scope_for(db, authority, &ActingUser::of(user), organization)
+            .await
+    }
+
+    /// [`Self::messaging_scope`] for an acting user resolved elsewhere (a signed-in
+    /// caller, or the stored manager of a team chat in the background).
+    async fn messaging_scope_for(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        acting: &ActingUser,
+        organization: Uuid,
+    ) -> ApiResult<(
+        url::Url,
+        ResolvedOrganizationScope,
+        CallingServiceBinding,
+        Uuid,
+        Uuid,
+    )> {
         let Some(messaging) = self.messaging.clone() else {
             return Err(messaging_not_set_up());
         };
-        let acting = ActingUser::of(user);
         // Membership, organization status and policy (`features.messaging`) are decided by
         // Organizations on every request: a removed or suspended member, or a suspended
         // organization, is refused here before anything reaches Messaging.
         workspaces::require_organization_capability(
             authority,
-            &acting,
+            acting,
             organization,
             OrganizationFeature::Messaging,
             None,
         )
         .await?;
         let scope = authority
-            .resolve_scope(organization, &acting)
+            .resolve_scope(organization, acting)
             .await
             .map_err(|e| match e {
                 AuthorityError::Refused(reply) => relayed_error(&reply),
@@ -778,9 +875,9 @@ impl OrganizationCalling {
         self.ensure_messaging_policy(&messaging, &scope, binding)
             .await;
         let principal = self
-            .principal_for(db, &scope, binding, user.user_id)
+            .principal_for(db, &scope, binding, acting.user_id())
             .await?;
-        Ok((messaging, scope, binding, principal, user.user_id))
+        Ok((messaging, scope, binding, principal, acting.user_id()))
     }
 
     /// ADR 0058 Amendment A2: an automatically provisioned organization environment starts
@@ -1046,6 +1143,140 @@ impl OrganizationCalling {
     }
 }
 
+/// Gap audit G3: one operation on a member's OWN calling presence in the organization's
+/// scope (Calling `calling-organization-member.act`).
+#[derive(Debug, Clone)]
+pub enum MemberCallingOperation {
+    /// The member's endpoints (`includeRevoked`).
+    ListEndpoints { include_revoked: bool },
+    /// Register (or refresh) one endpoint: Calling's `RegisterEndpointRequest` without
+    /// `principalId` (the member's organization principal is always the one acted for).
+    RegisterEndpoint(Value),
+    /// Revoke one of the member's endpoints.
+    RevokeEndpoint(Uuid),
+    /// Mint a signaling credential for one of the member's ACTIVE endpoints.
+    SignalingCredential(Uuid),
+}
+
+impl OrganizationCalling {
+    /// Gap audit G3: a member's own endpoint and signaling credentials in the
+    /// organization's OWN Calling scope, acting as the member's organization principal —
+    /// the same gate as the member Messaging relay: a verified registered member of an
+    /// ACTIVE organization whose policy allows Calling (`features.calling`, decided by the
+    /// Organizations Service on every request; no administrative capability), the
+    /// organization's verified scope with its Calling binding, and the member's
+    /// NATIVE_CF_USER principal there. Calling re-verifies the organization's credential
+    /// live and acts for that principal only. A removed or suspended member is refused
+    /// here by Organizations and, independently, by Calling once the offboarding worker
+    /// suspended the principal.
+    pub async fn member_calling(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        actor: &ActorContext,
+        organization: Uuid,
+        operation: MemberCallingOperation,
+    ) -> ApiResult<(u16, Value)> {
+        let user = actor.require_registered()?;
+        if !user.revocation_checked {
+            return Err(ApiError::domain(
+                ErrorCode::ServiceUnavailable,
+                "Your session cannot be verified right now; retry shortly",
+            ));
+        }
+        let acting = ActingUser::of(user);
+        workspaces::require_organization_capability(
+            authority,
+            &acting,
+            organization,
+            OrganizationFeature::Calling,
+            None,
+        )
+        .await?;
+        let scope = authority
+            .resolve_scope(organization, &acting)
+            .await
+            .map_err(|e| match e {
+                AuthorityError::Refused(reply) => relayed_error(&reply),
+                AuthorityError::Unavailable(_) => unavailable(),
+            })?;
+        let Some(binding) = scope.calling else {
+            return Err(not_set_up());
+        };
+        let principal = self
+            .principal_for(db, &scope, binding, user.user_id)
+            .await?;
+        let context = Self::scope_context(&scope, binding)
+            .with_initiating_credential(binding.credential_id)
+            .with_initiating_principal(principal, DelegatedPrincipalKind::NativeCfUser);
+        const BASE: &str = "/internal/v1/organization-members";
+        let (method, path, query, body) = match operation {
+            MemberCallingOperation::ListEndpoints { include_revoked } => (
+                Method::GET,
+                format!("{BASE}/endpoints"),
+                if include_revoked {
+                    vec![("includeRevoked".to_string(), "true".to_string())]
+                } else {
+                    vec![]
+                },
+                None,
+            ),
+            MemberCallingOperation::RegisterEndpoint(body) => (
+                Method::POST,
+                format!("{BASE}/endpoints"),
+                vec![],
+                Some(body),
+            ),
+            MemberCallingOperation::RevokeEndpoint(endpoint) => (
+                Method::POST,
+                format!("{BASE}/endpoints/revoke"),
+                vec![],
+                Some(json!({ "endpointId": endpoint })),
+            ),
+            MemberCallingOperation::SignalingCredential(endpoint) => (
+                Method::POST,
+                format!("{BASE}/signaling-credentials"),
+                vec![],
+                Some(json!({ "endpointId": endpoint })),
+            ),
+        };
+        let (status, value) = self
+            .exchange(
+                ServiceId::calling(),
+                &self.calling,
+                method,
+                &path,
+                &query,
+                None,
+                body.as_ref(),
+                context,
+            )
+            .await
+            .map_err(|why| {
+                tracing::warn!(
+                    error = why,
+                    "Calling unavailable for an organization member request"
+                );
+                calling_unavailable()
+            })?;
+        match status {
+            // Calling did not accept the Meeting Service's request (the trust bundle lacks
+            // `calling-organization-member.act`, or Platform Access no longer authenticates
+            // the organization's credential). Never shown as the caller's own failure.
+            401 | 403 => {
+                tracing::error!(
+                    organization_id = %organization,
+                    status,
+                    "Calling refused the organization member request (trust bundle grant or credential binding)"
+                );
+                Err(calling_unavailable())
+            }
+            s if s >= 500 => Err(calling_unavailable()),
+            s => Ok((s, value)),
+        }
+    }
+}
+
 /// Gap audit G6: the organization capability organization moderation needs (OWNER /
 /// ADMIN by default, decided by the Organizations Service).
 pub const MESSAGING_ORGANIZATION_MODERATE: &str = "messaging.organization.moderate";
@@ -1169,25 +1400,74 @@ impl OrganizationCalling {
         title: Option<String>,
     ) -> ApiResult<(u16, Value)> {
         let user = actor.require_registered()?;
-        let acting = ActingUser::of(user);
+        if !user.revocation_checked {
+            return Err(ApiError::domain(
+                ErrorCode::ServiceUnavailable,
+                "Your session cannot be verified right now; retry shortly",
+            ));
+        }
+        let (status, value) = self
+            .team_channel_sync(
+                db,
+                authority,
+                &ActingUser::of(user),
+                organization,
+                team,
+                title.clone(),
+                false,
+            )
+            .await?;
+        if (200..300).contains(&status) {
+            // The chat now follows its team: team events make it due for a resync, run
+            // as this manager (see `crate::services::team_channels`).
+            crate::services::team_channels::remember(
+                db,
+                organization,
+                team,
+                user.user_id,
+                title.as_deref(),
+            )
+            .await?;
+        }
+        Ok((status, value))
+    }
+
+    /// The team chat sync itself, for `acting` (who must hold
+    /// `organization.teams.manage`): the team's ACTIVE members (none once the team is
+    /// archived) become the chat's team members in Messaging.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn team_channel_sync(
+        &self,
+        db: &DatabaseConnection,
+        authority: &OrganizationsAuthority,
+        acting: &ActingUser,
+        organization: Uuid,
+        team: Uuid,
+        title: Option<String>,
+        archived: bool,
+    ) -> ApiResult<(u16, Value)> {
         workspaces::require_organization_capability(
             authority,
-            &acting,
+            acting,
             organization,
             OrganizationFeature::Messaging,
             Some(ORGANIZATION_TEAMS_MANAGE),
         )
         .await?;
         let (messaging, scope, binding, owner, _) = self
-            .messaging_scope(db, authority, actor, organization)
+            .messaging_scope_for(db, authority, acting, organization)
             .await?;
-        let users = authority
-            .team_member_users(organization, team, &acting)
-            .await
-            .map_err(|e| match e {
-                AuthorityError::Refused(reply) => relayed_error(&reply),
-                AuthorityError::Unavailable(_) => unavailable(),
-            })?;
+        let users = if archived {
+            Vec::new()
+        } else {
+            authority
+                .team_member_users(organization, team, acting)
+                .await
+                .map_err(|e| match e {
+                    AuthorityError::Refused(reply) => relayed_error(&reply),
+                    AuthorityError::Unavailable(_) => unavailable(),
+                })?
+        };
         let mut members = Vec::with_capacity(users.len());
         let mut seen = HashSet::new();
         for u in users.into_iter().filter(|u| seen.insert(*u)) {

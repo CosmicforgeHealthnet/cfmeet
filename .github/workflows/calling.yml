@@ -214,11 +214,12 @@ jobs:
           # public-network parties / bridges / telephony commands and events, spend): calls
           # + 28 call_* tables + the outbox; Part F §55 adds call_answer_group_claims (the
           # group-level single-winner claim of ring groups / queue offers) and §61 the five
-          # call_recording_* tables. The count is updated intentionally with each family and
+          # call_recording_* tables; the gap-closure history adds call_consultations (C14,
+          # attended transfer). The count is updated intentionally with each family and
           # paired with the structural checks below (required tables, no foreign domain).
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \
             "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' \
-             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "36"
+             AND (tablename = 'calls' OR tablename LIKE 'call\_%' OR tablename = 'calling_outbox_events')")" = "37"
           # Applied = registered migrations (derived from the migrator, never hand-counted).
           registered="$(grep -c 'Box::new(m20' migration/src/lib.rs)"
           test "$(psql -h 127.0.0.1 -U postgres -d calling_migration_smoke -tAc \

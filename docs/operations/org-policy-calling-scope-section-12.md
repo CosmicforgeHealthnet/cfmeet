@@ -139,14 +139,18 @@ Order matters; each step is reversible on its own.
 * Suspending the organization suspends its tenant (Section 7), so every forward fails authentication.
 * Schema rollback (only if required): `CF_MIGRATION_ALLOW_DESTRUCTIVE=down organizations-migration down -n 1` and `CF_MIGRATION_ALLOW_DESTRUCTIVE=down calling-migration down -n 1`. Both are additive-only drops. The override is required by the SEC-015 guard.
 
+## 6a. Gap audit G3 — members' own calling presence and extension offboarding
+
+* **Member relay (Meeting Service 1.7.0).** `GET` / `POST /api/v2/organizations/{id}/member-calling/endpoints`, `DELETE …/member-calling/endpoints/{endpointId}` and `POST …/member-calling/signaling-credentials`. Same gate as the member Messaging relay: an active member of an active organization whose policy allows Calling (no `calling.enterprise.manage`). The Meeting Service acts as the member's organization principal and names the organization's Calling credential (id only). Calling (`/internal/v1/organization-members/*`, `cfmeet.calling.http-api` 1.27.0) re-verifies that credential live and acts for that principal only: bodies never name a principal, and another member's endpoint is 404. The signaling credential is an *organization member* credential. The organization credential's closed scope set (`calls.read`, `enterprise.config.*`) is not widened: such a credential needs `calls.read` plus a FIRST_PARTY `org-` tenant on every use.
+* **Offboarding.** The organization access worker suspends the member's organization principal, as before. It now also calls `POST /internal/v1/organization-members/extension-status`. On removal or suspension, every ACTIVE extension routed to that PRINCIPAL is disabled. On reactivation, exactly those extensions are restored. A number that is now taken stays disabled and is counted in `notRestored`. A Calling refusal keeps the change due, with `last_error_class` `CALLING_REFUSED_*` in the backlog, until it is fixed.
+* **Operator steps (not done here).** In Calling's receiver trust bundle, grant `cfmeet.meeting-service` the permissions `calling-organization-member.act` and `calling-organization-member.offboard`. Deploy Calling before or with the Meeting Service. Until both are in place, member relay calls answer 503, and membership changes stay due with `CALLING_REFUSED_INTERNAL_PERMISSION_DENIED` (or `CALLING_REFUSED_NOT_FOUND` against an older Calling). The principal itself is still suspended at once.
+
 ## 7. Still open
 
 * **Member calls in the organization scope:**
-  * extension dialing;
-  * endpoint registration in the organization triple;
-  * an ownership guard equivalent to the BFF's `ownCall` / `ownEndpoints`.
+  * extension dialing and placing calls (`POST /v1/calls`) as a member.
 
-  Only the administration surface is relayed. Personal calls stay in the personal scope by design. Organization member calling needs a product decision and a separate slice.
+  Endpoints and signaling exist (6a): members receive, accept and decline organization calls. Placing calls needs a product decision and a separate slice.
 * **Per-organization Platform Access credential and Calling scope grants:** an operator / owner decision for each organization (step 3). Until it is made, the relay answers `409 ORGANIZATION_CALLING_DISABLED` for that organization.
 * **Frontend adoption** (step 7), owned by the frontend team. The shared credential and env allowlist stay live until then (CAL-007 PARTIAL).
 * **Admit by a non-member co-host** of an organization's meeting is governed by meeting roles only. Organizations answers policy reads only for members.

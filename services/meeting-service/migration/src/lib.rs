@@ -46,6 +46,7 @@ mod m20261118_000003_account_avatars;
 mod m20261118_000004_email_calendar_invite;
 mod m20261118_000005_chat_message_edits;
 mod m20261118_000006_account_notices;
+mod m20261118_000006_team_channel_sync;
 
 pub mod phase2_backfill;
 
@@ -471,6 +472,7 @@ impl MigratorTrait for GapClosureMigrator {
             Box::new(m20261118_000003_account_avatars::Migration),
             Box::new(m20261118_000004_email_calendar_invite::Migration),
             Box::new(m20261118_000005_chat_message_edits::Migration),
+            Box::new(m20261118_000006_team_channel_sync::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {

@@ -167,6 +167,8 @@ pub struct TelephonyService {
     pub(crate) calling: Arc<dyn CallingPort>,
     /// Part IV L: Numbering (DCN resolution and caller-identity verification).
     pub(crate) numbering: Arc<dyn crate::ports::NumberingPort>,
+    /// Gap C10: DCN usage / risk reports to Numbering (both off by default).
+    pub numbering_reports: crate::numbering_reports::NumberingReportSettings,
     pub(crate) worker_id: String,
     pub settings: ExecutionSettings,
     /// When this instance last read back the interconnects' call inventory.
@@ -188,6 +190,7 @@ impl TelephonyService {
             privacy: Arc::new(Unconfigured),
             calling: Arc::new(Unconfigured),
             numbering: Arc::new(crate::ports::UnconfiguredNumbering),
+            numbering_reports: Default::default(),
             worker_id: format!("w-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
             settings: ExecutionSettings::default(),
             last_inventory: Arc::default(),
@@ -218,6 +221,15 @@ impl TelephonyService {
 
     pub fn with_numbering(mut self, port: Arc<dyn crate::ports::NumberingPort>) -> Self {
         self.numbering = port;
+        self
+    }
+
+    /// Gap C10: the Numbering usage / risk reporting switches and thresholds.
+    pub fn with_numbering_reports(
+        mut self,
+        settings: crate::numbering_reports::NumberingReportSettings,
+    ) -> Self {
+        self.numbering_reports = settings;
         self
     }
 

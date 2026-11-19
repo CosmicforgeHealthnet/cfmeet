@@ -94,7 +94,9 @@ class Grants(unittest.TestCase):
     def test_every_grant_exists_in_the_permission_registry_for_that_receiver_and_issuer(self):
         registry = permission_registry()
         text = (REPO / 'packages/service-auth/src/permissions.rs').read_text()
-        all_permissions = re.findall(r'    InternalPermission::([A-Za-z]+),\n', text[text.index('pub const ALL'):])
+        all_block = text[text.index('pub const ALL'):]
+        all_block = all_block[:all_block.index('];')]
+        all_permissions = re.findall(r'    InternalPermission::([A-Za-z]+),\n', all_block)
         self.assertEqual(len(registry), len(all_permissions))
         self.assertGreater(len(registry), 60)
         self.assertEqual(cr.validate_grants(registry), [])
@@ -419,12 +421,26 @@ class SecretsAreNeverPrinted(unittest.TestCase):
     def test_migration_and_dump_urls_reach_containers_only_through_private_env_files(self):
         calls = []
         with isolated_work(), patch.object(cr, 'migrator_target', return_value=('postgres://m:hunter2@db/x', 'net')), \
-                patch.object(p, 'run', side_effect=lambda *a, **k: calls.append(a) or ''):
+                patch.object(cr, 'run_binary', side_effect=lambda args, **k: calls.append(args) or b''):
             cr.migrate('organizations', 'sha256:new')
             self.assertFalse((cr.WORK / 'run' / 'organizations.migration.env').exists())
         self.assertTrue(calls)
         self.assertFalse(any('hunter2' in arg for call in calls for arg in call))
         self.assertTrue(all('--env-file' in call for call in calls))
+
+    def test_a_failed_migration_reports_its_scrubbed_reason(self):
+        """Production 2026-11-18: a Communications migration failed with only "subprocess failed:
+        docker". The reason now travels, credentials and literal values masked."""
+        failed = subprocess.CompletedProcess([], 1, b'', b"Error: Execution Error: error returned from database: "
+                                             b"column \"x\" contains null values; url postgres://m:hunter2@db/x")
+        with isolated_work(), patch.object(cr, 'migrator_target', return_value=('postgres://m:hunter2@db/x', 'net')), \
+                patch.object(cr.subprocess, 'run', return_value=failed):
+            with self.assertRaises(RuntimeError) as raised:
+                cr.migrate('organizations', 'sha256:new')
+        message = str(raised.exception)
+        self.assertIn('[organizations-migration]', message)
+        self.assertIn('contains null values', message)
+        self.assertNotIn('hunter2', message)
 
 
 class SafeDefaultsAndRouting(unittest.TestCase):

@@ -80,7 +80,7 @@ Source: `docs/implementation/audit-findings-traceability.csv` (149 canonical fin
 | CAL-016 | P2 | INFRASTRUCTURE | Enterprise SIP desk phones depend on Telephony + Asterisk edge that are not deployed | `EXTERNAL_BLOCKED` | OPEN |
 | CAL-017 | P2 | BACKEND | Admin review gaps: no recording discovery, no org-wide call list, raw-JSON enterprise editors | `CLOSED` | b4c9476a; CI: calling 42350889478, RTC 42350891700, enterprise 42350894085, certification 42350904788 |
 | CAL-018 | P3 | PRODUCT_DECISION | Declining on one device does not decline the call for the user; caller keeps ringing until TTL | `OWNER_DECISION` | OPEN |
-| CAL-019 | P3 | PRODUCT_DECISION | Attended (consultative) transfer not implemented | `OWNER_DECISION` | OPEN |
+| CAL-019 | P3 | PRODUCT_DECISION | Attended (consultative) transfer not implemented | `CLOSED` | gap closure C14: POST /v1/calls/{id}/consultations (+ /complete, /cancel), call_consultations (gap-closure 000056), ADR 0022 amendment; services/calling/tests/attended_transfer.rs (backend only; web UI unchanged) |
 | CAL-020 | P3 | FRONTEND | Signaling adapter lacks the production HTTPS guard | `FRONTEND_CORRECTED` | FRONTEND_CORRECTED on branch (https/wss production guard for adapter, signaling transport and socket) |
 | CAL-021 | P3 | PRODUCT_DECISION | Voicemail/recording artifacts are not malware-scanned (acceptable today) | `OWNER_DECISION` | OPEN |
 | CAL-022 | P2 | FRONTEND | Web calling has never been verified end-to-end against the real backend | `OWNER_DECISION` | PARTIAL: served-contract test + adapter/logic tests in CI; two-browser staging E2E EXTERNAL_BLOCKED (staging credentials) |

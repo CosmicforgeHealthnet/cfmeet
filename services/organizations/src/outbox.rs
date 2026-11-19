@@ -53,7 +53,11 @@ pub fn subscribers(event_type: &str) -> &'static [&'static str] {
         | "membership.removed"
         | "ownership.transferred"
         | "policy.updated"
-        | "scope.mapping_changed" => MEETING,
+        | "scope.mapping_changed"
+        // Team chats follow team membership (Meeting Service team chat worker).
+        | "team.member_added"
+        | "team.member_removed"
+        | "team.archived" => MEETING,
         _ => &[],
     }
 }
@@ -366,6 +370,9 @@ mod tests {
             "organization.suspended",
             "organization.reactivated",
             "policy.updated",
+            "team.member_added",
+            "team.member_removed",
+            "team.archived",
         ] {
             assert_eq!(subscribers(t), &[services::MEETING_SERVICE], "{t}");
         }

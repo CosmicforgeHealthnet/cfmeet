@@ -281,8 +281,9 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// The public API Gateway: `calling-request.forward` only (Part VI §51).
     pub api_gateway: Arc<ServiceTokenSigner>,
-    /// The Meeting Service: `calling-request.act-for-organization` only (Blueprint
-    /// Section 12 follow-up, CAL-007; accepted only while the Calling flag is on).
+    /// The Meeting Service: `calling-request.act-for-organization` (Blueprint Section 12
+    /// follow-up, CAL-007; accepted only while the Calling flag is on) and the gap audit
+    /// G3 organization member permissions `calling-organization-member.act` / `.offboard`.
     pub meeting_service: Arc<ServiceTokenSigner>,
     /// The Developer Platform: the webhook migration export and rollback only
     /// (`webhook-migration.export`, `webhook-migration.import`; Part VI §53).
@@ -391,7 +392,11 @@ pub fn service_auth_fixture_targeting(
                 (
                     cf_service_auth::services::MEETING_SERVICE,
                     vec![meeting_service_key.public_jwk()],
-                    &["calling-request.act-for-organization"],
+                    &[
+                        "calling-request.act-for-organization",
+                        "calling-organization-member.act",
+                        "calling-organization-member.offboard",
+                    ],
                 ),
                 (
                     cf_service_auth::services::DEVELOPER_PLATFORM,
