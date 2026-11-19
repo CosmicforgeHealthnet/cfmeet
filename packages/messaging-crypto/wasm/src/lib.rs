@@ -661,7 +661,7 @@ impl WebDevice {
         let g = group_of(&self.device, &mut self.groups, group_id)?;
         let allowed = |device: Uuid, key: &[u8]| {
             let entry = format!("{device}:{}", hex(key));
-            allowed_joiners.iter().any(|a| *a == entry)
+            allowed_joiners.contains(&entry)
         };
         let p = match self.device.process_with_joiners(g, message, allowed) {
             Ok(p) => p,

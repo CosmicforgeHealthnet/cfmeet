@@ -145,11 +145,24 @@ async function roundTrip(c: MessagingCrypto): Promise<void> {
   assert.deepEqual(new Set(alice.members(group)), new Set([aliceId, bobId]));
   const msgAad = c.messageAad({ ...binding, senderDeviceId: aliceId });
   const ciphertext = alice.encrypt(group, msgAad, new TextEncoder().encode('hello bob'));
-  const processed = bob.process(group, ciphertext, msgAad);
+  const processed = bob.process(group, ciphertext, msgAad, []);
   assert.equal(processed.kind, 'APPLICATION');
   assert.equal(new TextDecoder().decode(processed.plaintext), 'hello bob');
   const again = alice.encrypt(group, msgAad, new TextEncoder().encode('second'));
-  assert.throws(() => bob.process(group, again, c.messageAad(binding)), (e: unknown) => e instanceof MessagingCryptoError && e.code === 'AAD_MISMATCH');
+  assert.throws(() => bob.process(group, again, c.messageAad(binding), []), (e: unknown) => e instanceof MessagingCryptoError && e.code === 'AAD_MISMATCH');
+
+  // A third device joins by itself from the GroupInfo (external commit); members merge it
+  // only for a verified joiner.
+  const carolId = UUID();
+  const carol = c.createDevice(carolId);
+  const join = carol.externalJoin(group, alice.groupInfo(group));
+  assert.equal(join.welcome, undefined);
+  const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  assert.equal(alice.process(group, join.commit, null, []).kind, 'JOINER_UNVERIFIED');
+  const merged = alice.process(group, join.commit, null, [`${carolId}:${hex(carol.signaturePublicKey)}`]);
+  assert.equal(merged.kind, 'COMMIT');
+  assert.equal(merged.joiner, carolId);
+  assert.deepEqual(new Set(alice.members(group)), new Set([aliceId, bobId, carolId]));
 
   // Attachments: encrypt, bind the descriptor to the server id, decrypt; tampering is refused.
   const attachmentId = UUID();
