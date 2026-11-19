@@ -25,7 +25,8 @@ Operations
                                (monitoring_stack.py); also run after every successful release,
                                where a monitoring failure is reported but never fails it.
   activate-* / org-cutover-*   separately approved activation steps (see ACTIVATIONS); the CF Meet
-                               Platform "Build" phases live in platform_operations.py.
+                               Platform "Build" phases live in platform_operations.py, the CF Meet
+                               Apps ("Integrate") phases in integrate_operations.py.
   platform-acceptance          two fresh developer workspaces through the public API (cleaned up):
                                every recorded platform phase, cross-tenant refusals, flag-off checks.
 
@@ -58,6 +59,7 @@ import org_first_activation
 import notification_operations as notif_ops
 import key_rotation
 import platform_operations as platform_ops
+import integrate_operations as integrate_ops
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -304,7 +306,7 @@ FLAGS = (
     'EMAIL_PROVIDER', 'EMAIL_FROM_ADDRESS', 'EMAIL_VERIFICATION_REQUIRED', 'EMAIL_VERIFICATION_ENFORCE_FROM',
     'EMAIL_VERIFICATION_GRACE_UNTIL', 'FEATURE_MEETING_V2_ENABLED', 'FEATURE_RTC_PROVIDER_CONTROL_V2',
     'CONFERENCE_EMPTY_TIMEOUT_SECS', 'FEATURE_RECORDING_V2_ENABLED',
-) + platform_ops.FLAGS + tuple(sorted(p.SAFE_ENV))
+) + platform_ops.FLAGS + integrate_ops.FLAGS + tuple(sorted(p.SAFE_ENV))
 SECRET_HINT = re.compile(r'(SECRET|PASSWORD|TOKEN|KEY|PEPPER|DATABASE_URL|REDIS_URL|CREDENTIAL|DSN)', re.I)
 
 
@@ -609,7 +611,7 @@ GRANTS = (
     # Hub before sending a meeting notice. The Hub release (communications_release.HUB_INCOMING)
     # carries the same grant; this operation applies it without a Hub release.
     ('activate-meeting-notice-preferences', 'communications', 'meeting-service', ('communications-preferences.read',)),
-) + notif_ops.GRANTS + platform_ops.GRANTS
+) + notif_ops.GRANTS + platform_ops.GRANTS + integrate_ops.GRANTS
 
 
 def validate_grants(registry_, grants=GRANTS):
@@ -1311,6 +1313,9 @@ def safe_defaults():
     # CF Meet Platform "Build" flags: off until their activation is recorded (platform_operations).
     for name, flags in platform_ops.safe_default_rules(done).items():
         rules.setdefault(name, {}).update(flags)
+    # CF Meet Apps flags: off until their activation is recorded (integrate_operations).
+    for name, flags in integrate_ops.safe_default_rules(done).items():
+        rules.setdefault(name, {}).update(flags)
     return rules
 
 
@@ -1585,6 +1590,9 @@ def rollback(sha, run_id):
     if entry['operation'] in platform_ops.EDGE:
         # Platform prefixes (/v1/users, the calling edge, /v1/meetings) leave the edge before their containers.
         platform_ops.undo_edge(sys.modules[__name__], entry)
+    if entry['operation'] in integrate_ops.EDGE:
+        # CF Meet Apps prefixes (/v1/oauth, /v1/app-directory) leave the edge before their containers.
+        integrate_ops.undo_edge(sys.modules[__name__], entry)
     if entry.get('edge'):
         undo_gateway_docs(entry['edge'])
     if entry.get('edgeLimits'):
@@ -2229,7 +2237,8 @@ def activate_gateway_families(sha, run_id, confirm):
     old_snippet = GATEWAY_SNIPPET.read_text()
 
     def post():
-        GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES + FAMILY_PREFIXES + platform_ops.edge_prefixes(done),
+        GATEWAY_SNIPPET.write_text(gateway_snippet(GATEWAY_PREFIXES + FAMILY_PREFIXES + platform_ops.edge_prefixes(done)
+                                                   + integrate_ops.edge_prefixes(done),
                                                    docs=done('activate-gateway-docs')))
         try:
             p.reload_host_nginx()
@@ -2340,7 +2349,7 @@ def gateway_snippet(prefixes=GATEWAY_PREFIXES, docs=False):
 def edge_prefixes():
     """The /v1 families the edge currently routes to the gateway (journal-derived)."""
     return GATEWAY_PREFIXES + (FAMILY_PREFIXES if done('activate-gateway-families') else ()) \
-        + platform_ops.edge_prefixes(done)
+        + platform_ops.edge_prefixes(done) + integrate_ops.edge_prefixes(done)
 
 
 def route_collisions(texts, prefixes=GATEWAY_PREFIXES):
@@ -2649,7 +2658,8 @@ def activate_token_ceiling(sha, run_id, confirm):
 # --- dispatcher ------------------------------------------------------------------------------
 
 def _platform(step):
-    """A platform_operations step bound to this module (CF Meet Platform "Build", ADR 0062 / 0063)."""
+    """A platform_operations / integrate_operations step bound to this module (CF Meet Platform
+    "Build", ADR 0062 / 0063; CF Meet Apps, ADR 0064 / 0065)."""
     return lambda sha, run_id, confirm: step(sys.modules[__name__], sha, run_id, confirm)
 
 
@@ -2750,6 +2760,9 @@ ACTIVATIONS = {
     # CF Meet Platform "Build" B1-B6 (ADR 0062 / 0063): partner users, user tokens and allowed
     # websites, partner chat, calls, push and meetings; the calling edge is a separate owner decision.
     **{op: (platform_ops.REQUIRES[op], _platform(step)) for op, step in platform_ops.ACTIVATIONS.items()},
+    # CF Meet Apps I1-I7 (ADR 0064 / 0065): app registration and reviewers, OAuth, delegated
+    # access, workspace installs, install events, the directory and in-meeting apps.
+    **{op: (integrate_ops.REQUIRES[op], _platform(step)) for op, step in integrate_ops.ACTIVATIONS.items()},
 }
 OPERATIONS = ('inspect', 'backup', 'provision', 'release', 'verify', 'rollback', 'certify') + tuple(ACTIVATIONS) \
     + ('developer-acceptance', 'organization-acceptance', 'diagnose', 'email-acceptance', 'developer-access-review',

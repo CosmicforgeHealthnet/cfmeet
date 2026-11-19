@@ -168,7 +168,7 @@ def edge_prefixes(done):
 
 
 def enabled_stages(cr, current=None):
-    """Acceptance stages of the recorded phases plus `current` (the one being activated)."""
+    """Build acceptance stages of the recorded phases plus `current` (the one being activated)."""
     return tuple(STAGES[op] for op in STAGE_ORDER if op == current or cr.done(op))
 
 
@@ -185,12 +185,25 @@ def base_urls(cr, name, targets):
     return out
 
 
+def app_features(cr, current=None):
+    """The CF Meet Apps acceptance features on (integrate_operations.py, ADR 0064 / 0065)."""
+    import integrate_operations
+    return integrate_operations.features(cr, current)
+
+
+def acceptance_plan(cr, current=None):
+    """(stages, app features) of the acceptance: every Build phase on, plus the `apps` stage
+    while app registration is on (`current` is the operation being activated, either kind)."""
+    apps = app_features(cr, current)
+    return enabled_stages(cr, current) + (('apps',) if apps else ()), apps
+
+
 def run_acceptance(cr, run_id, operation):
-    """The two-tenant acceptance of every phase on (including `operation`); any FAIL raises,
-    which restores the activation."""
+    """The two-tenant acceptance of every phase on (including `operation`, a Build or an
+    Integrate phase); any FAIL raises, which restores the activation."""
     import platform_acceptance
-    stages = enabled_stages(cr, operation)
-    checks = platform_acceptance.run(run_id, stages, cr.emit)
+    stages, apps = acceptance_plan(cr, operation)
+    checks = platform_acceptance.run(run_id, stages, cr.emit, apps=apps)
     failed = sorted(k for k, v in checks.items() if v != 'PASS')
     if failed or not checks:
         raise RuntimeError('Platform acceptance failed after %s (%d of %d checks): %s'
@@ -486,14 +499,15 @@ def activate_meetings(cr, sha, run_id, confirm):
 # --- read-only acceptance operation ----------------------------------------------------------------
 
 def acceptance(cr, sha, run_id, confirm):
-    """`platform-acceptance`: the two-tenant acceptance of every recorded phase, and flag-off
-    checks of the others. Writes acceptance data through the public API only (cleaned up)."""
+    """`platform-acceptance`: the two-tenant acceptance of every recorded phase (Build and CF Meet
+    Apps), and flag-off checks of the others. Writes acceptance data through the public API only (cleaned up)."""
     if confirm:
         raise RuntimeError('platform-acceptance takes no confirmation')
     if not cr.done(USERS):
         raise RuntimeError('Acceptance needs ' + USERS)
     import platform_acceptance
-    checks = platform_acceptance.run(run_id, enabled_stages(cr), cr.emit)
+    stages, apps = acceptance_plan(cr)
+    checks = platform_acceptance.run(run_id, stages, cr.emit, apps=apps)
     cr.emit('platformAcceptanceSummary', checks)
     if not checks or any(v != 'PASS' for v in checks.values()):
         raise RuntimeError('Platform acceptance failed')

@@ -1,9 +1,12 @@
 """Offline tests: the CF Meet Platform "Build" two-tenant acceptance (platform_acceptance.py)."""
+import base64
 import contextlib
+import hashlib
 import io
 import json
 import re
 import unittest
+import urllib.parse
 from unittest.mock import patch
 
 import developer_acceptance as da
@@ -17,9 +20,13 @@ class FakePlatform:
     """Just enough of api.cfmeet.com (console, gateway, Developer Console, Messaging, Calling,
     Meeting Service) for the acceptance: tenant-scoped state, 404 for foreign resources, flags."""
 
-    def __init__(self, stages=ALL, broken=()):
+    def __init__(self, stages=ALL, broken=(), apps=pa.APP_FEATURES):
         self.stages = set(stages)
-        self.broken = set(broken)  # behaviours to break: 'isolation-users', 'chat-receive', 'cors-credential-route'
+        # CF Meet Apps features served (only while the apps stage is on).
+        self.apps_on = set(apps) if 'apps' in self.stages else set()
+        # Behaviours to break: 'isolation-users', 'chat-receive', 'cors-credential-route',
+        # 'refresh-reuse', 'cross-client-code', 'apps-isolation'.
+        self.broken = set(broken)
         self.n = 0
         self.calls = []
         self.users, self.tokens, self.client_tokens, self.signaling = {}, {}, {}, {}
@@ -29,6 +36,8 @@ class FakePlatform:
         self.participants, self.participant_tokens, self.push = {}, {}, {}
         self.revoked = set()
         self.scopes = {}
+        self.apps, self.codes, self.grants, self.oauth_tokens, self.app_spaces = {}, {}, {}, {}, {}
+        self.issued_codes = []
 
     def id(self, prefix='id'):
         self.n += 1
@@ -106,7 +115,13 @@ class FakePlatform:
             return 200, {'access_token': body['email'].split('@')[0] + '-tok'}
         if method == 'OPTIONS':
             return self.preflight(client, bare, headers)
+        if bare.startswith(('/v1/oauth/', '/v1/app-directory')) or bare == '/api/v2/app-context-keys':
+            return self.apps_public(method, bare, body, bearer, headers)
+        if bearer and bearer.startswith('cfoa_'):
+            return self.apps_token(method, bare, bearer)
         owner = self.session(bearer)
+        if owner and bare.startswith('/api/v2/'):
+            return self.apps_session(owner, method, path, bare, body)
         if owner:
             return self.console(owner, method, bare, body)
         env = self.machine_env(bearer)
@@ -156,6 +171,9 @@ class FakePlatform:
             return 200, {}
         if re.fullmatch(r'/v1/(projects/\w+/archive|organizations/\w+/close)', path):
             return 200, {}
+        m = re.fullmatch(r'/v1/projects/(\w+)/app(/secret|/test-accounts)?', path)
+        if m:
+            return self.console_app(owner, method, m.group(1), m.group(2), body)
         m = re.fullmatch(r'/v1/environments/(\w+)/(users|allowed-origins|test-user-tokens|push-credentials)', path)
         if m:
             target, feature = m.groups()
@@ -303,6 +321,177 @@ class FakePlatform:
             return (200, {}) if v and v['user'] == sig['user'] else self.nf()
         return 404, {}
 
+
+    # --- CF Meet Apps -----------------------------------------------------------------------
+
+    def app_on(self, feature):
+        return feature in self.apps_on
+
+    def console_app(self, owner, method, project, suffix, body):
+        if not self.app_on('register') or (project != owner + 'proj' and 'apps-isolation' not in self.broken):
+            return self.nf()
+        app = self.apps.get(project)
+        if suffix is None and method == 'PUT':
+            created = app is None
+            app = self.apps.setdefault(project, dict(owner=owner, secret=None, tests=[]))
+            app['manifest'] = dict(body)
+            return (201 if created else 200), self.app_view(project)
+        if app is None:
+            return self.nf()
+        if suffix == '/secret':
+            app['secret'] = 'cfcs_sbx_%s_%s' % (self.id('k'), 's' * 8)
+            return 201, {'clientId': project, 'clientSecret': app['secret'], 'secretId': self.id('sec')}
+        if suffix == '/test-accounts':
+            app['tests'] = list(body['accountIds'])
+            return 200, {'testAccountIds': app['tests']}
+        return 200, self.app_view(project)
+
+    def app_view(self, project):
+        app = self.apps[project]
+        return {'appId': project, 'clientId': project, 'status': 'DRAFT', 'manifest': app['manifest'],
+                'testAccountIds': app['tests']}
+
+    def authorization(self, owner, q):
+        """(status, error code, app) of an authorization request of `owner`'s account."""
+        app = self.apps.get(q.get('clientId'))
+        if not self.app_on('oauth'):
+            return 404, 'FEATURE_DISABLED', None
+        if not app or q.get('redirectUri') not in app['manifest']['redirectUris']:
+            return 400, 'OAUTH_REQUEST_INVALID', None
+        if q.get('codeChallengeMethod') != 'S256' or not q.get('codeChallenge'):
+            return 400, 'OAUTH_REQUEST_INVALID', None
+        if 'acct-' + owner not in app['tests']:
+            return 400, 'OAUTH_REQUEST_INVALID', None
+        return 200, None, app
+
+    def apps_session(self, owner, method, path, bare, body):
+        account = 'acct-' + owner
+        if bare == '/api/v2/oauth/authorize/context':
+            q = {k: v[0] for k, v in urllib.parse.parse_qs(path.split('?', 1)[1]).items()}
+            status, error, _ = self.authorization(owner, {'clientId': q.get('client_id'), 'redirectUri': q.get('redirect_uri'),
+                                                         'codeChallenge': q.get('code_challenge'),
+                                                         'codeChallengeMethod': q.get('code_challenge_method')})
+            if status != 200:
+                return status, {'error': {'code': error}}
+            out = {'app': {'clientId': q['client_id'], 'status': 'DRAFT', 'name': 'x'}, 'target': 'USER',
+                   'redirectUri': q['redirect_uri'], 'state': q.get('state')}
+            if q.get('install') == 'organization':
+                if not self.app_on('installs'):
+                    return 404, {'error': {'code': 'FEATURE_DISABLED'}}
+                out.update(target='ORGANIZATION', organizationInstall={'allowed': False, 'reason': 'NOT_A_MEMBER'})
+            return 200, out
+        if bare == '/api/v2/oauth/authorize/approve':
+            status, error, app = self.authorization(owner, body)
+            if status != 200:
+                return status, {'error': {'code': error}}
+            grant = next((g for g, v in self.grants.items() if v['client'] == body['clientId'] and v['account'] == account
+                          and v['active']), None) or self.id('grant')
+            self.grants.setdefault(grant, dict(client=body['clientId'], account=account, active=True))
+            code_ = 'code_' + self.id()
+            self.issued_codes.append(code_)
+            self.codes[code_] = dict(client=body['clientId'], redirect=body['redirectUri'], grant=grant,
+                                     challenge=body['codeChallenge'])
+            return 200, {'redirectTo': '%s?%s' % (body['redirectUri'], urllib.parse.urlencode(
+                {'code': code_, 'state': body['state']}))}
+        if bare == '/api/v2/me/apps':
+            return 200, {'items': [{'grantId': g, 'appId': v['client']} for g, v in self.grants.items()
+                                   if v['account'] == account and v['active']]}
+        m = re.fullmatch(r'/api/v2/me/apps/(\w+)', bare)
+        if m and method == 'DELETE':
+            g = self.grants.get(m.group(1))
+            if not g or g['account'] != account:
+                return self.nf()
+            g['active'] = False
+            return 204, {}
+        return 404, {}
+
+    def client_auth(self, headers):
+        value = headers.get('Authorization', '')
+        if not value.startswith('Basic '):
+            return None
+        client_id, secret = (urllib.parse.unquote(x) for x in base64.b64decode(value[6:]).decode().split(':', 1))
+        app = self.apps.get(client_id)
+        return client_id if app and app['secret'] == secret else None
+
+    def issue(self, client, grant):
+        access, refresh = 'cfoa_sbx_%s_a' % self.id(), 'cfor_sbx_%s_r' % self.id()
+        self.oauth_tokens[access] = dict(kind='access', grant=grant, active=True)
+        self.oauth_tokens[refresh] = dict(kind='refresh', grant=grant, active=True)
+        return 200, {'access_token': access, 'token_type': 'Bearer', 'expires_in': 3600, 'refresh_token': refresh,
+                     'scope': ' '.join(pa.APP_USER_SCOPES), 'installation': {'id': grant, 'target': 'USER'}}
+
+    def live(self, token, kind):
+        t = self.oauth_tokens.get(token)
+        return t if t and t['kind'] == kind and t['active'] and self.grants[t['grant']]['active'] else None
+
+    def apps_public(self, method, path, body, bearer, headers):
+        oauth_off = not self.app_on('oauth')
+        if path == '/v1/oauth/metadata':
+            return self.nf() if oauth_off else (200, {'token_endpoint': pa.PUBLIC + '/v1/oauth/token'})
+        if path in ('/v1/oauth/token', '/v1/oauth/revoke'):
+            if oauth_off:
+                return self.nf()
+            assert headers.get('Content-Type') == pa.FORM and isinstance(body, str)
+            client = self.client_auth(headers)
+            if not client:
+                return 401, {'error': 'invalid_client'}
+            form = dict(urllib.parse.parse_qsl(body))
+            if path == '/v1/oauth/revoke':
+                if form.get('token') in self.oauth_tokens:
+                    self.oauth_tokens[form['token']]['active'] = False
+                return 200, {}
+            if form['grant_type'] == 'authorization_code':
+                c = self.codes.pop(form['code'], None)
+                if not c or (c['client'] != client and 'cross-client-code' not in self.broken) \
+                        or c['redirect'] != form['redirect_uri']:
+                    return 400, {'error': 'invalid_grant'}
+                challenge = base64.urlsafe_b64encode(hashlib.sha256(form['code_verifier'].encode()).digest()).rstrip(b'=')
+                if challenge.decode() != c['challenge']:
+                    return 400, {'error': 'invalid_grant'}
+                return self.issue(client, c['grant'])
+            t = self.oauth_tokens.get(form['refresh_token'])
+            if t and not t['active'] and 'refresh-reuse' not in self.broken:
+                self.grants[t['grant']]['active'] = False  # reuse of a superseded refresh token
+            if not t or not t['active'] or not self.grants[t['grant']]['active']:
+                return 400, {'error': 'invalid_grant'}
+            t['active'] = False
+            return self.issue(client, t['grant'])
+        if path == '/v1/oauth/userinfo':
+            if oauth_off:
+                return self.nf()
+            t = self.live(bearer, 'access')
+            if not t:
+                return 401, {'error': 'invalid_token'}
+            return 200, {'sub': 'pairwise-%s' % hashlib.sha256(t['grant'].encode()).hexdigest()[:16], 'name': 'Acceptance',
+                         'picture': None, 'email': 'x@example.invalid'}
+        if path.startswith('/v1/app-directory'):
+            if not self.app_on('directory'):
+                return self.nf()
+            return (200, {'items': [], 'nextCursor': None}) if path == '/v1/app-directory' else self.nf()
+        if path == '/api/v2/app-context-keys':
+            if not self.app_on('in-meeting'):
+                return 404, {'error': {'code': 'FEATURE_DISABLED'}}
+            return 200, {'keys': [{'kty': 'OKP', 'crv': 'Ed25519', 'x': 'AAAA', 'kid': 'k1', 'use': 'sig', 'alg': 'EdDSA'}]}
+        return 404, {}
+
+    def apps_token(self, method, path, bearer):
+        t = self.live(bearer, 'access')
+        if not t:
+            return 401, {}
+        if path == '/v1/meetings/meeting-spaces' and method == 'POST':
+            if not self.app_on('delegated'):
+                return 401, {}
+            space = self.id('aspace')
+            self.app_spaces[space] = 'ACTIVE'
+            return 201, {'id': space}
+        m = re.fullmatch(r'/v1/meetings/meeting-spaces/(\w+)/archive', path)
+        if m and self.app_on('delegated') and m.group(1) in self.app_spaces:
+            self.app_spaces[m.group(1)] = 'ARCHIVED'
+            return 200, {}
+        if path.startswith('/v1/users'):
+            return 403, {'error': {'code': 'FORBIDDEN'}}
+        return 404, {}
+
     def relay(self, method, path, body, bearer, headers):
         assert headers.get('Host') == 'api.cfmeet.com' and headers.get('X-Forwarded-Proto') == 'https'
         env = self.machine_env(bearer)
@@ -328,8 +517,8 @@ class FakePlatform:
         return 404, {}
 
 
-def run_flow(api, stages=ALL):
-    accounts = [{'email': 'pa@example.invalid'}, {'email': 'pb@example.invalid'}]
+def run_flow(api, stages=ALL, apps=None):
+    accounts = [{'email': 'pa@example.invalid', 'userId': 'acct-pa'}, {'email': 'pb@example.invalid', 'userId': 'acct-pb'}]
     out = io.StringIO()
     emitted = []
 
@@ -342,7 +531,7 @@ def run_flow(api, stages=ALL):
             patch.object(pa.Client, '_call', lambda self, *a: api(self, *a)), \
             patch.object(pa.time, 'sleep', lambda s: None), contextlib.redirect_stdout(out), \
             patch.object(pa.urllib.request, 'urlopen', side_effect=AssertionError('no network in tests')):
-        checks = pa.run('77-1', stages, emit)
+        checks = pa.run('77-1', stages, emit, apps=apps)
     return checks, out.getvalue(), emitted
 
 
@@ -406,7 +595,8 @@ class Journey(unittest.TestCase):
         checks, _, _ = run_flow(api, ('users',))
         self.assertEqual({k: v for k, v in checks.items() if v != 'PASS'}, {})
         self.assertEqual(sorted(k.split(':')[0] for k in checks if k.startswith('flag off')),
-                         ['flag off calls', 'flag off chat', 'flag off meetings', 'flag off push', 'flag off tokens'])
+                         ['flag off apps', 'flag off calls', 'flag off chat', 'flag off meetings', 'flag off push',
+                          'flag off tokens'])
         self.assertFalse(any('revocation' in k for k in checks))
 
     def test_a_feature_left_on_while_its_phase_is_off_fails_the_flag_off_check(self):
@@ -451,6 +641,11 @@ class Journey(unittest.TestCase):
     def test_unknown_stages_are_refused(self):
         with self.assertRaises(AssertionError):
             pa.Journey('1-1', ('users', 'telecom'), lambda k, v: None)
+        with self.assertRaises(AssertionError):
+            pa.Journey('1-1', ('users', 'apps'), lambda k, v: None, apps=('oauth',))  # register carries the rest
+        with self.assertRaises(AssertionError):
+            pa.Journey('1-1', ('users', 'apps'), lambda k, v: None, apps=('register', 'telecom'))
+        self.assertEqual(pa.Journey('1-1', ('users',), lambda k, v: None, apps=('register',)).apps, ())
 
     def test_data_unwraps_meeting_envelopes_only(self):
         self.assertEqual(pa.data({'success': True, 'data': {'id': 'x'}}), {'id': 'x'})
@@ -458,6 +653,105 @@ class Journey(unittest.TestCase):
         self.assertEqual(pa.data([]), {})
         self.assertEqual(pa.tampered('abcA')[-1], 'B')
         self.assertEqual(pa.tampered('abcd')[-1], 'A')
+
+
+BUILD = pa.BUILD_STAGES
+
+
+class Apps(unittest.TestCase):
+    """The CF Meet Apps stage (ADR 0064 / 0065)."""
+
+    def test_every_feature_passes_and_grants_are_revoked_at_cleanup(self):
+        api = FakePlatform()
+        checks, printed, _ = run_flow(api)
+        self.assertEqual({k: v for k, v in checks.items() if v != 'PASS'}, {})
+        names = ' | '.join(checks)
+        for name in ('apps A: DRAFT app registered', 'apps B: client secret issued once', 'isolation apps: B\'s console reads',
+                     'apps oauth: consent context for the DRAFT test account', 'apps oauth: PKCE S256 required',
+                     'apps oauth: an account that is not a DRAFT test account is refused', 'apps oauth: code exchanged',
+                     'apps oauth: userinfo answers a pairwise sub', 'apps oauth: Connected apps lists the grant',
+                     'without the OAuth scheme -> 403', 'apps oauth: refresh rotates both tokens',
+                     'apps oauth: revoke answers 200', 'a superseded refresh token is refused',
+                     'its reuse revoked the whole grant', "isolation apps: B's client cannot redeem A's code",
+                     'apps delegated: the access token creates a meeting space', 'apps delegated: the user\'s own space archived',
+                     'apps installs: a workspace install', 'apps directory: anonymous list', 'apps directory: a DRAFT app is never listed',
+                     'apps in-meeting: public app-context JWKS'):
+            self.assertIn(name, names)
+        self.assertNotIn('flag off', names)
+        self.assertTrue(api.grants and not any(g['active'] for g in api.grants.values()))
+        self.assertEqual(set(api.app_spaces.values()), {'ARCHIVED'})
+        self.assertIn('E2EE invisibility', printed)
+        self.assertIn('install event delivery', printed)
+        # The app's OAuth traffic is exactly what a client sends: form token requests through the
+        # public host, consent on the first-party Meeting Service routes with the account session.
+        token_calls = [c for c in api.calls if c[1] == '/v1/oauth/token']
+        self.assertTrue(token_calls and all(base == pa.PUBLIC and bearer is None for _, _, base, bearer in token_calls))
+        self.assertTrue(all(bearer == 'pa-tok' for _, p, _, bearer in api.calls if p == '/api/v2/oauth/authorize/approve'))
+
+    def test_output_never_carries_a_client_secret_code_or_app_token(self):
+        api = FakePlatform()
+        _, printed, _ = run_flow(api)
+        secrets = [a['secret'] for a in api.apps.values()] + list(api.oauth_tokens) + api.issued_codes
+        self.assertGreaterEqual(len(secrets), 8)
+        for secret in secrets:
+            self.assertNotIn(secret, printed)
+        self.assertNotIn('code_', printed)
+        for line in printed.splitlines():
+            json.loads(line)
+
+    def test_register_only_proves_registration_and_oauth_off(self):
+        api = FakePlatform(apps=('register',))
+        checks, _, _ = run_flow(api, apps=('register',))
+        self.assertEqual({k: v for k, v in checks.items() if v != 'PASS'}, {})
+        self.assertIn('flag off oauth: refused (404)', checks)
+        self.assertIn('flag off directory: refused (404)', checks)
+        self.assertFalse(any(k.startswith('apps oauth') for k in checks))
+        self.assertTrue(any(k.startswith('apps A: DRAFT app registered') for k in checks))
+
+    def test_features_left_on_while_their_phase_is_off_fail_their_flag_off_checks(self):
+        api = FakePlatform()  # everything served
+        checks, _, _ = run_flow(api, apps=('register', 'oauth'))
+        self.assertEqual(sorted(k for k, v in checks.items() if v != 'PASS'),
+                         ['flag off delegated: an OAuth token is refused on /v1/meetings (201)',
+                          'flag off directory: refused (200)', 'flag off in-meeting: refused (200)'])
+
+    def test_refresh_reuse_that_does_not_revoke_the_grant_fails(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('refresh-reuse',)))
+        self.assertEqual([k for k, v in checks.items() if v != 'PASS'],
+                         ['apps oauth: its reuse revoked the whole grant (the current refresh token is refused)'])
+
+    def test_another_clients_code_redemption_fails_the_isolation_check(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('cross-client-code',)))
+        self.assertEqual([k for k, v in checks.items() if v != 'PASS'], ["isolation apps: B's client cannot redeem A's code"])
+
+    def test_a_readable_foreign_app_fails_isolation_and_the_journey_continues(self):
+        checks, _, _ = run_flow(FakePlatform(broken=('apps-isolation',)))
+        self.assertEqual(checks["isolation apps: B's console reads A's app -> 404"], 'FAIL')
+        self.assertEqual(checks["isolation apps: B's console rotates A's client secret -> 404"], 'FAIL')
+        self.assertEqual(checks['apps directory: anonymous list (200)'], 'PASS')
+        self.assertEqual(checks['apps in-meeting: public app-context JWKS (one Ed25519 key, no private part)'], 'PASS')
+
+    def test_an_account_without_a_recorded_user_id_fails_registration_only(self):
+        api = FakePlatform(stages=BUILD[:2] + ('apps',), apps=('register',))
+        out = io.StringIO()
+        with patch.object(pa.app_acceptance, 'accounts', lambda ns, count: [{'email': 'pa@x'}, {'email': 'pb@x'}]), \
+                patch.object(pa.app_acceptance, 'controlled_code', lambda key, url=None: '024680'), \
+                patch.object(pa.Client, '_call', lambda self, *a: api(self, *a)), \
+                patch.object(pa.time, 'sleep', lambda s: None), contextlib.redirect_stdout(out):
+            checks = pa.run('77-2', BUILD[:2] + ('apps',), lambda k, v: print(json.dumps({k: v})), apps=('register',))
+        failed = sorted(k for k, v in checks.items() if v != 'PASS')
+        self.assertEqual(len(failed), 2, failed)
+        self.assertTrue(all('no recorded CF Meet user id' in k for k in failed), failed)
+        self.assertEqual(checks['users A: user created (201, ACTIVE)'], 'PASS')
+
+    def test_pkce_and_basic_auth_follow_the_rfcs(self):
+        verifier, challenge = pa.pkce()
+        self.assertTrue(43 <= len(verifier) <= 128)
+        self.assertEqual(challenge, base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode())
+        header = pa.basic('id', 'cfcs_sbx_a:b')
+        self.assertEqual(base64.b64decode(header['Authorization'][6:]).decode(), 'id:cfcs_sbx_a%3Ab')
+        self.assertEqual(header['Content-Type'], pa.FORM)
+        self.assertEqual(pa.query('https://x/cb?code=c1&state=s'), {'code': 'c1', 'state': 's'})
 
 
 if __name__ == '__main__':

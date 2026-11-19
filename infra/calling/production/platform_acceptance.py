@@ -26,16 +26,39 @@ with its own developer workspace, project and SANDBOX environment (A and B), the
             the gateway relay: the edge does not route /api/v2 machine traffic); a user-token
             join with the grant's role and the profile's name; re-join keeps the participant;
             no grant -> 403; B's token on A's conference -> refused; meeting chat readable
+  apps      CF Meet Apps (ADR 0064 / 0065; integrate_operations.py), per feature on (`apps`):
+            register   A and B each register a DRAFT app on their project (manifest, client
+                       secret shown once, A's own account as the test account); B gets 404 on
+                       A's app
+            oauth      the DRAFT test-account flow exactly as the consent page and the app's
+                       server send it: consent context (PKCE S256 required; B's account, not a
+                       test account, refused), approve -> code, token exchange (client_secret_basic,
+                       form), userinfo (pairwise sub), Connected apps lists the grant, an OAuth
+                       token refused on a non-OAuth route (403), refresh rotation, revoke,
+                       reuse of a superseded refresh token revokes the grant, B's client cannot
+                       redeem A's code
+            delegated  the access token creates (and archives) a meeting space through /v1/meetings
+            installs   a workspace install into an organization the account does not belong to
+                       is never allowed
+            directory  anonymous list (A's DRAFT app never listed; unknown app 404)
+            in-meeting the public app-context JWKS (one Ed25519 key, no private part)
+            Features that are off get flag-off checks. Install event delivery and E2EE
+            invisibility need fixtures acceptance accounts do not have: noted, not claimed.
 
 Stages that are not on get flag-off checks instead (the feature answers like an unknown route).
 Cleanup always runs: users deleted, origins cleared, calls cancelled, conferences ended, spaces
-archived, credentials revoked, projects archived, workspaces closed. Output: one JSON object
-per check (`platformAcceptance`), ids and statuses only: never a token, key or secret.
+archived, app grants revoked, credentials revoked, projects archived, workspaces closed. Output:
+one JSON object per check (`platformAcceptance`), ids and statuses only: never a token, code,
+key or secret.
 """
+import base64
 import datetime
+import hashlib
 import json
+import secrets
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -47,10 +70,16 @@ PUBLIC = 'https://api.cfmeet.com'
 # what the edge would forward to if the machine meeting family were routed there.
 RELAY = 'http://127.0.0.1:18110'
 RELAY_HEADERS = {'Host': 'api.cfmeet.com', 'X-Forwarded-Proto': 'https'}
-STAGES = ('users', 'tokens', 'chat', 'calls', 'push', 'meetings')
+BUILD_STAGES = ('users', 'tokens', 'chat', 'calls', 'push', 'meetings')
+STAGES = BUILD_STAGES + ('apps',)
 SCOPES = {'users': ('principals.read', 'principals.write'), 'tokens': ('user_tokens.issue',),
           'chat': ('conversations.create', 'conversations.manage', 'messages.read', 'messages.send'),
-          'calls': ('calls.read', 'calls.write'), 'push': (), 'meetings': ('meetings.read', 'meetings.write')}
+          'calls': ('calls.read', 'calls.write'), 'push': (), 'meetings': ('meetings.read', 'meetings.write'),
+          'apps': ()}
+# CF Meet Apps features (integrate_operations.FEATURES, same order); `register` carries the rest.
+APP_FEATURES = ('register', 'oauth', 'delegated', 'installs', 'events', 'directory', 'in-meeting')
+APP_USER_SCOPES = ('profile:read', 'profile:email', 'meetings:read', 'meetings:write')
+FORM = 'application/x-www-form-urlencoded'
 WEB_ORIGIN = 'https://cfmeet.com'
 UNREGISTERED_ORIGIN = 'https://unregistered.acceptance.example.com'
 PHONE_LIKE_ID = '+14155550123'
@@ -82,7 +111,9 @@ class Client(da.Client):
         if bearer:
             sent['Authorization'] = 'Bearer ' + bearer
         data = None
-        if body is not None:
+        if isinstance(body, str):  # a pre-encoded body (OAuth form); its Content-Type is in `headers`
+            data = body.encode()
+        elif body is not None:
             sent['Content-Type'] = 'application/json'
             data = json.dumps(body).encode()
         elif method in ('POST', 'PUT', 'PATCH'):
@@ -141,12 +172,37 @@ def tampered(token):
     return token[:-1] + ('A' if token[-1] != 'A' else 'B')
 
 
+def pkce():
+    """(verifier, S256 challenge) of RFC 7636."""
+    verifier = secrets.token_urlsafe(48)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
+    return verifier, challenge
+
+
+def basic(client_id, secret):
+    """client_secret_basic (RFC 6749 §2.3.1: both parts form-encoded before Base64)."""
+    raw = '%s:%s' % (urllib.parse.quote(client_id, safe=''), urllib.parse.quote(secret, safe=''))
+    return {'Authorization': 'Basic ' + base64.b64encode(raw.encode()).decode(), 'Content-Type': FORM}
+
+
+def query(url):
+    """The query parameters of a redirect URL ({name: first value})."""
+    return {k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(url or '').query).items()}
+
+
 class Journey:
-    def __init__(self, run_id, stages, emit):
+    def __init__(self, run_id, stages, emit, apps=None):
         unknown = set(stages) - set(STAGES)
         assert not unknown, 'Unknown acceptance stages: %s' % sorted(unknown)
         self.run_id = run_id
         self.stages = tuple(s for s in STAGES if s in stages)
+        if 'apps' in self.stages:
+            apps = APP_FEATURES if apps is None else apps
+            unknown = set(apps) - set(APP_FEATURES)
+            assert not unknown and 'register' in apps, 'Invalid app features: %s' % sorted(apps)
+            self.apps = tuple(f for f in APP_FEATURES if f in apps)
+        else:
+            self.apps = ()
         self.emit = emit
         self.tag = run_id.replace('-', 'x').lower()
         self.checks = {}
@@ -154,6 +210,9 @@ class Journey:
 
     def on(self, stage):
         return stage in self.stages
+
+    def app(self, feature):
+        return feature in self.apps
 
     def check(self, name, ok, fatal=False, **detail):
         self.checks[name] = 'PASS' if ok else 'FAIL'
@@ -216,7 +275,7 @@ class Journey:
                    and sorted(credential.get('scopes') or []) == sorted(self.scopes()), fatal=True)
         machine = Client(issued['secret'])
         return dict(label=label, console=console, org=org, project=project, env=env, machine=machine,
-                    relay=Client(issued['secret'], base=RELAY, headers=RELAY_HEADERS),
+                    relay=Client(issued['secret'], base=RELAY, headers=RELAY_HEADERS), accountId=account.get('userId'),
                     origin='https://%s-%s.acceptance.example.com' % (label.lower(), self.tag))
 
     # --- users (B1) --------------------------------------------------------------------------
@@ -520,6 +579,215 @@ class Journey:
         status, _ = b['relay'].call('GET', '/api/v2/conferences/%s' % a['conference'], expected=(200, 403, 404))
         self.check('isolation meetings: B\'s server reads A\'s conference -> 404', status == 404)
 
+    # --- CF Meet Apps (ADR 0064 / 0065) --------------------------------------------------------
+
+    def app_path(self, t, suffix=''):
+        return '/v1/projects/%s/app%s' % (t['project']['id'], suffix)
+
+    def apps_register(self, t):
+        label, console = t['label'], t['console']
+        redirect = t['origin'] + '/oauth/callback'
+        status, app = console.call('PUT', self.app_path(t), {
+            'name': 'Platform acceptance app %s %s' % (label, self.run_id), 'redirectUris': [redirect],
+            'userScopes': list(APP_USER_SCOPES), 'distribution': 'PRIVATE'}, expected=(200, 201))
+        self.check('apps %s: DRAFT app registered on the project' % label,
+                   app.get('status') == 'DRAFT' and app.get('clientId') == t['project']['id'], fatal=True,
+                   clientId=app.get('clientId'))
+        _, issued = console.call('POST', self.app_path(t, '/secret'), expected=(201,), idempotent=True)
+        self.check('apps %s: client secret issued once (cfcs_, no-store)' % label,
+                   str(issued.get('clientSecret', '')).startswith('cfcs_') and issued.get('clientId') == app['clientId']
+                   and 'no-store' in console.last_headers.get('cache-control', ''), fatal=True,
+                   secretId=issued.get('secretId'))
+        if not t.get('accountId'):
+            raise da.Failed('apps %s: the acceptance account has no recorded CF Meet user id' % label)
+        _, accounts = console.call('PUT', self.app_path(t, '/test-accounts'), {'accountIds': [t['accountId']]})
+        self.check('apps %s: the developer\'s own account is the DRAFT test account' % label,
+                   t['accountId'] in [str(a) for a in accounts.get('testAccountIds') or []])
+        _, got = console.call('GET', self.app_path(t))
+        self.check('apps %s: manifest read back (exact redirect URI, requested scopes)' % label,
+                   (got.get('manifest') or {}).get('redirectUris') == [redirect]
+                   and sorted((got.get('manifest') or {}).get('userScopes') or []) == sorted(APP_USER_SCOPES))
+        t.update(clientId=app['clientId'], clientSecret=issued['clientSecret'], redirect=redirect)
+
+    def apps_isolation(self, a, b):
+        status, _ = b['console'].call('GET', self.app_path(a), expected=(200, 403, 404))
+        self.check('isolation apps: B\'s console reads A\'s app -> 404', status == 404)
+        status, _ = b['console'].call('POST', self.app_path(a, '/secret'), expected=(201, 403, 404), idempotent=True)
+        self.check('isolation apps: B\'s console rotates A\'s client secret -> 404', status == 404)
+
+    def authorize(self, t, session, challenge, state, expected=(200,), method='S256'):
+        params = urllib.parse.urlencode({'client_id': t['clientId'], 'redirect_uri': t['redirect'],
+                                         'scope': ' '.join(APP_USER_SCOPES), 'state': state, 'code_challenge': challenge,
+                                         'code_challenge_method': method})
+        status, value = session.call('GET', '/api/v2/oauth/authorize/context?' + params, expected=expected)
+        return status, data(value)
+
+    def approve(self, t, session, challenge, state):
+        """APPROVE as the signed-in account; every grant it creates is revoked at cleanup."""
+        try:
+            _, value = session.call('POST', '/api/v2/oauth/authorize/approve', {
+                'clientId': t['clientId'], 'redirectUri': t['redirect'], 'scope': ' '.join(APP_USER_SCOPES),
+                'state': state, 'codeChallenge': challenge, 'codeChallengeMethod': 'S256', 'decision': 'APPROVE'})
+        finally:
+            self.track_grants(t, session)
+        redirect = str(data(value).get('redirectTo', ''))
+        got = query(redirect)
+        return redirect.startswith(t['redirect'] + '?') and got.get('state') == state, got.get('code')
+
+    def track_grants(self, t, session):
+        """Cleanup revokes every grant of `t`'s app the account holds (Connected apps)."""
+        try:
+            _, value = session.call('GET', '/api/v2/me/apps')
+        except (da.Failed, OSError):
+            return
+        known = {path for _, path, _ in self.cleanup}
+        for item in data(value).get('items') or []:
+            path = '/api/v2/me/apps/%s' % item.get('grantId')
+            if item.get('appId') == t['clientId'] and item.get('grantId') and path not in known:
+                self.undo(session, 'DELETE', path)
+
+    def token(self, client, form, expected=(200,)):
+        http = Client()
+        answer = http.call('POST', '/v1/oauth/token', urllib.parse.urlencode(form), expected=expected,
+                           headers=basic(client['clientId'], client['clientSecret']))
+        self.oauth_headers = http.last_headers
+        return answer
+
+    def userinfo(self, access, expected=(200, 401)):
+        return Client().call('GET', '/v1/oauth/userinfo', token=access, expected=expected)
+
+    def apps_oauth(self, a, b):
+        session = a['console']
+        verifier, challenge = pkce()
+        state = uuid.uuid4().hex
+        _, context = self.authorize(a, session, challenge, state)
+        self.check('apps oauth: consent context for the DRAFT test account',
+                   (context.get('app') or {}).get('clientId') == a['clientId']
+                   and (context.get('app') or {}).get('status') == 'DRAFT' and context.get('target') == 'USER'
+                   and context.get('redirectUri') == a['redirect'])
+        status, _ = self.authorize(a, session, challenge, state, expected=(200, 400), method='plain')
+        self.check('apps oauth: PKCE S256 required (plain refused, 400)', status == 400)
+        status, _ = self.authorize(a, b['console'], challenge, state, expected=(200, 400, 403))
+        self.check('apps oauth: an account that is not a DRAFT test account is refused', status in (400, 403))
+        ok, code_ = self.approve(a, session, challenge, state)
+        self.check('apps oauth: approve redirects to the exact redirect URI with a code and the state',
+                   ok and bool(code_), fatal=True)
+        _, issued = self.token(a, {'grant_type': 'authorization_code', 'code': code_, 'redirect_uri': a['redirect'],
+                                   'code_verifier': verifier})
+        access, refresh = str(issued.get('access_token', '')), str(issued.get('refresh_token', ''))
+        grant = (issued.get('installation') or {}).get('id')
+        self.check('apps oauth: code exchanged (cfoa_ access, cfor_ refresh, USER installation, no-store)',
+                   access.startswith('cfoa_') and refresh.startswith('cfor_') and issued.get('token_type') == 'Bearer'
+                   and (issued.get('installation') or {}).get('target') == 'USER' and 'bot_token' not in issued
+                   and 'no-store' in self.oauth_headers.get('cache-control', ''), fatal=True, grantId=grant)
+        _, info = self.userinfo(access, expected=(200,))
+        self.check('apps oauth: userinfo answers a pairwise sub (never the account id), name and email',
+                   bool(info.get('sub')) and info.get('sub') != a['accountId'] and a['accountId'] not in str(info)
+                   and 'name' in info and 'email' in info)
+        _, apps = session.call('GET', '/api/v2/me/apps')
+        self.check('apps oauth: Connected apps lists the grant',
+                   grant in [x.get('grantId') for x in data(apps).get('items') or []])
+        status, _ = Client().call('GET', '/v1/users', token=access, expected=(200, 401, 403, 404))
+        self.check('apps oauth: an OAuth token on a route without the OAuth scheme -> 403', status == 403)
+        self.apps_delegated(a, access)
+        _, rotated = self.token(a, {'grant_type': 'refresh_token', 'refresh_token': refresh})
+        access2, refresh2 = str(rotated.get('access_token', '')), str(rotated.get('refresh_token', ''))
+        self.check('apps oauth: refresh rotates both tokens',
+                   access2.startswith('cfoa_') and refresh2.startswith('cfor_') and access2 != access
+                   and refresh2 != refresh, fatal=True)
+        status, _ = self.userinfo(access2)
+        self.check('apps oauth: the rotated access token works', status == 200)
+        status, _ = Client().call('POST', '/v1/oauth/revoke', urllib.parse.urlencode({'token': access2}),
+                                  expected=(200, 400, 401), headers=basic(a['clientId'], a['clientSecret']))
+        refused = retry(lambda: self.userinfo(access2)[0] == 401, *REVOCATION_WAIT)
+        self.check('apps oauth: revoke answers 200 and the token is refused within 60 s', status == 200 and bool(refused))
+        status, value = self.token(a, {'grant_type': 'refresh_token', 'refresh_token': refresh}, expected=(200, 400, 401))
+        self.check('apps oauth: a superseded refresh token is refused (invalid_grant)',
+                   status == 400 and value.get('error') == 'invalid_grant')
+        status, value = self.token(a, {'grant_type': 'refresh_token', 'refresh_token': refresh2}, expected=(200, 400, 401))
+        self.check('apps oauth: its reuse revoked the whole grant (the current refresh token is refused)',
+                   status == 400 and value.get('error') == 'invalid_grant')
+        verifier2, challenge2 = pkce()
+        state2 = uuid.uuid4().hex
+        ok, code2 = self.approve(a, session, challenge2, state2)
+        if ok and code2:
+            status, value = self.token(b, {'grant_type': 'authorization_code', 'code': code2, 'redirect_uri': a['redirect'],
+                                           'code_verifier': verifier2}, expected=(200, 400, 401))
+            self.check('isolation apps: B\'s client cannot redeem A\'s code',
+                       status in (400, 401) and value.get('error') in ('invalid_grant', 'invalid_client'))
+        else:
+            self.check('isolation apps: a second code for the cross-client check', False)
+        self.emit('platformAcceptanceNote', {'apps': 'E2EE invisibility needs a first-party PRIVATE_E2EE messaging '
+                                                     'fixture the acceptance accounts do not have: skipped, not claimed'})
+
+    def apps_delegated(self, a, access):
+        """With `delegated` on, the access token creates (then archives) a space as the user
+        through the partner meetings family; off, the token is refused there."""
+        status, value = Client().call('POST', '/v1/meetings/meeting-spaces', {'title': 'App acceptance %s' % self.run_id},
+                                      token=access, expected=(200, 201, 401, 403, 404), idempotent=True)
+        space = data(value).get('id') if status in (200, 201) else None
+        archived = None
+        if space:
+            path = '/v1/meetings/meeting-spaces/%s/archive' % space
+            archived, _ = Client().call('POST', path, token=access, expected=(200, 204, 401, 403, 404))
+            if archived not in (200, 204):
+                self.undo(Client(access), 'POST', path)  # best effort; the grant is revoked at cleanup
+        if not self.app('delegated'):
+            self.check('flag off delegated: an OAuth token is refused on /v1/meetings (%d)' % status,
+                       status in REFUSED and not space)
+            return
+        self.check('apps delegated: the access token creates a meeting space as the user (/v1/meetings)',
+                   status == 201 and bool(space), spaceId=space)
+        if space:
+            self.check('apps delegated: the user\'s own space archived with the token', archived in (200, 204))
+
+    def apps_installs(self, a):
+        session = a['console']
+        _, challenge = pkce()
+        params = urllib.parse.urlencode({'client_id': a['clientId'], 'redirect_uri': a['redirect'],
+                                         'scope': 'profile:read', 'state': 'install', 'code_challenge': challenge,
+                                         'code_challenge_method': 'S256', 'install': 'organization',
+                                         'organization_id': str(uuid.uuid4())})
+        status, value = session.call('GET', '/api/v2/oauth/authorize/context?' + params,
+                                     expected=(200, 400, 403, 404))
+        decision = data(value).get('organizationInstall') or {}
+        self.check('apps installs: a workspace install into an organization the account does not belong to is '
+                   'never allowed', status in (400, 403, 404) or (status == 200 and decision.get('allowed') is False))
+        self.emit('platformAcceptanceNote', {'apps installs': 'an allowed workspace install needs a business '
+                                                              'organization fixture: not claimed'})
+
+    def apps_directory(self, a):
+        status, listed = Client().call('GET', '/v1/app-directory', expected=(200,) + REFUSED)
+        if not self.app('directory'):
+            self.check('flag off directory: refused (%d)' % status, status in REFUSED)
+            return
+        items = listed.get('items')
+        self.check('apps directory: anonymous list (200)', status == 200 and isinstance(items, list))
+        self.check('apps directory: a DRAFT app is never listed',
+                   a.get('clientId') not in [x.get('appId') or x.get('clientId') for x in items or []])
+        status, _ = Client().call('GET', '/v1/app-directory/%s' % a['clientId'], expected=(200, 404))
+        self.check('apps directory: a DRAFT app is not found (404)', status == 404)
+
+    def apps_in_meeting(self, a):
+        status, jwks = Client().call('GET', '/api/v2/app-context-keys', expected=(200,) + REFUSED)
+        if not self.app('in-meeting'):
+            self.check('flag off in-meeting: refused (%d)' % status, status in REFUSED)
+            return
+        keys = jwks.get('keys') if isinstance(jwks.get('keys'), list) else []
+        self.check('apps in-meeting: public app-context JWKS (one Ed25519 key, no private part)',
+                   status == 200 and len(keys) == 1 and keys[0].get('kty') == 'OKP' and keys[0].get('crv') == 'Ed25519'
+                   and 'd' not in keys[0])
+
+    def apps_oauth_off(self, a):
+        status, _ = Client().call('GET', '/v1/oauth/metadata', expected=(200,) + REFUSED)
+        self.check('flag off oauth: refused (%d)' % status, status in REFUSED)
+        self.emit('platformAcceptanceNote', {'apps': 'OAuth is off: delegated access, installs and in-meeting app '
+                                                     'checks need an authorized app and are not run'})
+
+    def apps_events(self, a):
+        self.emit('platformAcceptanceNote', {'apps events': 'install event delivery needs an installed app with a '
+                                                            'reachable HTTPS webhook and a meeting event: not claimed'})
+
     # --- flag-off and revocation ---------------------------------------------------------------
 
     def flag_off(self, t):
@@ -539,6 +807,7 @@ class Journey:
             'push': lambda: console.call('GET', '/v1/environments/%s/push-credentials' % env, expected=session)[0],
             'meetings': lambda: Client().call('POST', '/api/v2/conferences/%s/join' % uuid.uuid4(), {}, token=token,
                                               expected=(200, 201) + REFUSED)[0],
+            'apps': lambda: console.call('GET', '/v1/projects/%s/app' % t['project']['id'], expected=session)[0],
         }
         for stage in STAGES:
             if not self.on(stage):
@@ -573,9 +842,27 @@ class Journey:
         self.emit('platformAcceptanceCleanup', {'steps': len(self.cleanup), 'problems': problems})
 
 
-def run(run_id, stages, emit):
-    """{check: PASS|FAIL}. `stages` ⊆ STAGES, the phases that are on."""
-    journey = Journey(run_id, stages, emit)
+def apps_plan(journey, a, b):
+    """The `apps` stage groups of the features on (register first; every other feature needs it)."""
+    plan = [('apps A', journey.apps_register, a), ('apps B', journey.apps_register, b),
+            ('apps isolation', journey.apps_isolation, a, b)]
+    if journey.app('oauth'):
+        plan.append(('apps oauth', journey.apps_oauth, a, b))
+        if journey.app('installs'):
+            plan.append(('apps installs', journey.apps_installs, a))
+        plan.append(('apps in-meeting', journey.apps_in_meeting, a))
+    else:
+        plan.append(('apps oauth off', journey.apps_oauth_off, a))
+    plan.append(('apps directory', journey.apps_directory, a))
+    if journey.app('events'):
+        plan.append(('apps events', journey.apps_events, a))
+    return plan
+
+
+def run(run_id, stages, emit, apps=None):
+    """{check: PASS|FAIL}. `stages` ⊆ STAGES, the phases that are on; `apps` ⊆ APP_FEATURES,
+    the CF Meet Apps features on (with the `apps` stage; default: all)."""
+    journey = Journey(run_id, stages, emit, apps)
     accounts = app_acceptance.accounts('platform-' + journey.tag, count=2)
     try:
         a = journey.tenant('A', accounts[0])
@@ -592,6 +879,8 @@ def run(run_id, stages, emit):
             if journey.on(stage):
                 plan += [('%s %s' % (stage, t['label']), getattr(journey, stage), t) for t in pair]
                 plan.append(('%s isolation' % stage, getattr(journey, stage + '_isolation'), a, b))
+        if journey.on('apps'):
+            plan += apps_plan(journey, a, b)
         plan.append(('flag off', journey.flag_off, a))
         if journey.on('tokens'):
             plan.append(('revocation', journey.revocation, a))
@@ -604,7 +893,7 @@ def run(run_id, stages, emit):
         journey.check('setup: %s' % type(error).__name__, False)
     finally:
         journey.close()
-    emit('platformAcceptanceVerdict', {'stages': list(journey.stages),
+    emit('platformAcceptanceVerdict', {'stages': list(journey.stages), 'apps': list(journey.apps),
                                        'passed': sum(v == 'PASS' for v in journey.checks.values()),
                                        'checks': len(journey.checks)})
     return journey.checks

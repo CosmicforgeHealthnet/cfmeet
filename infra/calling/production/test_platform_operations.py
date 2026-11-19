@@ -496,7 +496,9 @@ class Meetings(unittest.TestCase):
         self.assertEqual(po.MEETINGS_EDGE_PROBE, (method, '/v1/meetings' + path[len('/api/v2'):]))
         for r in MANIFEST['routes']:
             if r['pattern'] == '/v1/meetings' or r['pattern'].startswith('/v1/meetings/'):
-                self.assertEqual((r['upstream'], r['auth']), ('cfmeet.meeting-service', ['PLATFORM_CREDENTIAL']), r['id'])
+                # Partner machine traffic; CF Meet Apps access tokens too (integrate contract §6).
+                self.assertEqual(r['upstream'], 'cfmeet.meeting-service', r['id'])
+                self.assertIn(r['auth'], (['PLATFORM_CREDENTIAL'], ['PLATFORM_CREDENTIAL', 'OAUTH_ACCESS_TOKEN']), r['id'])
                 self.assertEqual(r['upstreamPath'], '/api/v2' + r['pattern'][len('/v1/meetings'):], r['id'])
 
     def run_post(self, work, statuses, acceptance_ok=True, smoke=None):
@@ -608,15 +610,16 @@ class AcceptanceWiring(unittest.TestCase):
         with isolated_work() as work:
             journal(work, po.USERS, po.TOKENS, po.CALLS)
 
-            def run(run_id, stages, emit):
+            def run(run_id, stages, emit, apps=()):
                 seen.append(stages)
+                self.assertEqual(apps, ())
                 return {'a': 'PASS', 'b': 'FAIL'} if 'meetings' in stages else {'a': 'PASS'}
             with patch.object(platform_acceptance, 'run', run):
                 po.run_acceptance(cr, '7-1', po.CHAT)
                 with self.assertRaisesRegex(RuntimeError, 'acceptance failed after activate-platform-meetings'):
                     po.run_acceptance(cr, '7-1', po.MEETINGS)
         self.assertEqual(seen, [('users', 'tokens', 'chat', 'calls'), ('users', 'tokens', 'calls', 'meetings')])
-        with patch.object(platform_acceptance, 'run', lambda r, s, e: {}):
+        with patch.object(platform_acceptance, 'run', lambda r, s, e, apps: {}):
             with self.assertRaisesRegex(RuntimeError, 'acceptance failed'):
                 po.run_acceptance(cr, '7-1', po.USERS)  # no checks is never a pass
 
@@ -626,11 +629,11 @@ class AcceptanceWiring(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Acceptance needs activate-platform-users'):
                 cr.run(po.ACCEPTANCE, SHA, '8-1')
             journal(work, po.USERS, po.TOKENS)
-            with patch.object(platform_acceptance, 'run', lambda r, s, e: {'x': 'PASS'}) as _, \
+            with patch.object(platform_acceptance, 'run', lambda r, s, e, apps: {'x': 'PASS'}) as _, \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 cr.run(po.ACCEPTANCE, SHA, '8-1')
             self.assertIn('platformAcceptanceSummary', out.getvalue())
-            with patch.object(platform_acceptance, 'run', lambda r, s, e: {'x': 'FAIL'}), \
+            with patch.object(platform_acceptance, 'run', lambda r, s, e, apps: {'x': 'FAIL'}), \
                     contextlib.redirect_stdout(io.StringIO()):
                 with self.assertRaisesRegex(RuntimeError, 'Platform acceptance failed'):
                     cr.run(po.ACCEPTANCE, SHA, '8-1')
@@ -649,7 +652,8 @@ class AcceptanceWiring(unittest.TestCase):
         import platform_acceptance
         self.assertEqual(platform_acceptance.RELAY, 'http://127.0.0.1:%d' % cr.GATEWAY_RELAY_PORT)
         self.assertEqual(platform_acceptance.PUBLIC, cr.PUBLIC)
-        self.assertEqual(platform_acceptance.STAGES, tuple(po.STAGES[op] for op in po.STAGE_ORDER))
+        self.assertEqual(platform_acceptance.BUILD_STAGES, tuple(po.STAGES[op] for op in po.STAGE_ORDER))
+        self.assertEqual(platform_acceptance.STAGES, platform_acceptance.BUILD_STAGES + ('apps',))
 
 
 if __name__ == '__main__':
