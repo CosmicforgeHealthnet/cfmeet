@@ -30,6 +30,7 @@ on:
       - "services/security-scan-gateway/**"
       - "services/notifications/**"
       - "services/organizations/**"
+      - "services/admin-bridge/**"
       - "services/communications/**"
       - "certification/**"
       - "scripts/sbom/**"
@@ -54,6 +55,7 @@ on:
       - "services/security-scan-gateway/**"
       - "services/notifications/**"
       - "services/organizations/**"
+      - "services/admin-bridge/**"
       - "services/communications/**"
       - "certification/**"
       - "scripts/sbom/**"
@@ -123,6 +125,8 @@ jobs:
           # were the two tracked lockfiles without an audit.
           - services/organizations
           - packages/migration-guard
+          # The HQ admin bridge (ADR 0067).
+          - services/admin-bridge
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
