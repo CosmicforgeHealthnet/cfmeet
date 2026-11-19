@@ -1,0 +1,72 @@
+{
+  "description": "Aggregate health of the bridge and every CF Meet service it calls. A component the bridge could not check is UNKNOWN with null fields, never OK.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "components"
+  ],
+  "properties": {
+    "status": {
+      "enum": [
+        "OK",
+        "DEGRADED",
+        "UNAVAILABLE"
+      ]
+    },
+    "components": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "service",
+          "status",
+          "checked_at",
+          "latency_ms"
+        ],
+        "properties": {
+          "service": {
+            "enum": [
+              "admin-bridge",
+              "meeting-service",
+              "messaging",
+              "calling",
+              "communications",
+              "organizations",
+              "developer-platform",
+              "platform-access",
+              "notifications",
+              "numbering"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OK",
+              "DEGRADED",
+              "UNAVAILABLE",
+              "UNKNOWN",
+              "NOT_CONFIGURED"
+            ]
+          },
+          "checked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "latency_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 60000
+          }
+        }
+      }
+    }
+  }
+}

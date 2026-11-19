@@ -1,0 +1,410 @@
+{
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "Discovery": {
+        "description": "Runtime capability states of the running bridge. `state` is the artifact state lowered by runtime switches (a served capability whose module or write switch is off is DISABLED with a blocker). openapi_sha256 is the sha256 of the exact openapi.json bytes this build renders; HQ trusts runtime states only when it equals the pinned hash. policy_revision is the pinned, verified access-policy revision.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "openapi_sha256",
+          "policy_revision",
+          "capabilities"
+        ],
+        "properties": {
+          "contract_version": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+          },
+          "openapi_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "policy_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "capabilities": {
+            "type": "array",
+            "maxItems": 512,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "state",
+                "blocker"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z]+(\\.[a-z0-9-]+){1,4}$"
+                },
+                "state": {
+                  "enum": [
+                    "READ_ONLY",
+                    "AVAILABLE",
+                    "DISABLED",
+                    "BLOCKED_DEPENDENCY"
+                  ]
+                },
+                "blocker": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 256
+                }
+              }
+            }
+          }
+        }
+      },
+      "Health": {
+        "description": "Aggregate health of the bridge and every CF Meet service it calls. A component the bridge could not check is UNKNOWN with null fields, never OK.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "components"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "OK",
+              "DEGRADED",
+              "UNAVAILABLE"
+            ]
+          },
+          "components": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "service",
+                "status",
+                "checked_at",
+                "latency_ms"
+              ],
+              "properties": {
+                "service": {
+                  "enum": [
+                    "admin-bridge",
+                    "meeting-service",
+                    "messaging",
+                    "calling",
+                    "communications",
+                    "organizations",
+                    "developer-platform",
+                    "platform-access",
+                    "notifications",
+                    "numbering"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "OK",
+                    "DEGRADED",
+                    "UNAVAILABLE",
+                    "UNKNOWN",
+                    "NOT_CONFIGURED"
+                  ]
+                },
+                "checked_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "latency_ms": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0,
+                  "maximum": 60000
+                }
+              }
+            }
+          }
+        }
+      },
+      "Dataset": {
+        "description": "One certified HQ dataset over a UTC day window. Metric names are fixed per dataset (datasets.v1.json); a metric the bridge could not establish is null, never zero. coverage is COMPLETE only when every source reported every day of the window.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dataset_id",
+          "classification",
+          "coverage",
+          "window",
+          "series",
+          "next_cursor"
+        ],
+        "properties": {
+          "dataset_id": {
+            "type": "string",
+            "pattern": "^cfmeet\\.[a-z_]{1,48}$"
+          },
+          "classification": {
+            "const": "INTERNAL"
+          },
+          "coverage": {
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "NONE"
+            ]
+          },
+          "window": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start",
+              "end"
+            ],
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "series": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "date",
+                "metrics"
+              ],
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "metrics": {
+                  "type": "object",
+                  "maxProperties": 16,
+                  "propertyNames": {
+                    "enum": [
+                      "approved",
+                      "apps_draft",
+                      "apps_in_review",
+                      "apps_published",
+                      "apps_suspended",
+                      "dau",
+                      "failed_deliveries",
+                      "failed_messages",
+                      "in_review",
+                      "installs",
+                      "mau",
+                      "meetings",
+                      "messages_sent",
+                      "open_calling",
+                      "open_communications",
+                      "open_incidents",
+                      "open_meetings",
+                      "open_messaging",
+                      "participant_minutes",
+                      "partner_mau",
+                      "partners_live",
+                      "peak_live_meetings",
+                      "pending",
+                      "projection_gaps",
+                      "quarantined_events",
+                      "rejected",
+                      "signups",
+                      "workspaces_active",
+                      "workspaces_restricted",
+                      "workspaces_suspended"
+                    ]
+                  },
+                  "additionalProperties": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "ProjectionStatus": {
+        "description": "Freshness and coverage of every bridge projection (owner events -> summaries). Until owner events are wired (phase A7) every projection reports UNAVAILABLE.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projections"
+        ],
+        "properties": {
+          "projections": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "freshness",
+                "coverage",
+                "last_event_at",
+                "lag_seconds",
+                "open_gaps",
+                "quarantined"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_.]{0,63}$"
+                },
+                "freshness": {
+                  "enum": [
+                    "LIVE",
+                    "RECENT",
+                    "STALE",
+                    "PARTIAL",
+                    "UNKNOWN",
+                    "UNAVAILABLE"
+                  ]
+                },
+                "coverage": {
+                  "enum": [
+                    "COMPLETE",
+                    "PARTIAL",
+                    "NONE"
+                  ]
+                },
+                "last_event_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "lag_seconds": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "open_gaps": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "quarantined": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "Purpose": {
+        "enum": [
+          "support-review",
+          "verification-review",
+          "abuse-review",
+          "billing-review",
+          "pricing-change",
+          "ops-incident",
+          "release-request",
+          "privacy-request",
+          "admin-ui-capabilities",
+          "metrics-read",
+          "event-sync"
+        ]
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "product",
+          "correlation_id",
+          "as_of",
+          "freshness",
+          "error"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "1.0"
+          },
+          "product": {
+            "const": "cfmeet"
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "freshness": {
+            "enum": [
+              "LIVE",
+              "RECENT",
+              "STALE",
+              "PARTIAL",
+              "UNKNOWN",
+              "UNAVAILABLE"
+            ]
+          },
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        }
+      }
+    }
+  }
+}

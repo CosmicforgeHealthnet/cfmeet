@@ -1,0 +1,15 @@
+{
+  "enum": [
+    "support-review",
+    "verification-review",
+    "abuse-review",
+    "billing-review",
+    "pricing-change",
+    "ops-incident",
+    "release-request",
+    "privacy-request",
+    "admin-ui-capabilities",
+    "metrics-read",
+    "event-sync"
+  ]
+}

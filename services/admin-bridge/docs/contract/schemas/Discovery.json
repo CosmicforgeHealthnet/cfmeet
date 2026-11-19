@@ -1,0 +1,59 @@
+{
+  "description": "Runtime capability states of the running bridge. `state` is the artifact state lowered by runtime switches (a served capability whose module or write switch is off is DISABLED with a blocker). openapi_sha256 is the sha256 of the exact openapi.json bytes this build renders; HQ trusts runtime states only when it equals the pinned hash. policy_revision is the pinned, verified access-policy revision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "openapi_sha256",
+    "policy_revision",
+    "capabilities"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "openapi_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "policy_revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "state",
+          "blocker"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z]+(\\.[a-z0-9-]+){1,4}$"
+          },
+          "state": {
+            "enum": [
+              "READ_ONLY",
+              "AVAILABLE",
+              "DISABLED",
+              "BLOCKED_DEPENDENCY"
+            ]
+          },
+          "blocker": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256
+          }
+        }
+      }
+    }
+  }
+}

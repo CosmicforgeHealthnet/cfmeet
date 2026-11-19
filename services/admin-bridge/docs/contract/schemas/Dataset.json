@@ -1,0 +1,117 @@
+{
+  "description": "One certified HQ dataset over a UTC day window. Metric names are fixed per dataset (datasets.v1.json); a metric the bridge could not establish is null, never zero. coverage is COMPLETE only when every source reported every day of the window.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dataset_id",
+    "classification",
+    "coverage",
+    "window",
+    "series",
+    "next_cursor"
+  ],
+  "properties": {
+    "dataset_id": {
+      "type": "string",
+      "pattern": "^cfmeet\\.[a-z_]{1,48}$"
+    },
+    "classification": {
+      "const": "INTERNAL"
+    },
+    "coverage": {
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "NONE"
+      ]
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "series": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "date",
+          "metrics"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "metrics": {
+            "type": "object",
+            "maxProperties": 16,
+            "propertyNames": {
+              "enum": [
+                "approved",
+                "apps_draft",
+                "apps_in_review",
+                "apps_published",
+                "apps_suspended",
+                "dau",
+                "failed_deliveries",
+                "failed_messages",
+                "in_review",
+                "installs",
+                "mau",
+                "meetings",
+                "messages_sent",
+                "open_calling",
+                "open_communications",
+                "open_incidents",
+                "open_meetings",
+                "open_messaging",
+                "participant_minutes",
+                "partner_mau",
+                "partners_live",
+                "peak_live_meetings",
+                "pending",
+                "projection_gaps",
+                "quarantined_events",
+                "rejected",
+                "signups",
+                "workspaces_active",
+                "workspaces_restricted",
+                "workspaces_suspended"
+              ]
+            },
+            "additionalProperties": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "next_cursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+    }
+  }
+}

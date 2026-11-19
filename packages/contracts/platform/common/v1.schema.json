@@ -5,7 +5,7 @@
   "description": "Shared vocabulary for cross-service CF Meet contracts. Definitions only: the root schema places no constraints; contracts reference the $defs below.",
   "$defs": {
     "ServiceId": {
-      "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway. Never a wildcard.",
+      "description": "Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway, cfmeet.organizations, cfmeet.notifications, cfmeet.admin-bridge. Never a wildcard.",
       "type": "string",
       "maxLength": 64,
       "pattern": "^cfmeet\\.[a-z][a-z0-9]*(-[a-z0-9]+)*$"
@@ -188,7 +188,16 @@
         "platform-oauth.token",
         "platform-oauth.authorize",
         "organization-apps.evaluate",
-        "meeting-oauth-userinfo.read"
+        "meeting-oauth-userinfo.read",
+        "account.administer",
+        "meeting.administer",
+        "messaging-firstparty.administer",
+        "calling.administer",
+        "communications.administer",
+        "organization.operator-read",
+        "pricing.administer",
+        "notifications.administer",
+        "hq-bridge-events.publish"
       ]
     }
   }

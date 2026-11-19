@@ -1,0 +1,52 @@
+//! Bridge error codes: the complete, published list (`signing-profile.md`). Messages
+//! never echo a request value.
+
+macro_rules! codes {
+    ($($variant:ident => ($code:literal, $status:literal, $meaning:literal)),+ $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum ErrorCode { $($variant),+ }
+        impl ErrorCode {
+            pub const ALL: &'static [ErrorCode] = &[$(ErrorCode::$variant),+];
+            pub const fn code(self) -> &'static str { match self { $(ErrorCode::$variant => $code),+ } }
+            pub const fn status(self) -> u16 { match self { $(ErrorCode::$variant => $status),+ } }
+            pub const fn meaning(self) -> &'static str { match self { $(ErrorCode::$variant => $meaning),+ } }
+        }
+    };
+}
+
+codes! {
+    BridgeDisabled => ("BRIDGE_DISABLED", 503, "ADMIN_BRIDGE_ENABLED is off"),
+    RequestShapeInvalid => ("REQUEST_SHAPE_INVALID", 400, "path too long, encoded or dot segments, or a malformed request line"),
+    BodyTooLarge => ("BODY_TOO_LARGE", 413, "body over 32 KiB"),
+    ClientCertificateRefused => ("CLIENT_CERTIFICATE_REFUSED", 401, "no client certificate, wrong URI name, or fingerprint not enrolled and live"),
+    HqKeyUnknown => ("HQ_KEY_UNKNOWN", 401, "X-HQ-Key-ID is not an enrolled, live HMAC key"),
+    SignatureInvalid => ("SIGNATURE_INVALID", 401, "HMAC v2 headers missing or signature mismatch"),
+    TimestampSkew => ("TIMESTAMP_SKEW", 401, "X-Service-Timestamp more than 30 s from bridge time"),
+    StaffAssertionInvalid => ("STAFF_ASSERTION_INVALID", 401, "staff assertion malformed, wrong header, unknown kid, bad signature, wrong iss / aud / product, or lifetime over 60 s"),
+    StaffAssertionExpired => ("STAFF_ASSERTION_EXPIRED", 401, "staff assertion outside nbf / exp"),
+    RequestDigestMismatch => ("REQUEST_DIGEST_MISMATCH", 401, "request_digest does not match this request"),
+    Revoked => ("REVOKED", 401, "staff member or session revoked"),
+    Replay => ("REPLAY", 409, "nonce or jti already used"),
+    CapabilityNotFound => ("CAPABILITY_NOT_FOUND", 404, "no capability for this method and path"),
+    QueryInvalid => ("QUERY_INVALID", 400, "query parameters not exactly the capability's shape, in order, with valid values"),
+    PolicyUnavailable => ("POLICY_UNAVAILABLE", 503, "no verified access policy at the pinned revision"),
+    PurposeNotAllowed => ("PURPOSE_NOT_ALLOWED", 403, "purpose not allowed for this capability or role"),
+    PermissionDenied => ("PERMISSION_DENIED", 403, "permission missing from the assertion or not granted to any asserted role by the access policy"),
+    ScopeDenied => ("SCOPE_DENIED", 403, "market, organization, zone or tenant outside the assertion scopes or the enrolled scope"),
+    RecentMfaRequired => ("RECENT_MFA_REQUIRED", 403, "R2+ needs auth_time within 300 s"),
+    StrongAuthRequired => ("STRONG_AUTH_REQUIRED", 403, "R3 / R4 need a strong acr"),
+    ApprovalRequired => ("APPROVAL_REQUIRED", 403, "TWO_PERSON capability without an approval claim"),
+    ApprovalInvalid => ("APPROVAL_INVALID", 403, "approval for another capability, requester is not sub, approver is sub, or lifetime over 43200 s"),
+    ApprovalExpired => ("APPROVAL_EXPIRED", 403, "approval expires_at has passed"),
+    ApprovalReused => ("APPROVAL_REUSED", 409, "approval_id already used"),
+    CapabilityDisabled => ("CAPABILITY_DISABLED", 503, "capability not served in this build, its module switch is off, or writes are off"),
+    IdempotencyKeyRequired => ("IDEMPOTENCY_KEY_REQUIRED", 400, "command without a valid Idempotency-Key"),
+    IdempotencyConflict => ("IDEMPOTENCY_CONFLICT", 409, "Idempotency-Key reused with a different request"),
+    RateLimited => ("RATE_LIMITED", 429, "per staff member, permission and scope limit reached"),
+    AuditUnavailable => ("AUDIT_UNAVAILABLE", 503, "the audit row could not be written; nothing was done and no data is returned"),
+    DatasetNotFound => ("DATASET_NOT_FOUND", 404, "unknown dataset id"),
+    OwnerUnavailable => ("OWNER_UNAVAILABLE", 503, "the owning service did not answer a read"),
+    OwnerRefused => ("OWNER_REFUSED", 422, "the owning service refused the command (FAILED)"),
+    UnknownOutcome => ("UNKNOWN_OUTCOME", 502, "a command was sent and no clear answer came back; settle by reading back, never resend"),
+    Internal => ("INTERNAL", 500, "unexpected bridge failure"),
+}

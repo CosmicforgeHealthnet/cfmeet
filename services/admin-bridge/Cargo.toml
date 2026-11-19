@@ -1,0 +1,27 @@
+[workspace]
+members = ["."]
+
+[package]
+name = "admin-bridge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CF Meet Admin Bridge (ADR 0068): the only doorway from the CosmicForge central admin (HQ) into CF Meet. Authenticates HQ, authorizes staff against a signed access policy, calls the owning services with CF Meet service auth, writes a hash-chained audit and keeps small read summaries. Owns no business data and never reads end-to-end encrypted content"
+
+[lib]
+name = "admin_bridge"
+path = "src/lib.rs"
+
+[[bin]]
+name = "admin-bridge-contract"
+path = "src/bin/admin-bridge-contract.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "2.0"
+hmac = "0.12"
+base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "zeroize"] }

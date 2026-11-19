@@ -36,6 +36,7 @@ pub mod ids;
 pub mod jwt;
 pub mod keys;
 pub mod number_grant;
+pub mod operator;
 pub mod permissions;
 pub mod replay;
 pub mod signer;
@@ -58,6 +59,7 @@ pub use delegated::{ApplicationEnvironmentKind, DelegatedPlatformContext, Delega
 pub use identity::{services, RuntimeEnvironment, ServiceId};
 pub use ids::{CorrelationId, KeyId, RequestId, TokenId};
 pub use keys::{PublicJwk, ServiceSigningKey};
+pub use operator::{Approval, OperatorAttribution, OperatorAttributionError, StaffRef};
 pub use permissions::{InternalPermission, PermissionSet};
 pub use replay::{InMemoryReplayGuard, ReplayGuard, ReplayKey, ReplayStoreError, ReplayVerdict};
 pub use signer::{

@@ -1,0 +1,98 @@
+name: Admin Bridge service
+
+# services/admin-bridge — the only doorway from the CosmicForge central admin (HQ) into
+# CF Meet (ADR 0068, docs/admin/cfmeet-admin-bridge.md). HQ pins the contract in
+# services/admin-bridge/docs/contract/ at a commit of this public repository, so the
+# contract is generated from the catalog, checked for drift and refused when it breaks
+# compatibility with main.
+#
+# Phase A0: contract only. Nothing here deploys anywhere.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - "services/admin-bridge/**"
+      - "packages/service-auth/**"
+      - ".github/workflows/admin-bridge.yml"
+  pull_request:
+    paths:
+      - "services/admin-bridge/**"
+      - "packages/service-auth/**"
+      - ".github/workflows/admin-bridge.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: admin-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: services/admin-bridge
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  lint:
+    name: fmt / clippy / boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/admin-bridge -> target
+          key: lint
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Repository guards (no other service's source)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if grep -n -E '"\.\./(calling|communications|developer-platform|meeting-service|messaging|notifications|numbering|organizations|platform-access|privacy-relay|sms-gateway|telephony|api-gateway)' \
+               services/admin-bridge/Cargo.toml; then
+            echo "::error::services/admin-bridge depends on another service's source"; exit 1
+          fi
+
+  contract:
+    name: contract drift / compatibility / tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/admin-bridge -> target
+          key: contract
+      - name: Line endings (HQ pins the exact bytes)
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if grep -rl $'\r' services/admin-bridge/docs/contract; then
+            echo "::error::contract files must use LF line endings"; exit 1
+          fi
+      - name: Drift (committed contract == catalog)
+        run: cargo run --locked --bin admin-bridge-contract -- check
+      - name: Compatibility with main (breaking changes need a major bump agreed with HQ)
+        run: |
+          set -euo pipefail
+          base="$(mktemp -d)"
+          for f in capabilities.v1.json bridge-schemas.v1.json; do
+            git show "origin/main:services/admin-bridge/docs/contract/$f" > "$base/$f" 2>/dev/null || rm -f "$base/$f"
+          done
+          cargo run --locked --bin admin-bridge-contract -- compat --base "$base"
+      - name: SHA256SUMS
+        working-directory: services/admin-bridge/docs/contract
+        run: sha256sum --check --strict SHA256SUMS
+      - name: Tests
+        run: cargo test --workspace --locked
