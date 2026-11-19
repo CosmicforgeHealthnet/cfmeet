@@ -861,12 +861,19 @@ async fn one_tenants_signaling_credential_never_reaches_another_tenants_offer() 
 #[derive(Default)]
 struct FakeI3 {
     bodies: Mutex<Vec<Value>>,
+    /// I3c cancellations (gap audit C1), kept apart from the I3 offers.
+    cancels: Mutex<Vec<Value>>,
 }
 
 #[async_trait]
 impl CallPushSink for FakeI3 {
     async fn call_push(&self, body: Value) -> Result<Value, String> {
         self.bodies.lock().unwrap().push(body);
+        Ok(json!({ "results": [] }))
+    }
+
+    async fn call_push_cancel(&self, body: Value) -> Result<Value, String> {
+        self.cancels.lock().unwrap().push(body);
         Ok(json!({ "results": [] }))
     }
 }
