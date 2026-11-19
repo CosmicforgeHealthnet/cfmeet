@@ -313,7 +313,32 @@ export class ProcessResult {
         return BigInt.asUintN(64, ret);
     }
     /**
-     * `APPLICATION`, `COMMIT` or `PROPOSAL`.
+     * The joining device's signature public key, as its leaf carries it.
+     * @returns {Uint8Array}
+     */
+    get joinerKey() {
+        const ret = wasm.processresult_joinerKey(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * The device that joined (or asks to join) by an external commit.
+     * @returns {string | undefined}
+     */
+    get joiner() {
+        const ret = wasm.processresult_joiner(this.__wbg_ptr);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
+    }
+    /**
+     * `APPLICATION`, `COMMIT` (an external join included: see `joiner`), `PROPOSAL` or
+     * `JOINER_UNVERIFIED` (an external commit of a device not in `allowed_joiners`:
+     * nothing was merged; verify `joiner` / `joinerKey` and process it again).
      * @returns {string}
      */
     get kind() {
@@ -467,6 +492,25 @@ export class WebDevice {
         return v1;
     }
     /**
+     * Joins the group by itself from its GroupInfo (an MLS external commit) and merges it
+     * locally; refuses a GroupInfo of another group than `group_id`. Submit the commit;
+     * if the Delivery Service refuses it, the worker restores its snapshot.
+     * @param {Uint8Array} group_id
+     * @param {Uint8Array} group_info
+     * @returns {CommitResult}
+     */
+    externalJoin(group_id, group_info) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(group_info, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_externalJoin(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitResult.__wrap(ret[0]);
+    }
+    /**
      * Restores a device from [`WebDevice::export_state`] (decrypted by the worker).
      * @param {string} device_id
      * @param {Uint8Array} state
@@ -482,6 +526,22 @@ export class WebDevice {
             throw takeFromExternrefTable0(ret[1]);
         }
         return WebDevice.__wrap(ret[0]);
+    }
+    /**
+     * The group's current GroupInfo, signed by this device (public material only).
+     * @param {Uint8Array} group_id
+     * @returns {Uint8Array}
+     */
+    groupInfo(group_id) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_groupInfo(this.__wbg_ptr, ptr0, len0);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
     }
     /**
      * @param {Uint8Array} group_id
@@ -580,20 +640,26 @@ export class WebDevice {
      * Decrypts an application message (only when MLS authenticated exactly
      * `expected_aad` with it: the CF Meet binding of tenant, application, environment,
      * conversation, client message id and sending device) or verifies and merges a
-     * commit. A mismatched AAD, a tampered or replayed message is refused.
+     * commit. A mismatched AAD, a tampered or replayed message is refused. An external
+     * commit is merged only when its joining device is in `allowed_joiners`
+     * (`"<device id>:<hex signature key>"`, devices the page verified as registered,
+     * ACTIVE devices of members); otherwise the result is `JOINER_UNVERIFIED`.
      * @param {Uint8Array} group_id
      * @param {Uint8Array} message
-     * @param {Uint8Array | null} [expected_aad]
+     * @param {Uint8Array | null | undefined} expected_aad
+     * @param {string[]} allowed_joiners
      * @returns {ProcessResult}
      */
-    process(group_id, message, expected_aad) {
+    process(group_id, message, expected_aad, allowed_joiners) {
         const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ptr1 = passArray8ToWasm0(message, wasm.__wbindgen_malloc);
         const len1 = WASM_VECTOR_LEN;
         var ptr2 = isLikeNone(expected_aad) ? 0 : passArray8ToWasm0(expected_aad, wasm.__wbindgen_malloc);
         var len2 = WASM_VECTOR_LEN;
-        const ret = wasm.webdevice_process(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        const ptr3 = passArrayJsValueToWasm0(allowed_joiners, wasm.__wbindgen_malloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_process(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
         if (ret[2]) {
             throw takeFromExternrefTable0(ret[1]);
         }
@@ -682,6 +748,20 @@ export class WebDevice {
         var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v1;
+    }
+    /**
+     * Commits a fresh leaf for this device (no membership change) and merges it locally.
+     * @param {Uint8Array} group_id
+     * @returns {CommitResult}
+     */
+    updateKeys(group_id) {
+        const ptr0 = passArray8ToWasm0(group_id, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.webdevice_updateKeys(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return CommitResult.__wrap(ret[0]);
     }
 }
 if (Symbol.dispose) WebDevice.prototype[Symbol.dispose] = WebDevice.prototype.free;

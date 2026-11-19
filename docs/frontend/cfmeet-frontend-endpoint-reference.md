@@ -17,7 +17,7 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.7.0 | 298 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.8.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.29.0 | 145 |
-| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.19.0 | 105 |
+| Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.20.0 | 105 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.6.0 | 73 |
 | **Total** | | | **695** |
 
@@ -967,7 +967,7 @@ Contract `packages/contracts/calling/http/v1.openapi.json` version **1.29.0**; b
 
 ## Messaging (MANAGED and PRIVATE_E2EE)
 
-Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.19.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
+Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.20.0**; base URL env `NEXT_PUBLIC_MESSAGING_URL`. First-party clients go through the Meeting Service relay `/api/v2/messaging/relay/{path}` (personal) or `/api/v2/organizations/{id}/messaging/relay/{path}` (organization), then realtime with a session token -> ticket -> WebSocket.
 
 ### Blocked Users
 
