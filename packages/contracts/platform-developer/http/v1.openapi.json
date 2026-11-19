@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform — Developer Console API",
-    "version": "1.7.0",
-    "description": "The Developer Console of the CF Meet Platform: the control plane where a partner manages its workspaces, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access. (A workspace is called an organization in paths and fields: /v1/organizations, organizationId.) The partner's product traffic (meetings, messaging, calling) goes to the domain APIs of the same gateway, not here. Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests. 1.7.0 (ADR 0062 / 0063, CF Meet Platform Build): the partner Users API for machine credentials (/v1/users*, delegated to Platform Access; principals.read / principals.write / user_tokens.issue; user tokens returned once), the console user list and SANDBOX test token generator, allowed websites (/v1/environments/{environmentId}/allowed-origins) and push credentials (/v1/environments/{environmentId}/push-credentials*, secrets sealed to the Notification Service, metadata only), each behind its own default-off flag; LIMIT_EXCEEDED for the optional workspace / project creation caps."
+    "version": "1.8.0",
+    "description": "The Developer Console of the CF Meet Platform: the control plane where a partner manages its workspaces, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access. (A workspace is called an organization in paths and fields: /v1/organizations, organizationId.) The partner's product traffic (meetings, messaging, calling) goes to the domain APIs of the same gateway, not here. Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests. 1.7.0 (ADR 0062 / 0063, CF Meet Platform Build): the partner Users API for machine credentials (/v1/users*, delegated to Platform Access; principals.read / principals.write / user_tokens.issue; user tokens returned once), the console user list and SANDBOX test token generator, allowed websites (/v1/environments/{environmentId}/allowed-origins) and push credentials (/v1/environments/{environmentId}/push-credentials*, secrets sealed to the Notification Service, metadata only), each behind its own default-off flag; LIMIT_EXCEEDED for the optional workspace / project creation caps. 1.8.0 (ADR 0064 / 0065, CF Meet Apps): app registration on projects (/v1/projects/{projectId}/app*: immutable manifest versions, client secret shown once, review submission, grants, draft test accounts; OWNER / ADMIN; flag DEVELOPER_PLATFORM_APPS_ENABLED), the anonymous OAuth endpoints /v1/oauth/token, /revoke, /userinfo, /metadata (RFC 6749 wire format, relayed to Platform Access; flag DEVELOPER_PLATFORM_OAUTH_ENABLED) and the anonymous app directory /v1/app-directory* (PUBLISHED, PUBLIC apps; flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED)."
   },
   "tags": [
     {
@@ -77,6 +77,18 @@
     {
       "name": "Push credentials",
       "description": "ADR 0063: partner APNs / FCM push credentials, sealed to the Notification Service (metadata only here)."
+    },
+    {
+      "name": "Apps",
+      "description": "ADR 0064 / 0065: the app registered on a project (manifest versions, client secret, review submission, grants, test accounts)."
+    },
+    {
+      "name": "OAuth",
+      "description": "ADR 0064: the public OAuth 2.0 endpoints of CF Meet Apps (anonymous; RFC 6749 / 7009 / 8414 wire format)."
+    },
+    {
+      "name": "App directory",
+      "description": "ADR 0065: the public directory of PUBLISHED, PUBLIC apps (anonymous)."
     }
   ],
   "servers": [
@@ -6252,6 +6264,885 @@
             "$ref": "#/components/responses/Error"
           },
           "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app": {
+      "get": {
+        "operationId": "getProjectApp",
+        "summary": "Read the app registered on the project (current manifest, review status, live version)",
+        "description": "Read the app registered on the project (current manifest, review status, live version). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/App"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putProjectApp",
+        "summary": "Register or change the project's app (a changed manifest is a new immutable version; SUBMITTED / IN_REVIEW / SUSPENDED apps are locked)",
+        "description": "Register or change the project's app (a changed manifest is a new immutable version; SUBMITTED / IN_REVIEW / SUSPENDED apps are locked). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Changed or unchanged.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/App"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Registered.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/App"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PutAppRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app/secret": {
+      "post": {
+        "operationId": "rotateProjectAppSecret",
+        "summary": "Issue or rotate the app's client secret (returned once; the previous secret keeps Platform Access's 24 h overlap)",
+        "description": "Issue or rotate the app's client secret (returned once; the previous secret keeps Platform Access's 24 h overlap). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Issued (Cache-Control: no-store).",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AppClientSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app/submit": {
+      "post": {
+        "operationId": "submitProjectApp",
+        "summary": "Submit the current version for review (DRAFT / REJECTED, or an APPROVED / PUBLISHED app with pending changes; no loopback redirect; PUBLIC apps name privacy policy and terms)",
+        "description": "Submit the current version for review (DRAFT / REJECTED, or an APPROVED / PUBLISHED app with pending changes; no loopback redirect; PUBLIC apps name privacy policy and terms). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/App"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app/grants": {
+      "get": {
+        "operationId": "listProjectAppGrants",
+        "summary": "List the app's installations (from Platform Access; no CF Meet account id)",
+        "description": "List the app's installations (from Platform Access; no CF Meet account id). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AppGrantList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app/test-accounts": {
+      "put": {
+        "operationId": "putProjectAppTestAccounts",
+        "summary": "Replace the draft test accounts (CF Meet account ids, at most 25, format checked only)",
+        "description": "Replace the draft test accounts (CF Meet account ids, at most 25, format checked only). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/App"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PutAppTestAccountsRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/token": {
+      "post": {
+        "operationId": "oauthToken",
+        "summary": "Exchange an authorization code (PKCE S256) or a refresh token for tokens",
+        "description": "RFC 6749 token endpoint. Anonymous at the API Gateway: the client authenticates with its client secret (client_secret_basic or client_secret_post) and Platform Access verifies it; refresh tokens rotate and a reused code or superseded refresh token revokes the whole installation. Responses are snake_case with Cache-Control: no-store. Flag DEVELOPER_PLATFORM_OAUTH_ENABLED.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [],
+        "x-cfmeet-forward-authorization": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/revoke": {
+      "post": {
+        "operationId": "oauthRevoke",
+        "summary": "Revoke an access or refresh token (RFC 7009)",
+        "description": "RFC 7009 revocation: 200 whatever the token's state, 401 invalid_client when client authentication fails. Anonymous at the API Gateway; same client authentication as the token endpoint. Flag DEVELOPER_PLATFORM_OAUTH_ENABLED.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [],
+        "x-cfmeet-forward-authorization": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthRevokeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked or unknown (empty body).",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/userinfo": {
+      "get": {
+        "operationId": "oauthUserinfo",
+        "summary": "Read the signed-in user's profile with a user access token",
+        "description": "Bearer cfoa_ user access token with profile:read (email only with profile:email). Anonymous at the API Gateway: Platform Access introspects the token, the Meeting Service supplies the profile; sub is pairwise per app. Flag DEVELOPER_PLATFORM_OAUTH_ENABLED.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [],
+        "x-cfmeet-forward-authorization": true,
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^Bearer cfoa_"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthUserinfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/metadata": {
+      "get": {
+        "operationId": "oauthMetadata",
+        "summary": "Read the OAuth authorization server metadata",
+        "description": "RFC 8414-style metadata: the authorization endpoint (the CF Meet consent page), token, revocation and userinfo endpoints, scopes, PKCE S256, the code response type and both grant types. Anonymous. Flag DEVELOPER_PLATFORM_OAUTH_ENABLED.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthMetadata"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app-directory": {
+      "get": {
+        "operationId": "listAppDirectory",
+        "summary": "List the published public apps",
+        "description": "The app directory: PUBLISHED, PUBLIC, not suspended apps with their published manifest (name, description, logo, developer, scopes, privacy and terms URLs, whether they have an in-meeting surface). Anonymous. Flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED.",
+        "tags": [
+          "App directory"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/DirectoryAppList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/app-directory/{appId}": {
+      "get": {
+        "operationId": "getAppDirectoryEntry",
+        "summary": "Read one published public app",
+        "description": "One directory entry (anything not PUBLISHED, PUBLIC and live is 404). Anonymous. Flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED.",
+        "tags": [
+          "App directory"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/DirectoryApp"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

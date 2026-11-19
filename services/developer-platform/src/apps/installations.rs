@@ -16,10 +16,10 @@
 //!
 //! **Snapshot** (camelCase): `id`, `appId`, `target` (`USER` | `ORGANIZATION`),
 //! `organizationId?`, `principalId` (the user / bot principal), `status` (`ACTIVE` |
-//! `REVOKED`), `scopes` (array or space-separated), `revokedReason?`, and the install
-//! target's FIRST_PARTY scope as `targetTenantId` / `targetApplicationId` /
-//! `targetEnvironmentId` (or `targetScope: {tenantId, applicationId, environmentId}`).
-//! An account id is never stored.
+//! `REVOKED`), `scopes` (array or space-separated), `revokeReason?` (Platform Access:
+//! `UNINSTALLED`, `APP_SUSPENDED`, `CODE_REUSE`, `REFRESH_REUSE`), and the install target's
+//! FIRST_PARTY scope as `tenantId` / `applicationId` / `environmentId` (Platform Access's
+//! `AppGrantSnapshot`). An account id is never stored.
 
 use std::sync::Arc;
 
@@ -91,9 +91,10 @@ impl GrantSnapshot {
                 .zip(uuid_at(n, "applicationId"))
                 .zip(uuid_at(n, "environmentId"))
                 .map(|((t, a), e)| (t, a, e)),
-            None => uuid_at(s, "targetTenantId")
-                .zip(uuid_at(s, "targetApplicationId"))
-                .zip(uuid_at(s, "targetEnvironmentId"))
+            None => uuid_at(s, "tenantId")
+                .or_else(|| uuid_at(s, "targetTenantId"))
+                .zip(uuid_at(s, "applicationId").or_else(|| uuid_at(s, "targetApplicationId")))
+                .zip(uuid_at(s, "environmentId").or_else(|| uuid_at(s, "targetEnvironmentId")))
                 .map(|((t, a), e)| (t, a, e)),
         };
         let scopes: Vec<String> = match s.get("scopes") {
@@ -118,8 +119,8 @@ impl GrantSnapshot {
             scopes,
             status: status.to_string(),
             revoked_reason: s
-                .get("revokedReason")
-                .or_else(|| s.get("reason"))
+                .get("revokeReason")
+                .or_else(|| s.get("revokedReason"))
                 .and_then(Value::as_str)
                 .filter(|r| code(r))
                 .map(str::to_string),

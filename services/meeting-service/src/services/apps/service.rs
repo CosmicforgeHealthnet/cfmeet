@@ -133,8 +133,9 @@ impl AuthorizationRequest {
         let code_challenge = code_challenge
             .filter(|c| {
                 (43..=128).contains(&c.len())
-                    && c.bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
+                    && c.bytes().all(|b| {
+                        b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~')
+                    })
             })
             .ok_or_else(|| oauth_invalid("PKCE_REQUIRED", "code_challenge is missing or invalid"))?
             .to_string();
@@ -151,9 +152,10 @@ impl AuthorizationRequest {
                 }
                 None
             }
-            Some("organization") => Some(organization_id.ok_or_else(|| {
-                invalid("install=organization requires organization_id")
-            })?),
+            Some("organization") => Some(
+                organization_id
+                    .ok_or_else(|| invalid("install=organization requires organization_id"))?,
+            ),
             Some(_) => return Err(invalid("install must be user or organization")),
         };
         Ok(Self {
@@ -244,11 +246,7 @@ impl Apps {
 
     /// Platform Access validation; the answer must be for this client and, when it names a
     /// redirect URI, exactly the requested one.
-    async fn validate(
-        &self,
-        req: &AuthorizationRequest,
-        account: Uuid,
-    ) -> ApiResult<Value> {
+    async fn validate(&self, req: &AuthorizationRequest, account: Uuid) -> ApiResult<Value> {
         let pa = self.oauth(self.authorize_enabled, "App authorization")?;
         let answer = pa
             .validate(&req.platform_body(account, None))
@@ -410,7 +408,9 @@ impl Apps {
             .get("code")
             .and_then(Value::as_str)
             .filter(|c| !c.is_empty() && c.len() <= 512)
-            .ok_or_else(|| unavailable(AuthorityUnavailable("authorization without code".into())))?;
+            .ok_or_else(|| {
+                unavailable(AuthorityUnavailable("authorization without code".into()))
+            })?;
         let grant = answer
             .body
             .get("grantId")
@@ -440,9 +440,7 @@ impl Apps {
         Ok(grants
             .into_iter()
             .filter(|g| match owner {
-                GrantOwner::Account(a) => {
-                    g.target == "USER" && g.account_id.is_none_or(|x| x == a)
-                }
+                GrantOwner::Account(a) => g.target == "USER" && g.account_id.is_none_or(|x| x == a),
                 GrantOwner::Organization(o) => {
                     g.target == "ORGANIZATION" && g.organization_id.is_none_or(|x| x == o)
                 }
@@ -631,7 +629,9 @@ impl Apps {
         conference_id: Uuid,
     ) -> ApiResult<ConferenceAppList> {
         self.in_meeting()?;
-        let (_, apps) = self.conference_apps_for(state, actor, conference_id).await?;
+        let (_, apps) = self
+            .conference_apps_for(state, actor, conference_id)
+            .await?;
         Ok(ConferenceAppList {
             items: apps.into_iter().map(|(a, _)| a).collect(),
         })
@@ -646,7 +646,9 @@ impl Apps {
         app_id: Uuid,
     ) -> ApiResult<AppContextTokenResponse> {
         let signer = self.in_meeting()?;
-        let (participant, apps) = self.conference_apps_for(state, actor, conference_id).await?;
+        let (participant, apps) = self
+            .conference_apps_for(state, actor, conference_id)
+            .await?;
         if !apps.iter().any(|(a, _)| a.app_id == app_id) {
             return Err(app_not_found());
         }
@@ -682,7 +684,11 @@ impl Apps {
 
 /// `GET /internal/v1/oauth/userinfo` — the profile of `account` for an app holding
 /// `scopes` (`email` only with `profile:email`, and only a verified address).
-pub async fn userinfo(state: &AppState, account: Uuid, scopes: &[&str]) -> ApiResult<Option<Value>> {
+pub async fn userinfo(
+    state: &AppState,
+    account: Uuid,
+    scopes: &[&str],
+) -> ApiResult<Option<Value>> {
     let Some(user) = users::Entity::find_by_id(account).one(&state.db).await? else {
         return Ok(None);
     };
@@ -697,8 +703,7 @@ pub async fn userinfo(state: &AppState, account: Uuid, scopes: &[&str]) -> ApiRe
         "displayName": user.presentation_name(),
         "avatarUrl": user.avatar_url,
     });
-    if scopes.contains(&"profile:email") && user.email_verified(state.require_email_verification)
-    {
+    if scopes.contains(&"profile:email") && user.email_verified(state.require_email_verification) {
         body["email"] = json!(user.email.to_ascii_lowercase());
     }
     Ok(Some(body))
@@ -760,7 +765,10 @@ mod tests {
         let org = Uuid::new_v4();
         let r = parse("S256", Some("organization"), Some(org)).unwrap();
         assert_eq!(r.target(), "ORGANIZATION");
-        assert_eq!(r.platform_body(Uuid::nil(), None)["organizationId"], json!(org));
+        assert_eq!(
+            r.platform_body(Uuid::nil(), None)["organizationId"],
+            json!(org)
+        );
         assert!(AuthorizationRequest::parse(
             Some("nope"),
             Some("https://a.example/cb"),

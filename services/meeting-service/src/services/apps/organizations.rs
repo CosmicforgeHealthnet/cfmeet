@@ -39,8 +39,11 @@ pub trait AppOrganizations: Send + Sync {
     ) -> Result<InstallDecision, AuthorityUnavailable>;
 
     /// OWNER or ADMIN (ACTIVE membership) of the ACTIVE organization.
-    async fn is_admin(&self, organization: Uuid, account: Uuid)
-        -> Result<bool, AuthorityUnavailable>;
+    async fn is_admin(
+        &self,
+        organization: Uuid,
+        account: Uuid,
+    ) -> Result<bool, AuthorityUnavailable>;
 }
 
 pub type SharedAppOrganizations = Arc<dyn AppOrganizations>;
@@ -67,9 +70,7 @@ pub fn decision_of(status: u16, body: &Value) -> Result<InstallDecision, Authori
             None => Err(AuthorityUnavailable("malformed install decision".into())),
         },
         // App installs off at Organizations (404) or any other refusal: never an allow.
-        400..=499 if status != 429 => Ok(InstallDecision::Refused(
-            "ORGANIZATION_NOT_READY".into(),
-        )),
+        400..=499 if status != 429 => Ok(InstallDecision::Refused("ORGANIZATION_NOT_READY".into())),
         other => Err(AuthorityUnavailable(format!("HTTP {other}"))),
     }
 }
@@ -135,7 +136,11 @@ mod tests {
             InstallDecision::Allowed
         );
         assert_eq!(
-            decision_of(200, &json!({ "allowed": false, "reason": "NOT_ALLOWLISTED" })).unwrap(),
+            decision_of(
+                200,
+                &json!({ "allowed": false, "reason": "NOT_ALLOWLISTED" })
+            )
+            .unwrap(),
             InstallDecision::Refused("NOT_ALLOWLISTED".into())
         );
         assert_eq!(

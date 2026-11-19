@@ -97,7 +97,10 @@ async fn userinfo(State(s): State<UserinfoState>, request: Request) -> Response 
         .split(|c: char| c == ' ' || c == ',')
         .filter(|s| !s.is_empty())
         .collect();
-    if !scopes.iter().any(|s| *s == "profile:read" || *s == "profile:email") {
+    if !scopes
+        .iter()
+        .any(|s| *s == "profile:read" || *s == "profile:email")
+    {
         return error(StatusCode::FORBIDDEN, "SCOPE_REQUIRED", Some(&rid));
     }
     match super::service::userinfo(&s.app, account, &scopes).await {

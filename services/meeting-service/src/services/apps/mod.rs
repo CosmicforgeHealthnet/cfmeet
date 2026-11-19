@@ -223,11 +223,13 @@ impl AppsConfig {
     /// (organization installs and organization Apps need it).
     pub fn build(
         &self,
-        organizations: Option<crate::services::organizations_authority::SharedOrganizationsAuthority>,
+        organizations: Option<
+            crate::services::organizations_authority::SharedOrganizationsAuthority,
+        >,
     ) -> Result<Apps, String> {
-        let oauth = self.client()?.map(|c| {
-            Arc::new(oauth::PlatformAccessOauth::new(c)) as oauth::SharedOauthAuthority
-        });
+        let oauth = self
+            .client()?
+            .map(|c| Arc::new(oauth::PlatformAccessOauth::new(c)) as oauth::SharedOauthAuthority);
         let context = self
             .context_key_file
             .as_ref()
@@ -238,12 +240,10 @@ impl AppsConfig {
             delegated_enabled: self.delegated_enabled,
             in_meeting_enabled: self.in_meeting_enabled,
             oauth,
-            organizations: organizations
-                .filter(|a| a.is_authoritative())
-                .map(|a| {
-                    Arc::new(organizations::OrganizationsAppPolicy::new(a))
-                        as organizations::SharedAppOrganizations
-                }),
+            organizations: organizations.filter(|a| a.is_authoritative()).map(|a| {
+                Arc::new(organizations::OrganizationsAppPolicy::new(a))
+                    as organizations::SharedAppOrganizations
+            }),
             context,
         })
     }

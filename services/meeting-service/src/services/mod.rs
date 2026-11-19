@@ -21,8 +21,8 @@ pub mod token_blacklist;
 // Phase 2 meeting domain (spec v1.1 Parts A–D)
 pub mod actor;
 pub mod admission;
-pub mod apps;
 pub mod appointment_authorization;
+pub mod apps;
 pub mod artifacts;
 pub mod calendar;
 pub mod collaboration;

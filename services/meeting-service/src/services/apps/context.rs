@@ -74,9 +74,10 @@ impl AppContextSigner {
     }
 
     pub fn from_pem_file(path: &Path) -> Result<Self, String> {
-        let pem = Zeroizing::new(std::fs::read_to_string(path).map_err(|_| {
-            "MEETING_APP_CONTEXT_SIGNING_KEY_FILE cannot be read".to_string()
-        })?);
+        let pem = Zeroizing::new(
+            std::fs::read_to_string(path)
+                .map_err(|_| "MEETING_APP_CONTEXT_SIGNING_KEY_FILE cannot be read".to_string())?,
+        );
         Self::from_pkcs8_pem(&pem)
     }
 
@@ -172,10 +173,7 @@ pub fn verify(token: &str, jwks: &Value) -> Option<Value> {
     let sig: [u8; 64] = URL_SAFE_NO_PAD.decode(s).ok()?.try_into().ok()?;
     VerifyingKey::from_bytes(&x)
         .ok()?
-        .verify(
-            format!("{h}.{c}").as_bytes(),
-            &Signature::from_bytes(&sig),
-        )
+        .verify(format!("{h}.{c}").as_bytes(), &Signature::from_bytes(&sig))
         .ok()?;
     serde_json::from_slice(&URL_SAFE_NO_PAD.decode(c).ok()?).ok()
 }
@@ -199,7 +197,11 @@ mod tests {
         assert_eq!(c["role"], "HOST");
         assert_eq!(c["exp"].as_i64().unwrap() - c["iat"].as_i64().unwrap(), 300);
         assert!(c.get("sub").is_none());
-        assert_ne!(c["participant"], part.to_string(), "pairwise, never the raw id");
+        assert_ne!(
+            c["participant"],
+            part.to_string(),
+            "pairwise, never the raw id"
+        );
         let t = s.mint(app, conf, part, "PARTICIPANT", Some("pairwise-sub"));
         assert_eq!(verify(&t, &s.jwks()).unwrap()["sub"], "pairwise-sub");
         // Another key does not verify it; a tampered token does not verify.

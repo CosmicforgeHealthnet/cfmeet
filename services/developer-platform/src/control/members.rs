@@ -257,6 +257,8 @@ pub async fn remove(
     )
     .await?;
     txn.commit().await?;
+    // ADR 0064: a PRIVATE app's allow list follows the workspace membership.
+    crate::apps::registration::resync_tenant(state, tenant_id).await;
     Ok(())
 }
 
@@ -610,6 +612,8 @@ pub async fn accept(
     .await?;
     let v = member_view(&txn, member_id).await?;
     txn.commit().await?;
+    // ADR 0064: a PRIVATE app's allow list follows the workspace membership.
+    crate::apps::registration::resync_tenant(state, tenant_id).await;
     Ok(v)
 }
 

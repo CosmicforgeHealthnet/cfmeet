@@ -210,14 +210,16 @@ async fn delegated_user(
         Ok(None) => return refuse(delegated::Refusal::UnknownAccount.as_str(), route),
         Err(e) => return ApiError::from(e).into_response(),
     };
-    let cutoff = match crate::services::account_security::credentials_cutoff(state, account).await
-    {
+    let cutoff = match crate::services::account_security::credentials_cutoff(state, account).await {
         Ok(c) => c,
         Err(e) => return e.into_response(),
     };
-    if let Err(r) =
-        delegated::check_account(user.status.clone(), user.role.clone(), cutoff, oauth.issued_at)
-    {
+    if let Err(r) = delegated::check_account(
+        user.status.clone(),
+        user.role.clone(),
+        cutoff,
+        oauth.issued_at,
+    ) {
         return refuse(r.as_str(), route);
     }
     let user = DelegatedUser {

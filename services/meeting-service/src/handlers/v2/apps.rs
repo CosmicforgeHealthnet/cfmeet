@@ -11,12 +11,7 @@ use axum::{
 use uuid::Uuid;
 
 use super::{V2Json, V2Path, V2Query};
-use crate::{
-    dto::apps::*,
-    error::ApiResult,
-    services::actor::ActorContext,
-    state::AppState,
-};
+use crate::{dto::apps::*, error::ApiResult, services::actor::ActorContext, state::AppState};
 
 fn no_store<T: serde::Serialize>(status: StatusCode, body: T) -> Response {
     let mut r = (status, Json(body)).into_response();

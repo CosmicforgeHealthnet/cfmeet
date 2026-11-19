@@ -181,8 +181,8 @@ pub fn safe_url(raw: &str) -> bool {
     let Ok(u) = url::Url::parse(raw) else {
         return false;
     };
-    let local = u.scheme() == "http"
-        && matches!(u.host_str(), Some("localhost") | Some("127.0.0.1"));
+    let local =
+        u.scheme() == "http" && matches!(u.host_str(), Some("localhost") | Some("127.0.0.1"));
     (u.scheme() == "https" || local)
         && u.username().is_empty()
         && u.password().is_none()
@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(g.scopes, vec!["meetings:read", "profile:read"]);
         assert_eq!(g.app_name.as_deref(), Some("Cal"));
         assert_eq!(g.logo_url, None, "unsafe URL dropped");
-        let s = g.meeting_surface.unwrap();
+        let s = g.meeting_surface.clone().unwrap();
         assert_eq!(s.origins, vec!["https://app.example"]);
         assert!(g.is_active());
         assert!(Grant::from_json(&json!({ "id": id })).is_none());

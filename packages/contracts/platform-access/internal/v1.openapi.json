@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.11.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED. 1.11.0 (ADR 0062): console test user tokens POST /internal/v1/delegation/environments/{environmentId}/test-user-tokens (platform-identity.delegate + X-CF-Delegated-Actor; ACTIVE SANDBOX environments of EXTERNAL tenants only; no credential: the token's credentialId / serviceAccountId are the environment's synthetic console-test markers; TTL at most 3600 s; grants bounded by the application's current SANDBOX scope grants; audited USER_TOKEN_TEST_ISSUED); POST /internal/v1/user-tokens/verify accepts them."
+    "version": "1.12.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED. 1.11.0 (ADR 0062): console test user tokens POST /internal/v1/delegation/environments/{environmentId}/test-user-tokens (platform-identity.delegate + X-CF-Delegated-Actor; ACTIVE SANDBOX environments of EXTERNAL tenants only; no credential: the token's credentialId / serviceAccountId are the environment's synthetic console-test markers; TTL at most 3600 s; grants bounded by the application's current SANDBOX scope grants; audited USER_TOKEN_TEST_ISSUED); POST /internal/v1/user-tokens/verify accepts them. 1.12.0 (ADR 0064, CF Meet Apps / \"Integrate\"; every operation behind PLATFORM_ACCESS_OAUTH_ENABLED, off: 404 NOT_FOUND): OAuth client profiles, client secrets and app grant listing for the Developer Console (platform-oauth.manage) — PUT / GET /internal/v1/oauth/clients/{applicationId}, POST …/secret, GET …/grants; authorization for the Meeting Service (platform-oauth.authorize) — POST /internal/v1/oauth/authorization-requests/validate, POST /internal/v1/oauth/authorizations, GET /internal/v1/oauth/grants, DELETE /internal/v1/oauth/grants/{grantId}; the token endpoint backend for the Developer Console (platform-oauth.token) — POST /internal/v1/oauth/token, /revoke, /introspect. POST /internal/v1/credentials/authenticate (and delegated-authority) also accept cfoa_ / cfob_ app tokens: the authority chain is the grant's target FIRST_PARTY triple and installation service account, scopes are mapped from the grant, the principal restriction is exactly the user / bot principal, and the chain adds credentialKind, appId and grantId. The identity change feed gains APP_GRANT. New error codes INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED, APP_NOT_AVAILABLE and RFC 6749 invalid_grant, invalid_client, unsupported_grant_type, invalid_request."
   },
   "components": {
     "securitySchemes": {
@@ -1143,6 +1143,890 @@
           }
         },
         "description": "A console test token request: as UpsertEndUserAndMintRequest, with ttlSeconds at most 3600."
+      },
+      "OAuthClientRequest": {
+        "description": "ADR 0064: the OAuth client profile of an EXTERNAL tenant's application (full replacement). Redirect URIs: exact https:// URIs, http://localhost[:port] only while DRAFT, no fragment, no wildcard, at most 10. userScopes: user / install scopes; botScopes: bot / install scopes. testAccountIds: the CF Meet accounts that may authorize while DRAFT. allowedAccountIds / allowedOrganizationIds: PRIVATE distribution allow lists synced by the Developer Console (its workspace members' accounts, and organizations owned by one of them) — Platform Access does not know workspace membership.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "redirectUris",
+          "distribution",
+          "status"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "redirectUris": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "minItems": 1,
+            "maxItems": 10
+          },
+          "userScopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "chat:read:bot",
+                "chat:write:bot",
+                "events:meetings"
+              ],
+              "description": "OAuth scope of the closed catalogue (version 1, Platform Access identity/oauth_scopes.rs)."
+            },
+            "maxItems": 32
+          },
+          "botScopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "chat:read:bot",
+                "chat:write:bot",
+                "events:meetings"
+              ],
+              "description": "OAuth scope of the closed catalogue (version 1, Platform Access identity/oauth_scopes.rs)."
+            },
+            "maxItems": 32
+          },
+          "distribution": {
+            "type": "string",
+            "enum": [
+              "PRIVATE",
+              "PUBLIC"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "APPROVED",
+              "PUBLISHED",
+              "SUSPENDED"
+            ]
+          },
+          "testAccountIds": {
+            "type": "array",
+            "items": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "maxItems": 25,
+            "uniqueItems": true,
+            "description": "At most 25 CF Meet account ids (DRAFT authorization)."
+          },
+          "allowedAccountIds": {
+            "type": "array",
+            "items": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "maxItems": 1000,
+            "uniqueItems": true,
+            "description": "PRIVATE: accounts that may authorize."
+          },
+          "allowedOrganizationIds": {
+            "type": "array",
+            "items": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "maxItems": 1000,
+            "uniqueItems": true,
+            "description": "PRIVATE: organizations that may install."
+          }
+        }
+      },
+      "OAuthClient": {
+        "description": "ADR 0064: an OAuth client profile (clientId = application id). revokedGrants is present on PUT (grants revoked by a SUSPENDED status). secretIssuedAt: issue time of the current client secret (absent before the first).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "clientId",
+          "name",
+          "redirectUris",
+          "userScopes",
+          "botScopes",
+          "distribution",
+          "status",
+          "testAccountIds",
+          "allowedAccountIds",
+          "allowedOrganizationIds",
+          "developerName",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "clientId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "redirectUris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "userScopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "chat:read:bot",
+                "chat:write:bot",
+                "events:meetings"
+              ],
+              "description": "OAuth scope of the closed catalogue (version 1, Platform Access identity/oauth_scopes.rs)."
+            }
+          },
+          "botScopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "chat:read:bot",
+                "chat:write:bot",
+                "events:meetings"
+              ],
+              "description": "OAuth scope of the closed catalogue (version 1, Platform Access identity/oauth_scopes.rs)."
+            }
+          },
+          "distribution": {
+            "type": "string",
+            "enum": [
+              "PRIVATE",
+              "PUBLIC"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "APPROVED",
+              "PUBLISHED",
+              "SUSPENDED"
+            ]
+          },
+          "testAccountIds": {
+            "type": "array",
+            "items": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          "allowedAccountIds": {
+            "type": "array",
+            "items": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          "allowedOrganizationIds": {
+            "type": "array",
+            "items": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          "developerName": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/Timestamp"
+          },
+          "secretIssuedAt": {
+            "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/Timestamp"
+          },
+          "revokedGrants": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OAuthClientSecret": {
+        "description": "ADR 0064: a new client secret, shown ONCE (`cfcs_<sbx|test|live>_<24hex>_<64hex>`, verifier-only storage). The previous secret keeps working for 24 h.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "clientSecret",
+          "secretId",
+          "issuedAt"
+        ],
+        "properties": {
+          "clientSecret": {
+            "type": "string",
+            "pattern": "^cfcs_(sbx|test|live)_[0-9a-f]{24}_[0-9a-f]{64}$"
+          },
+          "secretId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "issuedAt": {
+            "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/Timestamp"
+          }
+        }
+      },
+      "OAuthGrant": {
+        "description": "ADR 0064: an app grant (installation). USER: accountId; ORGANIZATION: organizationId. tenantId / applicationId / environmentId: the target FIRST_PARTY triple; principalId: the restricted user (NATIVE_CF_USER cfmeet-user:<accountId>) or bot (BOT_OR_SERVICE app:<appId>) principal; serviceAccountId: the installation service account.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "appId",
+          "appName",
+          "target",
+          "accountId",
+          "organizationId",
+          "installedByAccountId",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "environmentKind",
+          "principalId",
+          "serviceAccountId",
+          "scopes",
+          "status",
+          "revokedAt",
+          "revokeReason",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "appId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "appName": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "accountId": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "organizationId": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "installedByAccountId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "tenantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "applicationId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "environmentId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "environmentKind": {
+            "type": "string",
+            "enum": [
+              "SANDBOX",
+              "TEST",
+              "PRODUCTION"
+            ]
+          },
+          "principalId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "serviceAccountId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "chat:read:bot",
+                "chat:write:bot",
+                "events:meetings"
+              ],
+              "description": "OAuth scope of the closed catalogue (version 1, Platform Access identity/oauth_scopes.rs)."
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "REVOKED"
+            ]
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revokeReason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "UNINSTALLED",
+                  "APP_SUSPENDED",
+                  "CODE_REUSE",
+                  "REFRESH_REUSE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/Timestamp"
+          },
+          "updatedAt": {
+            "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/Timestamp"
+          }
+        }
+      },
+      "OAuthGrantPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OAuthGrant"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "OAuthGrantList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OAuthGrant"
+            }
+          }
+        }
+      },
+      "OAuthGrantResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "grant"
+        ],
+        "properties": {
+          "grant": {
+            "$ref": "#/components/schemas/OAuthGrant"
+          }
+        }
+      },
+      "OAuthAuthorizationRequest": {
+        "description": "ADR 0064: an authorization request relayed by the Meeting Service for the account it authenticated. ORGANIZATION installs need organizationId (the organization's provisioned FIRST_PARTY scope, capability `primary`).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "clientId",
+          "redirectUri",
+          "scope",
+          "codeChallenge",
+          "codeChallengeMethod",
+          "target",
+          "accountId"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "description": "The app's client id (application id)."
+          },
+          "redirectUri": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "scope": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Space-delimited OAuth scopes (RFC 6749)."
+          },
+          "codeChallenge": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "codeChallengeMethod": {
+            "type": "string",
+            "const": "S256"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "organizationId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "accountId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      },
+      "OAuthAuthorizationApproval": {
+        "description": "ADR 0064: an approved authorization (decision APPROVE; a denial never reaches Platform Access).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "clientId",
+          "redirectUri",
+          "scope",
+          "codeChallenge",
+          "codeChallengeMethod",
+          "target",
+          "accountId",
+          "decision"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "description": "The app's client id (application id)."
+          },
+          "redirectUri": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "scope": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Space-delimited OAuth scopes (RFC 6749)."
+          },
+          "codeChallenge": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "codeChallengeMethod": {
+            "type": "string",
+            "const": "S256"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "organizationId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "accountId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "decision": {
+            "type": "string",
+            "const": "APPROVE"
+          }
+        }
+      },
+      "OAuthAuthorizationContext": {
+        "description": "ADR 0064: the consent data of a valid authorization request. An install scope (events:meetings) is shown with who = the grant's own principal (user / bot).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "app",
+          "scopes",
+          "target"
+        ],
+        "properties": {
+          "app": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "clientId",
+              "name",
+              "distribution",
+              "status",
+              "developerName"
+            ],
+            "properties": {
+              "clientId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "distribution": {
+                "type": "string",
+                "enum": [
+                  "PRIVATE",
+                  "PUBLIC"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "DRAFT",
+                  "APPROVED",
+                  "PUBLISHED",
+                  "SUSPENDED"
+                ]
+              },
+              "developerName": {
+                "type": "string"
+              }
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "description",
+                "who"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "enum": [
+                    "profile:read",
+                    "profile:email",
+                    "meetings:read",
+                    "meetings:write",
+                    "chat:read",
+                    "chat:write",
+                    "chat:read:bot",
+                    "chat:write:bot",
+                    "events:meetings"
+                  ],
+                  "description": "OAuth scope of the closed catalogue (version 1, Platform Access identity/oauth_scopes.rs)."
+                },
+                "description": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string",
+                  "enum": [
+                    "user",
+                    "bot"
+                  ]
+                }
+              }
+            }
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          }
+        }
+      },
+      "OAuthAuthorizationResult": {
+        "description": "ADR 0064: the single-use authorization code (60 s, verifier-only, bound to client, redirect URI, PKCE challenge and grant) and the grant id.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "expiresIn",
+          "grantId"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^cfoc_(sbx|test|live)_[0-9a-f]{24}_[0-9a-f]{64}$"
+          },
+          "expiresIn": {
+            "type": "integer",
+            "const": 60
+          },
+          "grantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          }
+        }
+      },
+      "OAuthTokenRequest": {
+        "description": "ADR 0064: the token endpoint backend (camelCase; the Developer Console speaks RFC 6749 outside). grantType authorization_code needs code, redirectUri and codeVerifier; refresh_token needs refreshToken.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "clientId",
+          "clientSecret",
+          "grantType"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string"
+          },
+          "grantType": {
+            "type": "string",
+            "enum": [
+              "authorization_code",
+              "refresh_token"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "redirectUri": {
+            "type": "string"
+          },
+          "codeVerifier": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 128
+          },
+          "refreshToken": {
+            "type": "string"
+          }
+        }
+      },
+      "OAuthTokenResult": {
+        "description": "ADR 0064: issued tokens. accessToken cfoa_ (1 h), refreshToken cfor_ (90 d, rotating, single use), botToken cfob_ only on the first authorization-code exchange of an ORGANIZATION grant with bot scopes. scope: the grant's (accumulated) OAuth scopes.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accessToken",
+          "tokenType",
+          "expiresIn",
+          "refreshToken",
+          "scope",
+          "grant"
+        ],
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "pattern": "^cfoa_(sbx|test|live)_[0-9a-f]{24}_[0-9a-f]{64}$"
+          },
+          "tokenType": {
+            "type": "string",
+            "const": "Bearer"
+          },
+          "expiresIn": {
+            "type": "integer",
+            "const": 3600
+          },
+          "refreshToken": {
+            "type": "string",
+            "pattern": "^cfor_(sbx|test|live)_[0-9a-f]{24}_[0-9a-f]{64}$"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "grant": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "target"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              },
+              "target": {
+                "type": "string",
+                "enum": [
+                  "USER",
+                  "ORGANIZATION"
+                ]
+              },
+              "organizationId": {
+                "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+              }
+            }
+          },
+          "botToken": {
+            "type": "string",
+            "pattern": "^cfob_(sbx|test|live)_[0-9a-f]{24}_[0-9a-f]{64}$"
+          }
+        }
+      },
+      "OAuthRevokeRequest": {
+        "description": "ADR 0064: RFC 7009 revocation of an access, bot or refresh token owned by the authenticated client.",
+        "type": "object",
+        "required": [
+          "clientId",
+          "clientSecret",
+          "token"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "OAuthIntrospectRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "OAuthIntrospection": {
+        "description": "ADR 0064: active only for a live cfoa_ / cfob_ token of an ACTIVE grant with a FULL authority chain (refresh tokens are never active here). sub is pairwise: base64url(HMAC-SHA-256(server key, appId, subject)), subject = the account id (USER) or `organization:<id>` (ORGANIZATION); stable per app, different across apps.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "grantId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "appId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "accountId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "organizationId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "principalId": {
+            "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "chat:read:bot",
+                "chat:write:bot",
+                "events:meetings"
+              ],
+              "description": "OAuth scope of the closed catalogue (version 1, Platform Access identity/oauth_scopes.rs)."
+            }
+          },
+          "sub": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$"
+          },
+          "credentialKind": {
+            "type": "string",
+            "enum": [
+              "OAUTH_ACCESS",
+              "OAUTH_BOT"
+            ]
+          },
+          "expiresAt": {
+            "$ref": "https://schemas.cfmeet.com/platform-access/identity/v1.schema.json#/$defs/Timestamp"
+          }
+        }
+      },
+      "OAuthRevokeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
       }
     },
     "responses": {
@@ -1251,6 +2135,10 @@
     {
       "name": "Internal — Allowed Websites",
       "description": "ADR 0062: allowed websites (exact origins) of environments and their change feed (platform-environment-origins.read: API Gateway, Messaging, Calling, Meeting Service). Behind PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED; off: 404 NOT_FOUND."
+    },
+    {
+      "name": "Internal — CF Meet Apps (OAuth)",
+      "description": "ADR 0064 CF Meet Apps: OAuth client profiles and secrets (Developer Console), authorization requests, grants and uninstall (Meeting Service), and the token endpoint backend (Developer Console). Behind PLATFORM_ACCESS_OAUTH_ENABLED."
     }
   ],
   "paths": {
@@ -7601,6 +8489,715 @@
             "$ref": "#/components/responses/Error"
           },
           "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/clients/{applicationId}": {
+      "put": {
+        "operationId": "putOAuthClient",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Create or replace an app's OAuth client profile",
+        "description": "Permission `platform-oauth.manage` (Developer Console). The application must belong to an EXTERNAL tenant (FIRST_PARTY: POLICY_VIOLATION; unknown: NOT_FOUND). 201 when created, 200 when replaced. status SUSPENDED revokes every grant of the app (all tokens, bots deactivated, APP_GRANT changes) in the same transaction. Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The app's application id (= client id)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthClientRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthClient"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthClient"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getOAuthClient",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Read an app's OAuth client profile",
+        "description": "Permission `platform-oauth.manage`. Unknown client: NOT_FOUND. Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The app's application id (= client id)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthClient"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/clients/{applicationId}/secret": {
+      "post": {
+        "operationId": "issueOAuthClientSecret",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Issue / rotate the client secret",
+        "description": "Permission `platform-oauth.manage`. Returns the new secret ONCE (Cache-Control: no-store); the previous secret keeps authenticating for 24 h. Unknown client: NOT_FOUND. Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The app's application id."
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthClientSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/clients/{applicationId}/grants": {
+      "get": {
+        "operationId": "listOAuthClientGrants",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "List an app's grants",
+        "description": "Permission `platform-oauth.manage`. Every grant of the app (ACTIVE and REVOKED) in creation order; cursor = the last grant id of the previous page. Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The app's application id."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "Opaque cursor (nextCursor)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "description": "Page size 1-200 (default 50)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthGrantPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/authorization-requests/validate": {
+      "post": {
+        "operationId": "validateOAuthAuthorizationRequest",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Validate an authorization request",
+        "description": "Permission `platform-oauth.authorize` (Meeting Service). No side effect. 400 INVALID_CLIENT (unknown client), INVALID_REDIRECT_URI (not registered exactly, or localhost outside DRAFT), INVALID_SCOPE (empty, outside the catalogue, not requested by the client or not for the target), PKCE_REQUIRED (codeChallengeMethod must be S256 with a 43-character challenge), APP_NOT_AVAILABLE (distribution / status rules: SUSPENDED nobody, DRAFT test accounts only, PRIVATE allow lists, PUBLIC+PUBLISHED anyone); organization without a provisioned / active FIRST_PARTY scope: 409 INVALID_STATE. Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthAuthorizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizationContext"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/authorizations": {
+      "post": {
+        "operationId": "createOAuthAuthorization",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Approve an authorization: grant + code",
+        "description": "Permission `platform-oauth.authorize` (Meeting Service). Validates like /validate, then ensures the principal (USER: NATIVE_CF_USER cfmeet-user:<accountId> in CF Meet's FIRST_PARTY personal communications environment — the one named by the caller's signed delegated context, re-validated (FIRST_PARTY, FULL authority), or PLATFORM_ACCESS_OAUTH_PERSONAL_ENVIRONMENT_ID without a context; ORGANIZATION: BOT_OR_SERVICE app:<appId> in the organization's FIRST_PARTY triple) and the installation service account `app-<appId hex>` of the (app, environment), creates the grant or accumulates its scopes, and returns a single-use code (60 s). Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthAuthorizationApproval"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/grants": {
+      "get": {
+        "operationId": "listOAuthGrants",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "List an account's or organization's grants",
+        "description": "Permission `platform-oauth.authorize`. Exactly one of accountId (ACTIVE USER grants) or organizationId (ACTIVE ORGANIZATION grants). Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The CF Meet account."
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The CF Meet business organization."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthGrantList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/grants/{grantId}": {
+      "delete": {
+        "operationId": "revokeOAuthGrant",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Revoke (uninstall) a grant",
+        "description": "Permission `platform-oauth.authorize`. Idempotent: revokes every access / bot token and refresh token and pending code, deactivates the bot of an ORGANIZATION grant and records an APP_GRANT change with status REVOKED. Optional accountId / organizationId scope the call to that owner (another owner's grant: NOT_FOUND). Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "The grant id."
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "Optional owner account."
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "Optional owner organization."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthGrantResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/token": {
+      "post": {
+        "operationId": "exchangeOAuthToken",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Token endpoint backend",
+        "description": "Permission `platform-oauth.token` (Developer Console). Client authentication with the client secret. Errors carry RFC 6749 codes in error.code: invalid_request (400), invalid_client (401), invalid_grant (400: unknown / expired / foreign code or refresh token, wrong redirect URI, PKCE verifier mismatch, revoked grant), unsupported_grant_type (400). Presenting a consumed code or a superseded refresh token revokes the grant. Cache-Control: no-store. Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthTokenResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/revoke": {
+      "post": {
+        "operationId": "revokeOAuthToken",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Revoke a token (RFC 7009)",
+        "description": "Permission `platform-oauth.token`. Always 200 `{}`: a token is revoked only when the client authenticates and owns it (access / bot: the credential; refresh: that refresh token). Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthRevokeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthRevokeResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/oauth/introspect": {
+      "post": {
+        "operationId": "introspectOAuthToken",
+        "tags": [
+          "Internal — CF Meet Apps (OAuth)"
+        ],
+        "summary": "Introspect an app token",
+        "description": "Permission `platform-oauth.token`. Returns `{active:false}` for anything that does not authenticate now. Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthIntrospectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthIntrospection"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

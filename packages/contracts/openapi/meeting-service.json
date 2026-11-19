@@ -3736,6 +3736,40 @@
         ]
       }
     },
+    "/api/v2/app-context-keys": {
+      "get": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "Public keys of app-context tokens (JWKS).",
+        "operationId": "v2_app_context_keys",
+        "responses": {
+          "200": {
+            "description": "JWKS",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppContextKeySet"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/api/v2/avatars/{avatarId}": {
       "get": {
         "tags": [
@@ -3838,9 +3872,148 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read"
+      }
+    },
+    "/api/v2/conferences/{id}/apps": {
+      "get": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "Apps with an in-meeting panel for this conference.",
+        "description": "Apps installed for the meeting owner (personal install) or for the meeting's\norganization that declare a meeting surface. Admitted participants only.",
+        "operationId": "v2_list_conference_apps",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "In-meeting apps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceAppList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/apps/{appId}/context": {
+      "post": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "A 5-minute app-context token for an in-meeting app.",
+        "description": "An Ed25519 JWS (`aud` = the app's client id) carrying the conference, a pairwise\nparticipant id and the participant's role, plus the user's pairwise `sub` only if that\nuser granted the app. Verify it with `GET /api/v2/app-context-keys`.",
+        "operationId": "v2_create_app_context",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "description": "App id (OAuth client id)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Context token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppContextTokenResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND / APP_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
       }
     },
     "/api/v2/conferences/{id}/artifacts": {
@@ -4307,6 +4480,11 @@
           {
             "platformCredential": [
               "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
             ]
           }
         ],
@@ -5492,6 +5670,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write"
@@ -5960,6 +6143,11 @@
           {
             "platformCredential": [
               "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
             ]
           }
         ],
@@ -7120,6 +7308,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read"
@@ -7799,6 +7992,11 @@
           {
             "platformCredential": [
               "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
             ]
           }
         ],
@@ -10775,6 +10973,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write"
@@ -11248,6 +11451,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read"
@@ -11336,6 +11544,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write"
@@ -11404,6 +11617,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write"
@@ -11466,6 +11684,11 @@
           {
             "platformCredential": [
               "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
             ]
           }
         ],
@@ -11552,6 +11775,123 @@
           },
           "403": {
             "description": "REAUTHENTICATION_REQUIRED - missing, wrong, used or expired step-up token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/apps": {
+      "get": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "The signed-in account's connected apps (personal installs).",
+        "operationId": "v2_list_my_apps",
+        "responses": {
+          "200": {
+            "description": "Connected apps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAppList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/me/apps/{grantId}": {
+      "delete": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "Disconnect one of the signed-in account's apps (revokes the grant and every token).",
+        "operationId": "v2_revoke_my_app",
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "description": "Grant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "APP_NOT_FOUND / FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
             "content": {
               "application/json": {
                 "schema": {
@@ -13790,6 +14130,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read"
@@ -13893,6 +14238,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write"
@@ -13957,6 +14307,11 @@
           {
             "platformCredential": [
               "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
             ]
           }
         ],
@@ -14031,6 +14386,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write"
@@ -14096,6 +14456,11 @@
           {
             "platformCredential": [
               "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
             ]
           }
         ],
@@ -14231,6 +14596,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read"
@@ -14333,6 +14703,11 @@
           {
             "platformCredential": [
               "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
             ]
           }
         ],
@@ -14451,6 +14826,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read"
@@ -14534,6 +14914,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write"
@@ -14598,6 +14983,11 @@
           {
             "platformCredential": [
               "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
             ]
           }
         ],
@@ -17590,6 +17980,253 @@
         ]
       }
     },
+    "/api/v2/oauth/authorize/approve": {
+      "post": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "Approve or deny an app's authorization request.",
+        "description": "`APPROVE` creates (or extends) the grant at Platform Access — for a workspace install\nonly if the organization's app policy allows this account — and returns\n`redirect_uri?code=…&state=…`; `DENY` returns `redirect_uri?error=access_denied&state=…`.\nThe browser navigates to `redirectTo`.",
+        "operationId": "v2_oauth_authorize_decide",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthorizeDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Where to send the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizeDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OAUTH_REQUEST_INVALID / VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (the organization does not allow this install; the message starts with NOT_A_MEMBER, ROLE_REQUIRED, NOT_ALLOWLISTED or ORGANIZATION_NOT_READY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/oauth/authorize/context": {
+      "get": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "Consent data for an app's authorization request.",
+        "description": "The CF Meet consent page (`https://cfmeet.com/oauth/authorize`) forwards the app's\nauthorization request unchanged. The signed-in account is required; Platform Access\nvalidates the client, the exact redirect URI, the scopes and PKCE (S256 only) for that\naccount. A workspace install (`install=organization&organization_id=…`) also reports\nwhether the organization allows this account to install the app.",
+        "operationId": "v2_oauth_authorize_context",
+        "parameters": [
+          {
+            "name": "client_id",
+            "in": "query",
+            "description": "The app's OAuth client id (= app id).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "description": "Must exactly match a redirect URI registered for the app.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "Space-separated OAuth scopes (`profile:read meetings:write …`).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Opaque value echoed back to the app.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "code_challenge",
+            "in": "query",
+            "description": "PKCE S256 challenge (43-128 characters).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "code_challenge_method",
+            "in": "query",
+            "description": "Must be `S256`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "install",
+            "in": "query",
+            "description": "`organization` for a workspace install (default: a personal install).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "organization_id",
+            "in": "query",
+            "description": "The organization of a workspace install.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "nullable": true
+            }
+          },
+          {
+            "name": "response_type",
+            "in": "query",
+            "description": "Ignored (the response type is always `code`).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Consent data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizeContextResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OAUTH_REQUEST_INVALID (the message starts with INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED or APP_NOT_AVAILABLE; never redirect after INVALID_CLIENT / INVALID_REDIRECT_URI) / VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/organization-invitations/accept": {
       "post": {
         "tags": [
@@ -18151,6 +18788,165 @@
           },
           "409": {
             "description": "VERSION_CONFLICT / SLUG_TAKEN / ORGANIZATION_SUSPENDED / ORGANIZATION_ARCHIVED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/apps": {
+      "get": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "The apps installed for an organization (organization OWNER / ADMIN only).",
+        "operationId": "v2_list_organization_apps",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Installed apps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectedAppList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (organization administrators only)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "FEATURE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/api/v2/organizations/{id}/apps/{grantId}": {
+      "delete": {
+        "tags": [
+          "Apps (v2)"
+        ],
+        "summary": "Uninstall an app from an organization (revokes the grant, its tokens and its bot).",
+        "operationId": "v2_revoke_organization_app",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Organization id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "grantId",
+            "in": "path",
+            "description": "Grant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (organization administrators only)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "APP_NOT_FOUND / FEATURE_DISABLED",
             "content": {
               "application/json": {
                 "schema": {
@@ -23659,6 +24455,70 @@
           }
         }
       },
+      "AppContextJwk": {
+        "type": "object",
+        "required": [
+          "kty",
+          "crv",
+          "x",
+          "kid",
+          "use",
+          "alg"
+        ],
+        "properties": {
+          "alg": {
+            "type": "string"
+          },
+          "crv": {
+            "type": "string"
+          },
+          "kid": {
+            "type": "string"
+          },
+          "kty": {
+            "type": "string"
+          },
+          "use": {
+            "type": "string"
+          },
+          "x": {
+            "type": "string"
+          }
+        }
+      },
+      "AppContextKeySet": {
+        "type": "object",
+        "description": "JWKS of the app-context signing keys.",
+        "required": [
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AppContextJwk"
+            }
+          }
+        }
+      },
+      "AppContextTokenResponse": {
+        "type": "object",
+        "required": [
+          "contextToken",
+          "expiresIn"
+        ],
+        "properties": {
+          "contextToken": {
+            "type": "string",
+            "description": "Ed25519 JWS (verify with `GET /api/v2/app-context-keys`)."
+          },
+          "expiresIn": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds (300)."
+          }
+        }
+      },
       "AppointOrganizationOwnerRequest": {
         "type": "object",
         "description": "`POST /api/v2/admin/organizations/{id}/owners` (platform administrators).",
@@ -24059,6 +24919,112 @@
           }
         },
         "additionalProperties": false
+      },
+      "AuthorizeContextResponse": {
+        "type": "object",
+        "description": "Consent data for the consent page.",
+        "required": [
+          "app",
+          "scopes",
+          "target",
+          "redirectUri"
+        ],
+        "properties": {
+          "app": {
+            "$ref": "#/components/schemas/OauthAppSummary"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "organizationInstall": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrganizationInstallDecision"
+              }
+            ],
+            "nullable": true
+          },
+          "redirectUri": {
+            "type": "string",
+            "description": "The redirect URI Platform Access validated (exactly the requested one)."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OauthScopeView"
+            }
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "target": {
+            "type": "string",
+            "description": "`USER` or `ORGANIZATION`."
+          }
+        }
+      },
+      "AuthorizeDecisionRequest": {
+        "type": "object",
+        "description": "`POST /api/v2/oauth/authorize/approve`.",
+        "required": [
+          "clientId",
+          "redirectUri",
+          "scope",
+          "codeChallenge",
+          "codeChallengeMethod",
+          "decision"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "codeChallenge": {
+            "type": "string"
+          },
+          "codeChallengeMethod": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string",
+            "description": "`APPROVE` or `DENY`."
+          },
+          "install": {
+            "type": "string",
+            "description": "`organization` for a workspace install; absent or `user` for a personal install.",
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "redirectUri": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AuthorizeDecisionResponse": {
+        "type": "object",
+        "required": [
+          "redirectTo"
+        ],
+        "properties": {
+          "redirectTo": {
+            "type": "string",
+            "description": "Where the browser goes next: `redirect_uri?code=…&state=…` on approval,\n`redirect_uri?error=access_denied&state=…` on denial."
+          }
+        }
       },
       "BackfillReportResponse": {
         "type": "object",
@@ -25129,6 +26095,54 @@
           }
         }
       },
+      "ConferenceApp": {
+        "type": "object",
+        "description": "An app with a meeting surface installed for the meeting's owner or organization.",
+        "required": [
+          "appId",
+          "surface",
+          "installedFor"
+        ],
+        "properties": {
+          "appId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "developerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "installedFor": {
+            "type": "string",
+            "description": "`OWNER` (the meeting owner's personal install) or `ORGANIZATION`."
+          },
+          "logoUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "surface": {
+            "$ref": "#/components/schemas/MeetingSurfaceView"
+          }
+        }
+      },
+      "ConferenceAppList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConferenceApp"
+            }
+          }
+        }
+      },
       "ConferenceKind": {
         "type": "string",
         "enum": [
@@ -25362,6 +26376,80 @@
           },
           "status": {
             "$ref": "#/components/schemas/ConferenceStatus"
+          }
+        }
+      },
+      "ConnectedApp": {
+        "type": "object",
+        "description": "One installed app (a grant).",
+        "required": [
+          "grantId",
+          "appId",
+          "target",
+          "scopes",
+          "status",
+          "hasMeetingSurface"
+        ],
+        "properties": {
+          "appId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "developerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "grantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "hasMeetingSurface": {
+            "type": "boolean",
+            "description": "Whether the app has an in-meeting panel."
+          },
+          "logoUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string",
+            "description": "`USER` or `ORGANIZATION`."
+          }
+        }
+      },
+      "ConnectedAppList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConnectedApp"
+            }
           }
         }
       },
@@ -26849,6 +27937,8 @@
           "AVATAR_NOT_FOUND",
           "DEVICE_KEY_IN_USE",
           "DEVICE_LINK_INVALID",
+          "APP_NOT_FOUND",
+          "OAUTH_REQUEST_INVALID",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -28196,6 +29286,26 @@
           }
         }
       },
+      "MeetingSurfaceView": {
+        "type": "object",
+        "required": [
+          "url",
+          "origins"
+        ],
+        "properties": {
+          "origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Origins the panel's messaging bridge accepts."
+          },
+          "url": {
+            "type": "string",
+            "description": "The iframe URL (`https://`)."
+          }
+        }
+      },
       "MeetingType": {
         "type": "string",
         "enum": [
@@ -28804,6 +29914,56 @@
           "UNKNOWN"
         ]
       },
+      "OauthAppSummary": {
+        "type": "object",
+        "required": [
+          "clientId",
+          "name"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "developerName": {
+            "type": "string",
+            "nullable": true
+          },
+          "distribution": {
+            "type": "string",
+            "description": "`PRIVATE` or `PUBLIC`.",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`DRAFT`, `APPROVED`, `PUBLISHED` (or `SUSPENDED`, never authorizable).",
+            "nullable": true
+          }
+        }
+      },
+      "OauthScopeView": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "who": {
+            "type": "string",
+            "description": "`user` or `bot`.",
+            "nullable": true
+          }
+        }
+      },
       "OrganizationAuditActor": {
         "type": "object",
         "description": "Who performed an audited organization change.",
@@ -28905,6 +30065,23 @@
             "type": "integer",
             "format": "int64",
             "description": "Pass as `before` for the next (older) page; null on the last page.",
+            "nullable": true
+          }
+        }
+      },
+      "OrganizationInstallDecision": {
+        "type": "object",
+        "description": "The organization's install decision for a workspace install (Organizations policy).",
+        "required": [
+          "allowed"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "description": "`NOT_A_MEMBER`, `ROLE_REQUIRED`, `NOT_ALLOWLISTED` or `ORGANIZATION_NOT_READY`.",
             "nullable": true
           }
         }
@@ -34288,6 +35465,12 @@
         "type": "http",
         "scheme": "bearer"
       },
+      "oauthAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfoa_<sbx|test|live>_…",
+        "description": "OAuth access token of a CF Meet App acting for one CF Meet user (ADR 0064), sent to the public API Gateway as `Authorization: Bearer cfoa_…`. The roles listed are the OAuth scopes the grant must hold (meetings:read / meetings:write). The app acts as that user on the user's own meetings only (read: meetings the user owns, hosts or co-hosts; write: meetings the user owns; any other meeting is 404) and can never join, receive media, read recordings or administer. Bot tokens are refused."
+      },
       "participant_token": {
         "type": "apiKey",
         "in": "header",
@@ -34435,6 +35618,10 @@
     {
       "name": "Organizations (v2)",
       "description": "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. The Organizations Service is authoritative for organization data (production since the first activation): these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, teams, policies, ownership transfer, lifecycle, audit, provisioning). A deployment whose Organizations Service is not authoritative answers FEATURE_DISABLED. Organization Calling and Messaging relay allowlisted paths to the Calling and Messaging services, which own their data. The public Swagger selector serves these operations as the dedicated Organizations document."
+    },
+    {
+      "name": "Apps (v2)",
+      "description": "ADR 0064 / 0065 CF Meet Apps: the OAuth consent relay for https://cfmeet.com/oauth/authorize (the signed-in account approves or denies an app's authorization request; Platform Access is the token authority), the account's connected apps, an organization's installed apps (organization OWNER / ADMIN) and in-meeting apps (apps with a meeting surface installed for the meeting owner or organization, 5-minute Ed25519 app-context tokens and their public keys). Each feature is off unless enabled (FEATURE_DISABLED)."
     },
     {
       "name": "Compatibility (v2)",

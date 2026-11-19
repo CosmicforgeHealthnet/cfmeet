@@ -290,6 +290,8 @@ pub const MEETING_PERMISSIONS: &[&str] = &[
     "platform-principal.ensure",
     "platform-principal.ensure-meeting-platform",
     "platform-user-token.verify",
+    // ADR 0064: CF Meet Apps authorization.
+    "platform-oauth.authorize",
 ];
 /// Part VI §50: the Developer Platform delegates the workspace hierarchy and reads identity
 /// (+ ADR 0062: the partner Users API).
@@ -297,6 +299,9 @@ pub const DEVELOPER_PLATFORM_PERMISSIONS: &[&str] = &[
     "platform-identity.read",
     "platform-identity.delegate",
     "platform-end-users.delegate",
+    // ADR 0064: OAuth client profiles and the token endpoint backend.
+    "platform-oauth.manage",
+    "platform-oauth.token",
 ];
 /// Part VI §51: the API Gateway authenticates credentials (+ ADR 0062: user tokens and
 /// allowed websites).

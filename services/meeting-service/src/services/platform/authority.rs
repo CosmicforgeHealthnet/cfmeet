@@ -357,13 +357,25 @@ mod tests {
         // Incomplete: no grant, or not exactly one restricted principal.
         let mut bad = body.clone();
         bad.as_object_mut().unwrap().remove("grantId");
-        assert_eq!(AuthorityChain::from_answer(&bad).unwrap().oauth, Some(Err(())));
+        assert_eq!(
+            AuthorityChain::from_answer(&bad).unwrap().oauth,
+            Some(Err(()))
+        );
         let mut bad = body.clone();
         bad["authority"]["principalRestriction"] = json!(null);
-        assert_eq!(AuthorityChain::from_answer(&bad).unwrap().oauth, Some(Err(())));
+        assert_eq!(
+            AuthorityChain::from_answer(&bad).unwrap().oauth,
+            Some(Err(()))
+        );
         // References are canonical only.
-        assert_eq!(OauthCredential::account_of_reference(&format!("cfmeet-user:{}", account.simple())), None);
-        assert_eq!(OauthCredential::account_of_reference(&format!("app:{account}")), None);
+        assert_eq!(
+            OauthCredential::account_of_reference(&format!("cfmeet-user:{}", account.simple())),
+            None
+        );
+        assert_eq!(
+            OauthCredential::account_of_reference(&format!("app:{account}")),
+            None
+        );
     }
 
     #[test]
