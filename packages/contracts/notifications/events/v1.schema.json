@@ -2544,6 +2544,47 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": [
+          "recipients"
+        ],
+        "properties": {
+          "recipients": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "ref"
+              ],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^platform-principal:"
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "recipients": {
+            "items": {
+              "type": "object",
+              "required": [
+                "ref"
+              ],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^platform-principal:"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "x-cfmeet-catalogue": [

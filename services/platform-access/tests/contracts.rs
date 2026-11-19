@@ -511,6 +511,8 @@ async fn oauth_responses_conform_to_the_identity_contract() {
     assert_eq!(status.body["credentialKind"], "OAUTH_ACCESS");
     assert_eq!(status.body["scopes"], json!(["meetings.read"]));
     assert_eq!(status.body["grantId"], chain["grantId"]);
+    assert_eq!(status.body["restrictedPrincipal"]["kind"], "NATIVE_CF_USER");
+    assert!(chain["credentialIssuedAt"].is_string());
     let page = h
         .as_calling(
             Method::POST,

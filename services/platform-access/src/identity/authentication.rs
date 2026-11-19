@@ -771,46 +771,47 @@ fn evaluate(
     // ADR 0064: an OAuth token lives only while its grant, app and principal do; its
     // scopes are the grant's (live), mapped through the closed catalogue, STANDARD only;
     // its restriction is exactly the grant's principal.
-    let (scopes, credential_kind, app_id, grant_id, restricted_principal) = match (oauth, oauth_kind) {
-        (Some(o), Some(kind)) => {
-            if o.grant_status != "ACTIVE" || o.client_status == "SUSPENDED" {
-                return Err(R::CredentialRevoked);
+    let (scopes, credential_kind, app_id, grant_id, restricted_principal) =
+        match (oauth, oauth_kind) {
+            (Some(o), Some(kind)) => {
+                if o.grant_status != "ACTIVE" || o.client_status == "SUSPENDED" {
+                    return Err(R::CredentialRevoked);
+                }
+                if !o.app_active {
+                    return Err(R::CredentialSuspended);
+                }
+                match o.principal_status.as_str() {
+                    "ACTIVE" => {}
+                    "SUSPENDED" => return Err(R::CredentialSuspended),
+                    _ => return Err(R::CredentialRevoked),
+                }
+                if row.restricted_principals.as_deref() != Some(&[o.principal_id][..]) {
+                    return Err(R::CorruptAuthorityChain);
+                }
+                let scopes: Vec<String> =
+                    super::oauth_scopes::internal_scopes(o.scopes.iter().map(String::as_str))
+                        .into_iter()
+                        .filter(|s| {
+                            registry
+                                .definition(s)
+                                .is_some_and(|d| d.trust == super::scopes::ScopeTrust::Standard)
+                        })
+                        .collect();
+                let principal = RestrictedPrincipal {
+                    id: o.principal_id,
+                    kind: o.principal_kind,
+                    reference: o.principal_reference,
+                };
+                (
+                    scopes,
+                    Some(kind),
+                    Some(o.app_id),
+                    Some(o.grant_id),
+                    Some(principal),
+                )
             }
-            if !o.app_active {
-                return Err(R::CredentialSuspended);
-            }
-            match o.principal_status.as_str() {
-                "ACTIVE" => {}
-                "SUSPENDED" => return Err(R::CredentialSuspended),
-                _ => return Err(R::CredentialRevoked),
-            }
-            if row.restricted_principals.as_deref() != Some(&[o.principal_id][..]) {
-                return Err(R::CorruptAuthorityChain);
-            }
-            let scopes: Vec<String> =
-                super::oauth_scopes::internal_scopes(o.scopes.iter().map(String::as_str))
-                    .into_iter()
-                    .filter(|s| {
-                        registry
-                            .definition(s)
-                            .is_some_and(|d| d.trust == super::scopes::ScopeTrust::Standard)
-                    })
-                    .collect();
-            let principal = RestrictedPrincipal {
-                id: o.principal_id,
-                kind: o.principal_kind,
-                reference: o.principal_reference,
-            };
-            (
-                scopes,
-                Some(kind),
-                Some(o.app_id),
-                Some(o.grant_id),
-                Some(principal),
-            )
-        }
-        _ => (scopes, None, None, None, None),
-    };
+            _ => (scopes, None, None, None, None),
+        };
     let credential_issued_at = credential_kind.map(|_| credential.created_at);
     // Defence in depth: never report live telecom outside PRODUCTION.
     let mut environment = environment;

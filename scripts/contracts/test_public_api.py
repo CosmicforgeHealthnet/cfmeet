@@ -53,12 +53,15 @@ class RouteChecks(unittest.TestCase):
 
         marked = lambda op: {**op, "x-cfmeet-forward-authorization": True,
                              "security": [{"oauthAccessToken": []}]}
+        # The real contract already marks the OAuth token / revoke / userinfo routes.
+        baseline = sum(1 for r in public_api.build()["routes"] if r.get("forwardAuthorization"))
         try:
             public_api.operations = patched("developer-platform", "listScopeRegistry", marked)
             routes = public_api.build()["routes"]
             r = next(r for r in routes if r["id"] == "developer-platform.listScopeRegistry")
             self.assertEqual((r["auth"], r["forwardAuthorization"]), (["ANONYMOUS"], True))
-            self.assertEqual(sum(1 for r in routes if r.get("forwardAuthorization")), 1, "only the marked route")
+            self.assertEqual(sum(1 for r in routes if r.get("forwardAuthorization")), baseline + 1,
+                             "only the marked route is added")
             for name, (domain, op_id, mutate) in {
                 "other upstream": ("messaging", "listConversations", marked),
                 "not true": ("developer-platform", "listScopeRegistry",
@@ -72,8 +75,10 @@ class RouteChecks(unittest.TestCase):
                     public_api.build()
         finally:
             public_api.operations = original
-        # Unmarked operations carry no flag at all (the manifest stays unchanged).
-        self.assertFalse(any("forwardAuthorization" in r for r in public_api.build()["routes"]))
+        # Unmarked operations carry no flag at all: only the contract's marked OAuth routes do.
+        flagged = {r["id"] for r in public_api.build()["routes"] if "forwardAuthorization" in r}
+        self.assertEqual(len(flagged), baseline)
+        self.assertTrue(all(r.startswith("developer-platform.oauth") for r in flagged), flagged)
         self.assertFalse(public_api.forward_authorization("x.y", {}, {}, "cfmeet.developer-platform", "REST"))
         with self.assertRaises(public_api.CatalogueError):
             public_api.forward_authorization("x.y", {"x-cfmeet-forward-authorization": True}, {},

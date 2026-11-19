@@ -1053,6 +1053,10 @@ async fn an_organization_install_creates_the_bot_the_installation_account_and_a_
         );
         assert_eq!(chain["scopes"], json!(["messages.read", "messages.send"]));
         assert_eq!(chain["principalRestriction"], json!([bot_principal]));
+        assert_eq!(
+            chain["restrictedPrincipal"],
+            json!({ "id": bot_principal, "kind": "BOT_OR_SERVICE", "reference": format!("app:{app}") })
+        );
         assert_eq!(chain["grantId"], grant.to_string());
     }
     // The bot token is issued once per grant.
@@ -1344,4 +1348,148 @@ async fn with_the_flag_off_every_route_is_unknown_and_app_tokens_never_authentic
         h.authenticate(&access).await.body["outcome"],
         "AUTHENTICATED"
     );
+}
+
+#[tokio::test]
+async fn presentation_grant_listings_and_the_restricted_principal() {
+    let Some(h) = harness().await else {
+        return;
+    };
+    let p = personal(&h).await;
+    let presented = with(
+        client("PUBLISHED", "PUBLIC"),
+        json!({
+            "developerName": "Acme Apps",
+            "logoUrl": "https://cdn.example.com/logo.png",
+            "meetingSurface": {
+                "url": "https://meet.example.com/panel",
+                "origins": ["https://meet.example.com", "https://meet.example.com", "https://cdn.example.com:8443"],
+            },
+        }),
+    );
+    let (app, secret) = new_app(&h, "presented", presented.clone()).await;
+    let path = format!("/internal/v1/oauth/clients/{app}");
+    let profile = dev(&h, Method::GET, &path, None).await.body;
+    assert_eq!(profile["developerName"], "Acme Apps");
+    assert_eq!(profile["logoUrl"], "https://cdn.example.com/logo.png");
+    let surface = json!({
+        "url": "https://meet.example.com/panel",
+        "origins": ["https://meet.example.com", "https://cdn.example.com:8443"],
+    });
+    assert_eq!(profile["meetingSurface"], surface);
+    for bad in [
+        json!({ "logoUrl": "http://cdn.example.com/logo.png" }),
+        json!({ "logoUrl": format!("https://cdn.example.com/{}", "x".repeat(512)) }),
+        json!({ "developerName": "" }),
+        json!({ "meetingSurface": { "url": "http://meet.example.com", "origins": [] } }),
+        json!({ "meetingSurface": { "url": "https://meet.example.com", "origins": ["https://meet.example.com/path"] } }),
+        json!({ "meetingSurface": { "url": "https://meet.example.com", "origins": ["http://localhost:3000"] } }),
+        json!({ "meetingSurface": { "url": "https://meet.example.com",
+            "origins": (0..11).map(|i| format!("https://o{i}.example.com")).collect::<Vec<_>>() } }),
+    ] {
+        let r = dev(
+            &h,
+            Method::PUT,
+            &path,
+            Some(with(presented.clone(), bad.clone())),
+        )
+        .await;
+        assert_eq!(r.code(), "VALIDATION_ERROR", "{bad}: {}", r.body);
+    }
+    // The consent screen shows the override.
+    let account = Uuid::new_v4();
+    let ctx = validate(&h, request(app, account, "meetings:read")).await;
+    assert_eq!(ctx.body["app"]["developerName"], "Acme Apps");
+
+    let (code, grant) = user_code(&h, &p, app, account, "meetings:read").await;
+    let t = exchange(&h, app, &secret, &code).await;
+    let access = s(&t.body, "accessToken");
+    let sub = s(&introspect(&h, &access).await, "sub");
+
+    // Grant listings: the app as shown, and the pairwise sub of the grant.
+    let mine = meeting(
+        &h,
+        Method::GET,
+        &format!("/internal/v1/oauth/grants?accountId={account}"),
+        None,
+        None,
+    )
+    .await;
+    let item = &mine.body["items"][0];
+    assert_eq!(item["id"], grant.to_string());
+    assert_eq!(item["appId"], app.to_string());
+    assert_eq!(item["target"], "USER");
+    assert_eq!(item["accountId"], account.to_string());
+    assert_eq!(item["scopes"], json!(["meetings:read"]));
+    assert_eq!(item["status"], "ACTIVE");
+    assert!(item["createdAt"].is_string());
+    assert_eq!(
+        item["app"],
+        json!({ "name": "Calendar Sync", "developerName": "Acme Apps",
+                "logoUrl": "https://cdn.example.com/logo.png", "meetingSurface": surface })
+    );
+    assert_eq!(item["sub"], json!(sub));
+    let by_app = dev(
+        &h,
+        Method::GET,
+        &format!("/internal/v1/oauth/clients/{app}/grants"),
+        None,
+    )
+    .await;
+    assert_eq!(by_app.body["items"][0]["sub"], json!(sub));
+    assert_eq!(by_app.body["items"][0]["app"]["developerName"], "Acme Apps");
+
+    // Authentication and the credential lookup name the restricted principal and issue time.
+    let user = principal_id(&h, &format!("cfmeet-user:{account}")).await;
+    let a = h.authenticate(&access).await;
+    let chain = &a.body["authority"];
+    let restricted = json!({ "id": user, "kind": "NATIVE_CF_USER", "reference": format!("cfmeet-user:{account}") });
+    assert_eq!(chain["restrictedPrincipal"], restricted);
+    assert_eq!(
+        chain["credentialIssuedAt"],
+        chain["credential"]["createdAt"]
+    );
+    let lookup_ctx = DelegatedPlatformContext::new(
+        p.tenant_id,
+        p.application_id,
+        p.env("PRODUCTION"),
+        cf_service_auth::ApplicationEnvironmentKind::Production,
+        uuid(&chain["serviceAccount"]["id"]),
+    );
+    let lookup = h
+        .as_calling(
+            Method::GET,
+            &format!("/internal/v1/credentials/{}", s(&chain["credential"], "id")),
+            None,
+            Some(lookup_ctx),
+        )
+        .await;
+    assert_eq!(lookup.status, StatusCode::OK, "{}", lookup.body);
+    assert_eq!(lookup.body["restrictedPrincipal"], restricted);
+    assert_eq!(lookup.body["credentialKind"], "OAUTH_ACCESS");
+    assert_eq!(
+        lookup.body["credentialIssuedAt"],
+        chain["credentialIssuedAt"]
+    );
+    // API keys carry neither.
+    let c = h.consumer("keyonly", "EXTERNAL", &["calls.read"]).await;
+    let (_, key) = h.issue(c.sa("SANDBOX"), &["calls.read"]).await;
+    let plain = h.authenticate(&key).await;
+    assert!(plain.body["authority"].get("restrictedPrincipal").is_none());
+    assert!(plain.body["authority"].get("credentialIssuedAt").is_none());
+
+    // Uninstall returns the grant with its sub; a full replacement clears the presentation.
+    let del = meeting(
+        &h,
+        Method::DELETE,
+        &format!("/internal/v1/oauth/grants/{grant}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(del.body["grant"]["sub"], json!(sub));
+    let r = dev(&h, Method::PUT, &path, Some(client("PUBLISHED", "PUBLIC"))).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    assert!(r.body["logoUrl"].is_null() && r.body["meetingSurface"].is_null());
+    assert_eq!(r.body["developerName"], "presented tenant");
 }

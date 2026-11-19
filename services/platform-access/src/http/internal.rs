@@ -417,10 +417,7 @@ struct OAuthFacts {
 }
 
 /// ADR 0064: `(kind, appId, grantId, mapped internal scopes)` of an OAuth token credential.
-async fn oauth_facts(
-    state: &AppState,
-    credential_id: Uuid,
-) -> AccessResult<Option<OAuthFacts>> {
+async fn oauth_facts(state: &AppState, credential_id: Uuid) -> AccessResult<Option<OAuthFacts>> {
     if !state.build.oauth_enabled {
         return Ok(None);
     }

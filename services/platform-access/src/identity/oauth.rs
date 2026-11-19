@@ -506,8 +506,9 @@ fn meeting_surface(url: &str, origins: &[String]) -> PlatformResult<MeetingSurfa
                 "meetingSurface.origins must be exact https:// origins".into(),
             ));
         }
-        let origin = super::environment_origins::validate_origin(origin, EnvironmentKind::Production)
-            .map_err(PlatformError::Validation)?;
+        let origin =
+            super::environment_origins::validate_origin(origin, EnvironmentKind::Production)
+                .map_err(PlatformError::Validation)?;
         if !out.contains(&origin) {
             out.push(origin);
         }

@@ -207,7 +207,8 @@
           "UPSTREAM_UNAVAILABLE",
           "UPSTREAM_TIMEOUT",
           "SERVICE_UNAVAILABLE",
-          "INTERNAL_ERROR"
+          "INTERNAL_ERROR",
+          "CREDENTIAL_NOT_ACCEPTED"
         ]
       },
       "platform.common.v1.ApplicationEnvironmentKind": {
