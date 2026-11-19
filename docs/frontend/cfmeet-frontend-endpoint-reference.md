@@ -14,16 +14,16 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
-| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.7.0 | 307 |
+| Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.8.0 | 312 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.8.0 | 74 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.30.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.22.0 | 108 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.8.0 | 101 |
-| **Total** | | | **736** |
+| **Total** | | | **741** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
-Contract `packages/contracts/openapi/meeting-service.json` version **1.7.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
+Contract `packages/contracts/openapi/meeting-service.json` version **1.8.0**; base URL env `NEXT_PUBLIC_API_URL`. Direct to the Meeting Service with the account session (`Authorization: Bearer <access token>`); guests use `X-Participant-Token`.
 
 ### API Keys
 
@@ -185,10 +185,12 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.7.0**; ba
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| GET | `/api/v2/calendar-feeds/{file}` | optional / public | Read a calendar feed (audit MF2). | 200, 404 | CALENDAR_FEED_NOT_FOUND | `openapi/meeting-service.json#v2_read_calendar_feed` |
 | GET | `/api/v2/conferences/{id}` | optional / public; account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Read a conference. Callers without authority get the SUMMARY view. | 200, 404 | CONFERENCE_NOT_FOUND | `openapi/meeting-service.json#v2_get_conference` |
 | GET | `/api/v2/conferences/{id}/calendar.ics` | account session; participant token | Export one conference occurrence as an iCalendar (RFC 5545) file. | 200, 403, 404, 409 | CONFERENCE_NOT_FOUND, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_conference_calendar` |
 | POST | `/api/v2/conferences/{id}/cancel` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Cancel an unstarted conference (single-occurrence exception for recurring series). | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_cancel_conference` |
 | POST | `/api/v2/conferences/{id}/end` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | LIVE → ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E). | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_end_conference` |
+| POST | `/api/v2/conferences/{id}/extend` | account session; participant token | Extend a live conference (MF1). | 200, 400, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_extend_conference` |
 | POST | `/api/v2/conferences/{id}/join` | optional / public; account session; participant token; CF Meet user token (partner end-user device) | Join (or reconnect to) a conference. | 200, 401, 403, 404, 409, 410, 503 | AUTHENTICATION_REQUIRED, CONFERENCE_LOCKED, CONFERENCE_NOT_FOUND, CONFERENCE_NOT_LIVE, INVITATION_EXPIRED, INVITATION_INVALID, MEETING_ACCESS_DENIED, MEETING_CAPACITY_REACHED, MEETING_PASSCODE_INVALID, MEETING_PASSCODE_REQUIRED, PARTICIPANT_BANNED, RTC_PROVIDER_UNAVAILABLE, SERVICE_UNAVAILABLE | `openapi/meeting-service.json#v2_join_conference` |
 | POST | `/api/v2/conferences/{id}/leave` | account session; participant token | Leave: close the caller's own session(s). Admission is unchanged. | 200, 404 | PARTICIPANT_NOT_FOUND | `openapi/meeting-service.json#v2_leave_conference` |
 | POST | `/api/v2/conferences/{id}/lock` | account session; participant token | Lock a live conference: no new non-exempt entrants. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_lock_conference` |
@@ -196,6 +198,9 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.7.0**; ba
 | POST | `/api/v2/conferences/{id}/reschedule` | account session | Reschedule one unstarted occurrence (series untouched). | 200, 400, 409 | CONFERENCE_STATE_CONFLICT, MEETING_VERSION_CONFLICT, VALIDATION_ERROR | `openapi/meeting-service.json#v2_reschedule_conference` |
 | POST | `/api/v2/conferences/{id}/start` | account session; participant token; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Start a conference. Concurrent starts yield exactly one LIVE authority. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_start_conference` |
 | POST | `/api/v2/conferences/{id}/unlock` | account session; participant token | Unlock a live conference. | 200, 403, 409 | CONFERENCE_NOT_LIVE, CONFERENCE_STATE_CONFLICT, PERMISSION_DENIED | `openapi/meeting-service.json#v2_unlock_conference` |
+| DELETE | `/api/v2/me/calendar-feed` | account session | Delete my calendar feed (audit MF2). | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_delete_calendar_feed` |
+| GET | `/api/v2/me/calendar-feed` | account session | My calendar feed (audit MF2). | 200, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_get_calendar_feed` |
+| POST | `/api/v2/me/calendar-feed` | account session | Create (or replace) my calendar feed (audit MF2). | 201, 401 | AUTHENTICATION_REQUIRED | `openapi/meeting-service.json#v2_create_calendar_feed` |
 | GET | `/api/v2/me/conferences` | account session | List the caller's occurrences across meeting spaces (agenda / calendar range). | 200, 400, 401, 403 | AUTHENTICATION_REQUIRED, PERMISSION_DENIED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_my_conferences` |
 | GET | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | List occurrences of a meeting space (members only). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_conferences` |
 | POST | `/api/v2/meeting-spaces/{id}/conferences` | account session; platform credential (server-side only); CF Meet app access token (OAuth, server-side only) | Create a one-time scheduled conference occurrence. | 201, 400, 403, 409, 429 | CONFERENCE_STATE_CONFLICT, IDEMPOTENCY_CONFLICT, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR | `openapi/meeting-service.json#v2_create_conference` |
@@ -483,7 +488,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.7.0**; ba
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/meeting-spaces/{id}/registrations` | account session | Registrations of a meeting space (organizer view). | 200, 403 | PERMISSION_DENIED | `openapi/meeting-service.json#v2_list_registrations` |
-| POST | `/api/v2/meeting-spaces/{id}/registrations` | optional / public; account session | Register for a webinar / town hall (public when the profile enables registration). | 200, 201, 400, 404, 409, 429 | RATE_LIMITED, REGISTRATION_CLOSED, REGISTRATION_DISABLED, REGISTRATION_DUPLICATE, REGISTRATION_FULL, VALIDATION_ERROR | `openapi/meeting-service.json#v2_register` |
+| POST | `/api/v2/meeting-spaces/{id}/registrations` | optional / public; account session | Register for a webinar / town hall (public when the profile enables registration). | 200, 201, 400, 404, 409, 429 | IDEMPOTENCY_CONFLICT, RATE_LIMITED, REGISTRATION_CLOSED, REGISTRATION_DISABLED, REGISTRATION_DUPLICATE, REGISTRATION_FULL, VALIDATION_ERROR | `openapi/meeting-service.json#v2_register` |
 | DELETE | `/api/v2/meeting-spaces/{id}/registrations/{registrationId}` | account session | Cancel a registration (revokes its admission token). | 200, 403, 404 | PERMISSION_DENIED, REGISTRATION_NOT_FOUND | `openapi/meeting-service.json#v2_cancel_registration` |
 | GET | `/api/v2/meeting-spaces/{id}/registrations/{registrationId}` | account session | One registration (organizer view). | 200, 403, 404 | PERMISSION_DENIED, REGISTRATION_NOT_FOUND | `openapi/meeting-service.json#v2_get_registration` |
 | POST | `/api/v2/registrations/cancel` | optional / public | Cancel my own registration (with its admission token). | 200, 400, 404 | REGISTRATION_NOT_FOUND, VALIDATION_ERROR | `openapi/meeting-service.json#v2_cancel_own_registration` |

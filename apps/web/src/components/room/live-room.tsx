@@ -341,7 +341,7 @@ function RoomContent({ joinData, isSidebarOpen, setIsSidebarOpen, onLeave, onCre
               <VideoGridContent layout={layout} />
             </StageContext.Provider>
             <ReactionOverlay />
-            <RoomNotices onOpenPanel={(panel) => { setSidebarPanel(panel); setIsSidebarOpen(true); }} />
+            <RoomNotices onOpenPanel={(panel) => { setSidebarPanel(panel); setIsSidebarOpen(true); }} onExtend={canEnd ? (minutes) => conferencesService.extend(joinData.conferenceId, minutes) : undefined} />
             <CaptionsOverlay conferenceId={joinData.conferenceId} on={captionsOn} />
 
             {/* Participant Notifications */}

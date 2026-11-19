@@ -63,3 +63,7 @@ path = "src/gap-closure-main.rs"
 [[bin]]
 name = "platform-build-migration"
 path = "src/platform-build-main.rs"
+
+[[bin]]
+name = "meeting-audit-migration"
+path = "src/meeting-audit-main.rs"

@@ -48,6 +48,7 @@ mod m20261118_000005_chat_message_edits;
 mod m20261118_000006_account_notices;
 mod m20261118_000006_team_channel_sync;
 mod m20261118_000007_platform_user_participants;
+mod m20261119_000001_calendar_feeds;
 
 pub mod phase2_backfill;
 
@@ -515,6 +516,31 @@ pub async fn platform_build_ready<C: sea_orm_migration::sea_orm::ConnectionTrait
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<PlatformBuildMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// Server audit closure (audit MF2): private, revocable calendar feed tokens. A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Not required at startup: only the calendar-feed endpoints use it (they answer
+/// FEATURE_DISABLED until `meeting-audit-migration up` has run).
+pub struct MeetingAuditMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for MeetingAuditMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261119_000001_calendar_feeds::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_audit_closure_migrations").into_iden()
+    }
+}
+
+/// The audit-closure history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn meeting_audit_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<MeetingAuditMigrator, _>(db)
         .await?
         .is_empty())
 }

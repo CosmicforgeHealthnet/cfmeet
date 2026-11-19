@@ -14,7 +14,7 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.7.0"
+      "description": "cfmeet.meeting-service.http-api 1.8.0"
     },
     {
       "name": "calling",
@@ -2520,6 +2520,94 @@
         ],
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_export_report",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION",
+          "PARTICIPANT_TOKEN"
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/extend": {
+      "post": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Extend a live conference (MF1).",
+        "description": "Adds `minutes` (1 to 240) to the scheduled end of a LIVE conference, counted from now when the\nscheduled end has already passed (the grace period before the automatic end). Requires a role\nholding `conference.end` (host or co-host). Everyone in the conference receives\n`conference.extended` with the new `scheduledEndAt` and `autoEndAt`; a new `conference.ending_soon`\nwarning is sent 5 minutes before the new automatic end. A conference that is not live returns\nCONFERENCE_NOT_LIVE; one without a scheduled end (never ended automatically) returns\nCONFERENCE_STATE_CONFLICT; the conference may run at most 24 hours.",
+        "operationId": "v2_extend_conference",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/meetings.ExtendConferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Extended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ConferenceActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_NOT_LIVE / CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "meetings.bearer_auth": []
+          },
+          {
+            "meetings.participant_token": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_extend_conference",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN"
@@ -10732,7 +10820,7 @@
           "meetings"
         ],
         "summary": "Register for a webinar / town hall (public when the profile enables registration).",
-        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
+        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns an admission token for joining as a viewer. No sign-in is needed; a signed-in caller's\naccount is linked to the registration. Which fields (email, organization, custom fields) are\nrequired or accepted is set by the meeting profile. When an email is given, the join link\n(`{app}/invite#<token>`, with a calendar invitation for a scheduled occurrence) is also emailed\nto it once (`emailDelivery`). Repeating a request with the same `idempotencyKey` returns 200 with\nthe existing registration and the same token (no second seat, no second email); a different\nrequest under the same key is IDEMPOTENCY_CONFLICT. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
         "operationId": "v2_register",
         "parameters": [
           {
@@ -10798,7 +10886,7 @@
             }
           },
           "409": {
-            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL",
+            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL / IDEMPOTENCY_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -63793,6 +63881,7 @@
           "DEVICE_LINK_INVALID",
           "APP_NOT_FOUND",
           "OAUTH_REQUEST_INVALID",
+          "CALENDAR_FEED_NOT_FOUND",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -63864,6 +63953,23 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "meetings.ExtendConferenceRequest": {
+        "type": "object",
+        "description": "MF1: extend a live conference's scheduled end.",
+        "required": [
+          "minutes"
+        ],
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Minutes added to the scheduled end (or to now, when the scheduled end has already\npassed and the meeting is in its grace period): 1 to 240.",
+            "maximum": 240,
+            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -67065,7 +67171,7 @@
               "string",
               "null"
             ],
-            "description": "Opaque admission token (shown once; only its hash is stored). Absent for an\nidempotent repeat."
+            "description": "Opaque admission token (only its hash is stored). An idempotent repeat (same\n`idempotencyKey` and request) returns the same token while the registration is\nactive (audit M10); absent once it was cancelled or revoked."
           },
           "conferenceId": {
             "type": [
@@ -67076,6 +67182,20 @@
           },
           "created": {
             "type": "boolean"
+          },
+          "emailDelivery": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/meetings.EmailDelivery"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "expiresAt": {
             "type": "string",

@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 use crate::{
     domain::{ConferenceKind, ConferenceStatus, RecordOrigin, SpaceStatus, TerminationReason},
-    dto::v2::{CreateConferenceRequest, RescheduleConferenceRequest},
+    dto::v2::{CreateConferenceRequest, ExtendConferenceRequest, RescheduleConferenceRequest},
     error::{ApiError, ApiResult, ErrorCode},
     models::{conference_sessions, meeting_spaces},
     services::{
@@ -208,6 +208,43 @@ pub fn conference_event<'a>(
             "version": c.version,
         }),
     }
+}
+
+/// MF1: the most minutes one extension adds.
+pub const MAX_EXTEND_MINUTES: u32 = 240;
+/// MF1 / audit M2: everyone is warned this many minutes before the automatic end.
+pub const AUTO_END_WARNING_MINUTES: i64 = 5;
+/// Audit M2: legacy meetings get the v2 default auto-end grace (`autoEndGraceMinutes`).
+pub const LEGACY_AUTO_END_GRACE_MINUTES: i64 = 15;
+
+/// When a conference with a scheduled end is ended automatically: scheduled end + the
+/// space's `autoEndGraceMinutes` (v2; `None` when `autoEnd` is off), or + 15 minutes for a
+/// legacy meeting's conference.
+pub fn auto_end_at(
+    conference: &conference_sessions::Model,
+    space: &meeting_spaces::Model,
+) -> Option<DateTime<Utc>> {
+    let end = conference.scheduled_end_at?;
+    if conference.origin == RecordOrigin::Legacy {
+        return Some(end + Duration::minutes(LEGACY_AUTO_END_GRACE_MINUTES));
+    }
+    let policy = schedule_policy(space);
+    policy
+        .auto_end
+        .then(|| end + Duration::minutes(policy.auto_end_grace_minutes as i64))
+}
+
+/// MF1: `conference.ending_soon` for a conference whose automatic end is `auto_end`.
+pub fn ending_soon_event<'a>(
+    c: &conference_sessions::Model,
+    auto_end: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> OutboxRecord<'a> {
+    let mut record = conference_event(c, event::CONFERENCE_ENDING_SOON);
+    record.payload["scheduledEndAt"] = json!(c.scheduled_end_at);
+    record.payload["autoEndAt"] = json!(auto_end);
+    record.payload["minutesRemaining"] = json!(((auto_end - now).num_seconds().max(0) + 59) / 60);
+    record
 }
 
 /// Result of a state-changing conference operation.
@@ -1009,6 +1046,94 @@ impl ConferenceService {
             ctx.user_id(),
         )
         .await?;
+        txn.commit().await?;
+        Ok(ConferenceOutcome::changed(
+            updated,
+            Enforcement::NotRequired,
+        ))
+    }
+
+    /// MF1: a host (`conference.end`) extends the scheduled end of a LIVE conference by
+    /// `minutes` (1 to [`MAX_EXTEND_MINUTES`]), from the current scheduled end or from now
+    /// when it has already passed (grace period). Everyone in the conference is told
+    /// (`conference.extended` with the new `scheduledEndAt` / `autoEndAt`), and a new
+    /// ending-soon warning follows before the new automatic end. A legacy meeting's
+    /// conference is extended on its legacy row as well (the legacy auto-end reads it).
+    pub async fn extend(
+        &self,
+        ctx: &ActorContext,
+        id: Uuid,
+        req: ExtendConferenceRequest,
+    ) -> ApiResult<ConferenceOutcome> {
+        if !(1..=MAX_EXTEND_MINUTES).contains(&req.minutes) {
+            return Err(ApiError::ValidationError(format!(
+                "minutes must be between 1 and {MAX_EXTEND_MINUTES}"
+            )));
+        }
+        let txn = self.core.db.begin().await?;
+        let conference = lock_conference(&txn, id).await?;
+        let space = find_space(&txn, conference.meeting_space_id).await?;
+        let authority = self
+            .authority_for(&txn, &space, id, ctx, Permission::ConferenceEnd)
+            .await?;
+        if conference.status != ConferenceStatus::Live {
+            return Err(ApiError::domain(
+                ErrorCode::ConferenceNotLive,
+                "Only a live conference can be extended",
+            ));
+        }
+        let Some(end) = conference.scheduled_end_at else {
+            return Err(state_conflict(
+                "This conference has no scheduled end; it is never ended automatically",
+            ));
+        };
+        let now = Utc::now();
+        let new_end = end.max(now) + Duration::minutes(req.minutes as i64);
+        let began = conference
+            .started_at
+            .or(conference.scheduled_start_at)
+            .unwrap_or(now)
+            .min(now);
+        if new_end - began > Duration::hours(24) {
+            return Err(ApiError::ValidationError(
+                "A conference can run at most 24 hours from its start".into(),
+            ));
+        }
+        let legacy = conference.origin == RecordOrigin::Legacy;
+        if legacy {
+            let Some(legacy_id) = space.legacy_meeting_id else {
+                return Err(state_conflict(
+                    "This legacy conference has no legacy meeting",
+                ));
+            };
+            txn.execute(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DbBackend::Postgres,
+                "UPDATE meetings SET end_time = $2, updated_at = $3 WHERE id = $1 AND status = 'ongoing'",
+                [
+                    legacy_id.into(),
+                    new_end.naive_utc().into(),
+                    now.naive_utc().into(),
+                ],
+            ))
+            .await?;
+        }
+        let mut am: conference_sessions::ActiveModel = conference.clone().into();
+        am.scheduled_end_at = Set(Some(new_end));
+        let updated = self.apply(&txn, conference, am).await?;
+        self.record(
+            &txn,
+            &authority.audit,
+            &updated,
+            action::CONFERENCE_EXTEND,
+            &[],
+            json!({ "from": end, "to": new_end, "minutes": req.minutes }),
+        )
+        .await?;
+        let mut record = conference_event(&updated, event::CONFERENCE_EXTENDED);
+        record.payload["scheduledEndAt"] = json!(new_end);
+        record.payload["autoEndAt"] = json!(auto_end_at(&updated, &space));
+        record.payload["minutes"] = json!(req.minutes);
+        emit(&txn, record).await?;
         txn.commit().await?;
         Ok(ConferenceOutcome::changed(
             updated,

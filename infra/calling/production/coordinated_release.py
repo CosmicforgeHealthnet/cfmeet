@@ -75,6 +75,10 @@ WEB_ORIGIN = 'https://cfmeet.com'
 # Every browser origin of the production web app: cfmeet.com redirects to www.cfmeet.com
 # (Vercel), so the browser's Origin is normally the www form.
 WEB_ORIGINS = (WEB_ORIGIN, 'https://www.cfmeet.com')
+# M1: production answers browser requests from the production web origins only. Every
+# release of an existing service re-applies these settings (staging and local keep theirs;
+# they never run through this module), and verify checks them.
+RELEASE_PINNED_ENV = {'meeting-service': {'FRONTEND_URLS': ','.join(WEB_ORIGINS)}}
 SHA_RE = re.compile(r'[a-f0-9]{40}')
 RUN_RE = re.compile(r'[0-9]{1,20}(-[0-9]{1,4})?')  # run id, optionally -attempt
 
@@ -156,7 +160,7 @@ SERVICES = {
                     'profile-notifications-migration', 'account-hardening-migration',
                     'organization-integration-migration', 'account-communications-migration',
                     'lifecycle-delivery-migration', 'notification-fence-migration',
-                    'gap-closure-migration', 'platform-build-migration'],
+                    'gap-closure-migration', 'platform-build-migration', 'meeting-audit-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
@@ -1242,7 +1246,7 @@ def deploy(name, image_id, sha, run_id, entry):
             return
         if not c['State']['Running']:
             raise RuntimeError('Existing service container is not running; refusing to replace it: ' + container)
-        cfg = release.clone(c, container, image_id, {}, False)
+        cfg = release.clone(c, container, image_id, RELEASE_PINNED_ENV.get(name, {}), False)
         labels = cfg.setdefault('Labels', {}) or {}
         cfg['Labels'] = labels
         # The cloned container labels would shadow the new image's OCI labels (Docker keeps
@@ -1313,6 +1317,9 @@ def safe_defaults():
     if done('activate-notifications-push'):
         for name in ('notifications', 'notifications-2'):
             rules[name]['NOTIFICATIONS_PUSH_PROVIDER'] = (None, '', 'none', 'live')
+    # Audit M4: the Meeting in-app-only path is on only after its gated activation.
+    rules.setdefault('meeting-service', {})[notif_ops.MEETING_IN_APP_FLAG] = \
+        (None, '', 'false', 'true') if done(notif_ops.MEETING_IN_APP_OPERATION) else (None, '', 'false')
     # CF Meet Platform "Build" flags: off until their activation is recorded (platform_operations).
     for name, flags in platform_ops.safe_default_rules(done).items():
         rules.setdefault(name, {}).update(flags)
@@ -1552,6 +1559,7 @@ def verify(sha, run_id):
             checks['routing_protocol ' + name] = 'FAIL'
     violations = safe_default_violations(running_envs())
     checks['provider_features_off'] = 'PASS' if not violations else 'FAIL'
+    checks.update(pinned_env_checks(running_envs()))
     checks.update(public_smoke())
     if SERVICES['organizations']['container'] in container_names():
         delivery = classify_event_delivery(event_delivery(), configured_event_destinations(
@@ -1563,6 +1571,12 @@ def verify(sha, run_id):
     failed = [k for k, v in checks.items() if v != 'PASS']
     if failed:
         raise RuntimeError('Verification failed: ' + ', '.join(failed))
+
+
+def pinned_env_checks(envs):
+    """M1: every RELEASE_PINNED_ENV setting holds on the running container."""
+    return {'pinned %s %s' % (name, key): 'PASS' if (envs.get(name) or {}).get(key) == value else 'FAIL'
+            for name, pins in RELEASE_PINNED_ENV.items() for key, value in pins.items()}
 
 
 # --- rollback --------------------------------------------------------------------------------
@@ -2763,6 +2777,11 @@ ACTIVATIONS = {
     # Document 4 §9.6: one producer fence row per run, LEGACY_ONLY <-> SHADOW only, reversible.
     'activate-notification-fence': ((), lambda sha, run_id, confirm: notif_ops.activate_fence(
         sys.modules[__name__], sha, run_id, confirm)),
+    # Audit M4: meeting notices reach the in-app inbox while their email stays with the Meeting
+    # Service (confirm enable | disable; gated on the service's IN_APP row ACTIVE, EMAIL not).
+    notif_ops.MEETING_IN_APP_OPERATION: (('activate-meeting-publications',), lambda sha, run_id, confirm:
+                                         notif_ops.activate_meeting_in_app(sys.modules[__name__], sha, run_id,
+                                                                           confirm)),
     # CF Meet Platform "Build" B1-B6 (ADR 0062 / 0063): partner users, user tokens and allowed
     # websites, partner chat, calls, push and meetings; the calling edge is a separate owner decision.
     **{op: (platform_ops.REQUIRES[op], _platform(step)) for op, step in platform_ops.ACTIVATIONS.items()},

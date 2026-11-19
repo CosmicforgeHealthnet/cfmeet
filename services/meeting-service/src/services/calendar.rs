@@ -1037,6 +1037,8 @@ impl CalendarService {
             recurrence_id: None,
             created: Some(conference.created_at),
             last_modified: conference.updated_at,
+            organizer: None,
+            attendees: vec![],
         };
         Ok(ics::render(
             &IcsCalendar {
@@ -1044,6 +1046,7 @@ impl CalendarService {
                 name: None,
                 events: vec![event],
                 timezone_until: None,
+                method: ics::IcsMethod::Publish,
             },
             Utc::now(),
         ))
@@ -1109,6 +1112,8 @@ impl CalendarService {
                         recurrence_id: None,
                         created: Some(rule.created_at),
                         last_modified: rule.updated_at,
+                        organizer: None,
+                        attendees: vec![],
                     };
                     let mut overrides = vec![];
                     for e in &exceptions {
@@ -1133,6 +1138,8 @@ impl CalendarService {
                                     recurrence_id: Some(original),
                                     created: Some(e.created_at),
                                     last_modified: e.updated_at,
+                                    organizer: None,
+                                    attendees: vec![],
                                 });
                             }
                         }
@@ -1177,6 +1184,8 @@ impl CalendarService {
                 recurrence_id: None,
                 created: Some(c.created_at),
                 last_modified: c.updated_at,
+                organizer: None,
+                attendees: vec![],
             });
         }
         let name = (!title_restricted(&space) || access.full).then(|| space.title.clone());
@@ -1186,6 +1195,7 @@ impl CalendarService {
                 name,
                 events,
                 timezone_until,
+                method: ics::IcsMethod::Publish,
             },
             now,
         ))

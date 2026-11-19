@@ -84,11 +84,12 @@ non-web operations (Privacy Relay contacts, media plane).
 
 <!-- BEGIN GENERATED: scripts/contracts/first_party_ingress.py -->
 
-Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
+Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 258 in total). Regenerate with `python3 scripts/contracts/first_party_ingress.py`; CI runs it with `--check`.
 
 | Reason code | Operations | Domains | Meaning (from `public-routes.json`) |
 |---|---:|---|---|
 | `APP_CONTEXT_KEYS_DIRECT` | 1 | meetings | Public JWKS that verifies in-meeting app-context tokens (ADR 0065): anonymous, served directly by the Meeting Service at /api/v2/app-context-keys; apps fetch it without a credential. |
+| `CALENDAR_FEED_DIRECT_INGRESS` | 4 | meetings | Private calendar subscription feed of a CF Meet account (audit MF2): managed by the signed-in account in the CF Meet apps and read by calendar clients with the feed token in a `.ics` path; the gateway route grammar has no file-extension segments and it is not a partner API, so it stays on the Meeting Service ingress. |
 | `CALENDAR_FILE_DIRECT_INGRESS` | 2 | meetings | RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API. |
 | `CONTACT_VAULT_PRIVATE` | 5 | privacy-relay | Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway. |
 | `FIRST_PARTY_APP_ACCOUNT` | 34 | meetings | The CF Meet app's own account profile. |
@@ -103,13 +104,22 @@ Generated from `infra/api-gateway/public-routes.json` (EXCLUDED operations, 254 
 | `MEDIA_PLANE_DIRECT` | 4 | calling | Device-to-media-edge traffic with sealed media credentials; low-latency media never transits the API Gateway. |
 | `MEETING_DIRECTORY_NOT_PUBLIC_FAMILY` | 6 | meetings | Meeting-domain organization directory administration; not part of the approved public meetings family and never the developer organization authority. |
 | `NOT_AN_API_OPERATION` | 1 | meetings | Service landing response. |
-| **Total** | **254** | | |
+| **Total** | **258** | | |
 
 #### `APP_CONTEXT_KEYS_DIRECT` (1)
 
 | Method | Path | operationId | Contract |
 |---|---|---|---|
 | GET | `/api/v2/app-context-keys` | `v2_app_context_keys` | `cfmeet.meeting-service.http-api` |
+
+#### `CALENDAR_FEED_DIRECT_INGRESS` (4)
+
+| Method | Path | operationId | Contract |
+|---|---|---|---|
+| GET | `/api/v2/calendar-feeds/{file}` | `v2_read_calendar_feed` | `cfmeet.meeting-service.http-api` |
+| DELETE | `/api/v2/me/calendar-feed` | `v2_delete_calendar_feed` | `cfmeet.meeting-service.http-api` |
+| GET | `/api/v2/me/calendar-feed` | `v2_get_calendar_feed` | `cfmeet.meeting-service.http-api` |
+| POST | `/api/v2/me/calendar-feed` | `v2_create_calendar_feed` | `cfmeet.meeting-service.http-api` |
 
 #### `CALENDAR_FILE_DIRECT_INGRESS` (2)
 

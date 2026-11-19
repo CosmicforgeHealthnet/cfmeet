@@ -180,6 +180,10 @@ async fn template(admin: &str) -> String {
             migration::PlatformBuildMigrator::up(&tmpl, None)
                 .await
                 .expect("platform-build migrations apply");
+            // Server audit MF2: calendar feed tokens (their own additive history).
+            migration::MeetingAuditMigrator::up(&tmpl, None)
+                .await
+                .expect("meeting-audit migrations apply");
             tmpl.close().await.ok();
             name
         })

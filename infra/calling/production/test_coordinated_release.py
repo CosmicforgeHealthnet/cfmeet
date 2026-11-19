@@ -286,6 +286,20 @@ class ImageVerification(unittest.TestCase):
                 cr.verify_running('cfmeet-calling', 'sha256:new', SHA)
 
 
+class ProductionBrowserOrigins(unittest.TestCase):
+    def test_meeting_service_release_pins_the_production_web_origins(self):
+        self.assertEqual(cr.RELEASE_PINNED_ENV['meeting-service']['FRONTEND_URLS'],
+                         'https://cfmeet.com,https://www.cfmeet.com')
+        self.assertNotIn('localhost', cr.RELEASE_PINNED_ENV['meeting-service']['FRONTEND_URLS'])
+
+    def test_verify_fails_while_the_audited_list_is_running(self):
+        audited = 'http://localhost:3000,http://localhost:3001,https://17730sdl-3000.uks1.devtunnels.ms'
+        self.assertEqual(cr.pinned_env_checks({'meeting-service': {'FRONTEND_URLS': audited}}),
+                         {'pinned meeting-service FRONTEND_URLS': 'FAIL'})
+        pinned = {'meeting-service': {'FRONTEND_URLS': 'https://cfmeet.com,https://www.cfmeet.com'}}
+        self.assertEqual(cr.pinned_env_checks(pinned), {'pinned meeting-service FRONTEND_URLS': 'PASS'})
+
+
 class RollbackOnFailedHealth(unittest.TestCase):
     def test_existing_service_is_restored_exactly_when_the_new_image_is_unhealthy(self):
         docker = FakeDocker(['cfmeet-numbering', 'cosmicforge-db'])

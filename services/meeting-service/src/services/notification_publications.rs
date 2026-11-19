@@ -218,6 +218,44 @@ pub async fn route<C: ConnectionTrait>(
     sealing: Option<&SealingKey>,
     now: DateTime<Utc>,
 ) -> Result<Routed, DbErr> {
+    route_with_in_app(conn, key, draft, None, category, sealing, now).await
+}
+
+/// What one fresh decision publishes: `Some(shadow)` (one row), or nothing. `in_app`: an
+/// in-app event of an OLD decision (audit M4) can be published.
+pub fn publication_kind(
+    route: Route,
+    decision_shadow: bool,
+    capable: bool,
+    in_app: bool,
+) -> Option<bool> {
+    match route {
+        Route::New => Some(false),
+        // Audit M4: the OLD decision keeps its legacy email; its in-app event is delivered
+        // (non-shadow) instead of a shadow copy. One publication per decision either way.
+        Route::Old if in_app => Some(false),
+        // SHADOW: the service records a copy of every OLD decision it can be told about.
+        Route::Old if decision_shadow && capable => Some(true),
+        Route::Old => None,
+    }
+}
+
+/// [`route`] plus the audit M4 in-app path. `in_app` is the event of the same notice
+/// addressed to its CF Meet account recipients only (`None`: the path is off). When the
+/// decision is a fresh `OLD` (the legacy row is written and emailed exactly as today) and
+/// that event can be built, it is published as a delivered event: the Notification Service
+/// delivers it on the channels it has ACTIVE for the category (IN_APP; its EMAIL row is
+/// never ACTIVE while the path is on, so no second email exists). A `NEW` decision
+/// publishes the full `draft` as before; `in_app` never influences the decision itself.
+pub async fn route_with_in_app<C: ConnectionTrait>(
+    conn: &C,
+    key: &str,
+    draft: Result<EventDraft, DecisionReason>,
+    in_app: Option<Result<EventDraft, DecisionReason>>,
+    category: MeetingCategory,
+    sealing: Option<&SealingKey>,
+    now: DateTime<Utc>,
+) -> Result<Routed, DbErr> {
     let capable = capability(&draft, sealing, now);
     let decision =
         fence::route_message_capable(conn, key, category, now + DECISION_LIFETIME, capable).await?;
@@ -228,30 +266,30 @@ pub async fn route<C: ConnectionTrait>(
             published: false,
         });
     }
-    let publish = match decision.route {
-        Route::New => true,
-        // SHADOW: the service records a copy of every OLD decision it can be told about.
-        Route::Old => decision.shadow && capable.is_ok(),
-    };
-    if decision.route == Route::Old && decision.shadow && capable.is_err() {
+    let in_app = in_app
+        .filter(|d| capability(d, sealing, now).is_ok())
+        .and_then(Result::ok)
+        .filter(|_| decision.route == Route::Old);
+    let kind = publication_kind(
+        decision.route,
+        decision.shadow,
+        capable.is_ok(),
+        in_app.is_some(),
+    );
+    if decision.route == Route::Old && decision.shadow && capable.is_err() && in_app.is_none() {
         inc(&OM.notification_publications_unpublishable);
     }
-    if publish {
-        let draft = draft.map_err(|_| DbErr::Custom("publication without an event".into()))?;
-        enqueue(
-            conn,
-            &draft,
-            &decision,
-            decision.route == Route::Old,
-            sealing,
-            now,
-        )
-        .await?;
+    if let Some(shadow) = kind {
+        let event = match in_app {
+            Some(event) => event,
+            None => draft.map_err(|_| DbErr::Custom("publication without an event".into()))?,
+        };
+        enqueue(conn, &event, &decision, shadow, sealing, now).await?;
     }
     Ok(Routed {
         decision,
         write_legacy: decision.route == Route::Old,
-        published: publish,
+        published: kind.is_some(),
     })
 }
 
@@ -754,6 +792,30 @@ pub async fn run(
             }
         }
         tokio::time::sleep(interval).await;
+    }
+}
+
+#[cfg(test)]
+mod in_app_tests {
+    use super::*;
+
+    #[test]
+    fn one_publication_per_decision() {
+        // Without the in-app path: today's rules.
+        assert_eq!(
+            publication_kind(Route::New, false, true, false),
+            Some(false)
+        );
+        assert_eq!(publication_kind(Route::Old, true, true, false), Some(true));
+        assert_eq!(publication_kind(Route::Old, true, false, false), None);
+        assert_eq!(publication_kind(Route::Old, false, true, false), None);
+        // In-app path: an OLD decision's event is delivered instead of shadow-copied.
+        assert_eq!(publication_kind(Route::Old, true, true, true), Some(false));
+        assert_eq!(
+            publication_kind(Route::Old, false, false, true),
+            Some(false)
+        );
+        assert_eq!(publication_kind(Route::New, false, true, true), Some(false));
     }
 }
 

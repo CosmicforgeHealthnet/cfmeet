@@ -17,7 +17,7 @@ import type {
   LeaveConferenceResponse,
   PreJoinResponse,
 } from "@/types/v2";
-import type { AgendaQuery, AgendaResponse } from "@/types/generated/meeting-service";
+import type { AgendaQuery, AgendaResponse, CalendarFeedResponse } from "@/types/generated/meeting-service";
 
 export const conferencesService = {
   // -------------------------------------------------------------------------
@@ -153,6 +153,24 @@ export const conferencesService = {
     );
     return response.data;
   },
+
+  /**
+   * Extend a live conference's scheduled end (host / co-host).
+   */
+  extend: async (id: string, minutes: number) => {
+    const response = await apiV2.post<ConferenceActionResponse>(
+      `/conferences/${encodeURIComponent(id)}/extend`,
+      { minutes },
+    );
+    return response.data;
+  },
+
+  /** My private calendar feed (state only; the URL is shown when created). */
+  calendarFeed: async () => (await apiV2.get<CalendarFeedResponse>("/me/calendar-feed")).data,
+  /** Create (or replace) my calendar feed: the answer carries its path once. */
+  createCalendarFeed: async () => (await apiV2.post<CalendarFeedResponse>("/me/calendar-feed", {})).data,
+  /** Turn my calendar feed off (the URL stops working). */
+  deleteCalendarFeed: async () => (await apiV2.delete<CalendarFeedResponse>("/me/calendar-feed")).data,
 
   // -------------------------------------------------------------------------
   // Join / Leave
