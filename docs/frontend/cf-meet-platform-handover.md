@@ -9,12 +9,20 @@ belong to the frontend team.
 
 Decisions: ADR 0061–0065 (`docs/decisions/`). Plan: `docs/platform/cf-meet-platform-integration-plan.md`.
 
-## 1. Regenerate the generated types first
+## 1. Generated types and contract mirrors (already synced)
 
-`apps/web/src/types/generated/meeting-service.ts` (and the mobile copy, if any) is stale. Regenerate
-it from `packages/contracts/openapi/meeting-service.json`. The new operations are under the tag
-**Apps (v2)**. The Developer Console contract is
-`packages/contracts/platform-developer/http/v1.openapi.json` (1.8.0).
+With the owner's approval, the backend PR made a data-only sync so the frontend CI parity checks
+stay green. No screen, component or test changed:
+- `apps/web/src/types/generated/meeting-service.ts` and `apps/mobile/lib/api/generated/meeting-service.ts`
+  are regenerated from `packages/contracts/openapi/meeting-service.json`. The new operations are
+  under the tag **Apps (v2)**.
+- `apps/web/src/lib/developer-platform/webhook-events.ts` lists the new event types
+  `app.installed`, `app.uninstalled`, `app.grant_revoked`, `bot.mentioned` and `bot.message_received`.
+  The console's webhook picker therefore shows them. They fire only after `activate-app-events`.
+- `apps/web/src/lib/developer-platform/permissions.ts` mirrors the new `rbac.rs` actions:
+  `EndUsers*`, `UserTokensIssue`, `AllowedOrigins*`, `PushCredentials*` and `Apps*`.
+
+The Developer Console contract is `packages/contracts/platform-developer/http/v1.openapi.json` (1.8.0).
 
 ## 2. Developer Console pages (console, signed-in developer)
 

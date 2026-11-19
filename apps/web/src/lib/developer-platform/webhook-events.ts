@@ -83,6 +83,11 @@ export const WEBHOOK_EVENT_TYPES: string[] = [
   "production_access.requested",
   "production_access.approved",
   "production_access.rejected",
+  "app.installed",
+  "app.uninstalled",
+  "app.grant_revoked",
+  "bot.mentioned",
+  "bot.message_received",
 ];
 
 /** Event types grouped by family prefix (`call`, `sms`, ...), for the picker. */
