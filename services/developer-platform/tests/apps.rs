@@ -347,7 +347,7 @@ fn manifest() -> Value {
         "redirectUris": ["https://calendar.example.com/oauth/callback"],
         "userScopes": ["profile:read", "meetings:write", "events:meetings"],
         "botScopes": ["chat:write:bot", "chat:read:bot"],
-        "eventTypes": ["meeting.started", "participant.joined", "bot.mentioned", "app.installed"],
+        "eventTypes": ["meeting.started", "participant.joined", "bot.mentioned", "bot.message_received", "app.installed"],
         "meetingSurface": { "url": "https://panel.calendar.example.com/meet", "origins": [] },
         "distribution": "PUBLIC",
     })
@@ -1238,7 +1238,7 @@ async fn install_events_reach_installed_apps_with_the_installation_id() {
             Method::POST,
             &format!("/v1/environments/{env}/webhooks"),
             Some(json!({ "url": "http://127.0.0.1:9/hook",
-                "eventTypes": ["meeting.started", "participant.joined", "bot.mentioned", "app.installed", "app.uninstalled"] })),
+                "eventTypes": ["meeting.started", "participant.joined", "bot.mentioned", "bot.message_received", "app.installed", "app.uninstalled"] })),
         )
         .await;
     assert_eq!(hook.status, StatusCode::CREATED, "{}", hook.json);
@@ -1375,6 +1375,24 @@ async fn install_events_reach_installed_apps_with_the_installation_id() {
         assert!(r.status.is_success(), "{}", r.json);
         assert_eq!(count_routed(org_grant, "bot.mentioned").await, expected);
     }
+    // A direct message to the bot (Messaging: ids only).
+    let mut dm = meeting_envelope(
+        org_scope,
+        "messaging.bot.message-received",
+        json!({ "conversation_id": Uuid::new_v4(), "message_id": Uuid::new_v4(),
+            "sender_principal_id": Uuid::new_v4(), "subject_principal_id": bot }),
+    );
+    dm["producer_service"] = json!("cfmeet.messaging");
+    let r = c
+        .internal(
+            &wh.producers.messaging,
+            Method::POST,
+            "/internal/v1/platform/events",
+            Some(dm),
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.json);
+    assert_eq!(count_routed(org_grant, "bot.message_received").await, 1);
     assert_eq!(
         c.count(
             "SELECT count(*) FROM devplat_webhook_events WHERE payload::text LIKE '%book a room%'"

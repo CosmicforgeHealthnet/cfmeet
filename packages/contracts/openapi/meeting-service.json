@@ -3742,6 +3742,7 @@
           "Apps (v2)"
         ],
         "summary": "Public keys of app-context tokens (JWKS).",
+        "description": "The Ed25519 keys (OKP JWKs, `kid` = RFC 7638 thumbprint) apps use to verify the\napp-context tokens of their in-meeting panel. Anonymous; cacheable for 5 minutes.",
         "operationId": "v2_app_context_keys",
         "responses": {
           "200": {
@@ -11797,6 +11798,7 @@
           "Apps (v2)"
         ],
         "summary": "The signed-in account's connected apps (personal installs).",
+        "description": "Every app the account authorized for itself (USER grants), with the scopes granted,\nfor the Connected apps settings page.",
         "operationId": "v2_list_my_apps",
         "responses": {
           "200": {
@@ -11852,7 +11854,8 @@
         "tags": [
           "Apps (v2)"
         ],
-        "summary": "Disconnect one of the signed-in account's apps (revokes the grant and every token).",
+        "summary": "Disconnect one of the signed-in account's apps.",
+        "description": "Revokes the grant and every token issued for it at Platform Access. A grant that is\nnot the account's own is `APP_NOT_FOUND`.",
         "operationId": "v2_revoke_my_app",
         "parameters": [
           {
@@ -18819,7 +18822,8 @@
         "tags": [
           "Apps (v2)"
         ],
-        "summary": "The apps installed for an organization (organization OWNER / ADMIN only).",
+        "summary": "The apps installed for an organization.",
+        "description": "Workspace installs (ORGANIZATION grants) of the organization, for its OWNERs and\nADMINs only (organization role checked with the Organizations Service).",
         "operationId": "v2_list_organization_apps",
         "parameters": [
           {
@@ -18897,7 +18901,8 @@
         "tags": [
           "Apps (v2)"
         ],
-        "summary": "Uninstall an app from an organization (revokes the grant, its tokens and its bot).",
+        "summary": "Uninstall an app from an organization.",
+        "description": "Revokes the grant, every token and the app's bot. Organization OWNERs and ADMINs only;\na grant of another organization is `APP_NOT_FOUND`.",
         "operationId": "v2_revoke_organization_app",
         "parameters": [
           {

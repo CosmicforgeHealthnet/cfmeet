@@ -40,7 +40,8 @@ use crate::{
     domain::{EnvironmentKind, PrincipalId, PrincipalKind},
     identity::{
         authentication::{
-            AuthenticationError, AuthorityChain, AuthorityMode, SuspendedLink, Throttle,
+            AuthenticationError, AuthorityChain, AuthorityMode, OAuthCredentialKind,
+            SuspendedLink, Throttle,
         },
         changes,
         credentials::CredentialEffectiveState,
@@ -393,6 +394,59 @@ struct CredentialStatusView {
     authenticates: bool,
     scopes: Vec<String>,
     principal_restriction: Option<Vec<Uuid>>,
+    /// ADR 0064: OAuth app tokens only (`OAUTH_ACCESS` | `OAUTH_BOT`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential_kind: Option<OAuthCredentialKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    grant_id: Option<Uuid>,
+}
+
+/// ADR 0064: `(kind, appId, grantId, mapped internal scopes)` of an OAuth token credential.
+async fn oauth_facts(
+    state: &AppState,
+    credential_id: Uuid,
+) -> AccessResult<Option<(OAuthCredentialKind, Uuid, Uuid, Vec<String>)>> {
+    if !state.build.oauth_enabled {
+        return Ok(None);
+    }
+    let Some(row) = state
+        .platform
+        .db()
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT o.kind, g.id AS grant_id, g.app_id, g.scopes FROM platform_oauth_tokens o \
+             JOIN platform_oauth_grants g ON g.id = o.grant_id WHERE o.credential_id = $1",
+            [credential_id.into()],
+        ))
+        .await
+        .map_err(internal)?
+    else {
+        return Ok(None);
+    };
+    let kind: String = row.try_get("", "kind").map_err(internal)?;
+    let kind = match kind.as_str() {
+        "ACCESS" => OAuthCredentialKind::Access,
+        "BOT" => OAuthCredentialKind::Bot,
+        _ => return Err(AccessError::Refused(ErrorCode::InternalError)),
+    };
+    let scopes: Vec<String> = row.try_get("", "scopes").map_err(internal)?;
+    let mapped = crate::identity::oauth_scopes::internal_scopes(scopes.iter().map(String::as_str))
+        .into_iter()
+        .filter(|s| {
+            state
+                .registry
+                .definition(s)
+                .is_some_and(|d| d.trust == crate::identity::scopes::ScopeTrust::Standard)
+        })
+        .collect();
+    Ok(Some((
+        kind,
+        row.try_get("", "app_id").map_err(internal)?,
+        row.try_get("", "grant_id").map_err(internal)?,
+        mapped,
+    )))
 }
 
 async fn load_credential_in_scope(
@@ -436,7 +490,12 @@ async fn load_credential_in_scope(
             .await
             .map_err(AccessError::service)?,
     );
-    let scopes = effective_scopes(state, scope, credential.id).await?;
+    let oauth = oauth_facts(state, credential.id).await?;
+    // ADR 0064: an OAuth token's scopes are its grant's, mapped (live).
+    let scopes = match &oauth {
+        Some((_, _, _, mapped)) => mapped.clone(),
+        None => effective_scopes(state, scope, credential.id).await?,
+    };
     let principal_restriction = state
         .platform
         .credential_principal_restriction(crate::domain::CredentialId::from_uuid(credential.id))
@@ -449,6 +508,9 @@ async fn load_credential_in_scope(
         effective_state,
         scopes,
         principal_restriction,
+        credential_kind: oauth.as_ref().map(|o| o.0),
+        app_id: oauth.as_ref().map(|o| o.1),
+        grant_id: oauth.as_ref().map(|o| o.2),
     })
 }
 

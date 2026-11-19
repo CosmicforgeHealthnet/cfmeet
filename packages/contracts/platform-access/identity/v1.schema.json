@@ -913,7 +913,7 @@
       }
     },
     "CredentialStatusResult": {
-      "description": "GET /internal/v1/credentials/{credentialId}: status, expiry and revocation of a credential of the delegated scope.",
+      "description": "GET /internal/v1/credentials/{credentialId}: status, expiry and revocation of a credential of the delegated scope. ADR 0064: for an OAuth app token, scopes are the grant's mapped internal scopes and credentialKind / appId / grantId are present (absent for every other credential).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -949,6 +949,25 @@
             },
             {
               "type": "null"
+            }
+          ]
+        },
+        "credentialKind": {
+          "$ref": "#/$defs/OAuthCredentialKind"
+        },
+        "appId": {
+          "description": "ADR 0064: the acting app (OAuth client id = Platform Access application id). Present only for OAuth credentials.",
+          "allOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          ]
+        },
+        "grantId": {
+          "description": "ADR 0064: the grant (installation) the OAuth credential belongs to. Present only for OAuth credentials.",
+          "allOf": [
+            {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
             }
           ]
         }

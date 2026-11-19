@@ -137,6 +137,17 @@ async fn the_schema_owns_only_devplat_tables_and_no_identity_hierarchy() {
         "devplat_api_operation_usage.status_class",
         // Section 50 billing-account reference metadata (never Platform Access identity):
         // RETAIL / CONTRACT / INTERNAL_COST_CENTER and its own lifecycle.
+        // ADR 0064 / 0065: the APP_GRANT projection (OAuth scope names and grant status, no
+        // account id, no token), the review history and status, and the client secret's
+        // METADATA only (Platform Access's secret id and issue time; the secret itself is
+        // never stored).
+        "devplat_app_installations.scopes",
+        "devplat_app_installations.status",
+        "devplat_app_transitions.from_status",
+        "devplat_app_transitions.to_status",
+        "devplat_apps.secret_id",
+        "devplat_apps.secret_issued_at",
+        "devplat_apps.status",
         "devplat_billing_accounts.classification",
         "devplat_billing_accounts.status",
         // Plans: customer-facing display metadata and lifecycle.

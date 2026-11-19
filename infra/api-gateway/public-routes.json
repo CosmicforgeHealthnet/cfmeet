@@ -4995,6 +4995,78 @@
       "method": "POST",
       "path": "/v1/environments/{environmentId}/push-credentials/{credentialRef}/verify",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/app",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/projects/{projectId}/app",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/app/secret",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/app/submit",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/app/grants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/projects/{projectId}/app/test-accounts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/oauth/token",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/oauth/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/oauth/userinfo",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/oauth/metadata",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/app-directory",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/app-directory/{appId}",
+      "class": "PUBLIC_CUSTOMER"
     }
   ]
 }

@@ -77,6 +77,9 @@ pub async fn authorize_decide(
 }
 
 /// The signed-in account's connected apps (personal installs).
+///
+/// Every app the account authorized for itself (USER grants), with the scopes granted,
+/// for the Connected apps settings page.
 #[utoipa::path(
     get, path = "/api/v2/me/apps", tag = "Apps (v2)", operation_id = "v2_list_my_apps",
     responses(
@@ -95,7 +98,10 @@ pub async fn list_my_apps(
     Ok(no_store(StatusCode::OK, body))
 }
 
-/// Disconnect one of the signed-in account's apps (revokes the grant and every token).
+/// Disconnect one of the signed-in account's apps.
+///
+/// Revokes the grant and every token issued for it at Platform Access. A grant that is
+/// not the account's own is `APP_NOT_FOUND`.
 #[utoipa::path(
     delete, path = "/api/v2/me/apps/{grantId}", tag = "Apps (v2)", operation_id = "v2_revoke_my_app",
     params(("grantId" = Uuid, Path, description = "Grant id")),
@@ -116,7 +122,10 @@ pub async fn revoke_my_app(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The apps installed for an organization (organization OWNER / ADMIN only).
+/// The apps installed for an organization.
+///
+/// Workspace installs (ORGANIZATION grants) of the organization, for its OWNERs and
+/// ADMINs only (organization role checked with the Organizations Service).
 #[utoipa::path(
     get, path = "/api/v2/organizations/{id}/apps", tag = "Apps (v2)", operation_id = "v2_list_organization_apps",
     params(("id" = Uuid, Path, description = "Organization id")),
@@ -138,7 +147,10 @@ pub async fn list_organization_apps(
     Ok(no_store(StatusCode::OK, body))
 }
 
-/// Uninstall an app from an organization (revokes the grant, its tokens and its bot).
+/// Uninstall an app from an organization.
+///
+/// Revokes the grant, every token and the app's bot. Organization OWNERs and ADMINs only;
+/// a grant of another organization is `APP_NOT_FOUND`.
 #[utoipa::path(
     delete, path = "/api/v2/organizations/{id}/apps/{grantId}", tag = "Apps (v2)", operation_id = "v2_revoke_organization_app",
     params(("id" = Uuid, Path, description = "Organization id"), ("grantId" = Uuid, Path, description = "Grant id")),
@@ -211,6 +223,9 @@ pub async fn create_app_context(
 }
 
 /// Public keys of app-context tokens (JWKS).
+///
+/// The Ed25519 keys (OKP JWKs, `kid` = RFC 7638 thumbprint) apps use to verify the
+/// app-context tokens of their in-meeting panel. Anonymous; cacheable for 5 minutes.
 #[utoipa::path(
     get, path = "/api/v2/app-context-keys", tag = "Apps (v2)", operation_id = "v2_app_context_keys",
     responses(
