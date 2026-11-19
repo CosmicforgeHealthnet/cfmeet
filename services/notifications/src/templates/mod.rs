@@ -311,6 +311,14 @@ pub fn inbox_text(template: &str, params: &Value) -> (String, String) {
             "Organization suspended",
             "An organization you belong to was suspended.".into(),
         ),
+        "org.organization.archived" => (
+            "Organization archived",
+            "An organization you belong to was archived.".into(),
+        ),
+        "org.organization.reactivated" => (
+            "Organization reactivated",
+            "An organization you belong to was reactivated.".into(),
+        ),
         "contact.requested" => (
             "New contact request",
             "Someone wants to connect with you.".into(),

@@ -143,6 +143,37 @@ pub async fn authorize(state: &AppState, request: AuthorizeWakeups) -> Result<Va
     }))
 }
 
+/// `MESSAGING_ORGANIZATION_WAKEUPS` (gap audit S1): `off` (default: unchanged behaviour)
+/// or `on`.
+pub const ORGANIZATION_WAKEUPS_ENV: &str = "MESSAGING_ORGANIZATION_WAKEUPS";
+
+pub fn organization_wakeups_from_env(get: impl Fn(&str) -> Option<String>) -> Result<bool, String> {
+    match get(ORGANIZATION_WAKEUPS_ENV).as_deref().map(str::trim) {
+        None | Some("") | Some("off") => Ok(false),
+        Some("on") => Ok(true),
+        Some(_) => Err(format!("{ORGANIZATION_WAKEUPS_ENV} must be off or on")),
+    }
+}
+
+/// Gap audit S1: whether `decision`'s conversation lives in an organization's own
+/// first-party scope (the event's authenticated tenant classification was FIRST_PARTY and
+/// the scope is not CF Meet's personal scope) while `MESSAGING_ORGANIZATION_WAKEUPS` is on.
+/// There, as in the personal scope, a NATIVE_CF_USER principal whose reference is
+/// `cfmeet-user:<uuid>` is the member's CF Meet account (the Meeting Service registers
+/// organization members that way).
+pub(crate) fn organization_scope(state: &AppState, decision: &WakeupAuthorization) -> bool {
+    let Some(policy) = state.communications.as_ref() else {
+        return false;
+    };
+    state.organization_wakeups
+        && decision.first_party
+        && !policy.governs(cf_communications_policy::Scope {
+            tenant_id: decision.tenant_id,
+            application_id: decision.application_id,
+            environment_id: decision.environment_id,
+        })
+}
+
 /// The first-party account references of the entitled principals. Only in the governed
 /// personal scope (CF Meet's own first-party environment, where Messaging already treats
 /// NATIVE_CF_USER principals as CF Meet accounts) and only for ACTIVE NATIVE_CF_USER
@@ -162,11 +193,11 @@ pub(crate) async fn account_refs(
         application_id: decision.application_id,
         environment_id: decision.environment_id,
     };
-    if !state
+    let governed = state
         .communications
         .as_ref()
-        .is_some_and(|p| p.governs(personal))
-    {
+        .is_some_and(|p| p.governs(personal));
+    if !governed && !organization_scope(state, decision) {
         return Ok(HashMap::new());
     }
     let (Some(service_account_id), Some(environment_kind)) = (
@@ -222,6 +253,21 @@ mod tests {
         ] {
             assert_eq!(account_ref(&bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn the_organization_wakeup_switch_is_off_by_default() {
+        let env = |v: Option<&'static str>| {
+            move |k: &str| {
+                (k == ORGANIZATION_WAKEUPS_ENV)
+                    .then(|| v.map(str::to_string))
+                    .flatten()
+            }
+        };
+        assert_eq!(organization_wakeups_from_env(env(None)), Ok(false));
+        assert_eq!(organization_wakeups_from_env(env(Some("off"))), Ok(false));
+        assert_eq!(organization_wakeups_from_env(env(Some("on"))), Ok(true));
+        assert!(organization_wakeups_from_env(env(Some("true"))).is_err());
     }
 
     #[test]

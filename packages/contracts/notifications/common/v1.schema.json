@@ -121,6 +121,8 @@
         "account.security.new-sign-in",
         "account.security.email-in-use",
         "account.security.email-changed",
+        "organizations.organization.archived",
+        "organizations.organization.reactivated",
         "notifications.cancel"
       ]
     },
