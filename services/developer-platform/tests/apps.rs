@@ -833,6 +833,23 @@ async fn without_named_reviewers_no_app_decision_is_possible() {
         )
         .await;
     assert_eq!(r.json["error"]["code"], "POLICY_VIOLATION", "{}", r.json);
+    // Without a logo or a meeting surface, the optional profile fields are left out.
+    let mut plain = manifest();
+    plain["logoUrl"] = Value::Null;
+    plain["meetingSurface"] = Value::Null;
+    let (_, other, _) = workspace(&c, &owner).await;
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::PUT,
+            &format!("/v1/projects/{other}/app"),
+            Some(plain),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    let synced = oauth.last_client(other);
+    assert!(synced.get("logoUrl").is_none() && synced.get("meetingSurface").is_none());
+    assert_eq!(synced["developerName"], "Calendar Co");
 }
 
 // ---------------------------------------------------------------------------------------

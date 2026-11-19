@@ -17,6 +17,7 @@ mod m20261122_000006_credential_usage_tenant_rename;
 mod m20261123_000007_organization_service_bindings;
 mod m20261124_000008_partner_users_tokens_origins;
 mod m20261125_000009_oauth_apps;
+mod m20261126_000010_oauth_client_presentation;
 
 /// Name of the table recording which Platform Access migrations have been applied.
 pub const MIGRATION_TABLE: &str = "platform_access_seaql_migrations";
@@ -36,6 +37,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261123_000007_organization_service_bindings::Migration),
             Box::new(m20261124_000008_partner_users_tokens_origins::Migration),
             Box::new(m20261125_000009_oauth_apps::Migration),
+            Box::new(m20261126_000010_oauth_client_presentation::Migration),
         ]
     }
 
