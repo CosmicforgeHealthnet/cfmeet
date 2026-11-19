@@ -544,6 +544,10 @@ pub async fn group_state(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClaimRequest {
     pub principal_ids: Vec<Uuid>,
+    /// Only these devices of the listed principals (a member adding a principal's NEW
+    /// device leaves the KeyPackages of devices already in the tree untouched).
+    #[serde(default)]
+    pub device_ids: Option<Vec<Uuid>>,
 }
 
 /// Claims one KeyPackage of every ACTIVE device of the given ACTIVE members (so the
@@ -557,6 +561,13 @@ pub async fn claim_key_packages(
 ) -> Result<Value> {
     if request.principal_ids.is_empty() || request.principal_ids.len() > 100 {
         return Err(Error::validation("principalIds must hold 1-100 principals"));
+    }
+    if request
+        .device_ids
+        .as_ref()
+        .is_some_and(|d| d.is_empty() || d.len() > 1000)
+    {
+        return Err(Error::validation("deviceIds must hold 1-1000 devices"));
     }
     let (conversation, _) =
         access::as_member(&state.db, ctx, conversation_id, acting.principal_id).await?;
@@ -603,10 +614,11 @@ pub async fn claim_key_packages(
                             "NOT_A_MEMBER",
                         ));
                     }
-                    for k in crate::devices::claim_key_packages(
+                    for k in crate::devices::claim_key_packages_of(
                         txn,
                         ctx2.scope.environment_id,
                         *p,
+                        request.device_ids.as_deref(),
                         reservation,
                         now,
                         chrono::Duration::hours(1),

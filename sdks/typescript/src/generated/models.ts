@@ -7743,6 +7743,8 @@ export namespace Messaging {
   };
   export type KeyPackageClaimRequest = {
     principalIds: Array<Uuid>;
+    /** Only these devices of the listed principals: a member adding a principal's NEW device leaves the KeyPackages of the devices already in the tree untouched. */
+    deviceIds?: Array<Uuid>;
   };
   /** A legal / compliance hold: held items are never purged or deleted. For PRIVATE_E2EE it preserves ciphertext and metadata only; it never creates a decryption capability. */
   export type LegalHold = {

@@ -1911,3 +1911,70 @@ async fn external_commits_only_admit_own_active_devices_of_members() {
     assert_eq!(state.json["mlsEpoch"], 4);
     assert_eq!(state.json["groupInfo"], Value::Null);
 }
+
+/// A member adding a principal's NEW device claims only that device's KeyPackage: the
+/// stock of the principal's devices already in the tree is not spent (so it stays
+/// available for the groups that still need it).
+#[tokio::test]
+async fn a_claim_limited_to_new_devices_spares_the_stock_of_the_others() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, alice, bob) = h.e2ee_direct(&c).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let kps: Vec<Vec<u8>> = (0..2).map(|_| bob.device.key_package().unwrap()).collect();
+    let r = h.publish(&c, bob.principal, bob.device_id(), &kps).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let bob2 = h.device_of(&c, bob.principal, 1).await;
+    let claim = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+            json!({ "principalIds": [bob.principal], "deviceIds": [bob2.device_id()] }),
+        )
+        .await;
+    assert_eq!(claim.status, StatusCode::OK, "{}", claim.text);
+    let got: Vec<Value> = claim.json["keyPackages"].as_array().unwrap().clone();
+    assert_eq!(got.len(), 1, "{}", claim.text);
+    assert_eq!(got[0]["deviceId"], json!(bob2.device_id()));
+    let own = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/principals/{}/devices", bob.principal),
+        )
+        .await;
+    let stock = |id: Uuid| {
+        own.json["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["deviceId"] == json!(id))
+            .unwrap()["keyPackagesAvailable"]
+            .clone()
+    };
+    assert_eq!(stock(bob.device_id()), 2, "{}", own.text);
+    assert_eq!(stock(bob2.device_id()), 0, "{}", own.text);
+    // A device of a principal that is not listed yields nothing; an empty list is refused.
+    let claim = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+            json!({ "principalIds": [alice.principal], "deviceIds": [bob.device_id()] }),
+        )
+        .await;
+    assert_eq!(claim.status, StatusCode::OK, "{}", claim.text);
+    assert_eq!(claim.json["keyPackages"], json!([]));
+    let claim = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+            json!({ "principalIds": [bob.principal], "deviceIds": [] }),
+        )
+        .await;
+    assert_eq!(claim.status.as_u16(), 400, "{}", claim.text);
+}

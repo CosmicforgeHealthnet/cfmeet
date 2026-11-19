@@ -763,6 +763,30 @@ pub async fn claim_key_packages<C: ConnectionTrait>(
     now: DateTime<Utc>,
     min_remaining: chrono::Duration,
 ) -> Result<Vec<ClaimedKeyPackage>> {
+    claim_key_packages_of(
+        db,
+        environment_id,
+        principal_id,
+        None,
+        reservation_id,
+        now,
+        min_remaining,
+    )
+    .await
+}
+
+/// [`claim_key_packages`] limited to `devices` of the principal (when given): a member
+/// adding a principal's NEW device does not spend the KeyPackages of the principal's
+/// devices that are already in the group's tree.
+pub async fn claim_key_packages_of<C: ConnectionTrait>(
+    db: &C,
+    environment_id: Uuid,
+    principal_id: Uuid,
+    devices: Option<&[Uuid]>,
+    reservation_id: Uuid,
+    now: DateTime<Utc>,
+    min_remaining: chrono::Duration,
+) -> Result<Vec<ClaimedKeyPackage>> {
     Ok(db::all(
         db,
         "WITH candidates AS ( \
@@ -773,7 +797,8 @@ pub async fn claim_key_packages<C: ConnectionTrait>(
                 AND k.not_before <= $4 AND k.not_after > $5 \
               ORDER BY k.not_after, k.id LIMIT 1 \
               FOR UPDATE SKIP LOCKED) p \
-            WHERE d.environment_id = $1 AND d.principal_id = $2 AND d.status = 'ACTIVE') \
+            WHERE d.environment_id = $1 AND d.principal_id = $2 AND d.status = 'ACTIVE' \
+              AND ($6 OR d.id = ANY($7))) \
          UPDATE messaging_key_packages k SET status = 'RESERVED', reservation_id = $3, reserved_at = $4 \
            FROM candidates c WHERE k.id = c.id AND k.status = 'AVAILABLE' \
          RETURNING k.id, k.device_id, k.key_package_ref, k.encoded",
@@ -783,6 +808,8 @@ pub async fn claim_key_packages<C: ConnectionTrait>(
             reservation_id.into(),
             now.into(),
             (now + min_remaining).into(),
+            devices.is_none().into(),
+            devices.map(|d| d.to_vec()).unwrap_or_default().into(),
         ],
     )
     .await?)

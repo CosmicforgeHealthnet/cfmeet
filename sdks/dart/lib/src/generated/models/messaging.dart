@@ -1981,13 +1981,17 @@ class KeyPackageClaimRequest {
   const KeyPackageClaimRequest.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory KeyPackageClaimRequest.create({required List<Uuid> principalIds}) =>
+  factory KeyPackageClaimRequest.create({List<Uuid>? deviceIds, required List<Uuid> principalIds}) =>
       KeyPackageClaimRequest.fromJson(<String, Object?>{
+        if (deviceIds != null) 'deviceIds': deviceIds,
         'principalIds': principalIds,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Only these devices of the listed principals: a member adding a principal's NEW device leaves the KeyPackages of the devices already in the tree untouched.
+  List<Uuid>? get deviceIds => json['deviceIds'] == null ? null : (json['deviceIds']! as List<Object?>).map((e) => e! as String).toList();
 
   List<Uuid> get principalIds => (json['principalIds']! as List<Object?>).map((e) => e! as String).toList();
 
