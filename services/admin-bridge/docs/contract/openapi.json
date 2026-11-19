@@ -1757,8 +1757,8 @@
     },
     "/internal/cfmeet-admin/v1/accounts/users/{user_id}": {
       "get": {
-        "operationId": "accounts.users.detail",
-        "summary": "accounts.users.detail",
+        "operationId": "accounts.users.read",
+        "summary": "accounts.users.read",
         "tags": [
           "accounts"
         ],
@@ -6428,8 +6428,8 @@
     },
     "/internal/cfmeet-admin/v1/meetings/meetings/{meeting_id}": {
       "get": {
-        "operationId": "meetings.meetings.detail",
-        "summary": "meetings.meetings.detail",
+        "operationId": "meetings.meetings.read",
+        "summary": "meetings.meetings.read",
         "tags": [
           "meetings"
         ],
@@ -12107,8 +12107,8 @@
     },
     "/internal/cfmeet-admin/v1/messaging/reports/{report_id}": {
       "get": {
-        "operationId": "messaging.reports.detail",
-        "summary": "messaging.reports.detail",
+        "operationId": "messaging.reports.read",
+        "summary": "messaging.reports.read",
         "tags": [
           "messaging"
         ],
@@ -18492,8 +18492,8 @@
     },
     "/internal/cfmeet-admin/v1/calling/calls/{call_id}": {
       "get": {
-        "operationId": "calling.calls.detail",
-        "summary": "calling.calls.detail",
+        "operationId": "calling.calls.read",
+        "summary": "calling.calls.read",
         "tags": [
           "calling"
         ],
@@ -24814,8 +24814,8 @@
     },
     "/internal/cfmeet-admin/v1/communications/profiles/{cfmeet_id}": {
       "get": {
-        "operationId": "communications.profiles.detail",
-        "summary": "communications.profiles.detail",
+        "operationId": "communications.profiles.read",
+        "summary": "communications.profiles.read",
         "tags": [
           "communications"
         ],
@@ -27862,8 +27862,8 @@
     },
     "/internal/cfmeet-admin/v1/organizations/organizations/{organization_id}": {
       "get": {
-        "operationId": "organizations.organizations.detail",
-        "summary": "organizations.organizations.detail",
+        "operationId": "organizations.organizations.read",
+        "summary": "organizations.organizations.read",
         "tags": [
           "organizations"
         ],
@@ -32808,8 +32808,8 @@
     },
     "/internal/cfmeet-admin/v1/partners/workspaces/{workspace_id}": {
       "get": {
-        "operationId": "partners.workspaces.detail",
-        "summary": "partners.workspaces.detail",
+        "operationId": "partners.workspaces.read",
+        "summary": "partners.workspaces.read",
         "tags": [
           "partners"
         ],
@@ -46047,8 +46047,8 @@
     },
     "/internal/cfmeet-admin/v1/apps/apps/{app_id}": {
       "get": {
-        "operationId": "apps.apps.detail",
-        "summary": "apps.apps.detail",
+        "operationId": "apps.apps.read",
+        "summary": "apps.apps.read",
         "tags": [
           "apps"
         ],
@@ -47583,8 +47583,8 @@
     },
     "/internal/cfmeet-admin/v1/verification/cases/{case_id}": {
       "get": {
-        "operationId": "verification.cases.detail",
-        "summary": "verification.cases.detail",
+        "operationId": "verification.cases.read",
+        "summary": "verification.cases.read",
         "tags": [
           "verification"
         ],
@@ -51445,8 +51445,8 @@
     },
     "/internal/cfmeet-admin/v1/pricing/versions/{version_id}": {
       "get": {
-        "operationId": "pricing.versions.detail",
-        "summary": "pricing.versions.detail",
+        "operationId": "pricing.versions.read",
+        "summary": "pricing.versions.read",
         "tags": [
           "pricing"
         ],
@@ -59648,8 +59648,8 @@
     },
     "/internal/cfmeet-admin/v1/privacy/requests/{request_id}": {
       "get": {
-        "operationId": "privacy.requests.detail",
-        "summary": "privacy.requests.detail",
+        "operationId": "privacy.requests.read",
+        "summary": "privacy.requests.read",
         "tags": [
           "privacy"
         ],

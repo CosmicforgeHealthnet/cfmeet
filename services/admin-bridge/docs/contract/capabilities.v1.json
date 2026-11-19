@@ -6,8 +6,8 @@
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "b02e1a0e016adea23624e8fe0231a839138672656dc09f1e9c22f67aa8dc789c",
-    "capability_matrix_sha256": "0caf07e866a4b0ebcd41ee6754ad9e79dbd85674108fc05cd0adadcbf775ac4f"
+    "openapi_sha256": "5a372758fe8f2a55f7b759d2579f74df6a36e4624b02ad51054ecc3accbedf8a",
+    "capability_matrix_sha256": "97a9de0a8f02ee5efb18603c0bc7bb9200ce6256780849f28e3bd8434935fb99"
   },
   "query_shapes": {
     "SCOPED": [
@@ -411,7 +411,7 @@
       "source_tests": []
     },
     {
-      "id": "accounts.users.detail",
+      "id": "accounts.users.read",
       "version": "1.0",
       "module": "accounts",
       "kind": "READ",
@@ -1359,7 +1359,7 @@
       "source_tests": []
     },
     {
-      "id": "meetings.meetings.detail",
+      "id": "meetings.meetings.read",
       "version": "1.0",
       "module": "meetings",
       "kind": "READ",
@@ -2510,7 +2510,7 @@
       "source_tests": []
     },
     {
-      "id": "messaging.reports.detail",
+      "id": "messaging.reports.read",
       "version": "1.0",
       "module": "messaging",
       "kind": "READ",
@@ -3761,7 +3761,7 @@
       "source_tests": []
     },
     {
-      "id": "calling.calls.detail",
+      "id": "calling.calls.read",
       "version": "1.0",
       "module": "calling",
       "kind": "READ",
@@ -4988,7 +4988,7 @@
       "source_tests": []
     },
     {
-      "id": "communications.profiles.detail",
+      "id": "communications.profiles.read",
       "version": "1.0",
       "module": "communications",
       "kind": "READ",
@@ -5533,7 +5533,7 @@
       "source_tests": []
     },
     {
-      "id": "organizations.organizations.detail",
+      "id": "organizations.organizations.read",
       "version": "1.0",
       "module": "organizations",
       "kind": "READ",
@@ -6583,7 +6583,7 @@
       "source_tests": []
     },
     {
-      "id": "partners.workspaces.detail",
+      "id": "partners.workspaces.read",
       "version": "1.0",
       "module": "partners",
       "kind": "READ",
@@ -9269,7 +9269,7 @@
       "source_tests": []
     },
     {
-      "id": "apps.apps.detail",
+      "id": "apps.apps.read",
       "version": "1.0",
       "module": "apps",
       "kind": "READ",
@@ -9580,7 +9580,7 @@
       "source_tests": []
     },
     {
-      "id": "verification.cases.detail",
+      "id": "verification.cases.read",
       "version": "1.0",
       "module": "verification",
       "kind": "READ",
@@ -10292,7 +10292,7 @@
       "source_tests": []
     },
     {
-      "id": "pricing.versions.detail",
+      "id": "pricing.versions.read",
       "version": "1.0",
       "module": "pricing",
       "kind": "READ",
@@ -11883,7 +11883,7 @@
       "source_tests": []
     },
     {
-      "id": "privacy.requests.detail",
+      "id": "privacy.requests.read",
       "version": "1.0",
       "module": "privacy",
       "kind": "READ",

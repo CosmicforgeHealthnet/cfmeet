@@ -133,7 +133,7 @@
     "tests": []
   },
   {
-    "id": "accounts.users.detail",
+    "id": "accounts.users.read",
     "version": "1.0",
     "owner": "meeting-service",
     "method": "GET",
@@ -475,7 +475,7 @@
     "tests": []
   },
   {
-    "id": "meetings.meetings.detail",
+    "id": "meetings.meetings.read",
     "version": "1.0",
     "owner": "meeting-service",
     "method": "GET",
@@ -893,7 +893,7 @@
     "tests": []
   },
   {
-    "id": "messaging.reports.detail",
+    "id": "messaging.reports.read",
     "version": "1.0",
     "owner": "messaging",
     "method": "GET",
@@ -1368,7 +1368,7 @@
     "tests": []
   },
   {
-    "id": "calling.calls.detail",
+    "id": "calling.calls.read",
     "version": "1.0",
     "owner": "calling",
     "method": "GET",
@@ -1843,7 +1843,7 @@
     "tests": []
   },
   {
-    "id": "communications.profiles.detail",
+    "id": "communications.profiles.read",
     "version": "1.0",
     "owner": "communications",
     "method": "GET",
@@ -2052,7 +2052,7 @@
     "tests": []
   },
   {
-    "id": "organizations.organizations.detail",
+    "id": "organizations.organizations.read",
     "version": "1.0",
     "owner": "organizations",
     "method": "GET",
@@ -2432,7 +2432,7 @@
     "tests": []
   },
   {
-    "id": "partners.workspaces.detail",
+    "id": "partners.workspaces.read",
     "version": "1.0",
     "owner": "developer-platform",
     "method": "GET",
@@ -3382,7 +3382,7 @@
     "tests": []
   },
   {
-    "id": "apps.apps.detail",
+    "id": "apps.apps.read",
     "version": "1.0",
     "owner": "developer-platform",
     "method": "GET",
@@ -3496,7 +3496,7 @@
     "tests": []
   },
   {
-    "id": "verification.cases.detail",
+    "id": "verification.cases.read",
     "version": "1.0",
     "owner": "developer-platform",
     "method": "GET",
@@ -3762,7 +3762,7 @@
     "tests": []
   },
   {
-    "id": "pricing.versions.detail",
+    "id": "pricing.versions.read",
     "version": "1.0",
     "owner": "developer-platform",
     "method": "GET",
@@ -4370,7 +4370,7 @@
     "tests": []
   },
   {
-    "id": "privacy.requests.detail",
+    "id": "privacy.requests.read",
     "version": "1.0",
     "owner": "admin-bridge",
     "method": "GET",

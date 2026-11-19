@@ -348,7 +348,7 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         ms(
             get(
-                "accounts.users.detail",
+                "accounts.users.read",
                 "/accounts/users/{user_id}",
                 Q::Scoped,
             ),
@@ -572,7 +572,7 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         ms(
             get(
-                "meetings.meetings.detail",
+                "meetings.meetings.read",
                 "/meetings/meetings/{meeting_id}",
                 Q::Scoped,
             ),
@@ -822,7 +822,7 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         mg(
             get(
-                "messaging.reports.detail",
+                "messaging.reports.read",
                 "/messaging/reports/{report_id}",
                 Q::Scoped,
             ),
@@ -1095,11 +1095,7 @@ pub fn catalog() -> Vec<Capability> {
     );
     c.push(
         cl(
-            get(
-                "calling.calls.detail",
-                "/calling/calls/{call_id}",
-                Q::Scoped,
-            ),
+            get("calling.calls.read", "/calling/calls/{call_id}", Q::Scoped),
             S::New,
             P::A2,
         )
@@ -1366,7 +1362,7 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         cm(
             get(
-                "communications.profiles.detail",
+                "communications.profiles.read",
                 "/communications/profiles/{cfmeet_id}",
                 Q::Scoped,
             ),
@@ -1494,7 +1490,7 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         og(
             get(
-                "organizations.organizations.detail",
+                "organizations.organizations.read",
                 "/organizations/organizations/{organization_id}",
                 Q::Scoped,
             ),
@@ -1744,7 +1740,7 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         dp(
             get(
-                "partners.workspaces.detail",
+                "partners.workspaces.read",
                 "/partners/workspaces/{workspace_id}",
                 Q::Scoped,
             ),
@@ -2307,7 +2303,7 @@ pub fn catalog() -> Vec<Capability> {
     );
     c.push(
         dp(
-            get("apps.apps.detail", "/apps/apps/{app_id}", Q::Scoped),
+            get("apps.apps.read", "/apps/apps/{app_id}", Q::Scoped),
             S::Exists,
             P::A2,
         )
@@ -2373,7 +2369,7 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         dp(
             get(
-                "verification.cases.detail",
+                "verification.cases.read",
                 "/verification/cases/{case_id}",
                 Q::Scoped,
             ),
@@ -2485,7 +2481,7 @@ pub fn catalog() -> Vec<Capability> {
     );
     c.push(
         pr(get(
-            "pricing.versions.detail",
+            "pricing.versions.read",
             "/pricing/versions/{version_id}",
             Q::Scoped,
         ))
@@ -2764,7 +2760,7 @@ pub fn catalog() -> Vec<Capability> {
     );
     c.push(
         get(
-            "privacy.requests.detail",
+            "privacy.requests.read",
             "/privacy/requests/{request_id}",
             Q::Scoped,
         )
