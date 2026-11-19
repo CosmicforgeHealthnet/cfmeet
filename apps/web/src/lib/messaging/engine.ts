@@ -37,6 +37,7 @@ import { MessageOutbox, browserOutboxStorage, flushOutbox, type OutboxItem } fro
 import { reactionSegment } from "./routes";
 import { messagingRealtimeOrigin } from "./urls";
 import { browserDeviceLabel } from "@/lib/auth/device-label";
+import { KEY_PACKAGE_TARGET, WAITING_NOTE, beforeJoinNote, joinerEntry, keyPackagesToPublish, missingDevices, removalPlan } from "./e2ee-membership";
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
 /** `needs-signin`: this sign-in is too old to register the browser; the standard sign-in flow takes over. */
@@ -192,7 +193,22 @@ type ServerMessage = {
 /** What the server knows about a private message (never its content): deletion, reply and edit links. */
 type E2eeMeta = { lifecycle: string; replyTo: string | null; target: string | null };
 
-type ServerDevice = { deviceId: string; status: string; signaturePublicKey: string; displayLabel: string | null };
+type ServerDevice = { deviceId: string; status: string; signaturePublicKey: string; displayLabel: string | null; keyPackagesAvailable?: number };
+
+/** The Delivery Service's view of a group (`GET …/mls/state`). */
+type MlsState = {
+  mlsEpoch: number;
+  pendingRemovals: { deviceId: string; principalId: string; reason: string }[];
+  /** The current epoch's GroupInfo (a member's device joins from it by itself); absent on older servers. */
+  groupInfo?: string | null;
+  groupInfoEpoch?: number | null;
+};
+
+/** A local group change (worker output) to submit to the Delivery Service. */
+type GroupChange = { commit: Uint8Array; epoch: number; welcome?: Uint8Array | null; groupInfo?: Uint8Array | null };
+
+/** An external commit the worker stopped at: its joining device must be verified first. */
+type PendingJoiner = { deviceId: string; sequence: number; senderPrincipalId: string };
 
 const PAGE = 100;
 /** Newest MANAGED messages loaded when a conversation is first synchronized. */
@@ -201,7 +217,15 @@ const INITIAL_PAGE = 50;
 const WINDOW = 100;
 const SESSION_DEVICE_KEY = "cfmeet.messaging.session-device.";
 const TYPING_THROTTLE_MS = 3000;
-const KEY_PACKAGE_STOCK = 10;
+/** A device not yet in a chat's group retries joining it by itself at most this often. */
+const JOIN_RETRY_MS = 10_000;
+/** A member device re-publishes a missing GroupInfo at most this often per chat. */
+const GROUP_INFO_RETRY_MS = 60_000;
+/** Before sending, the sender adds members' new devices; checked at most this often per chat. */
+const SEND_DEVICE_CHECK_MS = 10_000;
+/** A device that had no KeyPackage to claim is not claimed again before this. */
+const UNCLAIMABLE_RETRY_MS = 5 * 60_000;
+
 const POLL_MS = Math.max(1000, Number(process.env.NEXT_PUBLIC_MESSAGING_POLL_MS) || 15_000);
 /** A new browser checks whether a trusted device approved it. */
 const LINK_POLL_MS = 2_000;
@@ -310,8 +334,20 @@ export class MessagingEngine {
   private generation = 0;
   private pendingSends = new Map<string, MessageView[]>();
   private deviceChecks = new Map<string, number>();
-  private lastWaitingTopUp = 0;
+  private lastStockCheck = 0;
   private missingSince = new Map<string, number>();
+  /** Group changes of this device (worker snapshot / rollback) run one at a time. */
+  private mlsChain: Promise<unknown> = Promise.resolve();
+  /** Per chat: when this device last tried to join its group by itself. */
+  private joinAttempts = new Map<string, number>();
+  /** Per chat: when this device last published a missing GroupInfo. */
+  private groupInfoChecks = new Map<string, number>();
+  /** Per chat this device is not (yet) in: the latest messages, shown as placeholders. */
+  private waiting = new Map<string, ServerMessage[]>();
+  /** Devices whose claim returned no KeyPackage (none published): not claimed again for a while. */
+  private unclaimable = new Map<string, number>();
+  /** Members' device lists (cached briefly: adding new devices before every send). */
+  private deviceLists = new Map<string, { at: number; devices: ServerDevice[] }>();
   /** Automatic enrollment: in progress, and when a failed attempt may be retried. */
   private enrolling: Promise<void> | null = null;
   private nextEnrollAt = 0;
@@ -419,7 +455,7 @@ export class MessagingEngine {
           return;
         }
         this.set({ phase: "ready", deviceId: opened.deviceId });
-        await this.topUpKeyPackages();
+        await this.ensureKeyPackageStock(true).catch(() => {});
         this.connect();
       } else {
         this.set({ phase: "needs-device" });
@@ -489,7 +525,7 @@ export class MessagingEngine {
       void this.flush();
       if (this.snapshot.phase === "needs-device" && !this.snapshot.accountLink && Date.now() >= this.nextEnrollAt) void this.autoEnroll();
       for (const id of Object.keys(this.snapshot.awaitingSetup)) void this.flushDrafts(id);
-      await this.topUpWhileWaiting();
+      await this.ensureKeyPackageStock().catch(() => {});
       if (this.snapshot.phase === "ready" && this.snapshot.deviceId && !(await this.deviceIsActive(this.snapshot.deviceId))) {
         await this.onDeviceRevoked();
       }
@@ -540,7 +576,7 @@ export class MessagingEngine {
       await this.crypto.call("adopt");
       this.set({ phase: "ready", deviceId: device.deviceId, detail: null });
       this.enrollBackoff = 15_000;
-      await this.topUpKeyPackages(KEY_PACKAGE_STOCK);
+      await this.topUpKeyPackages(KEY_PACKAGE_TARGET);
       this.connect();
       await this.refreshConversations();
       await this.checkWelcomes();
@@ -564,27 +600,163 @@ export class MessagingEngine {
   }
 
   /**
-   * A device not yet in an encrypted group it belongs to depends on member devices
-   * claiming its KeyPackages; one claimed by an attempt that did not complete is spent.
-   * While waiting, publish one more per device-check period (the server caps the stock
-   * per device).
+   * Keeps this device's published KeyPackages stocked (WhatsApp: keys published in
+   * advance), so a sender can add this device to a chat on its own while it is offline.
+   * Every claim spends one; below KEY_PACKAGE_STOCK the device publishes up to
+   * KEY_PACKAGE_TARGET. Servers that do not report the stock are left alone.
    */
-  private async topUpWhileWaiting(): Promise<void> {
-    const c = this.crypto;
-    if (!c || this.snapshot.phase !== "ready" || Date.now() - this.lastWaitingTopUp < DEVICE_CHECK_MS) return;
-    for (const conv of this.server.values()) {
-      if (conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) continue;
-      if (await c.call<boolean>("hasGroup", { groupId: b64u.dec(conv.encryption.mlsGroupId) })) continue;
-      this.lastWaitingTopUp = Date.now();
-      await this.topUpKeyPackages(1).catch(() => {});
-      return;
-    }
+  private async ensureKeyPackageStock(force = false): Promise<void> {
+    const deviceId = this.snapshot.deviceId;
+    if (!this.crypto || this.snapshot.phase !== "ready" || !deviceId) return;
+    if (!force && Date.now() - this.lastStockCheck < DEVICE_CHECK_MS) return;
+    this.lastStockCheck = Date.now();
+    const own = (await this.ownDevices()).find((d) => d.deviceId === deviceId);
+    await this.topUpKeyPackages(keyPackagesToPublish(own?.keyPackagesAvailable));
   }
 
   private async topUpKeyPackages(count = 0): Promise<void> {
-    if (!this.crypto || !this.snapshot.deviceId || count < 1) return;
-    const kps = await this.crypto.call<Uint8Array[]>("keyPackages", { count });
+    const c = this.crypto;
+    if (!c || !this.snapshot.deviceId || count < 1) return;
+    const kps = await this.withMlsLock(() => c.call<Uint8Array[]>("keyPackages", { count }));
     await identityApi.publishKeyPackages(this.snapshot.deviceId, kps.map((k) => b64u.enc(k)));
+  }
+
+  /** Group changes of this device's worker (snapshot / confirm / rollback) never interleave. */
+  private withMlsLock<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.mlsChain.then(job, job);
+    this.mlsChain = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * Submits a group change this device already made locally, with the GroupInfo of the
+   * epoch it creates (so a member's new device can join by itself), and keeps it only if
+   * the Delivery Service accepts it. A server that does not take GroupInfos yet (an
+   * older image) gets the same commit without it.
+   */
+  private async submitChange(conv: ServerConversation, out: GroupChange, extra: { welcomed?: string[]; removed?: string[] } = {}): Promise<void> {
+    const c = this.crypto!;
+    const body = {
+      clientMessageId: uuid(),
+      deviceId: this.snapshot.deviceId,
+      epoch: out.epoch,
+      commit: b64u.enc(out.commit),
+      ...(out.welcome && extra.welcomed?.length ? { welcome: b64u.enc(out.welcome), welcomeDeviceIds: extra.welcomed } : {}),
+      ...(extra.removed ? { removedDeviceIds: extra.removed } : {}),
+    };
+    const path = `v1/conversations/${conv.conversationId}/mls/commits`;
+    try {
+      if (out.groupInfo) {
+        try {
+          await relay("POST", path, { ...body, groupInfo: b64u.enc(out.groupInfo) });
+        } catch (e) {
+          if (!(e instanceof MessagingApiError) || e.status !== 400) throw e;
+          await relay("POST", path, body);
+        }
+      } else {
+        await relay("POST", path, body);
+      }
+      await c.call("confirm");
+    } catch (e) {
+      await c.call("rollback").catch(() => {});
+      throw e;
+    }
+  }
+
+  private mlsState(conv: ServerConversation): Promise<MlsState> {
+    return relay<MlsState>("GET", `v1/conversations/${conv.conversationId}/mls/state`);
+  }
+
+  /** A member's device list, cached for `maxAgeMs`. */
+  private async principalDevices(principalId: string, maxAgeMs: number): Promise<ServerDevice[]> {
+    const hit = this.deviceLists.get(principalId);
+    if (hit && Date.now() - hit.at < maxAgeMs) return hit.devices;
+    const r = await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${principalId}/devices`);
+    this.deviceLists.set(principalId, { at: Date.now(), devices: r.devices });
+    return r.devices;
+  }
+
+  /**
+   * Joins a chat's encryption group BY ITSELF (MLS external commit from the GroupInfo the
+   * members published): this device never waits for anyone else to come online. A Welcome
+   * that already adds it is used first. Returns whether this device is in the group.
+   */
+  private async joinBySelf(conv: ServerConversation, force = false): Promise<boolean> {
+    const c = this.crypto;
+    const id = conv.conversationId;
+    if (!c || this.snapshot.phase !== "ready" || !this.snapshot.deviceId || conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) return false;
+    const gid = b64u.dec(conv.encryption.mlsGroupId);
+    if (await c.call<boolean>("hasGroup", { groupId: gid })) return true;
+    if (!force && Date.now() - (this.joinAttempts.get(id) ?? 0) < JOIN_RETRY_MS) return false;
+    this.joinAttempts.set(id, Date.now());
+    await this.checkWelcomes().catch(() => {});
+    const joined = await this.withMlsLock(async () => {
+      if (await c.call<boolean>("hasGroup", { groupId: gid })) return true;
+      const state = await this.mlsState(conv);
+      if (!state.groupInfo) return false;
+      const out = await c.call<GroupChange>("externalJoin", { groupId: gid, groupInfo: b64u.dec(state.groupInfo) });
+      try {
+        await this.submitChange(conv, out);
+      } catch {
+        // Another commit won this epoch (or a removal must be committed first): retried soon.
+        return false;
+      }
+      return true;
+    });
+    if (joined) {
+      this.joinAttempts.delete(id);
+      this.waiting.delete(id);
+      await this.renderConversations();
+    }
+    return joined;
+  }
+
+  /**
+   * The current epoch has no GroupInfo (a chat created before devices could join by
+   * themselves, or a commit of an older client): a member device publishes one with a
+   * key-update commit, so the members' new devices can join without anyone online.
+   */
+  private async ensureGroupInfo(conv: ServerConversation, state: MlsState | null): Promise<void> {
+    const c = this.crypto;
+    const id = conv.conversationId;
+    if (!c || !state || !("groupInfoEpoch" in state) || state.groupInfoEpoch === state.mlsEpoch || state.pendingRemovals.length) return;
+    if (Date.now() - (this.groupInfoChecks.get(id) ?? 0) < GROUP_INFO_RETRY_MS) return;
+    this.groupInfoChecks.set(id, Date.now());
+    const gid = b64u.dec(conv.encryption.mlsGroupId!);
+    await this.withMlsLock(async () => {
+      if (Number(await c.call<number>("epoch", { groupId: gid })) !== state.mlsEpoch) return;
+      const out = await c.call<GroupChange>("updateKeys", { groupId: gid });
+      // Another member's device may publish first (its commit wins the epoch): fine.
+      await this.submitChange(conv, out, { removed: [] }).catch(() => {});
+    });
+  }
+
+  /**
+   * Whether the device that joined by an external commit may be merged: a registered,
+   * ACTIVE device of a principal who is an ACTIVE member, whose key is the one in the
+   * directory and (with a pinned log) in the key-transparency log. `null`: refused.
+   * Throws when it cannot be decided now (network): the commit is retried later.
+   */
+  private async verifyJoiner(conv: ServerConversation, joiner: PendingJoiner): Promise<string | null> {
+    const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${conv.conversationId}/members?limit=${PAGE}`);
+    if (!members.members.some((m) => m.principalId === joiner.senderPrincipalId && (!m.state || m.state === "ACTIVE"))) return null;
+    let devices: ServerDevice[];
+    try {
+      devices = await this.principalDevices(joiner.senderPrincipalId, 0);
+    } catch (e) {
+      if (e instanceof MessagingApiError && (e.status === 404 || e.status === 403)) return null;
+      throw e;
+    }
+    const d = devices.find((x) => x.deviceId === joiner.deviceId && x.status === "ACTIVE");
+    if (!d) return null;
+    const key = b64u.dec(d.signaturePublicKey);
+    try {
+      await this.verifyTransparency(joiner.deviceId, key);
+    } catch (e) {
+      if (e instanceof CryptoWorkerError) return null;
+      throw e;
+    }
+    return joinerEntry(joiner.deviceId, key);
   }
 
   /** Removes this browser's device (server first) and erases its local keys and history. */
@@ -1054,53 +1226,50 @@ export class MessagingEngine {
     return this.createConversation([], "MANAGED", { cfMeetIds: [cfMeetId] });
   }
 
-  /** Claims, verifies and adds the devices of `principals` with ONE commit. */
-  private async addPrincipalsToGroup(conv: ServerConversation, principals: string[], create: boolean): Promise<void> {
-    const c = this.crypto!;
-    const gid = b64u.dec(conv.encryption.mlsGroupId!);
-    const deviceId = this.snapshot.deviceId!;
-    if (create) await c.call("createGroup", { groupId: gid });
-    try {
-      let packages: Uint8Array[] = [];
-      let welcomed: string[] = [];
-      if (principals.length) {
-        const claim = await relay<{ keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] }>(
-          "POST",
-          `v1/conversations/${conv.conversationId}/mls/key-package-claims`,
-          { principalIds: principals },
-        );
-        const now = Math.floor(Date.now() / 1000);
-        for (const k of claim.keyPackages) {
-          if (k.deviceId === deviceId) continue;
-          const kp = b64u.dec(k.keyPackage);
-          const info = await c.call<{ deviceId: string; signatureKey: Uint8Array }>("inspectKeyPackage", { keyPackage: kp, now });
-          if (info.deviceId !== k.deviceId) throw new CryptoWorkerError("KEY_PACKAGE_DEVICE_MISMATCH");
-          await this.verifyTransparency(k.deviceId, info.signatureKey);
-          packages.push(kp);
-          welcomed.push(k.deviceId);
+  /**
+   * Claims, verifies and adds the devices of `principals` with ONE commit. A new group
+   * publishes its GroupInfo at once (with the add, or a key-update commit when nobody else
+   * has a device yet), so every member's device can join it by itself later.
+   */
+  private addPrincipalsToGroup(conv: ServerConversation, principals: string[], create: boolean): Promise<void> {
+    return this.withMlsLock(async () => {
+      const c = this.crypto!;
+      const gid = b64u.dec(conv.encryption.mlsGroupId!);
+      const deviceId = this.snapshot.deviceId!;
+      if (create) await c.call("createGroup", { groupId: gid });
+      try {
+        const packages: Uint8Array[] = [];
+        const welcomed: string[] = [];
+        if (principals.length) {
+          const claim = await relay<{ keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] }>(
+            "POST",
+            `v1/conversations/${conv.conversationId}/mls/key-package-claims`,
+            { principalIds: principals },
+          );
+          const now = Math.floor(Date.now() / 1000);
+          for (const k of claim.keyPackages) {
+            if (k.deviceId === deviceId) continue;
+            const kp = b64u.dec(k.keyPackage);
+            const info = await c.call<{ deviceId: string; signatureKey: Uint8Array }>("inspectKeyPackage", { keyPackage: kp, now });
+            if (info.deviceId !== k.deviceId) throw new CryptoWorkerError("KEY_PACKAGE_DEVICE_MISMATCH");
+            await this.verifyTransparency(k.deviceId, info.signatureKey);
+            packages.push(kp);
+            welcomed.push(k.deviceId);
+          }
+          // A member without a published KeyPackage (no device yet, or none left) is not
+          // added here: its devices join by themselves from the GroupInfo, and senders add
+          // new devices before they send (addMissingDevices).
         }
-        // Nobody else has a messaging device yet: the group starts with this account's
-        // devices only ("pending setup"). Member devices are added automatically when they
-        // enroll (addMissingDevices); messages wait sealed on this device until then.
+        let out: GroupChange | null = null;
+        if (packages.length) out = await c.call<GroupChange>("addDevices", { groupId: gid, keyPackages: packages });
+        else if (create) out = await c.call<GroupChange>("updateKeys", { groupId: gid });
+        if (out) await this.submitChange(conv, out, { welcomed, removed: [] });
+        else await c.call("confirm");
+      } catch (e) {
+        await c.call("rollback").catch(() => {});
+        throw e;
       }
-      if (packages.length) {
-        const out = await c.call<{ commit: Uint8Array; welcome: Uint8Array | null; epoch: number }>("addDevices", { groupId: gid, keyPackages: packages });
-        await relay("POST", `v1/conversations/${conv.conversationId}/mls/commits`, {
-          clientMessageId: uuid(),
-          deviceId,
-          epoch: out.epoch,
-          commit: b64u.enc(out.commit),
-          ...(out.welcome ? { welcome: b64u.enc(out.welcome), welcomeDeviceIds: welcomed } : {}),
-          removedDeviceIds: [],
-        });
-        packages = [];
-        welcomed = [];
-      }
-      await c.call("confirm");
-    } catch (e) {
-      await c.call("rollback").catch(() => {});
-      throw e;
-    }
+    });
   }
 
   private async establishGroup(conv: ServerConversation, others: string[]): Promise<void> {
@@ -1277,124 +1446,118 @@ export class MessagingEngine {
     await this.refreshConversations();
   }
 
-  /** Cryptographic removal: a member device commits the removals the server requires. */
-  private async commitPendingRemovals(conv: ServerConversation): Promise<void> {
+  /**
+   * Cryptographic removal: a member device commits the removals the server requires. A
+   * pending device that is not in the tree (revoked before it ever joined) is attested
+   * too — with a key-update commit when no leaf has to go — so it never blocks the chat.
+   */
+  private async commitPendingRemovals(conv: ServerConversation, state: MlsState | null): Promise<void> {
     const c = this.crypto;
-    if (!c || conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) return;
+    if (!c || !state || conv.securityProfile !== "PRIVATE_E2EE" || !conv.encryption.mlsGroupId) return;
+    const pending = state.pendingRemovals.map((r) => r.deviceId);
+    if (!pending.length) return;
     const gid = b64u.dec(conv.encryption.mlsGroupId);
-    if (!(await c.call<boolean>("hasGroup", { groupId: gid }))) return;
-    const state = await relay<{ pendingRemovals: { deviceId: string }[] }>("GET", `v1/conversations/${conv.conversationId}/mls/state`);
-    const inTree = new Set(await c.call<string[]>("members", { groupId: gid }));
-    const remove = state.pendingRemovals.map((r) => r.deviceId).filter((d) => inTree.has(d) && d !== this.snapshot.deviceId);
-    if (!remove.length) return;
-    try {
-      const out = await c.call<{ commit: Uint8Array; epoch: number }>("removeDevices", { groupId: gid, deviceIds: remove });
-      await relay("POST", `v1/conversations/${conv.conversationId}/mls/commits`, {
-        clientMessageId: uuid(),
-        deviceId: this.snapshot.deviceId,
-        epoch: out.epoch,
-        commit: b64u.enc(out.commit),
-        removedDeviceIds: remove,
-      });
-      await c.call("confirm");
-    } catch {
-      // Another member's device committed first (epoch moved): ours is discarded.
-      await c.call("rollback").catch(() => {});
-    }
+    await this.withMlsLock(async () => {
+      if (!(await c.call<boolean>("hasGroup", { groupId: gid }))) return;
+      if (Number(await c.call<number>("epoch", { groupId: gid })) !== state.mlsEpoch) return;
+      const plan = removalPlan(pending, new Set(await c.call<string[]>("members", { groupId: gid })), this.snapshot.deviceId);
+      if (!plan) return;
+      const out = plan.remove.length
+        ? await c.call<GroupChange>("removeDevices", { groupId: gid, deviceIds: plan.remove })
+        : await c.call<GroupChange>("updateKeys", { groupId: gid });
+      // Another member's device may commit first (epoch moved): ours is discarded.
+      await this.submitChange(conv, out, { removed: plan.attest }).catch(() => {});
+    });
   }
 
   /**
-   * Multi-device: an ACTIVE device of a member that is not yet in the MLS tree (a new
-   * browser, a phone) is claimed, verified and added by any member device. Concurrent
-   * attempts are resolved by the Delivery Service's epoch order (the loser rolls back).
+   * Multi-device (WhatsApp): an ACTIVE device of a member that is not yet in the MLS tree
+   * (a new browser, a phone) is claimed, verified and added by a member device. Before
+   * every send (`urgent`) the sender does it itself, so what it sends reaches every device
+   * the others registered; otherwise one designated member device does it (others step
+   * in after a grace period). The new device does not depend on either: it joins by
+   * itself (joinBySelf). Concurrent attempts are resolved by the Delivery Service's epoch
+   * order (the loser rolls back).
    */
-  private async addMissingDevices(conv: ServerConversation): Promise<void> {
-    const last = this.deviceChecks.get(conv.conversationId) ?? 0;
-    if (Date.now() - last < DEVICE_CHECK_MS || !this.crypto || !conv.encryption.mlsGroupId) return;
-    this.deviceChecks.set(conv.conversationId, Date.now());
+  private async addMissingDevices(conv: ServerConversation, urgent = false): Promise<void> {
+    const id = conv.conversationId;
+    const last = this.deviceChecks.get(id) ?? 0;
+    if (Date.now() - last < (urgent ? SEND_DEVICE_CHECK_MS : DEVICE_CHECK_MS) || !this.crypto || !conv.encryption.mlsGroupId) return;
+    this.deviceChecks.set(id, Date.now());
     const gid = b64u.dec(conv.encryption.mlsGroupId);
+    if (!(await this.crypto.call<boolean>("hasGroup", { groupId: gid }))) return;
     const inTree = new Set(await this.crypto.call<string[]>("members", { groupId: gid }));
-    const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${conv.conversationId}/members?limit=${PAGE}`);
-    const missing: string[] = [];
-    const newDevices: ServerDevice[] = [];
-    const activeInTree: string[] = [];
-    const lookups = new Map((await Promise.all((members.members ?? []).filter((m) => !m.state || m.state === "ACTIVE").map(async (m) => [m.principalId, await relay<{ devices: ServerDevice[] }>("GET", `v1/messaging/principals/${m.principalId}/devices`).catch(() => ({ devices: [] as ServerDevice[] }))] as const))));
-    for (const m of members.members ?? []) {
-      if (m.state && m.state !== "ACTIVE") continue;
-      const d = lookups.get(m.principalId) ?? { devices: [] as ServerDevice[] };
-      for (const x of d.devices) if (x.status === "ACTIVE" && inTree.has(x.deviceId)) activeInTree.push(x.deviceId);
-      const fresh = d.devices.filter((x) => x.status === "ACTIVE" && !inTree.has(x.deviceId));
-      if (fresh.length) {
-        missing.push(m.principalId);
-        newDevices.push(...fresh);
-      }
-    }
+    const members = await relay<{ members: { principalId: string; state?: string }[] }>("GET", `v1/conversations/${id}/members?limit=${PAGE}`);
+    const active = (members.members ?? []).filter((m) => !m.state || m.state === "ACTIVE");
+    const lookups = new Map(
+      await Promise.all(active.map(async (m) => [m.principalId, await this.principalDevices(m.principalId, urgent ? SEND_DEVICE_CHECK_MS : 0).catch(() => [] as ServerDevice[])] as const)),
+    );
+    const { principals: missing, deviceIds, activeInTree } = missingDevices(active, (p) => lookups.get(p) ?? [], inTree, this.snapshot.deviceId);
+    const listed = [...lookups.values()].flat();
+    // A device without published KeyPackages (e.g. a browser whose storage was cleared) is
+    // not claimed again for a while; if it is alive it joins by itself.
+    const newDevices = deviceIds
+      .filter((d) => Date.now() - (this.unclaimable.get(d) ?? 0) > UNCLAIMABLE_RETRY_MS)
+      .map((d) => listed.find((x) => x.deviceId === d)!);
     if (!missing.length) {
-      this.missingSince.delete(conv.conversationId);
+      this.missingSince.delete(id);
       return;
     }
-    // One member device adds new devices (a claim consumes a KeyPackage of EVERY device
-    // of the principal, so racing members would exhaust the newcomer's stock): the ACTIVE
-    // device with the smallest id in the tree. Others step in only after a grace period
-    // (the designated device may be offline).
     const designated = activeInTree.sort()[0];
-    if (designated !== this.snapshot.deviceId) {
-      const seen = this.missingSince.get(conv.conversationId) ?? Date.now();
-      this.missingSince.set(conv.conversationId, seen);
-      if (Date.now() - seen < 10 * DEVICE_CHECK_MS) return;
+    if (!urgent && designated !== this.snapshot.deviceId) {
+      const seen = this.missingSince.get(id) ?? Date.now();
+      this.missingSince.set(id, seen);
+      if (Date.now() - seen < 2 * DEVICE_CHECK_MS) return;
     }
-    // A claim consumes one KeyPackage of every device of the principal, so nothing is
-    // claimed until each new device's listed key verifies against the transparency log
-    // (a device the log does not yet include is retried on a later check without
-    // spending the newcomer's KeyPackages).
+    // Only devices whose listed key verifies (against the transparency log, when pinned)
+    // are claimed; one the log does not include yet is retried on a later check.
+    const verified: string[] = [];
     for (const d of newDevices) {
       const ok = await this.verifyTransparency(d.deviceId, b64u.dec(d.signaturePublicKey)).then(
         () => true,
         () => false,
       );
-      if (!ok) return;
+      if (ok) verified.push(d.deviceId);
     }
-    await this.addDevicesOf(conv, missing, inTree).catch(() => {});
-    if (this.snapshot.awaitingSetup[conv.conversationId]) void this.flushDrafts(conv.conversationId);
+    if (!verified.length) return;
+    await this.addDevicesOf(conv, missing, verified).catch(() => {});
+    if (this.snapshot.awaitingSetup[id]) void this.flushDrafts(id);
   }
 
-  /** Adds the not-yet-present devices of `principals` (claims skip those in the tree). */
-  private async addDevicesOf(conv: ServerConversation, principals: string[], inTree: Set<string>): Promise<void> {
-    const c = this.crypto!;
-    const gid = b64u.dec(conv.encryption.mlsGroupId!);
-    const claim = await relay<{ keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] }>(
-      "POST",
-      `v1/conversations/${conv.conversationId}/mls/key-package-claims`,
-      { principalIds: principals },
-    );
-    const now = Math.floor(Date.now() / 1000);
-    const packages: Uint8Array[] = [];
-    const welcomed: string[] = [];
-    for (const k of claim.keyPackages) {
-      if (inTree.has(k.deviceId) || k.deviceId === this.snapshot.deviceId) continue;
-      const kp = b64u.dec(k.keyPackage);
-      const info = await c.call<{ deviceId: string; signatureKey: Uint8Array }>("inspectKeyPackage", { keyPackage: kp, now });
-      if (info.deviceId !== k.deviceId) continue;
-      await this.verifyTransparency(k.deviceId, info.signatureKey);
-      packages.push(kp);
-      welcomed.push(k.deviceId);
-    }
-    if (!packages.length) return;
-    try {
-      const out = await c.call<{ commit: Uint8Array; welcome: Uint8Array | null; epoch: number }>("addDevices", { groupId: gid, keyPackages: packages });
-      await relay("POST", `v1/conversations/${conv.conversationId}/mls/commits`, {
-        clientMessageId: uuid(),
-        deviceId: this.snapshot.deviceId,
-        epoch: out.epoch,
-        commit: b64u.enc(out.commit),
-        ...(out.welcome ? { welcome: b64u.enc(out.welcome), welcomeDeviceIds: welcomed } : {}),
-        removedDeviceIds: [],
-      });
-      await c.call("confirm");
-    } catch (e) {
-      await c.call("rollback").catch(() => {});
-      throw e;
-    }
+  /**
+   * Adds the given new devices of `principals` with one commit: the claim takes only
+   * their KeyPackages (never one of a device already in the tree).
+   */
+  private addDevicesOf(conv: ServerConversation, principals: string[], deviceIds: string[]): Promise<void> {
+    return this.withMlsLock(async () => {
+      const c = this.crypto!;
+      const gid = b64u.dec(conv.encryption.mlsGroupId!);
+      const inTree = new Set(await c.call<string[]>("members", { groupId: gid }));
+      const wanted = deviceIds.filter((d) => !inTree.has(d) && d !== this.snapshot.deviceId);
+      if (!wanted.length) return;
+      const path = `v1/conversations/${conv.conversationId}/mls/key-package-claims`;
+      type Claim = { keyPackages: { principalId: string; deviceId: string; keyPackage: string }[] };
+      const claim = await relay<Claim>("POST", path, { principalIds: principals, deviceIds: wanted }).catch((e) =>
+        // An older server does not take deviceIds.
+        e instanceof MessagingApiError && e.status === 400 ? relay<Claim>("POST", path, { principalIds: principals }) : Promise.reject(e),
+      );
+      for (const d of wanted) if (!claim.keyPackages.some((k) => k.deviceId === d)) this.unclaimable.set(d, Date.now());
+      const now = Math.floor(Date.now() / 1000);
+      const packages: Uint8Array[] = [];
+      const welcomed: string[] = [];
+      for (const k of claim.keyPackages) {
+        if (inTree.has(k.deviceId) || k.deviceId === this.snapshot.deviceId) continue;
+        const kp = b64u.dec(k.keyPackage);
+        const info = await c.call<{ deviceId: string; signatureKey: Uint8Array }>("inspectKeyPackage", { keyPackage: kp, now });
+        if (info.deviceId !== k.deviceId) continue;
+        await this.verifyTransparency(k.deviceId, info.signatureKey);
+        packages.push(kp);
+        welcomed.push(k.deviceId);
+      }
+      if (!packages.length) return;
+      const out = await c.call<GroupChange>("addDevices", { groupId: gid, keyPackages: packages });
+      await this.submitChange(conv, out, { welcomed, removed: [] });
+    });
   }
 
   private async checkWelcomes(): Promise<void> {
@@ -1416,7 +1579,8 @@ export class MessagingEngine {
       const gid = b64u.dec(conv.encryption.mlsGroupId);
       if (!(await this.crypto.call<boolean>("hasGroup", { groupId: gid }))) {
         try {
-          await this.crypto.call("join", { groupId: gid, welcome: b64u.dec(w.welcome) });
+          const c = this.crypto;
+          await this.withMlsLock(() => c.call("join", { groupId: gid, welcome: b64u.dec(w.welcome) }));
           joined++;
         } catch {
           // A Welcome this device cannot use (e.g. superseded): it is still consumed.
@@ -1426,7 +1590,7 @@ export class MessagingEngine {
       this.scheduleSync(conv.conversationId);
     }
     if (joined) {
-      await this.topUpKeyPackages(joined);
+      await this.ensureKeyPackageStock(true).catch(() => {});
       await this.renderConversations();
     }
   }
@@ -1464,19 +1628,29 @@ export class MessagingEngine {
     if (conv.securityProfile === "MANAGED") return this.syncManaged(conv);
     const c = this.crypto;
     if (!c || !this.snapshot.deviceId || !conv.encryption.mlsGroupId) {
+      await this.loadWaiting(conv);
       await this.renderE2ee(conversationId);
       return;
     }
     const gid = b64u.dec(conv.encryption.mlsGroupId);
-    if (await c.call<boolean>("hasGroup", { groupId: gid })) {
-      for (;;) {
+    let inGroup = await c.call<boolean>("hasGroup", { groupId: gid });
+    // Not in this chat's group yet: join it by itself (nobody else has to be online).
+    if (!inGroup && this.snapshot.phase === "ready") inGroup = await this.joinBySelf(conv).catch(() => false);
+    if (inGroup) {
+      // External commits (members' devices that joined by themselves) are merged only
+      // after their device is verified; one that fails verification is refused.
+      const allowedJoiners: string[] = [];
+      const rejectedJoiners: string[] = [];
+      for (let round = 0; round < 200; round++) {
         const after = await c.call<number>("cursor", { conversationId });
         const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${conversationId}/messages?afterSequence=${after}&limit=${PAGE}`);
         if (!page.messages.length) break;
         this.noteMeta(conversationId, page.messages);
-        const processed = await c.call<{ records: StoredRecord[] }>("processMessages", {
+        const processed = await this.withMlsLock(() => c.call<{ records: StoredRecord[]; joiner?: PendingJoiner | null }>("processMessages", {
           conversationId,
           groupId: gid,
+          allowedJoiners,
+          rejectedJoiners,
           messages: page.messages.map((m) => ({
             sequence: m.sequence,
             messageId: m.messageId,
@@ -1490,17 +1664,40 @@ export class MessagingEngine {
             ciphertext: m.e2ee?.ciphertext ?? "",
             attachmentIds: m.attachmentIds,
           })),
-        });
-        // Another device's commit may have used one of this device's KeyPackages (a
-        // claim takes one per device of a principal): keep the stock up.
-        const foreignCommits = processed.records.filter((r) => r.status === "COMMIT" && r.senderDeviceId !== this.snapshot.deviceId).length;
-        if (foreignCommits) await this.topUpKeyPackages(Math.min(foreignCommits, 5)).catch(() => {});
+        }));
+        if (processed.joiner) {
+          const verdict = await this.verifyJoiner(conv, processed.joiner);
+          if (verdict) allowedJoiners.push(verdict);
+          else rejectedJoiners.push(processed.joiner.deviceId);
+          continue;
+        }
+        // Another device's commit may have used one of this device's KeyPackages: keep the stock up.
+        if (processed.records.some((r) => r.status === "COMMIT" && r.senderDeviceId !== this.snapshot.deviceId)) void this.ensureKeyPackageStock(true).catch(() => {});
         if (page.messages.length < PAGE) break;
       }
-      await this.commitPendingRemovals(conv);
+      this.waiting.delete(conversationId);
+      const state = await this.mlsState(conv).catch(() => null);
+      await this.commitPendingRemovals(conv, state);
+      await this.ensureGroupInfo(conv, state);
       await this.addMissingDevices(conv);
+    } else {
+      await this.loadWaiting(conv);
     }
     await this.renderE2ee(conversationId);
+  }
+
+  /**
+   * A chat this device is not in yet: its latest messages are listed (metadata only) and
+   * shown as "Waiting for this message" rather than an empty chat.
+   */
+  private async loadWaiting(conv: ServerConversation): Promise<void> {
+    const id = conv.conversationId;
+    const last = conv.inbox?.lastMessage?.sequence ?? 0;
+    if (!last) return;
+    const page = await relay<{ messages: ServerMessage[] }>("GET", `v1/conversations/${id}/messages?afterSequence=${Math.max(0, last - PAGE)}&limit=${PAGE}`).catch(() => null);
+    if (!page) return;
+    this.noteMeta(id, page.messages);
+    this.waiting.set(id, page.messages.filter((m) => m.kind === "APPLICATION"));
   }
 
   private async renderE2ee(conversationId: string): Promise<void> {
@@ -1508,6 +1705,12 @@ export class MessagingEngine {
     const records = this.crypto && this.snapshot.deviceId ? await this.crypto.call<StoredRecord[]>("history", { conversationId }).catch(() => []) : [];
     const views: MessageView[] = [];
     const meta = this.metaFor(conversationId);
+    // Older history comes from another device of this account (history transfer), if any.
+    let olderNote = beforeJoinNote(false);
+    if (records.some((r) => r.status === "BEFORE_JOIN")) {
+      const own = await this.ownDeviceIds().catch(() => new Set<string>());
+      olderNote = beforeJoinNote([...own].some((d) => d !== this.snapshot.deviceId));
+    }
     const reactions = this.reactions.get(conversationId);
     const pinned = new Set((this.snapshot.pins[conversationId] ?? []).map((p) => p.messageId));
     // Edits are encrypted messages that point at the original (the link is server metadata).
@@ -1557,7 +1760,7 @@ export class MessagingEngine {
         base.note = "Sent from another of your devices";
       } else if (r.status === "BEFORE_JOIN") {
         base.state = "before-join";
-        base.note = "Sent before this device joined; recover history from another device to read it";
+        base.note = olderNote;
       } else if (r.status === "REMOVED") {
         base.state = "removed";
         base.note = "Message removed";
@@ -1567,6 +1770,29 @@ export class MessagingEngine {
       }
       views.push(base);
     }
+    // Not in this chat's group yet: its latest messages wait (placeholders, never nothing).
+    const local = new Set(records.map((r) => r.sequence));
+    for (const m of this.waiting.get(conversationId) ?? []) {
+      if (local.has(m.sequence)) continue;
+      const removed = m.lifecycle !== "ACTIVE";
+      views.push({
+        key: `s${m.sequence}`,
+        sequence: m.sequence,
+        senderPrincipalId: m.senderPrincipalId,
+        mine: m.senderPrincipalId === me,
+        createdAt: m.createdAt,
+        profile: "PRIVATE_E2EE",
+        state: removed ? "removed" : "unreadable",
+        text: null,
+        file: null,
+        note: removed ? "Message deleted" : WAITING_NOTE,
+        transferred: false,
+        messageId: m.messageId,
+        reactions: [],
+        pinned: false,
+      });
+    }
+    views.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
     // Replies: the quoted message is read from this device's own history.
     const byId = new Map(views.filter((v) => v.messageId).map((v) => [v.messageId as string, v]));
     for (const v of views) {
@@ -2049,9 +2275,14 @@ export class MessagingEngine {
     }
     const key = `p${uuid()}`;
     this.addPending(conversationId, { key, sequence: null, senderPrincipalId: this.snapshot.identity?.principalId ?? null, mine: true, createdAt: new Date().toISOString(), profile: conv.securityProfile, state: "sending", text, file: null, note: null, transferred: false });
-    // Not sendable yet (the others aren't reachable, or this browser isn't in the chat's encryption
-    // group yet): hold it sealed on this device and send it automatically once it can (WhatsApp).
-    const notInGroup = conv.securityProfile === "PRIVATE_E2EE" && !this.snapshot.conversations.find((c) => c.id === conversationId)?.groupReady;
+    // Not in the chat's encryption group yet: join it by itself first (nobody else has to be online).
+    let notInGroup = conv.securityProfile === "PRIVATE_E2EE" && !this.snapshot.conversations.find((c) => c.id === conversationId)?.groupReady;
+    if (notInGroup && this.crypto && this.snapshot.phase === "ready") notInGroup = !(await this.joinBySelf(conv, true).catch(() => false));
+    // The sender adds the others' newly registered devices before it encrypts, so the
+    // message reaches every device they have (from the KeyPackages they published).
+    if (conv.securityProfile === "PRIVATE_E2EE" && !notInGroup && this.crypto && this.snapshot.phase === "ready") await this.addMissingDevices(conv, true).catch(() => {});
+    // Still not sendable (nobody else has a device yet, or the join must wait for a removal):
+    // hold it sealed on this device and send it automatically once it can (WhatsApp).
     if (conv.securityProfile === "PRIVATE_E2EE" && this.crypto && this.snapshot.phase === "ready" && (notInGroup || (await this.updateAwaitingSetup(conv)))) {
       // Nobody else can decrypt yet: hold it sealed on this device, never report it sent.
       this.settlePending(conversationId, key, null);
@@ -2088,7 +2319,7 @@ export class MessagingEngine {
       // group moved on (409: new epoch, or a removal to commit) process everything and retry.
       if (attempt > 0) await this.sync(conv.conversationId);
       const clientMessageId = uuid();
-      const out = await c.call<{ ciphertext: Uint8Array; epoch: number }>("encrypt", { conversationId: conv.conversationId, groupId: gid, clientMessageId, payload });
+      const out = await this.withMlsLock(() => c.call<{ ciphertext: Uint8Array; epoch: number }>("encrypt", { conversationId: conv.conversationId, groupId: gid, clientMessageId, payload }));
       try {
         await relay("POST", `v1/conversations/${conv.conversationId}/messages`, {
           clientMessageId,
