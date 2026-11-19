@@ -111,7 +111,8 @@ impl Store {
         s: Scope,
         public_id: &str,
     ) -> Result<Profile> {
-        if !crate::crypto::valid_public_id(public_id) {
+        let public_id = crate::crypto::normalize_public_id(public_id);
+        if !crate::crypto::valid_public_id(&public_id) {
             return Err(Error::NotFound);
         }
         let mut v = scoped(s);

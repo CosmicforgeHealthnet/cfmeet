@@ -1225,3 +1225,122 @@ async fn reactivated_accounts_leave_deactivation() {
     .is_err());
     h.close().await;
 }
+
+/// Owner decision 2026-11-19: anyone who has a person's CF Meet ID can add them, chat and
+/// call them without a request (AUTOMATIC, the default); MANUAL keeps contact requests.
+/// Short IDs are typed case-insensitively, with or without the hyphen.
+#[tokio::test]
+async fn direct_contact_by_short_cf_meet_id_connects_at_once_unless_the_person_wants_requests() {
+    let h = Harness::new().await;
+    let a = h.direct_profile(&h.account()).await;
+    let b = h.direct_profile(&h.account()).await;
+    let b_id = h.public_id(&b).await;
+    assert_eq!(b_id.len(), 9, "short CF Meet ID: {b_id}");
+    assert_eq!(
+        h.state.get_privacy(&b).await.unwrap()["privacy"]["contactApproval"],
+        "AUTOMATIC"
+    );
+    // Typed in lower case without the hyphen.
+    let typed = b_id.replace('-', "").to_lowercase();
+    let r = h
+        .state
+        .send_request(&h.scope, &a, json!({"cfMeetId": typed}), Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(r["state"], "ACCEPTED", "{r}");
+    assert_eq!(r["relationship"], "CONNECTED");
+    assert_eq!(r["cfMeetId"], json!(b_id));
+    // Both are contacts straight away, and chat and calls are allowed (CONNECTIONS).
+    for (viewer, other) in [(&a, &b), (&b, &a)] {
+        let c = h
+            .state
+            .list_contacts(viewer, 10, Uuid::nil())
+            .await
+            .unwrap();
+        assert_eq!(c["data"][0]["principalId"], json!(other.principal_id));
+    }
+    for action in [Action::DirectConversation, Action::DirectCall] {
+        assert!(
+            h.state
+                .check_policy(&h.scope, &check(action, &a, &b))
+                .await
+                .unwrap()
+                .allowed,
+            "{action:?}"
+        );
+    }
+    // Nothing is left pending for the added person.
+    let incoming = h
+        .state
+        .list_requests(&b, true, 10, Uuid::nil())
+        .await
+        .unwrap();
+    assert!(
+        incoming["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["state"] != "PENDING"),
+        "{incoming}"
+    );
+
+    // A person who wants requests (MANUAL) still gets one.
+    let c = h.direct_profile(&h.account()).await;
+    let privacy = h.state.get_privacy(&c).await.unwrap();
+    let mut settings = privacy["privacy"].clone();
+    settings["contactApproval"] = json!("MANUAL");
+    h.state
+        .set_privacy(
+            &c,
+            json!({"expectedVersion": privacy["version"], "privacy": settings}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    let r = h
+        .state
+        .send_request(
+            &h.scope,
+            &a,
+            json!({"cfMeetId": h.public_id(&c).await}),
+            Uuid::new_v4(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r["state"], "PENDING", "{r}");
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &check(Action::DirectConversation, &a, &c))
+            .await
+            .unwrap()
+            .allowed
+    );
+
+    // A person who blocked you cannot be added, even with their ID.
+    let d = h.direct_profile(&h.account()).await;
+    h.state
+        .set_block(&d, &a, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    not_found(
+        h.state
+            .send_request(
+                &h.scope,
+                &a,
+                json!({"cfMeetId": h.public_id(&d).await}),
+                Uuid::new_v4(),
+            )
+            .await,
+    );
+    // An old-format long ID no longer resolves.
+    not_found(
+        h.state
+            .send_request(
+                &h.scope,
+                &a,
+                json!({"cfMeetId": "CF-ABCDEFGHIJKLMNOPQRSTUVWXYZ"}),
+                Uuid::new_v4(),
+            )
+            .await,
+    );
+}

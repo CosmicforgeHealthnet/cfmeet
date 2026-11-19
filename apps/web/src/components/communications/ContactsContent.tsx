@@ -153,7 +153,7 @@ function ProfileCard({ profile }: { profile: PublicProfile }) {
         </div>
         <button type="button" data-testid="send-request" disabled={!canRequest || actions.requestContact.isPending || actions.requestContact.isSuccess}
           onClick={() => actions.requestContact.mutate(profile.cfMeetId)} className={cn(pill, "bg-primary text-primary-foreground hover:bg-primary/90")}>
-          {actions.requestContact.isSuccess ? <Check className="size-4" /> : <UserPlus className="size-4" />}{actions.requestContact.isSuccess ? "Request sent" : "Add"}
+          {actions.requestContact.isSuccess ? <Check className="size-4" /> : <UserPlus className="size-4" />}{actions.requestContact.isSuccess ? (actions.requestContact.data?.state === "ACCEPTED" ? "Added" : "Request sent") : "Add"}
         </button>
       </div>
       <div className="mt-2 flex justify-end gap-1">

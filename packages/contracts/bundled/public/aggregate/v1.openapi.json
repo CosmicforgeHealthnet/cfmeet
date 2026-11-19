@@ -46,7 +46,7 @@
     },
     {
       "name": "communications",
-      "description": "cfmeet.communications.http-api 1.7.0"
+      "description": "cfmeet.communications.http-api 1.8.0"
     }
   ],
   "paths": {
@@ -2477,7 +2477,7 @@
       "post": {
         "operationId": "createCommunicationsContactRequest",
         "summary": "Request a personal connection by public ID",
-        "description": "No self-connection or duplicate active pair. A pending request grants no personal calls or direct chat. Maximum 60 attempts per hour and 24-hour cooldown after decline or cancellation. Discovery visibility and target request preferences apply.",
+        "description": "No self-connection or duplicate active pair. A pending request grants no personal calls or direct chat. Maximum 60 attempts per hour and 24-hour cooldown after decline or cancellation. Discovery visibility and target request preferences apply. Direct contact: if the person's contactApproval is AUTOMATIC (the default) you are connected at once (state ACCEPTED, relationship CONNECTED) and can chat and call; otherwise a PENDING request is sent.",
         "tags": [
           "communications"
         ],
@@ -2638,7 +2638,7 @@
                 "$ref": "#/components/schemas/communications.PublicIdResolve"
               },
               "example": {
-                "cfMeetId": "CF-JBSWY3DPEHPK3PXPJBSWY3DPEH"
+                "cfMeetId": "CF-AB7K3Q"
               }
             }
           }
@@ -8627,7 +8627,7 @@
                 "$ref": "#/components/schemas/communications.PublicIdResolve"
               },
               "example": {
-                "cfMeetId": "CF-JBSWY3DPEHPK3PXPJBSWY3DPEH"
+                "cfMeetId": "CF-AB7K3Q"
               }
             }
           }
@@ -11451,7 +11451,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^CF-[A-Z2-7]{26}$"
+              "pattern": "^[Cc][Ff]-?[A-HJ-NP-Za-hj-np-z2-9]{6}$"
             },
             "description": "Public CF Meet ID."
           }
@@ -11625,7 +11625,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^CF-[A-Z2-7]{26}$"
+              "pattern": "^[Cc][Ff]-?[A-HJ-NP-Za-hj-np-z2-9]{6}$"
             },
             "description": "Public CF Meet ID."
           }
@@ -11797,7 +11797,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^CF-[A-Z2-7]{26}$"
+              "pattern": "^[Cc][Ff]-?[A-HJ-NP-Za-hj-np-z2-9]{6}$"
             },
             "description": "Public CF Meet ID."
           }
@@ -11971,7 +11971,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^CF-[A-Z2-7]{26}$"
+              "pattern": "^[Cc][Ff]-?[A-HJ-NP-Za-hj-np-z2-9]{6}$"
             },
             "description": "Public CF Meet ID."
           }
@@ -63574,7 +63574,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$"
           },
           "blocked": {
             "type": "boolean"
@@ -63596,7 +63596,7 @@
         "properties": {
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$"
           },
           "blocked": {
             "type": "boolean",
@@ -64187,7 +64187,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$"
           },
           "displayName": {
             "type": "string"
@@ -64537,7 +64537,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$"
           },
           "state": {
             "type": "string",
@@ -64567,7 +64567,8 @@
           "cfMeetId",
           "state",
           "version"
-        ]
+        ],
+        "description": "When the addressee's contactApproval is AUTOMATIC the request is created ACCEPTED with relationship CONNECTED (direct contact); otherwise it is PENDING."
       },
       "communications.ContactsAddedToCall": {
         "type": "object",
@@ -66208,6 +66209,14 @@
               "NOBODY"
             ],
             "description": "Who may add this person to groups (gap audit S9; previously the contact-request permission decided). Optional on update: absent keeps the current value. Always present when read."
+          },
+          "contactApproval": {
+            "type": "string",
+            "enum": [
+              "AUTOMATIC",
+              "MANUAL"
+            ],
+            "description": "Direct contact: AUTOMATIC (default) connects anyone who has this person's CF Meet ID as soon as they add them, so they can chat and call straight away (sharing the ID is the consent); MANUAL keeps contact requests. Blocks and contactRequestPermissions NOBODY still refuse. Optional on update: absent keeps the current value. Always present when read."
           }
         },
         "required": [
@@ -66277,7 +66286,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$"
           },
           "displayName": {
             "type": "string",
@@ -66337,7 +66346,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$"
           },
           "version": {
             "type": "integer",
@@ -66356,7 +66365,8 @@
         "properties": {
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^[Cc][Ff]-?[A-HJ-NP-Za-hj-np-z2-9]{6}$",
+            "description": "A CF Meet ID as typed: CF- plus 6 characters, case-insensitive, hyphen optional."
           }
         },
         "required": [
@@ -66375,7 +66385,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$"
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$"
           },
           "displayName": {
             "type": "string",
@@ -78856,7 +78866,7 @@
           },
           "cfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$",
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$",
             "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
           }
         },
@@ -81073,7 +81083,7 @@
           },
           "counterpartCfMeetId": {
             "type": "string",
-            "pattern": "^CF-[A-Z2-7]{26}$",
+            "pattern": "^CF-[A-HJ-NP-Z2-9]{6}$",
             "description": "Personal CF Meet ID resolved privately through Communications under the authenticated actor and scope. Exactly one recipient identifier is allowed. Rotation invalidates the old public ID; existing canonical conversations remain unchanged."
           },
           "title": {

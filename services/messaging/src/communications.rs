@@ -46,12 +46,13 @@ pub async fn resolve_address(
     }
     let id = value
         .as_str()
+        // CF- plus 6 characters without look-alikes (Communications owns the format).
         .filter(|id| {
-            id.len() == 29
+            id.len() == 9
                 && id.starts_with("CF-")
                 && id.as_bytes()[3..]
                     .iter()
-                    .all(|c| c.is_ascii_uppercase() || (b'2'..=b'7').contains(c))
+                    .all(|c| b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789".contains(c))
         })
         .ok_or_else(|| Error::validation("invalid CF Meet ID"))?;
     let client = state

@@ -2724,6 +2724,7 @@ export namespace Communications {
     contactId: string;
     relationship: "REVOKED";
   };
+  /** When the addressee's contactApproval is AUTOMATIC the request is created ACCEPTED with relationship CONNECTED (direct contact); otherwise it is PENDING. */
   export type ContactRequest = {
     schemaVersion: 1;
     requestId: string;
@@ -3055,6 +3056,8 @@ export namespace Communications {
     presenceVisibility: "CONNECTIONS" | "NOBODY";
     /** Who may add this person to groups (gap audit S9; previously the contact-request permission decided). Optional on update: absent keeps the current value. Always present when read. */
     groupInvitationPolicy?: "CONNECTIONS" | "NOBODY";
+    /** Direct contact: AUTOMATIC (default) connects anyone who has this person's CF Meet ID as soon as they add them, so they can chat and call straight away (sharing the ID is the consent); MANUAL keeps contact requests. Blocks and contactRequestPermissions NOBODY still refuse. Optional on update: absent keeps the current value. Always present when read. */
+    contactApproval?: "AUTOMATIC" | "MANUAL";
   };
   export type PrivacyUpdate = {
     expectedVersion: number;
@@ -3083,6 +3086,7 @@ export namespace Communications {
     version: number;
   };
   export type PublicIdResolve = {
+    /** A CF Meet ID as typed: CF- plus 6 characters, case-insensitive, hyphen optional. */
     cfMeetId: string;
   };
   export type PublicProfile = {

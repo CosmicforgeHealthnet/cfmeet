@@ -885,6 +885,7 @@ class ContactRemoved {
   Map<String, Object?> toJson() => json;
 }
 
+/// When the addressee's contactApproval is AUTOMATIC the request is created ACCEPTED with relationship CONNECTED (direct contact); otherwise it is PENDING.
 class ContactRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const ContactRequest.fromJson(this.json);
@@ -2065,8 +2066,9 @@ class Privacy {
   const Privacy.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory Privacy.create({required String contactRequestPermissions, required String directChatPolicy, String? groupInvitationPolicy, required String incomingCallPolicy, required String invitationPermissions, required String presenceVisibility, required bool publicIdDiscoverable, required String publicProfileVisibility}) =>
+  factory Privacy.create({String? contactApproval, required String contactRequestPermissions, required String directChatPolicy, String? groupInvitationPolicy, required String incomingCallPolicy, required String invitationPermissions, required String presenceVisibility, required bool publicIdDiscoverable, required String publicProfileVisibility}) =>
       Privacy.fromJson(<String, Object?>{
+        if (contactApproval != null) 'contactApproval': contactApproval,
         'contactRequestPermissions': contactRequestPermissions,
         'directChatPolicy': directChatPolicy,
         if (groupInvitationPolicy != null) 'groupInvitationPolicy': groupInvitationPolicy,
@@ -2079,6 +2081,9 @@ class Privacy {
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
+
+  /// Direct contact: AUTOMATIC (default) connects anyone who has this person's CF Meet ID as soon as they add them, so they can chat and call straight away (sharing the ID is the consent); MANUAL keeps contact requests. Blocks and contactRequestPermissions NOBODY still refuse. Optional on update: absent keeps the current value. Always present when read.
+  String? get contactApproval => json['contactApproval'] as String?;
 
   String get contactRequestPermissions => json['contactRequestPermissions']! as String;
 
@@ -2227,6 +2232,7 @@ class PublicIdResolve {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
+  /// A CF Meet ID as typed: CF- plus 6 characters, case-insensitive, hyphen optional.
   String get cfMeetId => json['cfMeetId']! as String;
 
   Map<String, Object?> toJson() => json;

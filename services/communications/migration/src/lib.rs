@@ -317,6 +317,68 @@ pub async fn group_invitation_ready<C: ConnectionTrait>(db: &C) -> Result<bool, 
         && applied.contains(&ProfileReportReviews.name().to_owned())
         && applied.contains(&Reactivation.name().to_owned()))
 }
+/// Short CF Meet IDs (CF- plus 6 characters) and direct contact (contact_approval). An
+/// EIGHTH separate history: the previous image checks the seventh one has exactly its three
+/// migrations, so appending there would stop it after a rollback. Never merge them.
+pub struct ShortIdsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for ShortIdsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(ShortIds)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_short_ids_seaql_migrations").into_iden()
+    }
+}
+struct ShortIds;
+impl MigrationName for ShortIds {
+    fn name(&self) -> &str {
+        "m20261119_000001_short_ids_direct_contact"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ShortIds {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/009_short_ids_direct_contact.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the short-ID history is fully applied.
+pub async fn short_ids_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_short_ids_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_short_ids_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    let applied: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String>("", "version"))
+        .collect::<Result<_, _>>()?;
+    Ok(applied.len() == 1 && applied.contains(&ShortIds.name().to_owned()))
+}
 /// Apply the foundation history, then the unified, device-session, timeline-realtime,
 /// notification-publications, preference-authority and group-invitation ones.
 pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Result<(), DbErr> {
@@ -326,12 +388,16 @@ pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Resu
     TimelineRealtimeMigrator::up(db, None).await?;
     NotificationPublicationsMigrator::up(db, None).await?;
     PreferenceAuthorityMigrator::up(db, None).await?;
-    GroupInvitationPolicyMigrator::up(db, None).await
+    GroupInvitationPolicyMigrator::up(db, None).await?;
+    ShortIdsMigrator::up(db, None).await
 }
 /// Everything this image needs: every earlier history and the N10 preference-authority
 /// one.
 pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
-    if !notification_publications_ready(db).await? || !group_invitation_ready(db).await? {
+    if !notification_publications_ready(db).await?
+        || !group_invitation_ready(db).await?
+        || !short_ids_ready(db).await?
+    {
         return Ok(false);
     }
     let row = db
