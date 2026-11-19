@@ -598,7 +598,12 @@ async fn bad_client_redirect_scope_pkce_and_token_requests_are_refused() {
     // Client authentication: wrong secret, another client's secret, garbage.
     for (cid, csecret) in [
         (app.to_string(), secret2.clone()),
-        (app.to_string(), format!("{}0", &secret[..secret.len() - 1])),
+        // The last character changed to a different one (a fixed `0` equals the real
+        // secret whenever the secret already ends in `0`).
+        (app.to_string(), {
+            let last = if secret.ends_with('0') { '1' } else { '0' };
+            format!("{}{last}", &secret[..secret.len() - 1])
+        }),
         ("not-a-uuid".to_string(), secret.clone()),
         (app.to_string(), "cfmk_live_x".to_string()),
     ] {
