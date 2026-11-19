@@ -567,6 +567,7 @@ pub struct Harness {
 pub struct RecordingPush {
     sent: std::sync::Mutex<Vec<(uuid::Uuid, Value)>>,
     offers: std::sync::Mutex<Vec<calling::signaling::PushOffer>>,
+    cancels: std::sync::Mutex<Vec<calling::signaling::PushCancel>>,
 }
 
 impl RecordingPush {
@@ -577,6 +578,11 @@ impl RecordingPush {
     /// Every offer with its recipient facts (N9).
     pub fn offers(&self) -> Vec<calling::signaling::PushOffer> {
         self.offers.lock().unwrap().clone()
+    }
+
+    /// Every ring cancellation Calling dispatched (gap audit C1).
+    pub fn cancels(&self) -> Vec<calling::signaling::PushCancel> {
+        self.cancels.lock().unwrap().clone()
     }
 }
 
@@ -589,6 +595,10 @@ impl calling::signaling::PushDispatcher for RecordingPush {
     async fn dispatch_offer(&self, offer: calling::signaling::PushOffer) {
         self.offers.lock().unwrap().push(offer.clone());
         self.dispatch(offer.push_target_ref, offer.payload).await;
+    }
+
+    async fn dispatch_cancel(&self, cancel: calling::signaling::PushCancel) {
+        self.cancels.lock().unwrap().push(cancel);
     }
 }
 

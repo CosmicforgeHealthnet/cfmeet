@@ -1014,3 +1014,212 @@ async fn unpublishable_rows_are_skipped_retried_or_expired_and_content_is_refuse
         );
     }
 }
+
+// ------------------------------------------------------- gap audit S1: organization chats
+
+/// A MANAGED GROUP of three members in an ORGANIZATION's own first-party scope (as the
+/// Meeting Service's organization relay creates them). Like real organization members,
+/// nobody has a push registration in that scope: their devices register once, in CF
+/// Meet's personal scope, which `governed` names (a different first-party scope).
+async fn organization_fixture(h: &mut Harness) -> Fixture {
+    let c = h.first_party(true);
+    h.allow_managed(&c, "GROUP").await;
+    let mut people = Vec::new();
+    for _ in 0..3 {
+        people.push(h.member(&c, 0).await);
+    }
+    let r = h
+        .create_conversation(
+            &c,
+            people[0].principal,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let conversation = r.json;
+    for p in &people[1..] {
+        let a = h
+            .post(
+                &c,
+                Some(people[0].principal),
+                &format!("/v1/conversations/{}/members", cid(&conversation)),
+                json!({ "principalId": p.principal }),
+            )
+            .await;
+        assert_eq!(a.status, StatusCode::CREATED, "{}", a.text);
+    }
+    let accounts: HashMap<Uuid, String> = people
+        .iter()
+        .map(|m| (m.principal, format!("cfmeet-user:{}", Uuid::new_v4())))
+        .collect();
+    h.state.principals = Arc::new(Accounts {
+        inner: h.principals.clone(),
+        references: accounts.clone(),
+    });
+    let personal = h.first_party(true);
+    let governed = cf_communications_policy::PolicyClient::new(
+        h.state.service_auth.client(),
+        cf_communications_policy::Scope {
+            tenant_id: personal.context.scope.tenant_id,
+            application_id: personal.context.scope.application_id,
+            environment_id: personal.context.scope.environment_id,
+        },
+    );
+    // CF Meet's personal scope is configured (it does not govern the organization's).
+    h.state.communications = Some(governed.clone());
+    Fixture {
+        c,
+        conversation,
+        people,
+        accounts,
+        governed,
+    }
+}
+
+/// Gap audit S1: an organization chat's wake-up reaches nobody on the legacy path (no
+/// registration in the organization's scope). With `MESSAGING_ORGANIZATION_WAKEUPS` on it
+/// is routed NEW in every fence mode — even LEGACY_ONLY — and published to the
+/// Notification Service addressed to the members' CF Meet accounts (ids only, never the
+/// text); never both. Off, nothing changes.
+#[tokio::test]
+async fn organization_chats_wake_members_through_the_service_only_when_enabled() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let f = organization_fixture(&mut h).await;
+    const TEXT: &str = "organization-text-never-leaves-messaging";
+
+    // The event records the authenticated classification for delayed workers; customer
+    // webhook envelopes never carry it.
+    let off = send(&h, &f, TEXT).await;
+    assert_eq!(off.payload["first_party"], true);
+    assert!(off.envelope("test")["payload"].get("first_party").is_none());
+
+    // Switch off (default), LEGACY_ONLY: today's behaviour — no decision, no publication,
+    // and (nobody registered here) no push job.
+    assert_eq!(push::fanout_jobs(&h.state, &off).await.unwrap(), 0);
+    assert_eq!(decisions_of(&h, &off).await, 0);
+    assert!(publications_of(&h, &off).await.is_empty());
+
+    // Switch on: routed NEW even in LEGACY_ONLY, one publication, no legacy jobs.
+    h.state.organization_wakeups = true;
+    let on = send(&h, &f, TEXT).await;
+    assert_eq!(push::fanout_jobs(&h.state, &on).await.unwrap(), 0);
+    let (decision_id, route, _) = decision(&h, &on).await;
+    assert_eq!(route, "NEW");
+    let p = publication(&h, &on).await;
+    assert_eq!((p.decision_id, p.shadow), (decision_id, false));
+    assert_eq!(jobs_of(&h, &on).await, 0);
+    // Sticky and idempotent.
+    assert_eq!(push::fanout_jobs(&h.state, &on).await.unwrap(), 0);
+    assert_eq!(publications_of(&h, &on).await.len(), 1);
+
+    // Also in FENCED_OLD (where personal chats stay legacy).
+    set_mode(&h, "FENCED_OLD", 0).await;
+    let fenced = send(&h, &f, TEXT).await;
+    push::fanout_jobs(&h.state, &fenced).await.unwrap();
+    assert_eq!(decision(&h, &fenced).await.1, "NEW");
+
+    // The relay addresses the members' accounts (never the sender), ids only.
+    let key = cf_service_auth::KeyId::parse("messaging-s1-1").unwrap();
+    let key = ServiceSigningKey::generate(key);
+    let i1 = FakeI1::start(&key).await;
+    let sink = NotificationServiceEvents::new(client(copy(&key), Some(&i1.url)));
+    let report = relay(&mut h, Some(&f), &sink).await;
+    assert_eq!((report.acked, report.dead), (2, 0), "{report:?}");
+    let batches = i1.batches();
+    let events: Vec<&Value> = batches
+        .iter()
+        .flat_map(|b| b["events"].as_array().unwrap())
+        .collect();
+    assert_eq!(events.len(), 2);
+    for env in events {
+        assert!(batches.iter().all(|b| b.get("shadow").is_none()));
+        let recipients: Vec<String> = env["recipients"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["ref"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(recipients, f.recipient_refs());
+        assert_eq!(env["data"]["conversationKind"], "GROUP");
+        assert_eq!(env["data"]["securityProfile"], "MANAGED");
+        assert_eq!(
+            env["scope"]["environmentId"],
+            json!(f.c.context.scope.environment_id)
+        );
+        assert!(!env.to_string().contains(TEXT));
+    }
+    assert!(i1.inner.lock().unwrap().invalid.is_empty());
+    h.state.communications = Some(f.governed.clone());
+
+    // X3 answers with the same account mapping for the organization's conversation.
+    let answer = h
+        .call_internal(
+            &peers().notifications,
+            axum::http::Method::POST,
+            "/internal/v1/notifications/wakeups/authorize",
+            Some(json!({
+                "conversationId": cid(&f.conversation),
+                "eventSequence": on.conversation_event_sequence.unwrap(),
+                "senderPrincipal": f.sender().to_string(),
+            })),
+            None,
+            &[],
+        )
+        .await;
+    assert_eq!(answer.status, StatusCode::OK, "{}", answer.text);
+    let mapped: BTreeSet<String> = answer.json["entitled"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["accountRef"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(
+        mapped,
+        f.recipient_refs().into_iter().collect::<BTreeSet<_>>()
+    );
+}
+
+/// Gap audit S1: a customer's (EXTERNAL tenant) conversation is never an organization
+/// chat: its principals are customer identities, even with `cfmeet-user:`-looking
+/// references, and its wake-ups keep the legacy path.
+#[tokio::test]
+async fn external_conversations_never_take_the_organization_route() {
+    let Some(mut h) = Harness::new().await else {
+        return;
+    };
+    let mut f = organization_fixture(&mut h).await;
+    // The same shape in an EXTERNAL tenant.
+    let external = h.first_party(false);
+    h.allow_managed(&external, "GROUP").await;
+    let a = h.member(&external, 0).await;
+    let b = h.member(&external, 0).await;
+    let r = h
+        .create_conversation(
+            &external,
+            a.principal,
+            json!({ "contextClass": "GROUP", "securityProfile": "MANAGED" }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let conversation = r.json;
+    let add = h
+        .post(
+            &external,
+            Some(a.principal),
+            &format!("/v1/conversations/{}/members", cid(&conversation)),
+            json!({ "principalId": b.principal }),
+        )
+        .await;
+    assert_eq!(add.status, StatusCode::CREATED, "{}", add.text);
+    f.c = external;
+    f.conversation = conversation;
+    f.people = vec![a, b];
+    h.state.organization_wakeups = true;
+    let e = send(&h, &f, "external").await;
+    assert_eq!(e.payload["first_party"], false);
+    push::fanout_jobs(&h.state, &e).await.unwrap();
+    assert_eq!(decisions_of(&h, &e).await, 0);
+    assert!(publications_of(&h, &e).await.is_empty());
+}

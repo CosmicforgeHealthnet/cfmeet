@@ -3,6 +3,10 @@
 //! principals of FIRST_PARTY tenants) are sent — a customer application's
 //! `pushTargetRef` never leaves Calling; ringing never waits for push (fire and forget,
 //! bounded); one alert per (call, push target). Real PostgreSQL for the recipient facts.
+//!
+//! Gap audit C1: a ring that ends unanswered on its endpoint (answered elsewhere,
+//! cancelled by the caller, expired, the Call ended) is cancelled through I3c with the
+//! push target and the account only — never a call detail.
 mod common;
 
 use std::{
@@ -15,7 +19,7 @@ use axum::http::StatusCode;
 use calling::{
     domain::{EnvironmentKind, PrincipalKind, TenantClassification},
     platform::principals::{PrincipalReference, ResolvedPrincipal},
-    signaling::{CallPushSink, NotificationsPushTransport, PushDispatcher, PushOffer},
+    signaling::{CallPushSink, NotificationsPushTransport, PushCancel, PushDispatcher, PushOffer},
 };
 use common::{
     app::{AppWorld, Device},
@@ -30,6 +34,7 @@ use uuid::Uuid;
 #[derive(Default)]
 struct FakeI3 {
     bodies: Mutex<Vec<Value>>,
+    cancels: Mutex<Vec<Value>>,
     delay: Mutex<Option<Duration>>,
 }
 
@@ -41,6 +46,11 @@ impl CallPushSink for FakeI3 {
             tokio::time::sleep(d).await;
         }
         self.bodies.lock().unwrap().push(body);
+        Ok(json!({ "results": [] }))
+    }
+
+    async fn call_push_cancel(&self, body: Value) -> Result<Value, String> {
+        self.cancels.lock().unwrap().push(body);
         Ok(json!({ "results": [] }))
     }
 }
@@ -235,4 +245,101 @@ async fn offers_carry_the_account_only_for_first_party_recipients() {
     let offers = e.h().push.offers();
     let o = offers.iter().find(|o| o.push_target_ref == target).unwrap();
     assert_eq!(o.first_party_account, None);
+}
+
+#[tokio::test]
+async fn c1_cancellations_carry_only_the_target_and_the_account_once() {
+    let i3 = Arc::new(FakeI3::default());
+    let t = NotificationsPushTransport::new(i3.clone(), Duration::from_millis(1000));
+    let account = format!("cfmeet-user:{}", Uuid::new_v4());
+    let (call, target) = (Uuid::new_v4(), Uuid::new_v4());
+    let cancel = |target: Uuid, account: Option<&str>| PushCancel {
+        push_target_ref: target,
+        call_id: call,
+        first_party_account: account.map(str::to_string),
+    };
+    // A customer application's push target: never sent.
+    t.dispatch_cancel(cancel(Uuid::new_v4(), None)).await;
+    // First-party: sent once per (call, target).
+    t.dispatch_cancel(cancel(target, Some(&account))).await;
+    t.dispatch_cancel(cancel(target, Some(&account))).await;
+    for _ in 0..100 {
+        if !i3.cancels.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let bodies = i3.cancels.lock().unwrap().clone();
+    assert_eq!(bodies.len(), 1, "{bodies:#?}");
+    assert_eq!(
+        bodies[0],
+        json!({ "pushTargetRefs": [target], "recipientAccountRef": account })
+    );
+    // No call id, number, name or other call detail leaves Calling.
+    assert!(!bodies[0].to_string().contains(&call.to_string()));
+    assert!(i3.bodies.lock().unwrap().is_empty());
+    // The default transport (none) and the trait default never cancel anything.
+    calling::signaling::NoPushTransport
+        .dispatch_cancel(cancel(target, Some(&account)))
+        .await;
+}
+
+#[tokio::test]
+async fn c1_rings_answered_elsewhere_or_cancelled_are_cancelled_on_their_other_devices() {
+    let Some(a) = world(TenantClassification::FirstParty).await else {
+        return;
+    };
+    let caller = a.w.initiator.clone();
+    let from = a.device(&caller, "caller-1").await;
+    let account = format!("cfmeet-user:{}", Uuid::new_v4());
+    let bob = native(&a, &account).await;
+    let (t_phone, t_tablet) = (Uuid::new_v4(), Uuid::new_v4());
+    let phone = endpoint(&a, &bob, "bob-phone", t_phone).await;
+    endpoint(&a, &bob, "bob-tablet", t_tablet).await;
+
+    // 1. Answered on the phone: the tablet's ring is cancelled, the phone's is not.
+    let r = a
+        .create_call("VOICE", &caller, &from, &[&bob], "c1-answered")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    assert!(
+        a.h().push.cancels().is_empty(),
+        "nothing is cancelled while ringing"
+    );
+    let invitation = a.invitation_for(call, phone.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a.accept(call, invitation, &phone, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let cancels = a.h().push.cancels();
+    assert_eq!(cancels.len(), 1, "{cancels:?}");
+    assert_eq!(cancels[0].push_target_ref, t_tablet);
+    assert_eq!(cancels[0].call_id, call);
+    assert_eq!(
+        cancels[0].first_party_account.as_deref(),
+        Some(account.as_str())
+    );
+
+    // 2. Cancelled by the caller while ringing: both of Bob's rings are cancelled.
+    let r = a
+        .create_call("VOICE", &caller, &from, &[&bob], "c1-cancelled")
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let call: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a.command(call, "cancel", version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let mut targets: Vec<Uuid> = a
+        .h()
+        .push
+        .cancels()
+        .into_iter()
+        .filter(|c| c.call_id == call)
+        .map(|c| c.push_target_ref)
+        .collect();
+    targets.sort();
+    let mut expected = vec![t_phone, t_tablet];
+    expected.sort();
+    assert_eq!(targets, expected);
 }

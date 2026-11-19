@@ -954,6 +954,10 @@
             "PRODUCTION"
           ],
           "description": "Optional authenticated worker scope metadata, removed from public webhook envelopes."
+        },
+        "first_party": {
+          "type": "boolean",
+          "description": "1.13.0 (gap audit S1): optional authenticated tenant classification (Platform Access FIRST_PARTY) of the sending scope, so a delayed worker can tell an organization's own first-party scope. Removed from public webhook envelopes."
         }
       },
       "required": [

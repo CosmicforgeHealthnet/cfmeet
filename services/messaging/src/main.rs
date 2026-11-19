@@ -421,6 +421,29 @@ async fn main() -> anyhow::Result<()> {
             );
         }
     }
+    // Gap audit S1: organization conversations' wake-ups through the Notification Service.
+    // Off unless MESSAGING_ORGANIZATION_WAKEUPS=on; then the service target, CF Meet's
+    // personal scope (to tell an organization's scope from it) and the routing-fence
+    // history (decisions and publications) are required.
+    if messaging::notifications::organization_wakeups_from_env(|k| std::env::var(k).ok())
+        .map_err(anyhow::Error::msg)?
+    {
+        if !has_target(cf_service_auth::services::NOTIFICATIONS) {
+            anyhow::bail!("MESSAGING_ORGANIZATION_WAKEUPS=on needs CF_NOTIFICATIONS_BASE_URL");
+        }
+        if personal_scope.is_none() {
+            anyhow::bail!(
+                "MESSAGING_ORGANIZATION_WAKEUPS=on needs CF Meet's personal scope (CF_COMMUNICATIONS_PERSONAL_*)"
+            );
+        }
+        if !messaging_migration::notification_fence_ready(&state.db).await? {
+            anyhow::bail!(
+                "MESSAGING_ORGANIZATION_WAKEUPS=on needs the notification-fence migration history"
+            );
+        }
+        state.organization_wakeups = true;
+        tracing::info!("organization conversation wake-ups go to the Notification Service");
+    }
     // Notification Service N7: the relay of Messaging's publications (shadow copies in
     // SHADOW, publications of NEW decisions) to I1. Off unless the service is configured:
     // the routing mode alone decides what is enqueued, and nothing is ever sent without it.

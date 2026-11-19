@@ -51,6 +51,10 @@ pub struct AppState {
     /// N9 push-registration facade towards the Notification Service (`None`: off, the
     /// default — Messaging behaves exactly as before).
     pub push_mirror: Option<Arc<crate::push_mirror::PushMirror>>,
+    /// Gap audit S1 (`MESSAGING_ORGANIZATION_WAKEUPS=on`, default off): message wake-ups of
+    /// conversations in an organization's own first-party scope go to the Notification
+    /// Service (route `NEW`), addressed to the members' CF Meet accounts.
+    pub organization_wakeups: bool,
 }
 
 impl AppState {
@@ -86,6 +90,7 @@ impl AppState {
             attachments: AttachmentSettings::default(),
             sms: Arc::new(crate::sms_bridge::UnconfiguredSmsTransport),
             push_mirror: None,
+            organization_wakeups: false,
         }
     }
 

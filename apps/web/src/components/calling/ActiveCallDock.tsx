@@ -20,6 +20,7 @@ import Link from "next/link";
 import { Circle, Flag, Info, Maximize2, Minimize2, MoreHorizontal, Pause, Mic, Volume2, PhoneOff, Play, RefreshCw, UserPlus, Users } from "lucide-react";
 import { useCalling } from "@/context/CallingContext";
 import { callingKeys, useCall, useCallActions, useCallingMutation } from "@/hooks/calling/useCalls";
+import { callsService } from "@/services/calling/calls.service";
 import { usePrincipalNames } from "@/hooks/calling/usePrincipalNames";
 import { callingErrorMessage } from "@/lib/calling/errors";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
@@ -245,7 +246,7 @@ export default function ActiveCallDock() {
     const callId = media.callId;
     void (operation === "leave"
       ? session ? mutation.mutateAsync({ operation: "removeSession", callId, sessionId: session.sessionId, body: { expectedVersion: data.version }, key: newIdempotencyKey() }) : Promise.resolve()
-      : mutation.mutateAsync({ operation, callId, body: { expectedVersion: data.version }, key: newIdempotencyKey() })
+      : callsService.hangUp(callId, operation, data.version).finally(() => void queryClient.invalidateQueries({ queryKey: callingKeys.detail(callId) }))
     ).catch(() => undefined);
   };
   const hangUp = controls.cancel || !call.data

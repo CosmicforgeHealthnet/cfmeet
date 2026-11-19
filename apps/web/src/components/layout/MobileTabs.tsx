@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { CalendarDays, Home, Menu, MessageSquare, Video } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isActivePath } from "./AppSidebar";
+import { UnreadBadge, useUnreadChats } from "@/hooks/useUnreadChats";
 
 /** Opens the full menu drawer (MobileSidebar) from the "More" tab. */
 export const OPEN_MENU_EVENT = "cfmeet:open-menu";
@@ -19,6 +20,7 @@ const tabs = [
 /** Phone bottom navigation; every other section (Calls, Contacts, Settings…) is under More. */
 export default function MobileTabs() {
   const pathname = usePathname();
+  const unreadChats = useUnreadChats();
   return (
     <nav
       aria-label="Main"
@@ -37,7 +39,10 @@ export default function MobileTabs() {
                   active ? "font-semibold text-primary" : "text-muted-foreground",
                 )}
               >
-                <Icon className="size-5" strokeWidth={active ? 2.4 : 2} aria-hidden />
+                <span className="relative">
+                  <Icon className="size-5" strokeWidth={active ? 2.4 : 2} aria-hidden />
+                  {href === "/dashboard/messages" ? <UnreadBadge count={unreadChats} className="absolute -right-3 -top-1.5" /> : null}
+                </span>
                 {label}
               </Link>
             </li>

@@ -583,7 +583,8 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
 }) {
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
-  const live = managed && !!m.messageId && m.state === "delivered";
+  // Private chats get the same actions as managed ones (the server holds no content, only ids).
+  const live = !!m.messageId && (m.state === "delivered" || m.state === "sent");
   const mine = m.mine;
   const status = m.state === "queued" ? "Waiting…" : m.state === "pending-setup" ? "Waiting for secure setup" : m.state === "sending" ? "Sending…" : m.state === "failed" ? "Not sent" : clock(m.createdAt);
   const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted";
@@ -603,7 +604,7 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
           <div
             className={cn(
               "relative min-w-0 rounded-[20px] px-3.5 py-2 text-[15px] leading-snug",
-              mine ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+              mine ? "bg-primary text-primary-foreground shadow-sm" : "bg-card text-foreground shadow-sm",
               mine ? cn(!first && "rounded-tr-md", !last && "rounded-br-md") : cn(!first && "rounded-tl-md", !last && "rounded-bl-md"),
               m.state === "failed" && "ring-2 ring-destructive",
               m.announcement && "ring-2 ring-amber-400",
@@ -923,6 +924,13 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   useEffect(() => {
     if (lastSequence !== null && typeof document !== "undefined" && document.visibilityState === "visible") void engine.markRead(conversation.id);
   }, [engine, conversation.id, lastSequence]);
+  // Coming back to the tab or window reads what arrived while it was in the background.
+  useEffect(() => {
+    const read = () => { if (document.visibilityState === "visible") void engine.markRead(conversation.id); };
+    document.addEventListener("visibilitychange", read);
+    window.addEventListener("focus", read);
+    return () => { document.removeEventListener("visibilitychange", read); window.removeEventListener("focus", read); };
+  }, [engine, conversation.id]);
   // Keep the newest message in view.
   useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [items.length]);
   // Composer grows with the text, up to ~6 lines.
@@ -973,12 +981,13 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   const send = () => {
     const t = text;
     if (!t.trim() || !canSend) return;
-    const reply = managed ? replyTo?.messageId ?? null : null;
+    const reply = replyTo?.messageId ?? null;
     setText("");
     setReplyTo(null);
     setError(null);
     engine.typing(conversation.id, false);
-    void engine.send(conversation.id, t, managed ? { replyToMessageId: reply, mentionedPrincipalIds: mentions(t) } : {}).catch((cause) => {
+    // The server takes @mentions only in managed chats; replies work in both.
+    void engine.send(conversation.id, t, { replyToMessageId: reply, mentionedPrincipalIds: managed ? mentions(t) : [] }).catch((cause) => {
       setText((draft) => draft || t);
       setError(messagingErrorMessage(cause));
     });
@@ -1036,6 +1045,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
           </div>
         ) : null}
 
+        <div className="chat-wallpaper flex min-h-0 flex-1 flex-col">
         <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-6">
           {e2ee && !conversation.groupReady ? (
             <p className="mx-auto my-4 flex max-w-md items-start gap-3 rounded-2xl bg-muted/60 p-4 text-sm" data-testid="e2ee-unavailable">
@@ -1117,7 +1127,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 maxLength={16384}
                 disabled={!canSend}
                 placeholder={canSend ? (e2ee ? "Message" : "Message (CF Meet can read this chat)") : adminsOnly ? "Only admins can send messages" : "You can't send messages from this browser"}
-                onChange={(e) => { setText(e.target.value); if (managed) engine.typing(conversation.id, e.target.value.length > 0); }}
+                onChange={(e) => { setText(e.target.value); engine.typing(conversation.id, e.target.value.length > 0); }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
                 className="max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
               />
@@ -1125,6 +1135,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
             </form>
             <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground sm:block">{e2ee ? <><Lock className="mr-1 inline size-3" />End-to-end encrypted</> : "Enter to send · Shift + Enter for a new line"}</p>
           </div>
+        </div>
         </div>
       </section>
       {details ? <DetailsPanel engine={engine} conversation={conversation} title={title} onClose={() => setDetails(false)} shareEnabled={!!actions.shareMeeting} /> : null}
@@ -1174,6 +1185,9 @@ function PersonalMessages() {
   }, [engine, requested, s.conversations, s.phase]);
   const current = s.conversations.find((c) => c.id === selected) ?? null;
   const unreadTotal = s.conversations.filter((c) => c.unreadCount > 0 && c.id !== selected).length;
+  // Keep the number on the Chats tab in step with this list.
+  const tabCounter = useQueryClient();
+  useEffect(() => { tabCounter.setQueryData(["messaging", "unread-chats"], unreadTotal); }, [tabCounter, unreadTotal]);
   const conversations = s.conversations.filter((conversation) => {
     const matchesSearch = conversation.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
     const matchesFilter = filter === "ALL" || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected : conversation.securityProfile === filter);
@@ -1268,11 +1282,13 @@ function PersonalMessages() {
                       </span>
                       <span className="mt-0.5 flex items-center justify-between gap-2">
                         <span className={cn("flex min-w-0 items-center gap-1 text-sm", unread ? "font-medium text-foreground" : "text-muted-foreground")}>
+                          {s.typing[c.id]?.length ? <span className="truncate font-medium text-primary">{c.contextClass === "GROUP" ? `${s.names[s.typing[c.id][0]]?.split(" ")[0] ?? "Someone"} is typing…` : "typing…"}</span> : <>
                           {mine && latest && (latest.state === "sent" || latest.state === "delivered") ? <Ticks receipt={latest.seenBy?.length ? "read" : latest.receipt ?? "sent"} list /> : null}
                           {latest?.state === "failed" ? <span className="shrink-0 text-destructive">Not sent ·</span> : null}
                           {!latest && summary && summary.lifecycle === "ACTIVE" && c.securityProfile === "PRIVATE_E2EE"
                             ? <span aria-label="Loading message" className="h-3 w-32 animate-pulse rounded-full bg-muted" />
                             : <span className="truncate">{mine && preview && !latest ? "You: " : ""}{preview}</span>}
+                          </>}
                         </span>
                         {unread ? (
                           <span className="flex shrink-0 items-center gap-1">

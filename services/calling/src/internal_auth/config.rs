@@ -12,7 +12,7 @@
 //! | `CF_PRIVACY_RELAY_BASE_URL`, `CF_TELEPHONY_BASE_URL` | no | authenticated API base URLs |
 //! | `CF_PLATFORM_ACCESS_BASE_URL` | yes (server) | Platform Access, the identity authority (ADR 0032) |
 //! | `CF_NUMBERING_BASE_URL` | no | Numbering (Part IV L): DCN grants; unset = DCN calls fail closed |
-//! | `CF_NOTIFICATIONS_BASE_URL` | with `CALLING_PUSH_TRANSPORT=notifications` | the Notification Service's call fast lane I3 (`notifications-call-push.dispatch`, roadmap N9) |
+//! | `CF_NOTIFICATIONS_BASE_URL` | with `CALLING_PUSH_TRANSPORT=notifications` | the Notification Service's call fast lane I3 and its cancellation I3c (`notifications-call-push.dispatch`, roadmap N9, gap audit C1) |
 //! | `CF_DEVELOPER_PLATFORM_BASE_URL` | with `CALLING_PUBLIC_EVENTS_DESTINATION` `developer-platform` / `both` | the Developer Platform's central event ingestion (`developer-event.publish`, Part VI §53) |
 //! | `CF_NOTIFICATIONS_BASE_URL` | no | the Notification Service (roadmap N7): Calling writes and relays its `calling.*` publications (missed call, voicemail / recording ready) to I1 (`notifications-event.publish`); unset = nothing is written or sent, and the notification-publications migration history is not required |
 //!

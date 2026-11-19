@@ -5,6 +5,7 @@
 
 import callingApi from "./api";
 import { newIdempotencyKey } from "@/lib/calling/idempotency";
+import { isLiveCallState } from "@/types/calling/common";
 import type {
   AcceptResult,
   AvailableActions,
@@ -112,6 +113,23 @@ export const callsService = {
       { headers: idempotencyHeader(idempotencyKey) },
     );
     return response.data;
+  },
+
+  /**
+   * Cancel (still ringing) or end (answered), re-reading the call once when it changed in the
+   * meantime (409: it started ringing, or was answered): the other side must stop ringing even
+   * if this screen's copy of the call was a moment old.
+   */
+  hangUp: async (callId: Uuid, operation: "cancel" | "end", expectedVersion: number): Promise<void> => {
+    try {
+      await callsService[operation](callId, { expectedVersion }, newIdempotencyKey());
+    } catch (error) {
+      if ((error as { response?: { status?: number } }).response?.status !== 409) throw error;
+      const fresh = await callsService.get(callId);
+      if (fresh.state === "ENDING" || !isLiveCallState(fresh.state)) return;
+      const answered = ["ANSWERED", "CONNECTED", "HELD", "TRANSFERRING"].includes(fresh.state);
+      await callsService[answered ? "end" : "cancel"](callId, { expectedVersion: fresh.version }, newIdempotencyKey());
+    }
   },
 
   end: async (
