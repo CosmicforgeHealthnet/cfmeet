@@ -23,6 +23,19 @@ Two coordinated-release operations, each journaled and reversible:
   The previous mode and version are recorded in the journal entry; ``rollback`` restores
   them (no container restart: the service reads the table on every event).
 
+  Bundle (owner request 2026-11-19, "the bell must show everything"): ``confirm``
+  ``user-facing-in-app-active`` (or ``-push-``, any mode) changes, in ONE run, the row of that
+  channel of every user-facing category in ``USER_FACING`` (contact requests and accepts /
+  direct adds, missed calls, voicemail and recordings, added to a group, meeting notices,
+  organization invitations / role and membership changes, developer credentials). Every row
+  passes the same gate first (nothing changes when one is refused); EMAIL is never bundled
+  (email activation stays a per-row, owner-gated decision); PUSH ``active`` also needs
+  ``activate-notifications-push``. After an ``active`` bundle, the HELD events of those
+  categories are released exactly as I6 would (``release_held``): not CRITICAL, not a
+  shadow copy, not past their own delivery expiry, received within ``HELD_RELEASE_DAYS``.
+  Older or expired HELD events stay HELD (counted, never delivered). ``rollback`` restores
+  every row's previous mode; released events are not taken back.
+
 * ``activate-notifications-relay`` (owner-approved 2026-11-16) turns on the Meeting Service
   user relay U1-U9 under ``/api/v2/notifications``: both Notification Service replicas trust
   the Meeting Service for ``notifications-user.forward`` (I2 only), and the Meeting Service
@@ -66,6 +79,18 @@ CRITICAL = frozenset({'AUTH_VERIFICATION', 'AUTH_PASSWORD_RESET', 'SECURITY_DEVI
                       'SECURITY_PASSWORD_CHANGED', 'SECURITY_DEVICE_LINKED', 'ACCOUNT_NOTICES'})
 SOCIAL = frozenset({'CONTACT_REQUESTS', 'GROUP_INVITATIONS', 'MISSED_CALLS', 'VOICEMAIL', 'MESSAGE_WAKEUPS'})
 CATEGORY_RE = re.compile(r'[A-Z][A-Z_]{1,39}')
+
+# The bundle ``user-facing-<channel>-<mode>``: every non-CRITICAL category a person sees in
+# the bell (IN_APP) or as a push, in seed order. MESSAGE_WAKEUPS (push only, governed by the
+# Messaging fence) and CALL_INVITATIONS (I3 ring, its own C1 sequence) are not part of it.
+BUNDLE = 'user-facing'
+USER_FACING = ('CONTACT_REQUESTS', 'GROUP_INVITATIONS', 'MISSED_CALLS', 'VOICEMAIL', 'MEETING_NOTIFICATION',
+               'ORGANIZATION_UPDATES', 'DEVELOPER_PLATFORM')
+BUNDLE_CHANNELS = {'IN_APP': USER_FACING,
+                   'PUSH': tuple(c for c in USER_FACING if c != 'DEVELOPER_PLATFORM')}
+# HELD events older than this stay HELD when a bundle releases them (a stale notice is worse
+# than none; most producers' own delivery expiry is shorter anyway: 24-72 h).
+HELD_RELEASE_DAYS = 7
 
 # Owner read APIs: (owner service, permissions granted to cfmeet.notifications, probe path,
 # NOTIFICATIONS_AUTHORITIES names, base-URL variable).
@@ -162,6 +187,21 @@ SCOPE_VARS = ('CFMEET_COMMUNICATION_TENANT_ID', 'CFMEET_COMMUNICATION_APPLICATIO
               'CFMEET_COMMUNICATION_ENVIRONMENT_KIND', 'CFMEET_COMMUNICATION_SERVICE_ACCOUNT_ID')
 
 
+def parse_bundle(confirm):
+    """``user-facing-in-app-active`` -> ('IN_APP', 'ACTIVE'); None when ``confirm`` names one row."""
+    text = (confirm or '').strip()
+    if not text.startswith(BUNDLE + '-'):
+        return None
+    for suffix, mode in MODES.items():
+        for word, channel in CHANNELS.items():
+            if text == '%s-%s-%s' % (BUNDLE, word, suffix):
+                if channel not in BUNDLE_CHANNELS:
+                    raise RuntimeError('%s bundles only the in-app and push rows (EMAIL and OPERATOR rows '
+                                       'change one per run)' % BUNDLE)
+                return channel, mode
+    raise RuntimeError('confirm must be %s-<in-app|push>-<off|shadow|active>' % BUNDLE)
+
+
 def parse_routing(confirm):
     """``contact-requests-in-app-shadow`` -> ('CONTACT_REQUESTS', 'IN_APP', 'SHADOW')."""
     text = (confirm or '').strip()
@@ -222,13 +262,81 @@ def set_mode(cr, category, channel, mode, run_id, expected_version=None):
     return int(version)
 
 
+def routing_facts(cr):
+    env = cr.env_of('notifications')
+    return dict(email_provider=env.get('NOTIFICATIONS_EMAIL_PROVIDER'), resend_done=cr.done('activate-resend-email'),
+                owners_done=cr.done('activate-notifications-owners'),
+                critical_lane_done=cr.done('activate-critical-lane'),
+                push_done=cr.done('activate-notifications-push'))
+
+
+def release_held(cr, categories, run_id):
+    """I6 for every HELD event of ``categories`` whose routing is no longer all OFF: back to
+    PENDING (W1 processes it under today's rows and preferences). Same refusals as I6 (the
+    CRITICAL lane, past the envelope's own delivery expiry), never a shadow copy, and only
+    events received in the last ``HELD_RELEASE_DAYS`` days. Returns the (released, still
+    HELD) counts of those categories; never ids."""
+    assert all(CATEGORY_RE.fullmatch(c) for c in categories) and re.fullmatch(r'[0-9-]{1,32}', run_id)
+    db = cr.SERVICES['notifications']['db']
+    names = ', '.join("'%s'" % c for c in categories)
+    out = cr.release.db_sql(db, (
+        "WITH routable AS (SELECT category FROM notif_routing WHERE category IN (%s) GROUP BY category "
+        "HAVING bool_or(mode <> 'OFF')), "
+        "u AS (UPDATE notif_event_inbox SET state = 'PENDING', attempts = 0, lease_id = NULL, lease_until = NULL "
+        "WHERE state = 'HELD' AND lane <> 'CRITICAL' AND NOT shadow AND route_category IN (SELECT category FROM routable) "
+        "AND received_at > now() - interval '%d days' "
+        "AND (envelope #>> '{delivery,expiresAt}' IS NULL OR (envelope #>> '{delivery,expiresAt}')::timestamptz > now()) "
+        "RETURNING 1) "
+        "SELECT (SELECT count(*) FROM u) || ':' || ((SELECT count(*) FROM notif_event_inbox WHERE state = 'HELD' "
+        "AND route_category IN (%s)) - (SELECT count(*) FROM u));") % (names, HELD_RELEASE_DAYS, names))
+    released, left = (out or '0:0').strip().split(':')
+    return int(released), max(int(left), 0)
+
+
+def activate_routing_bundle(cr, sha, run_id, channel, mode):
+    """One run, every user-facing row of ``channel`` (see the module docstring)."""
+    cr.require_release(sha)
+    facts = routing_facts(cr)
+    categories = BUNDLE_CHANNELS[channel]
+    if channel == 'PUSH' and mode == 'ACTIVE' and not facts.get('push_done'):
+        raise RuntimeError('Routing gate: PUSH ACTIVE needs activate-notifications-push (the push provider); '
+                           'nothing changed')
+    for category in categories:
+        refusal = gate(category, channel, mode, facts)
+        if refusal:
+            raise RuntimeError('Routing gate: ' + refusal + '; nothing changed')
+    before = [(category, routing_row(cr, category, channel)) for category in categories]
+    entry = cr.begin('activate-notifications-routing', sha, run_id)
+    entry['notificationRouting'] = dict(bundle=BUNDLE, channel=channel, after=mode, rows=[
+        dict(category=category, channel=channel, before=row['mode'], after=mode) for category, row in before])
+    cr.commit(entry)
+    try:
+        for (category, row), record in zip(before, entry['notificationRouting']['rows']):
+            if row['mode'] == mode:
+                record['version'] = row['version']
+                continue
+            record['version'] = set_mode(cr, category, channel, mode, run_id, row['version'])
+            cr.commit(entry)
+    except Exception:
+        entry['status'] = 'failed'
+        cr.commit(entry)
+        raise
+    if mode == 'ACTIVE':
+        released, left = release_held(cr, categories, run_id)
+        entry['notificationRouting']['heldReleased'] = released
+        entry['notificationRouting']['heldLeft'] = left
+    entry['status'] = 'done'
+    cr.commit(entry)
+    cr.emit('notificationRouting', entry['notificationRouting'])
+
+
 def activate_routing(cr, sha, run_id, confirm):
+    bundle = parse_bundle(confirm)
+    if bundle:
+        return activate_routing_bundle(cr, sha, run_id, *bundle)
     category, channel, mode = parse_routing(confirm)
     cr.require_release(sha)
-    env = cr.env_of('notifications')
-    facts = dict(email_provider=env.get('NOTIFICATIONS_EMAIL_PROVIDER'), resend_done=cr.done('activate-resend-email'),
-                 owners_done=cr.done('activate-notifications-owners'),
-                 critical_lane_done=cr.done('activate-critical-lane'))
+    facts = routing_facts(cr)
     refusal = gate(category, channel, mode, facts)
     if refusal:
         raise RuntimeError('Routing gate: ' + refusal + '; nothing changed')
@@ -249,7 +357,13 @@ def activate_routing(cr, sha, run_id, confirm):
 
 
 def undo_routing(cr, record, run_id):
-    """Rollback of one routing change: back to the recorded previous mode."""
+    """Rollback of one routing change (or of every row of a bundle): back to the recorded
+    previous mode."""
+    if 'rows' in record:
+        for row in reversed(record['rows']):
+            if row['before'] != row['after']:
+                undo_routing(cr, row, run_id)
+        return
     version = set_mode(cr, record['category'], record['channel'], record['before'], run_id)
     cr.emit('notificationRoutingRestored', dict(record, restoredVersion=version))
 

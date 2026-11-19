@@ -135,12 +135,15 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
         messaging_migration::pending_migrations(&db.conn)
             .await
             .unwrap(),
-        vec!["m20261210_000038_mls_group_infos".to_string()]
+        vec![
+            "m20261210_000038_mls_group_infos".to_string(),
+            "m20261211_000039_member_notifications".to_string()
+        ]
     );
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
         .await
         .unwrap();
-    assert!(messaging_migration::pending_migrations(&db.conn)
+    assert!(messaging_migration::mls_join_pending(&db.conn)
         .await
         .unwrap()
         .is_empty());
@@ -177,6 +180,65 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
         0
     );
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::mls_join_pending(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+/// The member-notification outbox lives in its OWN history too: the previous image finds
+/// exactly the histories it knows after this one is applied, this image requires it before
+/// it reports ready, and it rolls back on its own.
+#[tokio::test]
+async fn the_member_notification_history_is_separate_so_a_rollback_still_starts() {
+    let Some(db) = TestDb::empty().await else {
+        return;
+    };
+    messaging_migration::Migrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::GapClosureMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        messaging_migration::pending_migrations(&db.conn)
+            .await
+            .unwrap(),
+        vec!["m20261211_000039_member_notifications".to_string()]
+    );
+    messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::pending_migrations(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    // What the previous image checks is untouched by this history.
+    assert!(messaging_migration::gap_closure_pending(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(messaging_migration::mls_join_pending(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    messaging_migration::MemberNotificationsMigrator::reset(&db.conn)
+        .await
+        .unwrap();
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM pg_tables WHERE tablename = 'messaging_member_notifications'"
+        )
+        .await,
+        0
+    );
+    messaging_migration::MemberNotificationsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     assert!(messaging_migration::pending_migrations(&db.conn)

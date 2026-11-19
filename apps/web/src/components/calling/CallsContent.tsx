@@ -98,7 +98,7 @@ const outcomeText: Record<string, string> = {
 
 type Launch = ({ contactId: string } | { conversationId: string }) & { kind: CallKind; name: string | null };
 
-export default function CallsContent({ initialCallId = "", launch = null }: { initialCallId?: string; launch?: Launch | null }) {
+export default function CallsContent({ initialCallId = "", launch = null, initialTab = "all" }: { initialCallId?: string; launch?: Launch | null; initialTab?: ListTab }) {
   const identity = useCallingIdentity();
   const calling = useCalling();
   // Calling starts a moment after the page: show loading, not "not available", until it has.
@@ -113,18 +113,18 @@ export default function CallsContent({ initialCallId = "", launch = null }: { in
       </div>
     );
   }
-  return <CallsWorkspace key={initialCallId} initialCallId={initialCallId} launch={launch} />;
+  return <CallsWorkspace key={`${initialCallId}:${initialTab}`} initialCallId={initialCallId} launch={launch} initialTab={initialTab} />;
 }
 
 type Runner = (action: () => Promise<unknown>) => Promise<void>;
 
-type ListTab = "all" | "missed" | "voicemail";
+export type ListTab = "all" | "missed" | "voicemail";
 
-function CallsWorkspace({ initialCallId, launch }: { initialCallId: string; launch: Launch | null }) {
+function CallsWorkspace({ initialCallId, launch, initialTab }: { initialCallId: string; launch: Launch | null; initialTab: ListTab }) {
   const calling = useCalling()!;
   const { principalId, device } = calling;
   const [selected, setSelected] = useState(initialCallId);
-  const [tab, setTab] = useState<ListTab>("all");
+  const [tab, setTab] = useState<ListTab>(initialTab);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
