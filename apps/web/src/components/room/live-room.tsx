@@ -33,6 +33,7 @@ import { useCurrentParticipant } from "@/hooks/v2/useParticipants";
 import { useSpace } from "@/hooks/v2/useSpaces";
 import { useCollaborationState } from "@/hooks/v2/useCollaboration";
 import { effectiveConferenceRole, meetingAllows } from "@/lib/meeting-authority";
+import { MEETING_AI_READY, MEETING_RECORDING_READY } from "@/lib/meeting-capture";
 import type { SidebarPanel } from "./sidebar";
 import { useMediaDeviceSelect } from "@livekit/components-react";
 import Sidebar from "@/components/room/sidebar";
@@ -730,12 +731,12 @@ function RoomTools({ onOpenPanel, conferenceId, close, openAudio, captionsOn, se
  const space = useSpace(conference.data?.meetingSpaceId || "");
  const collaboration = useCollaborationState(conferenceId);
  const role = effectiveConferenceRole(space.data?.viewerRole, me.data?.role, me.data?.admissionState);
- const canRecord = meetingAllows(role, "artifact.list", space.data?.rolePolicy) || (space.data?.recordingPolicy !== "DISABLED" && (meetingAllows(role, "recording.start", space.data?.rolePolicy) || meetingAllows(role, "recording.stop", space.data?.rolePolicy)));
+ const canRecord = MEETING_RECORDING_READY && (meetingAllows(role, "artifact.list", space.data?.rolePolicy) || (space.data?.recordingPolicy !== "DISABLED" && (meetingAllows(role, "recording.start", space.data?.rolePolicy) || meetingAllows(role, "recording.stop", space.data?.rolePolicy))));
  const row = "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-white/10";
  const open = (panel: SidebarPanel) => { close(); onOpenPanel(panel); };
  const transcriptionState = (conference.data as { transcriptionState?: string } | undefined)?.transcriptionState;
  const transcribing = !!transcriptionState && transcriptionState !== "OFF";
- const canStartTranscription = meetingAllows(role, "transcription.start", space.data?.rolePolicy) && space.data?.transcriptionPolicy !== "DISABLED";
+ const canStartTranscription = MEETING_AI_READY && meetingAllows(role, "transcription.start", space.data?.rolePolicy) && space.data?.transcriptionPolicy !== "DISABLED";
  const canStopTranscription = meetingAllows(role, "transcription.stop", space.data?.rolePolicy);
  const startTranscription = useStartTranscription(conferenceId);
  const stopTranscription = useStopTranscription(conferenceId);
@@ -771,10 +772,10 @@ function RoomTools({ onOpenPanel, conferenceId, close, openAudio, captionsOn, se
        <Icon className="size-4 text-white/70" /> {label}
      </button>
    ))}
-   <button type="button" onClick={() => void toggleCaptions()} disabled={startTranscription.isPending} className={row}>
+   {MEETING_AI_READY ? <button type="button" onClick={() => void toggleCaptions()} disabled={startTranscription.isPending} className={row}>
      {captionsOn ? <CaptionsOff className="size-4 text-white/70" /> : <Captions className="size-4 text-white/70" />}
      <span className="flex-1">{startTranscription.isPending ? "Starting captions…" : captionsOn ? "Turn off captions" : "Turn on captions"}</span>
-   </button>
+   </button> : null}
    {transcribing && canStopTranscription && liveJob && (
      <button type="button" onClick={() => { stopTranscription.mutate(liveJob); setCaptionsOn(false); close(); }} disabled={stopTranscription.isPending} className={row}><CaptionsOff className="size-4 text-white/70" /> Stop transcription for everyone</button>
    )}

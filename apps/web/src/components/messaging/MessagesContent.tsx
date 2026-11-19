@@ -604,7 +604,7 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
           <div
             className={cn(
               "relative min-w-0 rounded-[20px] px-3.5 py-2 text-[15px] leading-snug",
-              mine ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+              mine ? "bg-primary text-primary-foreground shadow-sm" : "bg-card text-foreground shadow-sm",
               mine ? cn(!first && "rounded-tr-md", !last && "rounded-br-md") : cn(!first && "rounded-tl-md", !last && "rounded-bl-md"),
               m.state === "failed" && "ring-2 ring-destructive",
               m.announcement && "ring-2 ring-amber-400",
@@ -1045,6 +1045,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
           </div>
         ) : null}
 
+        <div className="chat-wallpaper flex min-h-0 flex-1 flex-col">
         <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-6">
           {e2ee && !conversation.groupReady ? (
             <p className="mx-auto my-4 flex max-w-md items-start gap-3 rounded-2xl bg-muted/60 p-4 text-sm" data-testid="e2ee-unavailable">
@@ -1134,6 +1135,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
             </form>
             <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground sm:block">{e2ee ? <><Lock className="mr-1 inline size-3" />End-to-end encrypted</> : "Enter to send · Shift + Enter for a new line"}</p>
           </div>
+        </div>
         </div>
       </section>
       {details ? <DetailsPanel engine={engine} conversation={conversation} title={title} onClose={() => setDetails(false)} shareEnabled={!!actions.shareMeeting} /> : null}

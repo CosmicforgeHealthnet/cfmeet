@@ -185,7 +185,6 @@ const LANGUAGES = [
   { value: "sw", label: "Kiswahili" },
 ];
 
-/** Tap the photo to upload a new one (PNG, JPEG or WebP, up to 512 KB). */
 /** Your CF Meet ID: what people type to add you as a contact. */
 function MyCfMeetId() {
   const profile = useHubProfile();
@@ -202,15 +201,39 @@ function MyCfMeetId() {
   );
 }
 
+const AVATAR_MAX_BYTES = 512 * 1024;
+
+/** Phone photos are usually several MB: crop to a centred square, resize and re-encode until it fits. */
+async function shrinkPhoto(file: File): Promise<Blob> {
+  if (file.size <= AVATAR_MAX_BYTES) return file;
+  const bitmap = await createImageBitmap(file);
+  const side = Math.min(bitmap.width, bitmap.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = Math.min(512, side);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("This browser can't resize photos.");
+  ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  for (const quality of [0.9, 0.8, 0.65, 0.5]) {
+    const blob = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/jpeg", quality));
+    if (blob && blob.size <= AVATAR_MAX_BYTES) return blob;
+  }
+  throw new Error("That photo couldn't be made small enough. Try another one.");
+}
+
+/** Tap the photo to upload a new one (PNG, JPEG or WebP; large photos are resized here). */
 function AvatarUpload({ avatar, initials, onUploaded }: { avatar: string | null; initials: string; onUploaded: (url: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pick = async (file: File | undefined) => {
     if (!file) return;
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setError("Use a PNG, JPEG or WebP image."); return; }
-    if (file.size > 512 * 1024) { setError("That photo is too big. Use one under 512 KB."); return; }
     setBusy(true); setError(null);
-    try { const p = await accountService.uploadAvatar(file); if (p.avatarUrl) onUploaded(p.avatarUrl); }
+    try {
+      const photo = await shrinkPhoto(file);
+      const p = await accountService.uploadAvatar(photo instanceof File ? photo : new File([photo], "photo.jpg", { type: "image/jpeg" }));
+      if (p.avatarUrl) onUploaded(p.avatarUrl);
+    }
     catch (e) { setError(getErrorMessage(e, "The photo couldn't be uploaded. Try again.")); }
     finally { setBusy(false); }
   };
