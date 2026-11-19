@@ -377,6 +377,12 @@ pub enum InternalPermission {
     /// ones disabled that way when the member is reactivated. Meeting Service only.
     #[serde(rename = "calling-organization-member.offboard")]
     CallingOrganizationMemberOffboard,
+    /// Calling (S2, account deletion and data download): erase one account's call history
+    /// (hide every finished Call from its history, minimize its display names) and export
+    /// it, for the principal of the CF Meet FIRST_PARTY scope named in the signed delegated
+    /// context. Meeting Service only (the account authority).
+    #[serde(rename = "calling-account.privacy")]
+    CallingAccountPrivacy,
     /// Meeting Service (final closure, organization event delivery): receive the
     /// Organizations Service's transactional-outbox events (organization lifecycle,
     /// memberships, ownership, policy, scope mappings; ids, roles and statuses only) at
@@ -518,7 +524,7 @@ pub struct PermissionDefinition {
 pub const REGISTRY: &[PermissionDefinition] = &[
     PermissionDefinition { permission: InternalPermission::CommunicationsUserForward, name: "communications-user.forward", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Forward an account-authenticated personal Communications request with server-resolved principal" },
     PermissionDefinition { permission: InternalPermission::CommunicationsPolicyCheck, name: "communications-policy.check", receiver: services::COMMUNICATIONS, grantable_to: &[services::CALLING, services::MESSAGING], sensitive: false, description: "Check current personal relationships and privacy; no enterprise override supplied by clients" },
-    PermissionDefinition { permission: InternalPermission::CommunicationsAccountApply, name: "communications-account.apply", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Apply a durable account lifecycle or session-revocation event idempotently" },
+    PermissionDefinition { permission: InternalPermission::CommunicationsAccountApply, name: "communications-account.apply", receiver: services::COMMUNICATIONS, grantable_to: &[services::MEETING_SERVICE], sensitive: false, description: "Apply a durable account lifecycle or session-revocation event idempotently, erase a deleted account's Hub data and read it back for the account's data download" },
     PermissionDefinition { permission: InternalPermission::CommunicationsBlockApply, name: "communications-block.apply", receiver: services::COMMUNICATIONS, grantable_to: &[services::CALLING, services::MESSAGING], sensitive: false, description: "Apply restrictive domain block references without message or call contents" },
     PermissionDefinition { permission: InternalPermission::CommunicationsBackfill, name: "communications-backfill.run", receiver: services::COMMUNICATIONS, grantable_to: &[services::OPERATOR_CONSOLE], sensitive: false, description: "Run bounded authenticated profile backfill and event replay" },
     PermissionDefinition { permission: InternalPermission::CommunicationsAccountRead, name: "communications-account.read", receiver: services::MEETING_SERVICE, grantable_to: &[services::COMMUNICATIONS], sensitive: false, description: "Read current account eligibility and bounded backfill references; no credentials" },
@@ -1126,6 +1132,14 @@ pub const REGISTRY: &[PermissionDefinition] = &[
         description: "Disable the enterprise extensions routed to a removed or suspended organization member's principal, and restore exactly those on reactivation, in the organization's FIRST_PARTY scope (system-audited)",
     },
     PermissionDefinition {
+        permission: InternalPermission::CallingAccountPrivacy,
+        name: "calling-account.privacy",
+        receiver: services::CALLING,
+        grantable_to: &[services::MEETING_SERVICE],
+        sensitive: false,
+        description: "Erase (hide from history, minimize display names) or export the call history of one deleted or exporting account's principal in the CF Meet FIRST_PARTY scope",
+    },
+    PermissionDefinition {
         permission: InternalPermission::MeetingOrganizationEventsApply,
         name: "meeting-organization-events.apply",
         receiver: services::MEETING_SERVICE,
@@ -1455,6 +1469,7 @@ impl InternalPermission {
         InternalPermission::CallingRequestActForOrganization,
         InternalPermission::CallingOrganizationMemberAct,
         InternalPermission::CallingOrganizationMemberOffboard,
+        InternalPermission::CallingAccountPrivacy,
         InternalPermission::MeetingOrganizationEventsApply,
         InternalPermission::NotificationsEventPublish,
         InternalPermission::NotificationsUserForward,
@@ -2196,6 +2211,11 @@ mod tests {
             (
                 InternalPermission::CallingOrganizationMemberOffboard,
                 "calling-organization-member.offboard",
+                false,
+            ),
+            (
+                InternalPermission::CallingAccountPrivacy,
+                "calling-account.privacy",
                 false,
             ),
         ] {

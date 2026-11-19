@@ -578,3 +578,49 @@ class EdgeRateLimits(unittest.TestCase):
         with patch.object(cr, 'env_of', lambda n: {}):
             with self.assertRaisesRegex(RuntimeError, 'gateway routing'):
                 cr.activate_token_ceiling('a' * 40, '9-1', '')
+
+
+class ClientAddressLimits(unittest.TestCase):
+    """S1: every proxying location of the public site overwrites X-Real-IP with the
+    visitor's address; nothing else changes."""
+    SITE = ('server {\n    listen 443 ssl;\n    server_name api.cfmeet.com;\n'
+            '    include /etc/nginx/snippets/cfmeet-calling-routes.conf;\n'
+            '    location / {\n        proxy_pass http://127.0.0.1:8080;\n        proxy_set_header Host $host;\n    }\n'
+            '    location = /health { proxy_pass http://127.0.0.1:8080; proxy_set_header X-Real-IP $remote_addr; }\n'
+            '    location ^~ /internal/operations/ { return 404; }\n}\n')
+
+    def test_proxying_locations_get_the_header_once(self):
+        out, changed = cr.client_address_site(self.SITE)
+        self.assertEqual(changed, 1)
+        self.assertEqual(out.count(cr.CLIENT_ADDRESS_LINE), 2)
+        self.assertIn('location / { ' + cr.CLIENT_ADDRESS_LINE, out)
+        self.assertNotIn('/internal/operations/ { ' + cr.CLIENT_ADDRESS_LINE, out)
+        # Idempotent.
+        self.assertEqual(cr.client_address_site(out), (out, 0))
+
+    def test_a_location_with_another_x_real_ip_is_refused(self):
+        site = self.SITE.replace('X-Real-IP $remote_addr', 'X-Real-IP $http_x_forwarded_for')
+        with self.assertRaises(RuntimeError):
+            cr.client_address_site(site)
+
+    def test_the_meeting_service_reads_the_header_the_proxy_overwrites(self):
+        self.assertEqual(cr.ACTIVATIONS['activate-client-address-limits'][0], ())
+        self.assertEqual(cr.CLIENT_ADDRESS_HEADER.lower(), 'x-real-ip')
+
+
+class DatabasePools(unittest.TestCase):
+    """B6 / C5: the pools must fit the core database's connection budget."""
+
+    def test_plan_uses_configured_values_then_code_defaults(self):
+        envs = {'messaging': {}, 'calling': {'CALLING_DATABASE_MAX_CONNECTIONS': '12'},
+                'notifications': {'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '8'}, 'api-gateway': {}}
+        plan = cr.pool_plan(envs, {'notifications': {'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '16'}})
+        self.assertEqual(plan, {'messaging': 25, 'calling': 12, 'notifications': 16})
+
+    def test_budget_refuses_more_than_the_server_allows(self):
+        self.assertEqual(cr.pool_budget_errors({'a': 40, 'b': 40}, 100, 3), [])
+        self.assertTrue(cr.pool_budget_errors({'a': 50, 'b': 40}, 100, 3))
+
+    def test_notification_pool_change_is_release_configuration_only(self):
+        self.assertEqual(cr.NOTIFICATIONS_DARK_ENV['NOTIFICATIONS_DATABASE_MAX_CONNECTIONS'], cr.NOTIFICATIONS_POOL)
+        self.assertIn(('activate-account-privacy', 'calling', 'meeting-service', ('calling-account.privacy',)), cr.GRANTS)

@@ -24,6 +24,8 @@
 #[macro_use]
 pub mod domain;
 
+/// S2: account deletion / data download (Meeting Service only).
+pub mod account_privacy;
 pub mod calls;
 pub mod config;
 pub mod endpoints;

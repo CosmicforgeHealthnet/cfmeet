@@ -396,6 +396,7 @@ pub fn service_auth_fixture_targeting(
                         "calling-request.act-for-organization",
                         "calling-organization-member.act",
                         "calling-organization-member.offboard",
+                        "calling-account.privacy",
                     ],
                 ),
                 (

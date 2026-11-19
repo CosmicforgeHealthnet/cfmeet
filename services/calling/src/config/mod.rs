@@ -179,7 +179,7 @@ impl CallingConfig {
         };
 
         let database_max_connections =
-            positive(&non_empty, "CALLING_DATABASE_MAX_CONNECTIONS", 10)?;
+            positive(&non_empty, "CALLING_DATABASE_MAX_CONNECTIONS", 20)?;
         let legacy_usage_retired = match non_empty("CALLING_LEGACY_USAGE_AUTHORITY").as_deref() {
             None | Some("active") => false,
             Some("retired") => true,

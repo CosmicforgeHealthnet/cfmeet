@@ -11748,7 +11748,7 @@
           "Account security (v2)"
         ],
         "summary": "Delete my account",
-        "description": "Gap audit A2: permanently deletes (anonymizes) the signed-in account after a\n`DELETE_ACCOUNT` step-up: the address, username, name, avatar, time zone, locale and any\npassword are removed and the account can never sign in again; the Google link is removed,\nmeeting memberships end, owned meeting spaces are archived and webinar registrations are\ncancelled; every sign-in and device ends, and Messaging, the Communications Hub and Calling\ncredentials end with them. The previous address receives one confirmation email.",
+        "description": "Gap audit A2: permanently deletes (anonymizes) the signed-in account after a\n`DELETE_ACCOUNT` step-up: the address, username, name, avatar, time zone, locale and any\npassword are removed and the account can never sign in again; the Google link is removed,\nmeeting memberships end, owned meeting spaces are archived and webinar registrations are\ncancelled; every sign-in and device ends, and Messaging, the Communications Hub and Calling\ncredentials end with them. The person's messages, Hub profile, CF Meet ID, contacts,\nlists, saved messages and call history are then erased at those services (durable,\nretried until each confirms). The previous address receives one confirmation email.",
         "operationId": "v2_delete_my_account",
         "requestBody": {
           "content": {
@@ -12163,7 +12163,7 @@
           "Account security (v2)"
         ],
         "summary": "Export my personal data",
-        "description": "Gap audit A2: one JSON document of everything the Meeting Service holds about the\nsigned-in account (profile, sign-ins, linked devices, owned meeting spaces, memberships,\nwebinar registrations, conference participation and its own security events). Chats,\ncontacts and calls are held by Messaging, the Communications Hub and Calling, which the\ndocument names. Requires a session-bound sign-in.",
+        "description": "Gap audit A2: one JSON document of everything the Meeting Service holds about the\nsigned-in account (profile, sign-ins, linked devices, owned meeting spaces, memberships,\nwebinar registrations, conference participation and its own security events) and, under\n`elsewhere`, what Messaging (conversations), the Communications Hub (profile, CF Meet ID,\ncontacts, lists, saved messages, settings) and Calling (call history) hold about it; an\nowner that cannot answer is reported as unavailable. Requires a session-bound sign-in.",
         "operationId": "v2_export_my_data",
         "responses": {
           "200": {

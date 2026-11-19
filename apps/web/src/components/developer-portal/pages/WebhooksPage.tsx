@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronRight, MoreHorizontal, Pause, Play, Plus, RefreshCw, RotateCw, Search, Trash2, Webhook as WebhookIcon, XCircle } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronRight, MoreHorizontal, Pause, Play, Plus, RefreshCw, RotateCw, Search, Send, Trash2, Webhook as WebhookIcon, XCircle } from "lucide-react";
 import { Popover } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -92,6 +92,13 @@ function Subscriptions({ workspace, environmentId }: { workspace: Workspace; env
     (result) => setSecret({ title: "New signing secret", value: webhookSecret(result) }),
     "",
   );
+  // DF1: a test event, signed and delivered like a real one ("test": true in the payload).
+  const sendTest = useConsoleMutation(
+    (webhook: ConsoleWebhook) => client.call<WebhookDelivery>({ operation: "sendEnvironmentWebhookTest", path: { environmentId, webhookId: webhook.webhookId } }),
+    [["developer-portal", workspace.id, "deliveries", environmentId]],
+    undefined,
+    "Test event sent. It'll show up in Deliveries in a moment.",
+  );
   const current = list.items.find((w) => w.webhookId === selected) ?? null;
   const manage = can("WebhooksManage");
   const menu = "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm hover:bg-muted";
@@ -144,6 +151,7 @@ function Subscriptions({ workspace, environmentId }: { workspace: Workspace; env
                             <Popover.Content align="end" sideOffset={4} className="z-50 w-56 rounded-xl border border-border bg-popover p-1.5 shadow-xl">
                               {w.status === "ACTIVE" && <Popover.Close asChild><button type="button" className={menu} onClick={() => update.mutate({ webhook: w, status: "DISABLED" })}><Pause className="size-4 text-muted-foreground" />Pause deliveries</button></Popover.Close>}
                               {w.status === "DISABLED" && <Popover.Close asChild><button type="button" className={menu} onClick={() => update.mutate({ webhook: w, status: "ACTIVE" })}><Play className="size-4 text-muted-foreground" />Resume deliveries</button></Popover.Close>}
+                              {w.status === "ACTIVE" && <Popover.Close asChild><button type="button" className={menu} disabled={sendTest.isPending} onClick={() => sendTest.mutate(w)}><Send className="size-4 text-muted-foreground" />Send test event</button></Popover.Close>}
                               <Popover.Close asChild><button type="button" className={menu} onClick={() => setAsking({ title: "Get a new signing secret?", body: "Your server must switch to the new secret to keep verifying requests.", label: "Rotate secret", run: () => rotate.mutate(w) })}><RefreshCw className="size-4 text-muted-foreground" />Rotate signing secret</button></Popover.Close>
                               <Popover.Close asChild><button type="button" className={cn(menu, "text-red-600")} onClick={() => setAsking({ title: "Delete this endpoint?", body: "CF Meet stops sending events to it. This can't be undone.", label: "Delete", danger: true, run: () => remove.mutate(w) })}><Trash2 className="size-4" />Delete</button></Popover.Close>
                             </Popover.Content>

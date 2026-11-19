@@ -16,10 +16,10 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.7.0 | 307 |
 | Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.8.0 | 74 |
-| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.30.0 | 146 |
+| Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.31.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.22.0 | 108 |
-| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.8.0 | 101 |
-| **Total** | | | **736** |
+| Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.9.0 | 102 |
+| **Total** | | | **737** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -687,7 +687,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.8.
 
 ## Calling (personal and enterprise)
 
-Contract `packages/contracts/calling/http/v1.openapi.json` version **1.30.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
+Contract `packages/contracts/calling/http/v1.openapi.json` version **1.31.0**; base URL env `NEXT_PUBLIC_CALLING_API_URL`. Web: through the same-origin server adapter `/api/calling/*` and `/api/calling-signaling/*` (the adapter holds the platform credential; the browser never does). Signaling and media credentials are per device / per session. Organization calling: `/api/v2/organizations/{id}/calling/{path}`.
 
 ### Business Contacts
 
@@ -1229,7 +1229,7 @@ Contract `packages/contracts/messaging/http/v1.openapi.json` version **1.22.0**;
 
 ## Developer Portal (Developer Platform)
 
-Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.8.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
+Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **1.9.0**; base URL env `NEXT_PUBLIC_DEVELOPER_API_BASE_URL`. Developer console with the CF Meet account session bridged to the Developer Platform (`userSession`); machine clients use `platformCredential`.
 
 ### Activity
 
@@ -1436,3 +1436,4 @@ Contract `packages/contracts/platform-developer/http/v1.openapi.json` version **
 | PATCH | `/v1/environments/{environmentId}/webhooks/{webhookId}` | account session (developer bridge) | Update a webhook subscription of an environment | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#updateEnvironmentWebhook` |
 | GET | `/v1/environments/{environmentId}/webhooks/{webhookId}/deliveries` | account session (developer bridge) | List deliveries of a subscription | 200, 400, 401, 403, 404, 503 | — | `platform-developer/http/v1.openapi.json#listEnvironmentWebhookDeliveries` |
 | POST | `/v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret` | account session (developer bridge) | Rotate the signing secret of a subscription | 200, 400, 401, 403, 404, 409, 503 | — | `platform-developer/http/v1.openapi.json#rotateEnvironmentWebhookSecret` |
+| POST | `/v1/environments/{environmentId}/webhooks/{webhookId}/test` | account session (developer bridge) | Send a test event | 201, 401, 403, 404, 409, 429, 503 | — | `platform-developer/http/v1.openapi.json#sendEnvironmentWebhookTest` |

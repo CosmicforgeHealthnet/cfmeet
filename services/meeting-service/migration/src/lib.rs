@@ -48,6 +48,7 @@ mod m20261118_000005_chat_message_edits;
 mod m20261118_000006_account_notices;
 mod m20261118_000006_team_channel_sync;
 mod m20261118_000007_platform_user_participants;
+mod m20261119_000001_account_privacy_jobs;
 
 pub mod phase2_backfill;
 
@@ -515,6 +516,30 @@ pub async fn platform_build_ready<C: sea_orm_migration::sea_orm::ConnectionTrait
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<PlatformBuildMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// S2: the durable erasure jobs of a deleted account (`account_privacy_jobs`). A SEPARATE
+/// additive history so the previous image still starts after it is applied (rollback
+/// safety). Required at startup by the image that queues the jobs.
+pub struct AccountPrivacyMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AccountPrivacyMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261119_000001_account_privacy_jobs::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_account_privacy_migrations").into_iden()
+    }
+}
+
+/// The account-privacy history satisfies the DATA-011 target rule (applied ⊇ known,
+/// unknown versions fail closed).
+pub async fn account_privacy_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<AccountPrivacyMigrator, _>(db)
         .await?
         .is_empty())
 }

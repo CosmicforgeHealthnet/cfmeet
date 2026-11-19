@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.30.0"
+      "description": "cfmeet.calling.http-api 1.31.0"
     },
     {
       "name": "privacy-relay",
@@ -38,7 +38,7 @@
     },
     {
       "name": "developer-platform",
-      "description": "cfmeet.developer-platform.http-api 1.8.0"
+      "description": "cfmeet.developer-platform.http-api 1.9.0"
     },
     {
       "name": "gateway",
@@ -29973,6 +29973,81 @@
         },
         "x-cfmeet-service": "developer-platform",
         "x-cfmeet-route-id": "developer-platform.rotateEnvironmentWebhookSecret",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/webhooks/{webhookId}/test": {
+      "post": {
+        "operationId": "sendEnvironmentWebhookTest",
+        "summary": "Send a test event",
+        "description": "DF1: a NEW event of type webhook.test (the body carries \"test\": true at the top level and in data, and a message saying no real activity happened) with one delivery to this ACTIVE subscription only, signed with its current secret and delivered, retried and listed exactly like any other delivery (the same headers and signature scheme). At most 5 per webhook per minute (429 RATE_LIMITED); a paused or deleted webhook answers 409 INVALID_STATE. Roles: OWNER, ADMIN, DEVELOPER (Developer Console session only); refused while the organization is restricted, suspended or closed.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "description": "Environment id.",
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "description": "Subscription id.",
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The test delivery.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.webhooks.v1.WebhookDelivery"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.sendEnvironmentWebhookTest",
         "x-cfmeet-auth": [
           "DEVELOPER_SESSION"
         ]
@@ -60748,7 +60823,15 @@
             "pattern": "^whe_[0-9a-f]{32}$"
           },
           "eventType": {
-            "$ref": "#/components/schemas/developer_platform.platform-developer.webhooks.v1.WebhookEventType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/developer_platform.platform-developer.webhooks.v1.WebhookEventType"
+              },
+              {
+                "const": "webhook.test",
+                "description": "DF1: a test event sent on request from the Developer Console (never subscribable)."
+              }
+            ]
           },
           "replayOf": {
             "oneOf": [

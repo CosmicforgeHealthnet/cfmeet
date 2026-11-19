@@ -1095,6 +1095,12 @@
     {
       "domain": "developer-platform",
       "method": "POST",
+      "path": "/v1/environments/{environmentId}/webhooks/{webhookId}/test",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
       "path": "/v1/invitations/accept",
       "class": "PUBLIC_CUSTOMER"
     },
