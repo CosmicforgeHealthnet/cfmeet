@@ -45,6 +45,8 @@ mod m20261204_000032_application_baselines;
 mod m20261205_000033_client_session_binding;
 mod m20261206_000034_forwarding_links_announcements_franking;
 mod m20261207_000035_organization_moderation_team_channels;
+mod m20261208_000036_partner_session_devices;
+mod m20261209_000037_app_messages;
 
 /// Name of the table recording which Messaging migrations have been applied.
 pub const MIGRATION_TABLE: &str = "messaging_seaql_migrations";
@@ -166,6 +168,12 @@ impl MigratorTrait for GapClosureMigrator {
             Box::new(self::m20261205_000033_client_session_binding::Migration),
             Box::new(self::m20261206_000034_forwarding_links_announcements_franking::Migration),
             Box::new(self::m20261207_000035_organization_moderation_team_channels::Migration),
+            // ADR 0062 / 0063: partner session devices, the partner baseline, MESSAGE_SENT
+            // facts and partner push (additive; every flag default-off).
+            Box::new(self::m20261208_000036_partner_session_devices::Migration),
+            // ADR 0064 CF Meet Apps: messages record the sending app (additive; the
+            // MESSAGING_APPS_ENABLED flag is default-off).
+            Box::new(self::m20261209_000037_app_messages::Migration),
         ]
     }
     fn migration_table_name() -> DynIden {

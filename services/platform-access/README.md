@@ -39,10 +39,52 @@ It exposes no customer API. Consumers call the service-authenticated `/internal/
 | `/internal/v1/admin/**` (+ `X-CF-Operator`) | `platform-identity.administer` | operator console |
 | `PUT` / `GET /internal/v1/organization-scopes/{organizationRef}/{capability}`, `POST …/status` | `platform-identity.provision-first-party` | Organizations only ([ADR 0058](../../docs/decisions/0058-first-party-organization-scopes-and-provisioning.md)): idempotent create-or-return / read-back / suspend-resume of one FIRST_PARTY tenant + first-party application + PRODUCTION environment per first-party organization; no credentials or scope grants |
 
+| `POST`/`GET /internal/v1/end-users`, `GET`/`PATCH`/`DELETE /internal/v1/end-users/{userId}`, `POST …/revoke-sessions`, `POST /internal/v1/end-users/{userId}/tokens`, `POST /internal/v1/end-users/tokens` (+ `CF-Forwarded-Credential-Id`) | `platform-end-users.delegate` | Developer Console only ([ADR 0062](../../docs/decisions/0062-cf-meet-platform-build-users-tokens-devices.md)): partner users (EXTERNAL_APPLICATION_PRINCIPAL) of the forwarded credential's own EXTERNAL environment, re-verified live; user-token minting (`user_tokens.issue`) |
+| `GET /internal/v1/delegation/environments/{id}/end-users`, `GET`/`PUT …/allowed-origins`, `POST …/test-user-tokens` | `platform-identity.delegate` | Developer Console (console reads / allowed-websites management / console test tokens, SANDBOX only) |
+| `POST /internal/v1/user-tokens/verify`, `GET /internal/v1/user-tokens/keys` | `platform-user-token.verify` | Messaging, Calling, Meeting Service, API Gateway |
+| `GET /internal/v1/environment-origins`, `GET /internal/v1/environments/{id}/origins` | `platform-environment-origins.read` | API Gateway, Messaging, Calling, Meeting Service |
+| `POST /internal/v1/principals/ensure-meeting-platform` | `platform-principal.ensure-meeting-platform` | Meeting Service only (partner meeting chat) |
+
 "Delegated" operations require the signed delegated platform context; Platform Access
 re-validates its tenant / application / environment / service account against its own
 rows and refuses anything inconsistent (`DELEGATED_CONTEXT_INVALID`). A tenant id in a
 request never becomes authority.
+
+## CF Meet Platform "Build" (ADR 0062)
+
+Partner users, CF Meet user tokens, allowed websites and partner meeting principals
+(contract: `docs/platform/build-internal-contracts.md` §1–§2). Every feature is **off by
+default**; with a flag off its routes answer `404 NOT_FOUND` exactly like an unknown route.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PLATFORM_ACCESS_END_USERS_ENABLED` | `false` | Partner Users API and the console read |
+| `PLATFORM_ACCESS_USER_TOKENS_ENABLED` | `false` | user-token minting (with the Users API) and verification / keys; needs the signing key |
+| `PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED` | `false` | allowed websites (feed, reads, console management) |
+| `PLATFORM_ACCESS_MEETING_PLATFORM_ENABLED` | `false` | `POST /internal/v1/principals/ensure-meeting-platform` |
+| `PLATFORM_ACCESS_MAX_END_USERS_SANDBOX` / `_TEST` / `_PRODUCTION` | 100 / 1000 / 100000 | ACTIVE partner users per environment (`409 LIMIT_EXCEEDED`) |
+| `PLATFORM_ACCESS_USER_TOKEN_SIGNING_KEY_FILE` | — | PKCS#8 PEM Ed25519 key file (0600) signing `cfut_<sbx\|test\|live>_<JWS>` tokens; inline keys refused |
+| `PLATFORM_ACCESS_USER_TOKEN_PREVIOUS_PUBLIC_KEYS` | — | rotation: base64url raw public keys still accepted (`ACTIVE`) |
+| `PLATFORM_ACCESS_USER_TOKEN_RETIRED_PUBLIC_KEYS` | — | retired public keys: their tokens are `USER_TOKEN_REVOKED` (`RETIRED`) |
+
+* **Partner users** are EXTERNAL_APPLICATION_PRINCIPAL principals; profiles (display
+  name, image URL) and the session epoch (`tokens_not_before`, advanced by
+  `revoke-sessions`) live in `platform_end_user_profiles`. DELETE is the principal
+  tombstone plus profile erasure. Every mutation is audited (`devplat.s-<service account>`).
+* **User tokens** are stateless Ed25519 JWS (`typ: cfmeet-user+jwt`, ≤ 2048 bytes, 3600 s
+  default, 60–86400 s). Verification is live: user ACTIVE, `iat ≥ tokens_not_before`,
+  minting credential still authenticating, tenant EXTERNAL and chain ACTIVE, key not
+  retired; effective grants = claimed grants ∩ the credential's current scopes. At most 120
+  mints per user per hour (`429 RATE_LIMITED`).
+* **Console test tokens** (`POST /internal/v1/delegation/environments/{id}/test-user-tokens`,
+  a named human actor, no credential): ACTIVE SANDBOX environments of EXTERNAL tenants only
+  (otherwise `POLICY_VIOLATION`), TTL ≤ 3600 s, audited `USER_TOKEN_TEST_ISSUED`. The token's
+  `crd` / `sva` are the environment's synthetic console-test markers (UUIDv8 from the
+  environment id). Verify checks the live environment chain in place of a credential, and
+  bounds the grants by the application's current SANDBOX scope grants.
+* **Allowed websites**: at most 20 exact origins per environment, `https` only except
+  `http://localhost[:port]` / `http://127.0.0.1[:port]` in SANDBOX / TEST; every change (and
+  every effective status change of an environment with origins) appends to the feed.
 
 ## Running locally (no Docker required)
 
@@ -104,4 +146,5 @@ expiry, revocation, safety-only authority, throttling, pepper rotation),
 environment-kind restriction), `isolation` (cross-tenant / application / environment,
 forged delegated context, internal authorization), `messaging_scopes` (Part V B), `change_feed`, `handoff`
 (Part III import), `admin_cli`, `migrations`, `contracts` (OpenAPI = routes, responses
-conform). Calling's suite runs against this service's real binaries.
+conform), `platform_build` (ADR 0062: partner users, user tokens, allowed websites, partner
+meeting principals, flags off). Calling's suite runs against this service's real binaries.

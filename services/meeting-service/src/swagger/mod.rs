@@ -83,6 +83,16 @@ use utoipa::OpenApi;
         crate::handlers::v2::notifications::update_my_notification_preferences,
         crate::handlers::v2::notifications::register_my_push_endpoint,
         crate::handlers::v2::notifications::remove_my_push_endpoint,
+        // ADR 0064 / 0065: CF Meet Apps
+        crate::handlers::v2::apps::authorize_context,
+        crate::handlers::v2::apps::authorize_decide,
+        crate::handlers::v2::apps::list_my_apps,
+        crate::handlers::v2::apps::revoke_my_app,
+        crate::handlers::v2::apps::list_organization_apps,
+        crate::handlers::v2::apps::revoke_organization_app,
+        crate::handlers::v2::apps::list_conference_apps,
+        crate::handlers::v2::apps::create_app_context,
+        crate::handlers::v2::apps::app_context_keys,
         crate::handlers::v2::spaces::create_meeting_space,
         crate::handlers::v2::spaces::list_meeting_spaces,
         crate::handlers::v2::spaces::get_meeting_space,
@@ -785,6 +795,20 @@ use utoipa::OpenApi;
             crate::dto::v2_ghi::ArtifactListResponse,
             crate::dto::v2_ghi::TranscriptionJobListResponse,
             crate::dto::v2_ghi::RegistrationListResponse,
+            crate::dto::apps::AuthorizeDecisionRequest,
+            crate::dto::apps::AuthorizeContextResponse,
+            crate::dto::apps::AuthorizeDecisionResponse,
+            crate::dto::apps::OauthAppSummary,
+            crate::dto::apps::OauthScopeView,
+            crate::dto::apps::OrganizationInstallDecision,
+            crate::dto::apps::ConnectedApp,
+            crate::dto::apps::ConnectedAppList,
+            crate::dto::apps::MeetingSurfaceView,
+            crate::dto::apps::ConferenceApp,
+            crate::dto::apps::ConferenceAppList,
+            crate::dto::apps::AppContextTokenResponse,
+            crate::dto::apps::AppContextJwk,
+            crate::dto::apps::AppContextKeySet,
             // Internal provider-callback / operations schemas (`/internal/*`) are
             // deliberately NOT part of the public consumer contract.
         )
@@ -823,6 +847,7 @@ use utoipa::OpenApi;
         (name = "Realtime (v2)", description = "Authorized conference event stream (WebSocket) and replay. PostgreSQL is authority; events are delivery only — recover canonical state from GET /api/v2/conferences/{id}."),
         (name = "Waiting Room (v2)", description = "Waiting is a participant admission state. Access policy is always evaluated first."),
         (name = "Organizations (v2)", description = "First-party CF Meet business organizations (not developer-platform API workspaces) and the organization membership used by ORGANIZATION_ONLY access. Membership is resolved server-side; clients can never assert it. The Organizations Service is authoritative for organization data (production since the first activation): these routes relay to it with the signed-in user as the verified acting user (create, profile, members, invitations, teams, policies, ownership transfer, lifecycle, audit, provisioning). A deployment whose Organizations Service is not authoritative answers FEATURE_DISABLED. Organization Calling and Messaging relay allowlisted paths to the Calling and Messaging services, which own their data. The public Swagger selector serves these operations as the dedicated Organizations document."),
+        (name = "Apps (v2)", description = "ADR 0064 / 0065 CF Meet Apps: the OAuth consent relay for https://cfmeet.com/oauth/authorize (the signed-in account approves or denies an app's authorization request; Platform Access is the token authority), the account's connected apps, an organization's installed apps (organization OWNER / ADMIN) and in-meeting apps (apps with a meeting surface installed for the meeting owner or organization, 5-minute Ed25519 app-context tokens and their public keys). Each feature is off unless enabled (FEATURE_DISABLED)."),
         (name = "Compatibility (v2)", description = "Legacy → v2 migration evidence and shadow comparison (platform administrators)."),
         (name = "Recordings (v2)", description = "Part G: composite recording through the provider egress. REQUESTED → RECORDING only on provider evidence; STOPPING → PROCESSING → READY only after provider finalization and storage verification (size + checksum). One active composite recording per conference."),
         (name = "Artifacts (v2)", description = "Part G: recordings, transcripts and generated reports. Access is authorized per request and delivered as a short-lived signed URL; storage keys and provider ids are never exposed. Retention and deletion are confirmed against storage."),
@@ -866,6 +891,20 @@ impl utoipa::Modify for SecurityAddon {
                     utoipa::openapi::security::Http::new(
                         utoipa::openapi::security::HttpAuthScheme::Bearer,
                     ),
+                ),
+            );
+            // ADR 0062: a partner user's CF Meet user token (device credential). Accepted
+            // only by the operations that list it (the conference join).
+            components.add_security_scheme(
+                "userToken",
+                utoipa::openapi::security::SecurityScheme::Http(
+                    utoipa::openapi::security::HttpBuilder::new()
+                        .scheme(utoipa::openapi::security::HttpAuthScheme::Bearer)
+                        .bearer_format("cfut")
+                        .description(Some(
+                            "CF Meet user token of a partner user (`cfut_<sbx|test|live>_<JWS>`), minted by the partner's server for one user of its application environment and sent by the device as `Authorization: Bearer cfut_…`. Platform Access verifies it live on every use (a successful answer is cached for at most 30 seconds): the user must be ACTIVE and the minting credential, environment, application and tenant active. Only the conference join accepts it; the join returns the participant token the device uses afterwards.",
+                        ))
+                        .build(),
                 ),
             );
             components.add_security_scheme(
@@ -935,6 +974,20 @@ impl utoipa::Modify for PlatformCredentialAddon {
                         .build(),
                 ),
             );
+            // ADR 0064: an app's OAuth access token for one CF Meet user, accepted by the
+            // API Gateway on the same operations (`OAUTH_ACCESS_TOKEN`).
+            components.add_security_scheme(
+                "oauthAccessToken",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("cfoa_<sbx|test|live>_…")
+                        .description(Some(
+                            "OAuth access token of a CF Meet App acting for one CF Meet user (ADR 0064), sent to the public API Gateway as `Authorization: Bearer cfoa_…`. The roles listed are the OAuth scopes the grant must hold (meetings:read / meetings:write). The app acts as that user on the user's own meetings only (read: meetings the user owns, hosts or co-hosts; write: meetings the user owns; any other meeting is 404) and can never join, receive media, read recordings or administer. Bot tokens are refused.",
+                        ))
+                        .build(),
+                ),
+            );
         }
         for op in crate::services::platform::operations::OPERATIONS {
             let Some(item) = openapi.paths.paths.get_mut(op.path) else {
@@ -955,6 +1008,12 @@ impl utoipa::Modify for PlatformCredentialAddon {
                 .security
                 .get_or_insert_with(Vec::new)
                 .push(SecurityRequirement::new("platformCredential", [op.scope]));
+            if let Some(oauth_scope) = crate::services::apps::delegated::oauth_scope_of(op.scope) {
+                operation
+                    .security
+                    .get_or_insert_with(Vec::new)
+                    .push(SecurityRequirement::new("oauthAccessToken", [oauth_scope]));
+            }
             operation
                 .extensions
                 .get_or_insert_with(Default::default)
@@ -1008,13 +1067,10 @@ macro_rules! public_bundle {
 }
 
 /// (Swagger name, served path, public bundle). The Meeting Service document is generated
-/// at runtime (it carries the configured server list) and is listed first.
-const PEER_DOCS: [(&str, &str, &str); 8] = [
-    (
-        "Communications",
-        "/api-docs/communications.json",
-        public_bundle!("communications"),
-    ),
+/// at runtime (it carries the configured server list) and is listed first. ADR 0061: the
+/// Communications Hub is first-party only (`EXCLUDED FIRST_PARTY_COMMUNICATIONS_HUB`), so
+/// its public bundle is empty by design and is not published on the doc host.
+const PEER_DOCS: [(&str, &str, &str); 7] = [
     (
         "Calling",
         "/api-docs/calling.json",
@@ -1559,7 +1615,7 @@ mod tests {
     use super::*;
 
     /// Served `/api-docs/messaging.json` (the public Messaging bundle, PLT-006).
-    const SERVED_MESSAGING_OPERATIONS: usize = 103;
+    const SERVED_MESSAGING_OPERATIONS: usize = 106;
     const SERVED_MESSAGING_NATIVE: usize = 73;
 
     fn peer(name: &str) -> &'static str {
@@ -1603,7 +1659,6 @@ mod tests {
             "/api-docs/openapi.json",
             "/api-docs/organizations.json",
             "/api-docs/calling.json",
-            "/api-docs/communications.json",
             "/api-docs/numbering.json",
             "/api-docs/privacy-relay.json",
             "/api-docs/sms-gateway.json",
@@ -1627,6 +1682,8 @@ mod tests {
             "/api-docs/telephony.json",
             "/api-docs/messaging-internal.json",
             "/api-docs/sms-gateway-internal.json",
+            // ADR 0061: the Communications Hub is first-party only.
+            "/api-docs/communications.json",
         ] {
             let response = router
                 .clone()
@@ -1663,7 +1720,6 @@ mod tests {
     /// Gateway catalogue domain of each served peer document.
     fn catalogue_domain(name: &str) -> &'static str {
         match name {
-            "Communications" => "communications",
             "Calling" => "calling",
             "Numbering / DCNs" => "numbering",
             "Privacy Relay" => "privacy-relay",
@@ -1949,7 +2005,6 @@ mod tests {
             [
                 "Meetings",
                 "Organizations",
-                "Communications",
                 "Calling",
                 "Numbering / DCNs",
                 "Privacy Relay",

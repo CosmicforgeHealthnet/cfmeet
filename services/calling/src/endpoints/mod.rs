@@ -3,7 +3,9 @@
 //!
 //! * An endpoint belongs to exactly one principal of one tenant / application /
 //!   environment (database-pinned). It is registered by the application's BACKEND with
-//!   its API credential; browsers and mobile apps never hold that credential.
+//!   its API credential; browsers and mobile apps never hold that credential. A partner
+//!   user's device may instead exchange a CF Meet user token ([`user_sessions`], ADR 0062):
+//!   the endpoint of its app installation is registered on the token's minting credential.
 //! * The endpoint key is an opaque, bounded, non-secret application identifier, unique
 //!   among ACTIVE endpoints of an application environment. Re-registering the same key
 //!   for the same principal is idempotent; for another principal it is a conflict.
@@ -15,6 +17,7 @@
 
 pub mod http;
 pub mod service;
+pub mod user_sessions;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;

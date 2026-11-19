@@ -65,7 +65,7 @@ pub const DOCS: &[(&str, &str, &str)] = &[
     ("sms", "SMS", public_doc!("sms")),
     (
         "developer-platform",
-        "Developer Platform",
+        "Developer Console",
         public_doc!("developer-platform"),
     ),
     ("gateway", "Gateway", public_doc!("gateway")),
@@ -249,7 +249,7 @@ fn page() -> String {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CF Meet public API reference</title>
+  <title>CF Meet Platform API reference</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@{v}/swagger-ui.css" integrity="{css}" crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
 <body>

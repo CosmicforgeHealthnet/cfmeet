@@ -142,6 +142,9 @@ pub struct WebhookService {
     /// `true` once the process is shutting down: the worker finishes the delivery it is
     /// sending and releases the rest of its claimed batch (never abandons a send).
     stop: Option<tokio::sync::watch::Receiver<bool>>,
+    /// ADR 0064 (`DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED`): ingestion also routes
+    /// install-target events to the installed apps' subscriptions.
+    install_events: bool,
 }
 
 pub(crate) fn ts(at: DateTime<Utc>) -> String {
@@ -338,7 +341,18 @@ impl WebhookService {
             client,
             clock: Arc::new(Utc::now),
             stop: None,
+            install_events: false,
         }
+    }
+
+    /// ADR 0064: the install routing pass of ingestion (default off).
+    pub fn with_install_events(mut self, on: bool) -> Self {
+        self.install_events = on;
+        self
+    }
+
+    pub fn install_events(&self) -> bool {
+        self.install_events
     }
 
     /// Observes the process's shutdown signal (the worker binary).

@@ -685,6 +685,7 @@ async fn delegated_actor(
             // against the revocation store (`relay` refuses unchecked sessions).
             revocation_checked: true,
             account_session_id: None,
+            delegation: None,
         }),
         verified_organizations,
         request_id: crate::middleware::request_id::current_request_id(),

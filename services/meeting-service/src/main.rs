@@ -107,6 +107,26 @@ async fn main() -> anyhow::Result<()> {
             state = state.with_platform(receiver);
             tracing::info!("Part VI: platform credential access to /api/v2 enabled");
         }
+        // ADR 0062: partner users join with their CF Meet user token (and partner meeting
+        // chat). Their tables live in an additive history (`platform-build-migration up`);
+        // refuse to start without it rather than failing joins.
+        if let Some(users) = config.platform_users(&db, client.clone()) {
+            if !migration::platform_build_ready(&db)
+                .await
+                .expect("Platform-build migration readiness")
+            {
+                panic!("Platform-build migration is required while MEETING_PLATFORM_USER_JOIN_ENABLED is on (platform-build-migration up)");
+            }
+            if let Some(chat) = users.chat.clone() {
+                backend::services::platform::partner_chat::spawn_partner_chat_sync(
+                    chat,
+                    config.chat_sync_interval,
+                );
+                tracing::info!("ADR 0062: partner meeting chat enabled");
+            }
+            state = state.with_platform_users(users);
+            tracing::info!("ADR 0062: partner user join (CF Meet user tokens) enabled");
+        }
         // Part VI §55: usage facts of environment-owned meetings -> unified usage ledger.
         if let Some(s) = config.usage_export.clone() {
             use backend::services::platform::usage_export;
@@ -136,6 +156,31 @@ async fn main() -> anyhow::Result<()> {
             ));
             tracing::info!("Part VI: environment-scoped meeting events -> Developer Platform");
         }
+    }
+    // ADR 0064 / 0065: CF Meet Apps (MEETING_OAUTH_AUTHORIZE_ENABLED,
+    // MEETING_DELEGATED_APPS_ENABLED, MEETING_IN_MEETING_APPS_ENABLED; all off by default).
+    // Enabled but misconfigured stops startup (fail closed). No migration of their own.
+    let apps_config = backend::services::apps::AppsConfig::from_env()
+        .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+    let mut userinfo_verifier = None;
+    if let Some(config) = apps_config {
+        if config.delegated_enabled && state.platform.is_none() {
+            panic!("apps configuration error: MEETING_DELEGATED_APPS_ENABLED requires the platform credential receiver (MEETING_PLATFORM_ACCESS_ENABLED)");
+        }
+        let apps = config
+            .build(state.meeting.core.organization_authority.clone())
+            .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+        userinfo_verifier = config
+            .userinfo_verifier()
+            .unwrap_or_else(|e| panic!("apps configuration error: {e}"));
+        tracing::info!(
+            authorize = config.authorize_enabled,
+            delegated = config.delegated_enabled,
+            in_meeting = config.in_meeting_enabled,
+            organization_installs = apps.organizations.is_some(),
+            "ADR 0064 / 0065: CF Meet Apps enabled"
+        );
+        state = state.with_apps(apps);
     }
     tracing::info!("✅ Hosted UI URL: {}", app_config.app_url);
 
@@ -497,6 +542,9 @@ async fn main() -> anyhow::Result<()> {
     if bridge_router.is_some() {
         tracing::info!("Part VI: Developer Console session bridge enabled");
     }
+    // ADR 0064: the internal OAuth userinfo route (meeting-oauth-userinfo.read).
+    let userinfo_router = userinfo_verifier
+        .map(|verifier| backend::services::apps::userinfo::router(state.clone(), verifier));
 
     // Document 4 §3.1: Notification Service user relay (CF_NOTIFICATIONS_BASE_URL; unset:
     // the /api/v2/notifications routes answer 503 and nothing is forwarded).
@@ -582,6 +630,9 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower_http::trace::TraceLayer::new_for_http());
     if let Some(bridge) = bridge_router {
         app = app.merge(bridge);
+    }
+    if let Some(userinfo) = userinfo_router {
+        app = app.merge(userinfo);
     }
     if let Some(events) = events_router {
         app = app.merge(events);

@@ -313,6 +313,9 @@ pub async fn add(
     // The new member must be an ACTIVE messaging principal of the SAME environment.
     let kind = principal_kind(state, ctx, request.principal_id).await?;
     role_fits_principal(role, &kind)?;
+    // ADR 0064: a CF Meet App's bot joins MANAGED conversations only.
+    crate::apps::require_member_allowed(state, ctx, conversation_id, request.principal_id, &kind)
+        .await?;
     let st = state.clone();
     let ctx = ctx.clone();
     let admin = admin.clone();

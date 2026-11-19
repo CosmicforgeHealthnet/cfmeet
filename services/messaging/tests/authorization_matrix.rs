@@ -1259,6 +1259,9 @@ const ELSEWHERE: &[(&str, &str, &str)] = &[
     ("GET", "/v1/realtime", "WebSocket upgrade with a single-use ticket: `realtime_routes_refuse_customer_credentials_and_missing_tokens` below; tests/realtime.rs"),
     ("POST", "/v1/messaging/session-devices", "Section 13 first-party relay only (this matrix's customers are third-party and are refused): tests/realtime.rs `session_devices_*`"),
     ("POST", "/v1/messaging/session-devices/revoke", "Section 13 first-party relay only: tests/realtime.rs `session_devices_*`"),
+    ("POST", "/v1/messaging/user-sessions", "ADR 0062 partner user-token exchange (userToken, never a customer credential): tests/partner_session_devices.rs"),
+    ("PUT", "/v1/messaging/user-push-registrations/{installationId}", "ADR 0063 partner push registration (userToken): tests/partner_session_devices.rs"),
+    ("DELETE", "/v1/messaging/user-push-registrations/{installationId}", "ADR 0063 partner push removal (userToken): tests/partner_session_devices.rs"),
 ];
 
 // ---------------------------------------------------------------------- execution

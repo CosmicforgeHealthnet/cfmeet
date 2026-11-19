@@ -434,6 +434,7 @@ async fn cached_authorization_is_bounded_invalidated_and_never_used_for_mutation
         scopes: ["messages.read".to_string()].into(),
         personal_session_issued_at: None,
         principal_restriction: None,
+        oauth: None,
     };
     authority.tokens.lock().unwrap().insert(token.clone(), ctx);
     let cache = CachingAuthority::new(authority.clone(), std::time::Duration::from_secs(30));

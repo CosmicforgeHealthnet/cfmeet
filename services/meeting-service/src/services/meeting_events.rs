@@ -350,7 +350,10 @@ pub async fn audit<C: ConnectionTrait>(
         action: Set(record.action.to_string()),
         target_type: Set(record.target_type.map(str::to_string)),
         target_ref: Set(record.target_ref),
-        metadata: Set(record.metadata),
+        // ADR 0064: an app acting for the user is recorded (`via = app`).
+        metadata: Set(crate::services::apps::delegated::audit_metadata(
+            record.metadata,
+        )),
         request_id: Set(current_request_id()),
         created_at: Set(Utc::now()),
     }

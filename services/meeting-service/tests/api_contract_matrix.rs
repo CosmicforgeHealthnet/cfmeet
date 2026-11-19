@@ -79,8 +79,10 @@ async fn j_api_01_every_documented_operation_is_routed_with_standard_errors() {
     // passwordless account-security operations (step-up request / verify, email change
     // request / verify) + 7 gap-closure operations (my organization invitations, accept /
     // decline one by id, operator owner appointment, registrant self-cancel, sign out other
-    // sessions, operator session revocation, identity duplicate report and enforcement, 5 organization operator routes, data export, account deletion, 4 two-step sign-in operations) + 4 gap audit G3 member calling operations (endpoints list / register / revoke, signaling credential).
-    assert_eq!(probed, 270, "all v2 operations probed");
+    // sessions, operator session revocation, identity duplicate report and enforcement, 5 organization operator routes, data export, account deletion, 4 two-step sign-in operations) + 4 gap audit G3 member calling operations (endpoints list / register / revoke, signaling credential) + 9 ADR 0064 / 0065 CF Meet Apps
+    // operations (authorize context / decision, my apps list / revoke, organization apps
+    // list / revoke, conference apps, app-context token, app-context keys).
+    assert_eq!(probed, 279, "all v2 operations probed");
 }
 
 /// Unknown v2 paths and unsupported methods keep the standard envelope.

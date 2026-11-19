@@ -47,6 +47,10 @@ secrecy = "0.10"
 zeroize = "1.8"
 async-trait = "0.1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# ADR 0062: CF Meet user tokens (Ed25519 compact JWS), the same crates the shared
+# service-auth package already uses.
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem", "rand_core", "zeroize"] }
+base64 = "0.22"
 
 [dev-dependencies]
 jsonschema = { version = "0.58", default-features = false }

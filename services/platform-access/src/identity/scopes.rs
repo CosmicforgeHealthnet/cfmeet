@@ -139,6 +139,10 @@ pub mod names {
     pub const PRODUCTION_ACCESS_REQUEST: &str = "production_access.request";
     pub const AUDIT_READ: &str = "audit.read";
     pub const DEVELOPER_PLATFORM_ADMIN: &str = "developer_platform.admin";
+    /// ADR 0062: mint CF Meet user tokens (`cfut_`) for the partner users of the
+    /// credential's own environment. Each grant inside a token additionally needs its own
+    /// scope (`messages.read` / `messages.send` / `calls.write` / `meetings.write`).
+    pub const USER_TOKENS_ISSUE: &str = "user_tokens.issue";
 }
 
 /// The Part VI meetings scopes (least privilege: `meetings.write` never implies
@@ -438,6 +442,11 @@ const STANDARD_SCOPES: &[ScopeDefinition] = &[
         name: names::DEVELOPER_PLATFORM_ADMIN,
         description: "Privileged CosmicForge operator authority over the developer control plane (approval, restriction, plan overrides); never an ordinary customer grant",
         trust: ScopeTrust::PrivilegedOperator,
+    },
+    ScopeDefinition {
+        name: names::USER_TOKENS_ISSUE,
+        description: "Mint short-lived CF Meet user tokens for the partner users of the credential's application environment; every grant inside a token also requires its own scope (messages.read, messages.send, calls.write, meetings.write) and is re-checked against the credential's current scopes on every verification",
+        trust: ScopeTrust::Standard,
     },
     ScopeDefinition {
         name: names::EVENTS_PRIVATE_DELIVERY,
@@ -1052,6 +1061,29 @@ mod tests {
             TenantClassification::External,
         );
         assert_eq!(set.names(), vec![names::MESSAGES_SEND.to_string()]);
+    }
+
+    #[test]
+    fn user_token_issuance_is_a_standard_independent_scope() {
+        let registry = ScopeRegistry::standard();
+        let def = registry
+            .definition(names::USER_TOKENS_ISSUE)
+            .expect("user_tokens.issue is registered");
+        assert_eq!(def.name, "user_tokens.issue");
+        assert_eq!(def.trust, ScopeTrust::Standard);
+        for classification in TenantClassification::ALL {
+            assert!(registry
+                .grantable(names::USER_TOKENS_ISSUE, *classification)
+                .is_ok());
+        }
+        // The principal scopes stay registered and nothing implies anything else.
+        assert!(registry.definition(names::PRINCIPALS_READ).is_some());
+        assert!(registry.definition(names::PRINCIPALS_WRITE).is_some());
+        let set = registry.effective(
+            vec![grant(names::USER_TOKENS_ISSUE, GrantBasis::Standard, true)],
+            TenantClassification::External,
+        );
+        assert_eq!(set.names(), vec![names::USER_TOKENS_ISSUE.to_string()]);
     }
 
     #[test]

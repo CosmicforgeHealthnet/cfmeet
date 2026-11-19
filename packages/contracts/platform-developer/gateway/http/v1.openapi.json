@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet public API Gateway",
+    "title": "CF Meet Platform — API Gateway",
     "version": "1.1.0",
-    "description": "Customer ingress of services/api-gateway (Part VI §51): probes, public documentation and discovery, and the generated public route catalogue (infra/api-gateway/route-manifest.json, documented per domain in cfmeet.*.public-api and in aggregate in cfmeet.api-gateway.public-api). Default deny; internal, provider-callback, operator, Platform Access and Telephony surfaces are never routable. The foundation diagnostic route GET /v1/developer-platform/context is kept."
+    "description": "The single front door of the CF Meet Platform (https://api.cfmeet.com/v1) through which partner products use CF Meet meetings, messaging and calling with a scoped API key. Customer ingress of services/api-gateway (Part VI §51): probes, public documentation and discovery, and the generated public route catalogue (infra/api-gateway/route-manifest.json, documented per domain in cfmeet.*.public-api and in aggregate in cfmeet.api-gateway.public-api). Default deny; internal, provider-callback, operator, Platform Access and Telephony surfaces are never routable. The foundation diagnostic route GET /v1/developer-platform/context is kept."
   },
   "tags": [
     {

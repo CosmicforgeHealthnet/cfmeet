@@ -24,6 +24,12 @@
 //!
 //! Enabling session devices (`MESSAGING_SESSION_DEVICES_ENABLED`) is independent of, and
 //! never implies, E2EE device registration, which production keeps refusing.
+//!
+//! ADR 0062: a session device is bound either to a first-party account session
+//! (`binding_kind = ACCOUNT_SESSION`, everything above, unchanged) or to a partner user's
+//! CF Meet user token (`PLATFORM_USER_TOKEN`, [`crate::partner`]): the same MANAGED-only
+//! identity, issued by `POST /v1/messaging/user-sessions`, usable on a closed REST
+//! allowlist as well, and ended with its minting credential.
 
 use chrono::{DateTime, Utc};
 use sea_orm::{FromQueryResult, TransactionTrait};
@@ -54,6 +60,11 @@ pub const E2EE_DEVICE: &str = "E2EE_DEVICE";
 pub const CAPABILITIES: &[&str] = &["REALTIME_MANAGED"];
 /// A session device lives at most this long (a client then creates a new one).
 pub const MAX_LIFETIME_HOURS: i64 = 24;
+/// `binding_kind` of a first-party relay's session device (bound to an account session).
+pub const ACCOUNT_SESSION: &str = "ACCOUNT_SESSION";
+/// `binding_kind` of a partner session device exchanged from a CF Meet user token
+/// (ADR 0062; [`crate::partner`]).
+pub const PLATFORM_USER_TOKEN: &str = "PLATFORM_USER_TOKEN";
 
 pub(crate) fn valid_reference(r: &str) -> bool {
     r.len() == 64 && r.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
@@ -417,6 +428,42 @@ pub(crate) async fn revoke_device_sessions<C: sea_orm::ConnectionTrait>(
         .await?;
     }
     Ok(revoked.len())
+}
+
+/// A usable session device: how it is bound, and (partner devices) its minting
+/// credential.
+#[derive(Debug, Clone, PartialEq, Eq, FromQueryResult)]
+pub struct ActiveDevice {
+    pub binding_kind: String,
+    pub minting_credential_id: Option<Uuid>,
+}
+
+impl ActiveDevice {
+    pub fn is_partner(&self) -> bool {
+        self.binding_kind == PLATFORM_USER_TOKEN
+    }
+}
+
+/// The session device if it is ACTIVE and unexpired (whatever the feature switches).
+pub async fn active_device<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    device_id: Uuid,
+    principal_id: Uuid,
+    environment_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<Option<ActiveDevice>> {
+    Ok(db::one(
+        db,
+        "SELECT binding_kind, minting_credential_id FROM messaging_session_devices \
+          WHERE id = $1 AND principal_id = $2 AND environment_id = $3 AND status = 'ACTIVE' AND expires_at > $4",
+        vec![
+            device_id.into(),
+            principal_id.into(),
+            environment_id.into(),
+            now.into(),
+        ],
+    )
+    .await?)
 }
 
 /// Whether a session device is still usable (ACTIVE, unexpired, the feature on).

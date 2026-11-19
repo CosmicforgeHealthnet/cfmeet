@@ -53,6 +53,14 @@ pub struct CallingConfig {
     /// Meeting Service forwards (`calling-request.act-for-organization`; organization
     /// credential re-verified with Platform Access, acting principal recorded).
     pub organization_forwarding_enabled: bool,
+    /// ADR 0062 `CALLING_USER_TOKEN_EXCHANGE_ENABLED` (`true` / `false`, default `false`):
+    /// serve `POST /v1/calling/user-sessions` (CF Meet user token → endpoint + signaling
+    /// credential, verified live with Platform Access).
+    pub user_token_exchange_enabled: bool,
+    /// ADR 0063 `CALLING_PARTNER_PUSH_ENABLED` (`true` / `false`, default `false`): ring
+    /// offers to partner users of EXTERNAL tenants also go to the Notification Service as
+    /// `platform-principal` recipients (needs `CALLING_PUSH_TRANSPORT=notifications`).
+    pub partner_push_enabled: bool,
 }
 
 impl fmt::Debug for CallingConfig {
@@ -69,6 +77,11 @@ impl fmt::Debug for CallingConfig {
                 "organization_forwarding_enabled",
                 &self.organization_forwarding_enabled,
             )
+            .field(
+                "user_token_exchange_enabled",
+                &self.user_token_exchange_enabled,
+            )
+            .field("partner_push_enabled", &self.partner_push_enabled)
             .finish()
     }
 }
@@ -192,6 +205,22 @@ impl CallingConfig {
                     ))
                 }
             };
+        let switch_off_by_default = |var: &'static str| -> Result<bool, ConfigError> {
+            match non_empty(var)
+                .map(|v| v.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                None | Some("false") => Ok(false),
+                Some("true") => Ok(true),
+                Some(_) => Err(ConfigError::invalid(
+                    var,
+                    "must be `true` or `false`".to_string(),
+                )),
+            }
+        };
+        let user_token_exchange_enabled =
+            switch_off_by_default("CALLING_USER_TOKEN_EXCHANGE_ENABLED")?;
+        let partner_push_enabled = switch_off_by_default("CALLING_PARTNER_PUSH_ENABLED")?;
 
         Ok(Self {
             database_url,
@@ -207,6 +236,8 @@ impl CallingConfig {
             log_format,
             legacy_usage_retired,
             organization_forwarding_enabled,
+            user_token_exchange_enabled,
+            partner_push_enabled,
         })
     }
 
@@ -341,6 +372,27 @@ mod tests {
                 ("CALLING_ORGANIZATION_FORWARDING_ENABLED", bad),
             ]))
             .is_err());
+        }
+    }
+
+    #[test]
+    fn partner_build_switches_are_off_unless_explicitly_enabled() {
+        let base = ("DATABASE_URL", "postgres://x/y");
+        let cfg = CallingConfig::from_lookup(lookup(&[base])).unwrap();
+        assert!(!cfg.user_token_exchange_enabled);
+        assert!(!cfg.partner_push_enabled);
+        let cfg = CallingConfig::from_lookup(lookup(&[
+            base,
+            ("CALLING_USER_TOKEN_EXCHANGE_ENABLED", "true"),
+            ("CALLING_PARTNER_PUSH_ENABLED", "TRUE"),
+        ]))
+        .unwrap();
+        assert!(cfg.user_token_exchange_enabled && cfg.partner_push_enabled);
+        for var in [
+            "CALLING_USER_TOKEN_EXCHANGE_ENABLED",
+            "CALLING_PARTNER_PUSH_ENABLED",
+        ] {
+            assert!(CallingConfig::from_lookup(lookup(&[base, (var, "yes")])).is_err());
         }
     }
 

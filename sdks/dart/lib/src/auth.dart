@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'errors.dart';
 import 'platform.dart';
+import 'user_token.dart';
 
 /// Authentication modes of the public API (the `auth` of an `OperationSpec`).
 enum AuthMode {
@@ -27,6 +28,10 @@ enum AuthMode {
   /// A Call Signaling Credential `cfsig_...` (Bearer).
   signalingCredential('SIGNALING_CREDENTIAL'),
 
+  /// A CF Meet user token `cfut_<sbx|test|live>_...` (Bearer; ADR 0062): a device
+  /// credential minted for one partner user by the partner's server.
+  userToken('USER_TOKEN'),
+
   /// A single-use realtime ticket (WebSocket only; see `realtime.dart`).
   realtimeTicket('REALTIME_TICKET'),
 
@@ -45,7 +50,7 @@ final RegExp platformCredentialPattern =
 
 /// How one request is authenticated. Tokens are never logged or included in errors.
 class CfMeetAuth {
-  CfMeetAuth._(this.mode, this._token);
+  CfMeetAuth._(this.mode, this._token, [this.userTokenCache]);
 
   /// Server-side platform credential (`Authorization: Bearer cfmk_...`).
   factory CfMeetAuth.platformCredential(String credential) {
@@ -73,6 +78,22 @@ class CfMeetAuth {
   factory CfMeetAuth.signalingCredential(String credential) =>
       CfMeetAuth._(AuthMode.signalingCredential, _fixed(credential));
 
+  /// A CF Meet user token from YOUR server (`Authorization: Bearer cfut_...`).
+  ///
+  /// [tokenProvider] is called on first use, [refreshBeforeExpiry] before the cached
+  /// token's `exp` and after a 401 `USER_TOKEN_EXPIRED` / `USER_TOKEN_REVOKED` /
+  /// `AUTHENTICATION_FAILED` (the request is then retried once); concurrent callers share
+  /// one call. Never put a platform credential in a device app.
+  factory CfMeetAuth.userToken(
+    FutureOr<String> Function() tokenProvider, {
+    Duration refreshBeforeExpiry = const Duration(seconds: 60),
+    DateTime Function()? now,
+  }) {
+    final cache = UserTokenCache(tokenProvider,
+        refreshBeforeExpiry: refreshBeforeExpiry, now: now);
+    return CfMeetAuth._(AuthMode.userToken, cache.get, cache);
+  }
+
   /// No credential.
   factory CfMeetAuth.anonymous() => CfMeetAuth._(AuthMode.anonymous, () => '');
 
@@ -84,11 +105,15 @@ class CfMeetAuth {
       throw const CfMeetUsageError(
           'realtime tickets are minted per connection by the realtime helpers');
     }
+    if (mode == AuthMode.userToken) return CfMeetAuth.userToken(tokenProvider);
     return CfMeetAuth._(mode, tokenProvider);
   }
 
   final AuthMode mode;
   final FutureOr<String> Function() _token;
+
+  /// The token cache of a [AuthMode.userToken] auth (null for every other mode).
+  final UserTokenCache? userTokenCache;
 
   static FutureOr<String> Function() _fixed(String token) {
     if (token.isEmpty) throw const CfMeetUsageError('empty token');
@@ -125,6 +150,12 @@ class CfMeetAuth {
         if (token.startsWith('cfmk_')) {
           throw const CfMeetUsageError(
               'a platform credential must be configured with CfMeetAuth.platformCredential');
+        }
+        return {'authorization': 'Bearer $token'};
+      case AuthMode.userToken:
+        if (!isUserToken(token)) {
+          throw const CfMeetUsageError(
+              'not a CF Meet user token (expected cfut_<sbx|test|live>_<JWS>)');
         }
         return {'authorization': 'Bearer $token'};
       case AuthMode.participantToken:

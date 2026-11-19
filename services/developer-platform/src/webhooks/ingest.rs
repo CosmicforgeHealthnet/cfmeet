@@ -14,6 +14,15 @@
 //! * Fan-out targets ACTIVE subscriptions of the SAME tenant / application / environment
 //!   whose event types match — a sandbox subscription never receives a production event.
 //!   In shadow mode the deliveries are recorded SHADOW (nothing will be sent).
+//! * ADR 0064 install routing (`DEVELOPER_PLATFORM_INSTALL_EVENTS_ENABLED`): a SECOND pass
+//!   delivers the event to the apps INSTALLED on its scope (the organization's or the
+//!   user's FIRST_PARTY triple, from the Platform Access `APP_GRANT` projection) whose
+//!   grant covers the family, whose live manifest declares the type and that have an
+//!   ACTIVE subscription to it. Each such app environment gets its own derived event
+//!   (`data.installationId` added; same type, time and ids) — a delivery always belongs to
+//!   the subscription's own environment. A USER install only receives events naming the
+//!   user's principal; an ORGANIZATION install receives the organization's meeting events
+//!   and the `bot.*` events naming its bot (never other members' messages).
 
 use chrono::{DateTime, Utc};
 use sea_orm::{ConnectionTrait, TransactionTrait};
@@ -335,13 +344,230 @@ impl WebhookService {
             ))
             .await?
             .rows_affected();
+        let routed = if self.install_events {
+            route_to_installations(&txn, producer, facts, event, shadow, now).await?
+        } else {
+            0
+        };
         txn.commit().await?;
         Ok(Ingested {
             event_id: Some(event_id),
             duplicate: false,
-            deliveries,
+            deliveries: deliveries + routed,
         })
     }
+}
+
+/// The grant scopes (any of) that let an install of `target_kind` receive `event_type`
+/// (empty: never routed to that kind of install).
+pub fn install_scopes(event_type: &str, target_kind: &str) -> &'static [&'static str] {
+    match (catalog::family(event_type), target_kind) {
+        ("meeting" | "participant" | "artifact", _) => &["events:meetings"],
+        ("message" | "conversation", "USER") => &["chat:read"],
+        ("bot", "ORGANIZATION") => &["chat:read:bot", "chat:write:bot"],
+        _ => &[],
+    }
+}
+
+/// The principals an event names (`principalId`, `senderPrincipalId`,
+/// `subjectPrincipalId`).
+fn names_principal(data: &serde_json::Map<String, Value>, principal: Uuid, keys: &[&str]) -> bool {
+    let p = principal.to_string();
+    keys.iter()
+        .any(|k| data.get(*k).and_then(Value::as_str) == Some(p.as_str()))
+}
+
+/// Whether the installation `(kind, principal, scopes)` receives `event`.
+pub fn installation_receives(
+    event: &catalog::PublicEvent,
+    target_kind: &str,
+    principal: Option<Uuid>,
+    scopes: &[String],
+) -> bool {
+    let needed = install_scopes(event.event_type, target_kind);
+    if needed.is_empty() || !scopes.iter().any(|s| needed.contains(&s.as_str())) {
+        return false;
+    }
+    match (target_kind, catalog::family(event.event_type)) {
+        ("USER", _) => principal.is_some_and(|p| {
+            names_principal(
+                &event.data,
+                p,
+                &["principalId", "senderPrincipalId", "subjectPrincipalId"],
+            )
+        }),
+        ("ORGANIZATION", "bot") => {
+            principal.is_some_and(|p| names_principal(&event.data, p, &["subjectPrincipalId"]))
+        }
+        ("ORGANIZATION", _) => true,
+        _ => false,
+    }
+}
+
+/// The second (install) routing pass of one ingested event.
+async fn route_to_installations<C: ConnectionTrait>(
+    txn: &C,
+    producer: &str,
+    facts: &EnvelopeFacts,
+    event: &catalog::PublicEvent,
+    shadow: bool,
+    now: DateTime<Utc>,
+) -> Result<u64, ApiError> {
+    if !crate::apps::manifest::install_routable(event.event_type) {
+        return Ok(0);
+    }
+    let rows = txn
+        .query_all(stmt(
+            "SELECT grant_id, app_id, target_kind, principal_id, scopes FROM devplat_app_installations \
+              WHERE target_tenant_id = $1 AND target_application_id = $2 AND target_environment_id = $3 \
+              AND status = 'ACTIVE' ORDER BY grant_id LIMIT 500",
+            vec![facts.scope.0.into(), facts.scope.1.into(), facts.scope.2.into()],
+        ))
+        .await?;
+    let mut total = 0;
+    for r in rows {
+        let grant: Uuid = r.try_get("", "grant_id")?;
+        let app: Uuid = r.try_get("", "app_id")?;
+        let kind: String = r.try_get("", "target_kind")?;
+        let principal: Option<Uuid> = r.try_get("", "principal_id")?;
+        let scopes: Vec<String> = r.try_get("", "scopes")?;
+        if !installation_receives(event, &kind, principal, &scopes) {
+            continue;
+        }
+        // The app must still be live and declare the type in its live manifest.
+        let Some(app_row) = crate::apps::registration::load(txn, app, false).await? else {
+            continue;
+        };
+        if app_row.status == "SUSPENDED" {
+            continue;
+        }
+        let live = crate::apps::registration::manifest_of(txn, app, app_row.live_version()).await?;
+        if !crate::apps::manifest::strings(&live["eventTypes"])
+            .iter()
+            .any(|t| t == event.event_type)
+        {
+            continue;
+        }
+        let mut data = event.data.clone();
+        data.insert("installationId".into(), Value::String(grant.to_string()));
+        total += deliver_to_app(
+            txn,
+            AppDelivery {
+                app_id: app,
+                producer,
+                source_key: &[producer, &facts.source_event_id, &grant.to_string()],
+                event_type: event.event_type,
+                data,
+                occurred_at: facts.occurred_at,
+                correlation_id: facts.correlation_id.as_deref(),
+            },
+            shadow,
+            now,
+        )
+        .await?;
+    }
+    Ok(total)
+}
+
+/// One event for an installed app's own subscriptions.
+pub struct AppDelivery<'a> {
+    pub app_id: Uuid,
+    /// The producer recorded on the derived event.
+    pub producer: &'a str,
+    /// What makes the derived event unique (with the environment): re-routing the same
+    /// source never creates a second event or delivery.
+    pub source_key: &'a [&'a str],
+    pub event_type: &'static str,
+    pub data: serde_json::Map<String, Value>,
+    pub occurred_at: DateTime<Utc>,
+    pub correlation_id: Option<&'a str>,
+}
+
+/// Records `d` once per environment of the app holding an ACTIVE subscription to its
+/// type, and one delivery per such subscription. Returns the deliveries created.
+pub async fn deliver_to_app<C: ConnectionTrait>(
+    db: &C,
+    d: AppDelivery<'_>,
+    shadow: bool,
+    now: DateTime<Utc>,
+) -> Result<u64, ApiError> {
+    let envs = db
+        .query_all(stmt(
+            "SELECT DISTINCT tenant_id, application_id, environment_id FROM devplat_webhook_subscriptions \
+              WHERE application_id = $1 AND status = 'ACTIVE' AND $2 = ANY (event_types)",
+            vec![d.app_id.into(), d.event_type.into()],
+        ))
+        .await?;
+    let mut total = 0;
+    for env in envs {
+        let tenant: Uuid = env.try_get("", "tenant_id")?;
+        let application: Uuid = env.try_get("", "application_id")?;
+        let environment: Uuid = env.try_get("", "environment_id")?;
+        let environment_text = environment.to_string();
+        let mut lines: Vec<&str> = d.source_key.to_vec();
+        lines.push(environment_text.as_str());
+        let source = format!("ins_{}", &crate::digest::sha256_lines(lines)[..32]);
+        let event_id = format!("whe_{}", Uuid::new_v4().simple());
+        let mut body = serde_json::json!({
+            "id": event_id,
+            "type": d.event_type,
+            "apiVersion": "v1",
+            "occurredAt": ts(d.occurred_at),
+            "data": Value::Object(d.data.clone()),
+        });
+        if let Some(c) = d.correlation_id {
+            body["correlationId"] = Value::String(c.to_string());
+        }
+        let inserted = db
+            .execute(stmt(
+                "INSERT INTO devplat_webhook_events (event_id, producer, source_event_id, event_type, \
+                  tenant_id, application_id, environment_id, occurred_at, payload, received_at) \
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+                  ON CONFLICT (producer, source_event_id) WHERE origin = 'NATIVE' DO NOTHING",
+                vec![
+                    event_id.clone().into(),
+                    d.producer.into(),
+                    source.into(),
+                    d.event_type.into(),
+                    tenant.into(),
+                    application.into(),
+                    environment.into(),
+                    d.occurred_at.into(),
+                    body.into(),
+                    now.into(),
+                ],
+            ))
+            .await?
+            .rows_affected();
+        if inserted == 0 {
+            continue;
+        }
+        total += db
+            .execute(stmt(
+                "INSERT INTO devplat_webhook_deliveries (id, subscription_id, event_id, tenant_id, \
+                  application_id, environment_id, status, attempt_count, next_attempt_at, \
+                  created_at, updated_at, completed_at) \
+                  SELECT gen_random_uuid(), s.id, $1, s.tenant_id, s.application_id, s.environment_id, \
+                  CASE WHEN $6 THEN 'SHADOW' ELSE 'PENDING' END, 0, $7, $7, $7, \
+                  CASE WHEN $6 THEN $7 END \
+                  FROM devplat_webhook_subscriptions s \
+                  WHERE s.tenant_id = $2 AND s.application_id = $3 AND s.environment_id = $4 \
+                  AND s.status = 'ACTIVE' AND $5 = ANY (s.event_types) \
+                  ON CONFLICT (subscription_id, event_id) WHERE replay_of IS NULL DO NOTHING",
+                vec![
+                    event_id.into(),
+                    tenant.into(),
+                    application.into(),
+                    environment.into(),
+                    d.event_type.into(),
+                    shadow.into(),
+                    now.into(),
+                ],
+            ))
+            .await?
+            .rows_affected();
+    }
+    Ok(total)
 }
 
 #[cfg(test)]

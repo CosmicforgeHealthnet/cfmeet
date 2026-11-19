@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.19.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read)."
+    "version": "1.21.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0 (CF Meet Platform Build, ADR 0062 / 0063): the userToken security scheme (Authorization: Bearer cfut_..., a CF Meet user token verified by Platform Access); POST /v1/messaging/user-sessions exchanges it for a MANAGED-only partner session device and client token (EXTERNAL environments, msg grant; MESSAGING_PARTNER_SESSION_DEVICES_ENABLED); PUT / DELETE /v1/messaging/user-push-registrations/{installationId} (partner push registrations synchronised to the Notification Service; MESSAGING_PARTNER_PUSH_ENABLED). A partner session device's client token reaches only a closed MANAGED-only allowlist of the clientToken member operations (conversations and members read; messages list / get / send / edit / delete; reactions; read cursor; unread; events; attachments create / finalize / get / download grants; conversation search; reports): every other operation answers 401 CLIENT_TOKENS_NOT_ENABLED / PARTNER_ROUTE_NOT_ALLOWED and a PRIVATE_E2EE conversation answers 404. Realtime tickets and WebSocket upgrades of partner session devices also accept the environment's allowed websites (Platform Access) as Origin. 1.21.0 (CF Meet Apps, ADR 0064; MESSAGING_APPS_ENABLED): the oauthAccessToken security scheme (Authorization: Bearer cfoa_… OAuth access token or cfob_… bot token of a CF Meet App, verified by Platform Access) on the operations an app may use: conversations and members (read), messages (list, get, send, edit, delete), reactions, read cursor, unread, events, attachments (create, finalize, get, download grants), conversation search, search across the principal's MANAGED conversations, reports and invitation accept / decline. An OAuth credential acts only as the one principal it is restricted to (the granting user or the app's organization bot; CF-Acting-Principal may only repeat it, else 403 PRINCIPAL_NOT_AUTHORIZED / ACTING_PRINCIPAL_MISMATCH), sees MANAGED conversations only (PRIVATE_E2EE answers 404 and is absent from lists and search counts), and every other operation answers 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED (with the flag off every operation answers 403 INSUFFICIENT_SCOPE / OAUTH_NOT_ENABLED). Messages an app sent carry viaApplicationId. A CF Meet App's bot (BOT_OR_SERVICE, reference app:<appId>) is a member of MANAGED conversations only (403 PRINCIPAL_NOT_AUTHORIZED / APP_BOT_MANAGED_ONLY)."
   },
   "tags": [
     {
@@ -716,6 +716,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "description": "Keyset-paginated (limit 1-100, cursor). orderBy=createdAt (default): newest first. orderBy=lastActivity: the inbox order, latest application message first (Section 13, MSG-007); a cursor is valid only with the orderBy that produced it. With CF-Acting-Principal: that principal's conversations with ACTIVE membership (messages.read), each carrying its inbox summary (last activity, last visible message preview metadata, unread and mention counts); without: the environment's conversations (conversations.manage), without summaries.",
@@ -819,6 +822,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "description": "One conversation of the credential's environment; for a member principal (messages.read) or the administration (conversations.manage). Others: NOT_FOUND.",
@@ -1058,6 +1064,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "description": "ACTIVE members. With an acting member (messages.read) or the administration (conversations.manage); a non-member is NOT_FOUND. Keyset-paginated in join order (limit 1-500, default 100; cursor = the previous page's nextCursor).",
@@ -1412,6 +1421,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -1519,6 +1531,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -1613,6 +1628,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -1690,6 +1708,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -1780,6 +1801,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -1952,6 +1976,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -2033,6 +2060,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -3287,6 +3317,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "attachments.write",
@@ -3381,6 +3414,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "attachments.read",
@@ -3460,6 +3496,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "attachments.write",
@@ -3542,6 +3581,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "attachments.read",
@@ -3940,6 +3982,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -4039,6 +4084,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -4122,6 +4170,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -5499,6 +5550,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -5581,6 +5635,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -5672,6 +5729,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -6005,6 +6065,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
@@ -7167,6 +7230,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -7241,6 +7307,9 @@
           },
           {
             "clientToken": []
+          },
+          {
+            "oauthAccessToken": []
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
@@ -7498,6 +7567,178 @@
                 "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/SessionDeviceRevokeRequest"
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/messaging/user-sessions": {
+      "post": {
+        "operationId": "exchangeUserSession",
+        "tags": [
+          "Client Sessions"
+        ],
+        "summary": "exchange User Session",
+        "security": [
+          {
+            "userToken": []
+          }
+        ],
+        "description": "ADR 0062 (build contract §4): a partner device exchanges its CF Meet user token (Platform Access verifies it; the msg grant is required: INSUFFICIENT_SCOPE / MSG_GRANT_REQUIRED otherwise) for a MANAGED-only partner session device bound to SHA-256(\"cfmeet-user-binding:v1|env|principal|installationId\") and a client token for it (at most MESSAGING_SESSION_DEVICE_TOKEN_TTL_SECONDS, never past the user token's expiry). With sessionDeviceId the ACTIVE device of the same principal and installation is renewed (NOT_FOUND otherwise). EXTERNAL application environments only (PRINCIPAL_NOT_AUTHORIZED / PARTNER_SESSIONS_EXTERNAL_ONLY); the user must be ACTIVE. The device records the token's minting credential: revoking that credential, suspending or deleting the user, or revoke-sessions ends it and closes its connections. Then POST /v1/realtime/tickets with the client token. 503 FEATURE_DISABLED / PARTNER_SESSION_DEVICES_DISABLED while MESSAGING_PARTNER_SESSION_DEVICES_ENABLED is off; 401 USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/UserSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/UserSessionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/messaging/user-push-registrations/{installationId}": {
+      "put": {
+        "operationId": "registerUserPush",
+        "tags": [
+          "Presence & Notifications"
+        ],
+        "summary": "register User Push",
+        "security": [
+          {
+            "userToken": []
+          }
+        ],
+        "description": "ADR 0063 (§6 N-P2): registers (or replaces) the push handle of a partner device installation for the user token's principal; the handle is synchronised to the Notification Service with the subject {kind: platform-principal, tenantId, applicationId, environmentId, principalId, installationId} and never stored, echoed or logged by Messaging. Partner MANAGED messages then wake the installation with metadata only (§6 N-P4). msg grant required; EXTERNAL environments only. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off; 400 VALIDATION_ERROR / PUSH_REGISTRATION_REFUSED when the Notification Service refuses the handle.",
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{8,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/UserPushRegistration"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/messaging/common/v1.schema.json#/$defs/UserPushRegistrationRequest"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unregisterUserPush",
+        "tags": [
+          "Presence & Notifications"
+        ],
+        "summary": "unregister User Push",
+        "security": [
+          {
+            "userToken": []
+          }
+        ],
+        "description": "ADR 0063 (§6 N-P2): removes the installation's partner push registration for one platform (every platform without `platform`) at the Notification Service. Idempotent. msg grant required. 503 FEATURE_DISABLED / PARTNER_PUSH_DISABLED while MESSAGING_PARTNER_PUSH_ENABLED is off.",
+        "parameters": [
+          {
+            "name": "installationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{8,128}$"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "APNS",
+                "APNS_VOIP",
+                "FCM"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -8037,6 +8278,12 @@
         "scheme": "bearer",
         "description": "A CF Meet API credential, verified by Platform Access (never by Messaging)."
       },
+      "userToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfut",
+        "description": "A CF Meet user token (`cfut_<sbx|test|live>_<JWS>`, at most 2048 bytes) minted by the partner's server for one partner user (ADR 0062). Messaging never verifies it itself: Platform Access does, live (a positive answer is reused at most 30 s). Accepted only by the operations that list it."
+      },
       "cfServiceAuth": {
         "type": "apiKey",
         "in": "header",
@@ -8054,6 +8301,12 @@
         "in": "header",
         "name": "Sec-WebSocket-Protocol",
         "description": "`cfmeet.messaging.v1, cfmeet.ticket.<ticket>`: the single-use ticket travels as a subprotocol entry; the server answers `cfmeet.messaging.v1` only."
+      },
+      "oauthAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfoa | cfob",
+        "description": "A CF Meet App's OAuth access token (`cfoa_…`, acting for the granting CF Meet user) or bot token (`cfob_…`, acting as the app's organization bot), verified live by Platform Access (never by Messaging) — ADR 0064, MESSAGING_APPS_ENABLED. The credential acts only as the single principal it is restricted to, sees MANAGED conversations only (a PRIVATE_E2EE conversation is 404) and is accepted only by the operations that list it; elsewhere 403 INSUFFICIENT_SCOPE / OAUTH_ROUTE_NOT_ALLOWED."
       }
     },
     "responses": {

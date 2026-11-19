@@ -20,7 +20,7 @@ use crate::{
     db,
     error::{ApiError, ApiResult, ErrorCode},
     ingest::{self, IngestError, IngestRequest},
-    push, routing,
+    partner, push, routing,
     state::AppState,
 };
 
@@ -32,7 +32,15 @@ pub async fn ingest(
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::NotificationsEventPublish)?;
     let req: IngestRequest = parse(&body)?;
-    match ingest::ingest(&state.db, &state.metrics, caller.service(), req).await {
+    match ingest::ingest_with(
+        &state.db,
+        &state.metrics,
+        caller.service(),
+        req,
+        state.partner.is_some(),
+    )
+    .await
+    {
         Ok(results) => Ok(json_ok(json!({ "results": results }))),
         Err(IngestError::BatchSize) => {
             Err(ApiError::validation("events must hold 1 to 100 envelopes"))
@@ -54,7 +62,18 @@ pub async fn call_push(
     body: Bytes,
 ) -> ApiResult<Response> {
     caller.require(InternalPermission::NotificationsCallPushDispatch)?;
-    let req: push::CallPushRequest = parse(&body)?;
+    let req: push::CallPushRequest = match (parse(&body), &state.partner) {
+        (Ok(r), _) => r,
+        // ADR 0063 N-P3: a `platform-principal` recipient (only while partner push is on;
+        // off, the shape is refused exactly as before).
+        (Err(e), Some(partner)) => {
+            let Ok(req) = parse::<partner::PartnerCallPushRequest>(&body) else {
+                return Err(e);
+            };
+            return partner_call_push(&state, partner, &req).await;
+        }
+        (Err(e), None) => return Err(e),
+    };
     if req.push_target_refs.is_empty() || req.push_target_refs.len() > 20 {
         return Err(ApiError::validation(
             "pushTargetRefs holds 1 to 20 references",
@@ -87,6 +106,48 @@ pub async fn call_push(
         &state.keys,
         state.push.as_ref(),
         &req,
+        Utc::now(),
+    )
+    .await?;
+    Ok(json_ok(out))
+}
+
+/// I3 for a partner end user (ADR 0063 N-P3): gated by the partner flag only (the
+/// first-party `CALL_INVITATIONS` routing mode concerns CF Meet's own app).
+async fn partner_call_push(
+    state: &AppState,
+    partner: &partner::PartnerPush,
+    req: &partner::PartnerCallPushRequest,
+) -> ApiResult<Response> {
+    let r = &req.recipient;
+    if r.kind != partner::SUBJECT_KIND {
+        return Err(ApiError::validation("recipient.kind is platform-principal"));
+    }
+    if r.environment_id == push::FIRST_PARTY_SCOPE
+        || state.first_party_scope == Some((r.tenant_id, r.application_id, r.environment_id))
+    {
+        return Err(ApiError::validation(
+            "recipient is not a partner environment",
+        ));
+    }
+    if !req.payload.is_object() {
+        return Err(ApiError::validation("payload must be an object"));
+    }
+    if req
+        .push_target_refs
+        .as_ref()
+        .is_some_and(|refs| refs.is_empty() || refs.len() > 20)
+    {
+        return Err(ApiError::validation(
+            "pushTargetRefs holds 1 to 20 references",
+        ));
+    }
+    let out = partner::call_push(
+        &state.db,
+        &state.keys,
+        partner,
+        &state.metrics,
+        req,
         Utc::now(),
     )
     .await?;
@@ -143,7 +204,18 @@ pub async fn push_registrations_sync(
 ) -> ApiResult<Response> {
     use sea_orm::TransactionTrait;
     caller.require(InternalPermission::NotificationsPushRegistrationSync)?;
-    let req: push::MirrorRequest = parse(&body)?;
+    let req: push::MirrorRequest = match (parse(&body), &state.partner) {
+        (Ok(r), _) => r,
+        // ADR 0063 N-P2: a batch with `platform-principal` subjects (only while partner
+        // push is on; off, the shape is refused exactly as before).
+        (Err(e), Some(_)) => {
+            let Ok(req) = parse::<partner::SyncRequest>(&body) else {
+                return Err(e);
+            };
+            return partner_sync(&state, req).await;
+        }
+        (Err(e), None) => return Err(e),
+    };
     if req.registrations.is_empty() || req.registrations.len() > push::MIRROR_BATCH {
         return Err(ApiError::validation("registrations holds 1 to 100 items"));
     }
@@ -179,6 +251,86 @@ pub async fn push_registrations_sync(
         results.push(r);
     }
     Ok(json_ok(json!({ "results": results })))
+}
+
+/// I13 with partner registrations: first-party items are applied exactly as in
+/// [`push_registrations_sync`]; `platform-principal` items by [`partner::register`].
+async fn partner_sync(state: &AppState, req: partner::SyncRequest) -> ApiResult<Response> {
+    use sea_orm::TransactionTrait;
+    if req.registrations.is_empty() || req.registrations.len() > push::MIRROR_BATCH {
+        return Err(ApiError::validation("registrations holds 1 to 100 items"));
+    }
+    let mut results = Vec::with_capacity(req.registrations.len());
+    for item in req.registrations {
+        let txn = state.db.begin().await?;
+        let r = match item {
+            partner::SyncItem::Mirror(item) => {
+                let (outcome, target) = push::mirror_one(
+                    &txn,
+                    &state.keys,
+                    state.push.as_deref(),
+                    &item,
+                    state.local_test_push_allowed(),
+                    state.first_party_scope,
+                )
+                .await?;
+                state.metrics.inc(
+                    "notif_push_registration_sync_total",
+                    format!("outcome=\"{}\"", outcome.as_str()),
+                );
+                let platform = ["APNS", "FCM", "WEB_PUSH", "LOCAL_TEST"]
+                    .contains(&item.platform.as_str())
+                    .then_some(item.platform.as_str());
+                let mut r = json!({
+                    "deviceId": item.device_id,
+                    "platform": platform,
+                    "outcome": outcome.as_str(),
+                    "pushTargetRef": target,
+                });
+                if let push::MirrorOutcome::Invalid(reason) = outcome {
+                    r["reason"] = json!(reason);
+                }
+                r
+            }
+            partner::SyncItem::Nested(n) => {
+                partner_item(state, &txn, partner::PartnerRegistration::from(n)).await?
+            }
+            partner::SyncItem::Flat(f) => {
+                partner_item(state, &txn, partner::PartnerRegistration::from(f)).await?
+            }
+        };
+        txn.commit().await?;
+        results.push(r);
+    }
+    Ok(json_ok(json!({ "results": results })))
+}
+
+async fn partner_item<C: ConnectionTrait>(
+    state: &AppState,
+    txn: &C,
+    item: partner::PartnerRegistration,
+) -> ApiResult<Value> {
+    let (outcome, target) =
+        partner::register(txn, &state.keys, &item, state.first_party_scope).await?;
+    state.metrics.inc(
+        "notif_partner_push_registration_sync_total",
+        format!(
+            "environment=\"{}\",outcome=\"{}\"",
+            item.scope.environment_id,
+            outcome.as_str()
+        ),
+    );
+    let mut r = json!({
+        "kind": partner::SUBJECT_KIND,
+        "installationId": partner::installation_ok(&item.installation_id).then_some(&item.installation_id),
+        "platform": item.platform_label(),
+        "outcome": outcome.as_str(),
+        "pushTargetRef": target,
+    });
+    if let push::MirrorOutcome::Invalid(reason) = outcome {
+        r["reason"] = json!(reason);
+    }
+    Ok(r)
 }
 
 #[derive(Debug, Deserialize)]

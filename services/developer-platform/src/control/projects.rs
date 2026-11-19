@@ -115,6 +115,30 @@ pub struct CreateProject {
 }
 
 /// `POST /v1/organizations/{id}/projects`.
+/// `DEVELOPER_PLATFORM_CREATION_CAPS_ENABLED`: at most
+/// `DEVELOPER_PLATFORM_MAX_PROJECTS_PER_WORKSPACE` projects that are not ARCHIVED per
+/// workspace (0 = unlimited). 409 `LIMIT_EXCEEDED`.
+async fn projects_cap(state: &AppState, tenant_id: Uuid) -> Result<(), ApiError> {
+    let cap = state.build.max_projects_per_workspace;
+    if !state.build.creation_caps || cap == 0 {
+        return Ok(());
+    }
+    let n: i64 = state
+        .db
+        .query_one(stmt(
+            "SELECT count(*) AS n FROM devplat_project_profiles \
+             WHERE tenant_id = $1 AND status <> 'ARCHIVED'",
+            vec![tenant_id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::ServiceUnavailable))?
+        .try_get("", "n")?;
+    if n >= i64::from(cap) {
+        return Err(ApiError(ErrorCode::LimitExceeded));
+    }
+    Ok(())
+}
+
 pub async fn create(
     state: &AppState,
     caller: &Caller,
@@ -126,6 +150,7 @@ pub async fn create(
     let desc = description(body.description.as_deref())?;
     let support = body.support_email.as_deref().map(email).transpose()?;
     let labels = labels(body.labels)?;
+    projects_cap(state, tenant_id).await?;
     let app = delegate(
         state,
         caller,

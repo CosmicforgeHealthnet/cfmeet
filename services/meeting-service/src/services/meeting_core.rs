@@ -495,6 +495,27 @@ pub async fn own_participant<C: ConnectionTrait>(
         ActorKind::ParticipantCredential(c) => {
             participant_by_credential(conn, conference_id, c, for_update).await
         }
+        // ADR 0062: a partner user's ONE participant per conference (re-joins reuse it).
+        ActorKind::PlatformUser(u) => {
+            let Some(row) = conn
+                .query_one(sea_orm::Statement::from_sql_and_values(
+                    sea_orm::DbBackend::Postgres,
+                    "SELECT participant_id FROM meeting_platform_participants \
+                     WHERE conference_id = $1 AND principal_id = $2",
+                    [conference_id.into(), u.principal_id().into()],
+                ))
+                .await?
+            else {
+                return Ok(None);
+            };
+            let participant_id: Uuid = row.try_get_by_index(0)?;
+            let mut q = conference_participants::Entity::find_by_id(participant_id)
+                .filter(conference_participants::Column::ConferenceId.eq(conference_id));
+            if for_update {
+                q = q.lock(LockType::Update);
+            }
+            Ok(q.one(conn).await?)
+        }
         _ => Ok(None),
     }
 }

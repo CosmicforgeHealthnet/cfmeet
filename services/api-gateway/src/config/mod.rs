@@ -12,6 +12,9 @@
 //! | `API_GATEWAY_REDIS_KEY_PREFIX` | no | key namespace (default `cfgw:`) |
 //! | `API_GATEWAY_REDIS_TIMEOUT_MS` | no | bound of one quota-store call and of one connection attempt (20–5000, default 250); past it the request is counted per instance (`quotas: degraded`) |
 //! | `API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE` | no | per-token request ceiling of end-user / device traffic (meeting sessions, participant tokens, developer sessions, client tokens, signaling credentials, realtime tickets): `0` (default) off, else 10–100000 requests per token per minute, counted in the same quota store; anonymous requests carry no token and stay with the services and the edge |
+//! | `API_GATEWAY_USER_TOKENS_ENABLED` | no | feature flag (default `false`): accept CF Meet user tokens (`Authorization: Bearer cfut_…`) on `USER_TOKEN` routes — signature and expiry pre-checked with Platform Access's published keys (`platform-user-token.verify`, refreshed every 5 minutes or less; no keys: refused), `Authorization` forwarded unchanged for the owning service's live verification |
+//! | `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED` | no | feature flag (default `false`): CORS for partner websites registered per environment in Platform Access (`platform-environment-origins.read` change feed, polled every 30 s or less) on routes accepting a device authentication mode; `Origin` forwarded on WebSocket upgrades |
+//! | `API_GATEWAY_OAUTH_ENABLED` | no | feature flag (default `false`): CF Meet Apps OAuth (ADR 0064). `Bearer cfoa_…` / `Bearer cfob_…` on `OAUTH_ACCESS_TOKEN` routes are authenticated through Platform Access like platform credentials and forwarded as a signed delegated context with the token's single restricted principal (never the token); `cfor_` refresh tokens are always refused; an OAuth token on any other route is `403 CREDENTIAL_NOT_ACCEPTED`; `forwardAuthorization` routes (OAuth userinfo) transport `Authorization` to the Developer Console. Off: OAuth tokens are handled exactly as before |
 //! | `LOG_FORMAT` | no | `pretty` / `json` |
 //!
 //! Service authentication (`CF_*`) is read by [`service_auth`]. The gateway has NO
@@ -53,6 +56,13 @@ pub enum LogFormat {
 pub struct FeatureFlags {
     pub public_routing: bool,
     pub websockets: bool,
+    /// `API_GATEWAY_USER_TOKENS_ENABLED` (ADR 0062): the `USER_TOKEN` mode.
+    pub user_tokens: bool,
+    /// `API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED` (ADR 0062): partner-website CORS.
+    pub environment_origins: bool,
+    /// `API_GATEWAY_OAUTH_ENABLED` (ADR 0064): the `OAUTH_ACCESS_TOKEN` mode and the
+    /// `forwardAuthorization` pass-through.
+    pub oauth: bool,
 }
 
 /// The quota store shared by every gateway instance. With `API_GATEWAY_REDIS_URL` the
@@ -235,6 +245,9 @@ impl ApiGatewayConfig {
         let flags = FeatureFlags {
             public_routing: flag(&get, "API_GATEWAY_PUBLIC_ROUTING_ENABLED")?,
             websockets: flag(&get, "API_GATEWAY_WEBSOCKETS_ENABLED")?,
+            user_tokens: flag(&get, "API_GATEWAY_USER_TOKENS_ENABLED")?,
+            environment_origins: flag(&get, "API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED")?,
+            oauth: flag(&get, "API_GATEWAY_OAUTH_ENABLED")?,
         };
         let upstream_timeout = Duration::from_millis(bounded(
             &get,
@@ -417,6 +430,26 @@ mod tests {
         assert!(
             ApiGatewayConfig::from_lookup(lookup(&[("DATABASE_URL", "postgres://x/y")])).is_err()
         );
+    }
+
+    #[test]
+    fn platform_build_flags_default_off_and_parse() {
+        let cfg = ApiGatewayConfig::from_lookup(lookup(&[])).unwrap();
+        assert!(!cfg.flags.user_tokens && !cfg.flags.environment_origins && !cfg.flags.oauth);
+        let on = ApiGatewayConfig::from_lookup(lookup(&[
+            ("API_GATEWAY_USER_TOKENS_ENABLED", "true"),
+            ("API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED", "1"),
+            ("API_GATEWAY_OAUTH_ENABLED", "true"),
+        ]))
+        .unwrap();
+        assert!(on.flags.user_tokens && on.flags.environment_origins && on.flags.oauth);
+        for var in [
+            "API_GATEWAY_USER_TOKENS_ENABLED",
+            "API_GATEWAY_ENVIRONMENT_ORIGINS_ENABLED",
+            "API_GATEWAY_OAUTH_ENABLED",
+        ] {
+            assert!(ApiGatewayConfig::from_lookup(lookup(&[(var, "maybe")])).is_err());
+        }
     }
 
     #[test]

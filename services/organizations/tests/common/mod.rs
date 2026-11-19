@@ -235,6 +235,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             issuer(cf_service_auth::services::MEETING_SERVICE, &meeting, &[
                 "organization.read", "organization.write", "organization.act-for-user",
                 "organization.administer", "organization.migrate",
+                "organization-apps.evaluate",
             ]),
             issuer(cf_service_auth::services::MESSAGING, &messaging, &["organization.read"]),
             issuer(cf_service_auth::services::OPERATOR_CONSOLE, &operator, &[
@@ -380,6 +381,18 @@ impl Harness {
         let db = TestDb::new().await?;
         let (verifier, peers) = verifier_and_peers();
         let state = AppState::new(db.conn.clone(), verifier).with_event_destinations(destinations);
+        Some(Self {
+            router: http::app(state),
+            db,
+            peers,
+        })
+    }
+
+    /// A harness with ADR 0064 app installs on or off (`ORGANIZATIONS_APP_INSTALLS_ENABLED`).
+    pub async fn with_app_installs(enabled: bool) -> Option<Self> {
+        let db = TestDb::new().await?;
+        let (verifier, peers) = verifier_and_peers();
+        let state = AppState::new(db.conn.clone(), verifier).with_app_installs(enabled);
         Some(Self {
             router: http::app(state),
             db,

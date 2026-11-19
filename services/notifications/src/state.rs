@@ -41,6 +41,9 @@ pub struct AppState {
     /// `CFMEET_COMMUNICATION_*` scope — when configured: I13 then mirrors Messaging push
     /// registrations of that scope only (`OUT_OF_SCOPE` otherwise).
     pub first_party_scope: Option<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    /// ADR 0063 partner push; `None` while `NOTIFICATIONS_PARTNER_PUSH_ENABLED` is off
+    /// (every partner route and shape then behaves exactly as before).
+    pub partner: Option<Arc<crate::partner::PartnerPush>>,
 }
 
 impl AppState {
@@ -60,6 +63,7 @@ impl AppState {
             email: self.email.clone(),
             metrics: self.metrics.clone(),
             operator_emails: self.operator_emails.clone(),
+            partner_push: self.partner.is_some(),
         }
     }
 }

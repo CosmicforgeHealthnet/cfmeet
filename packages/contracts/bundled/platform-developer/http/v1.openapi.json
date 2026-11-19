@@ -1,26 +1,26 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet Developer Platform API",
-    "version": "1.6.0",
-    "description": "Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests."
+    "title": "CF Meet Platform — Developer Console API",
+    "version": "1.8.0",
+    "description": "The Developer Console of the CF Meet Platform: the control plane where a partner manages its workspaces, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access. (A workspace is called an organization in paths and fields: /v1/organizations, organizationId.) The partner's product traffic (meetings, messaging, calling) goes to the domain APIs of the same gateway, not here. Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests. 1.7.0 (ADR 0062 / 0063, CF Meet Platform Build): the partner Users API for machine credentials (/v1/users*, delegated to Platform Access; principals.read / principals.write / user_tokens.issue; user tokens returned once), the console user list and SANDBOX test token generator, allowed websites (/v1/environments/{environmentId}/allowed-origins) and push credentials (/v1/environments/{environmentId}/push-credentials*, secrets sealed to the Notification Service, metadata only), each behind its own default-off flag; LIMIT_EXCEEDED for the optional workspace / project creation caps. 1.8.0 (ADR 0064 / 0065, CF Meet Apps): app registration on projects (/v1/projects/{projectId}/app*: immutable manifest versions, client secret shown once, review submission, grants, draft test accounts; OWNER / ADMIN; flag DEVELOPER_PLATFORM_APPS_ENABLED), the anonymous OAuth endpoints /v1/oauth/token, /revoke, /userinfo, /metadata (RFC 6749 wire format, relayed to Platform Access; flag DEVELOPER_PLATFORM_OAUTH_ENABLED) and the anonymous app directory /v1/app-directory* (PUBLISHED, PUBLIC apps; flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED)."
   },
   "tags": [
     {
       "name": "Organizations",
-      "description": "Developer organizations (API customer workspaces backed by EXTERNAL Platform Access tenants), ownership transfer and closure. Not CF Meet business organizations (/api/v2/organizations)."
+      "description": "Workspaces (paths and fields: organizations): a partner's API customer account, backed by an EXTERNAL Platform Access tenant; ownership transfer and closure. Not CF Meet business organizations (/api/v2/organizations)."
     },
     {
       "name": "Members",
-      "description": "Human members of a developer organization and their roles (OWNER, ADMIN, DEVELOPER, ANALYST, BILLING)."
+      "description": "Human members of a workspace and their roles (OWNER, ADMIN, DEVELOPER, ANALYST, BILLING)."
     },
     {
       "name": "Invitations",
-      "description": "Invitations to join a developer organization."
+      "description": "Invitations to join a workspace."
     },
     {
       "name": "Projects",
-      "description": "Projects (Platform Access applications) of a developer organization."
+      "description": "Projects (Platform Access applications) of a workspace."
     },
     {
       "name": "Environments",
@@ -60,11 +60,35 @@
     },
     {
       "name": "Activity",
-      "description": "Immutable activity history of a developer organization."
+      "description": "Immutable activity history of a workspace."
     },
     {
       "name": "Support",
       "description": "Support profiles and incident status."
+    },
+    {
+      "name": "Partner users",
+      "description": "ADR 0062: partner users (Platform Access principals of an environment) and CF Meet user tokens, the device login of partner apps; the console's user list and SANDBOX token generator."
+    },
+    {
+      "name": "Allowed websites",
+      "description": "ADR 0062: an environment's allowed websites (exact origins) for browser device logins."
+    },
+    {
+      "name": "Push credentials",
+      "description": "ADR 0063: partner APNs / FCM push credentials, sealed to the Notification Service (metadata only here)."
+    },
+    {
+      "name": "Apps",
+      "description": "ADR 0064 / 0065: the app registered on a project (manifest versions, client secret, review submission, grants, test accounts)."
+    },
+    {
+      "name": "OAuth",
+      "description": "ADR 0064: the public OAuth 2.0 endpoints of CF Meet Apps (anonymous; RFC 6749 / 7009 / 8414 wire format)."
+    },
+    {
+      "name": "App directory",
+      "description": "ADR 0065: the public directory of PUBLISHED, PUBLIC apps (anonymous)."
     }
   ],
   "servers": [
@@ -5153,6 +5177,1979 @@
         },
         "x-cfmeet-required-scope": "organizations.manage"
       }
+    },
+    "/v1/users": {
+      "get": {
+        "operationId": "listUsers",
+        "summary": "List the partner users of the credential's environment (optionally by `externalId`)",
+        "description": "List the partner users of the credential's environment (optionally by `externalId`). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.read`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "externalId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.EndUserList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "principals.read"
+      },
+      "post": {
+        "operationId": "createUser",
+        "summary": "Create a partner user (idempotent on `externalId`: 201 new, 200 existing; environment caps answer 409 LIMIT_EXCEEDED)",
+        "description": "Create a partner user (idempotent on `externalId`: 201 new, 200 existing; environment caps answer 409 LIMIT_EXCEEDED). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.write`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing user.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.EndUser"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.EndUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.CreateEndUserRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "principals.write"
+      }
+    },
+    "/v1/users/tokens": {
+      "post": {
+        "operationId": "upsertUserToken",
+        "summary": "Create the user if new and mint a CF Meet user token (returned once; Cache-Control no-store; a replay never returns the token)",
+        "description": "Create the user if new and mint a CF Meet user token (returned once; Cache-Control no-store; a replay never returns the token). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Needs `principals.write` as well. Machine credentials need `user_tokens.issue`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.UserWithToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.UpsertUserTokenRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "user_tokens.issue"
+      }
+    },
+    "/v1/users/{userId}": {
+      "get": {
+        "operationId": "getUser",
+        "summary": "Read a partner user (another environment's user is 404)",
+        "description": "Read a partner user (another environment's user is 404). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.read`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.EndUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "principals.read"
+      },
+      "patch": {
+        "operationId": "updateUser",
+        "summary": "Change a partner user's profile or suspend / reactivate them",
+        "description": "Change a partner user's profile or suspend / reactivate them. Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.write`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.EndUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.UpdateEndUserRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "principals.write"
+      },
+      "delete": {
+        "operationId": "deleteUser",
+        "summary": "Delete a partner user (tombstone: profile erased, id kept; their tokens and device credentials stop working)",
+        "description": "Delete a partner user (tombstone: profile erased, id kept; their tokens and device credentials stop working). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.write`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "principals.write"
+      }
+    },
+    "/v1/users/{userId}/revoke-sessions": {
+      "post": {
+        "operationId": "revokeUserSessions",
+        "summary": "Revoke every token and device session of a partner user issued so far",
+        "description": "Revoke every token and device session of a partner user issued so far. Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `principals.write`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.RevokeSessionsResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "principals.write"
+      }
+    },
+    "/v1/users/{userId}/tokens": {
+      "post": {
+        "operationId": "issueUserToken",
+        "summary": "Mint a CF Meet user token for a partner user (grants within the credential's scopes; returned once; at most 120 per user per hour)",
+        "description": "Mint a CF Meet user token for a partner user (grants within the credential's scopes; returned once; at most 120 per user per hour). Machine credentials only (server-to-server; the API Gateway forwards the authenticated credential and Platform Access re-verifies it and takes the environment from it). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED. Machine credentials need `user_tokens.issue`.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.UserToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.IssueUserTokenRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "user_tokens.issue"
+      }
+    },
+    "/v1/environments/{environmentId}/users": {
+      "get": {
+        "operationId": "listEnvironmentUsers",
+        "summary": "List an environment's partner users in the Developer Console",
+        "description": "List an environment's partner users in the Developer Console. Roles: OWNER, ADMIN, DEVELOPER (human session; delegated to Platform Access). Flag DEVELOPER_PLATFORM_USERS_API_ENABLED.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.EndUserList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/test-user-tokens": {
+      "post": {
+        "operationId": "issueTestUserToken",
+        "summary": "Development token generator: create the user if new and mint a user token in a SANDBOX environment (other kinds: 422 POLICY_VIOLATION)",
+        "description": "Development token generator: create the user if new and mint a user token in a SANDBOX environment (other kinds: 422 POLICY_VIOLATION). Roles: OWNER, ADMIN, DEVELOPER (human session). Flag DEVELOPER_PLATFORM_TEST_TOKENS_ENABLED.",
+        "tags": [
+          "Partner users"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Minted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.UserWithToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.UpsertUserTokenRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/allowed-origins": {
+      "get": {
+        "operationId": "getAllowedOrigins",
+        "summary": "Read the environment's allowed websites (exact origins that may use device logins from a browser)",
+        "description": "Read the environment's allowed websites (exact origins that may use device logins from a browser). Roles: every member. Flag DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED. Machine credentials need `projects.read`.",
+        "tags": [
+          "Allowed websites"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AllowedOrigins"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-cfmeet-required-scope": "projects.read"
+      },
+      "put": {
+        "operationId": "putAllowedOrigins",
+        "summary": "Replace the environment's allowed websites (at most 20; https only, http://localhost and http://127.0.0.1 in SANDBOX / TEST)",
+        "description": "Replace the environment's allowed websites (at most 20; https only, http://localhost and http://127.0.0.1 in SANDBOX / TEST). Roles: OWNER, ADMIN. Flag DEVELOPER_PLATFORM_ALLOWED_ORIGINS_ENABLED. Machine credentials need `credentials.manage`.",
+        "tags": [
+          "Allowed websites"
+        ],
+        "security": [
+          {
+            "userSession": []
+          },
+          {
+            "platformCredential": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AllowedOrigins"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PutAllowedOriginsRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-required-scope": "credentials.manage"
+      }
+    },
+    "/v1/environments/{environmentId}/push-credentials": {
+      "get": {
+        "operationId": "listPushCredentials",
+        "summary": "List the environment's push credentials (metadata only)",
+        "description": "List the environment's push credentials (metadata only). Roles: OWNER, ADMIN (human session). Flag DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED.",
+        "tags": [
+          "Push credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PushCredentialList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPushCredential",
+        "summary": "Upload (replace) an APNs or FCM push credential: the secret is sealed to the Notification Service on receipt and never stored or returned; SANDBOX / TEST may only use the APNs sandbox host; PRODUCTION needs the PUSH capability live",
+        "description": "Upload (replace) an APNs or FCM push credential: the secret is sealed to the Notification Service on receipt and never stored or returned; SANDBOX / TEST may only use the APNs sandbox host; PRODUCTION needs the PUSH capability live. Roles: OWNER, ADMIN (human session). Flag DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED.",
+        "tags": [
+          "Push credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Uploaded.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PushCredential"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.CreatePushCredentialRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/push-credentials/{credentialRef}": {
+      "delete": {
+        "operationId": "deletePushCredential",
+        "summary": "Delete a push credential (removed from the Notification Service; pushes with it stop)",
+        "description": "Delete a push credential (removed from the Notification Service; pushes with it stop). Roles: OWNER, ADMIN (human session). Flag DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED.",
+        "tags": [
+          "Push credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "credentialRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/push-credentials/{credentialRef}/verify": {
+      "post": {
+        "operationId": "verifyPushCredential",
+        "summary": "Verify a push credential with its provider (APNs JWT / FCM OAuth token) and record the outcome",
+        "description": "Verify a push credential with its provider (APNs JWT / FCM OAuth token) and record the outcome. Roles: OWNER, ADMIN (human session). Flag DEVELOPER_PLATFORM_PUSH_CREDENTIALS_ENABLED.",
+        "tags": [
+          "Push credentials"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "credentialRef",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verified (see status).",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PushCredential"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app": {
+      "get": {
+        "operationId": "getProjectApp",
+        "summary": "Read the app registered on the project (current manifest, review status, live version)",
+        "description": "Read the app registered on the project (current manifest, review status, live version). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.App"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putProjectApp",
+        "summary": "Register or change the project's app (a changed manifest is a new immutable version; SUBMITTED / IN_REVIEW / SUSPENDED apps are locked)",
+        "description": "Register or change the project's app (a changed manifest is a new immutable version; SUBMITTED / IN_REVIEW / SUSPENDED apps are locked). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Changed or unchanged.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.App"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Registered.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.App"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PutAppRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app/secret": {
+      "post": {
+        "operationId": "rotateProjectAppSecret",
+        "summary": "Issue or rotate the app's client secret (returned once; the previous secret keeps Platform Access's 24 h overlap)",
+        "description": "Issue or rotate the app's client secret (returned once; the previous secret keeps Platform Access's 24 h overlap). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Issued (Cache-Control: no-store).",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Idempotent-Replayed": {
+                "$ref": "#/components/headers/IdempotentReplayed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AppClientSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app/submit": {
+      "post": {
+        "operationId": "submitProjectApp",
+        "summary": "Submit the current version for review (DRAFT / REJECTED, or an APPROVED / PUBLISHED app with pending changes; no loopback redirect; PUBLIC apps name privacy policy and terms)",
+        "description": "Submit the current version for review (DRAFT / REJECTED, or an APPROVED / PUBLISHED app with pending changes; no loopback redirect; PUBLIC apps name privacy policy and terms). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.App"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app/grants": {
+      "get": {
+        "operationId": "listProjectAppGrants",
+        "summary": "List the app's installations (from Platform Access; no CF Meet account id)",
+        "description": "List the app's installations (from Platform Access; no CF Meet account id). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AppGrantList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/app/test-accounts": {
+      "put": {
+        "operationId": "putProjectAppTestAccounts",
+        "summary": "Replace the draft test accounts (CF Meet account ids, at most 25, format checked only)",
+        "description": "Replace the draft test accounts (CF Meet account ids, at most 25, format checked only). Roles: OWNER, ADMIN. Human console session only (machine credentials are refused). Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.App"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PutAppTestAccountsRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/token": {
+      "post": {
+        "operationId": "oauthToken",
+        "summary": "Exchange an authorization code (PKCE S256) or a refresh token for tokens",
+        "description": "RFC 6749 token endpoint. Anonymous at the API Gateway: the client authenticates with its client secret (client_secret_basic or client_secret_post) and Platform Access verifies it; refresh tokens rotate and a reused code or superseded refresh token revokes the whole installation. Responses are snake_case with Cache-Control: no-store. Flag DEVELOPER_PLATFORM_OAUTH_ENABLED.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [],
+        "x-cfmeet-forward-authorization": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.OAuthTokenRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/revoke": {
+      "post": {
+        "operationId": "oauthRevoke",
+        "summary": "Revoke an access or refresh token (RFC 7009)",
+        "description": "RFC 7009 revocation: 200 whatever the token's state, 401 invalid_client when client authentication fails. Anonymous at the API Gateway; same client authentication as the token endpoint. Flag DEVELOPER_PLATFORM_OAUTH_ENABLED.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [],
+        "x-cfmeet-forward-authorization": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.OAuthRevokeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked or unknown (empty body).",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/userinfo": {
+      "get": {
+        "operationId": "oauthUserinfo",
+        "summary": "Read the signed-in user's profile with a user access token",
+        "description": "Bearer cfoa_ user access token with profile:read (email only with profile:email). Anonymous at the API Gateway: Platform Access introspects the token, the Meeting Service supplies the profile; sub is pairwise per app. Flag DEVELOPER_PLATFORM_OAUTH_ENABLED.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [],
+        "x-cfmeet-forward-authorization": true,
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^Bearer cfoa_"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthUserinfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/oauth/metadata": {
+      "get": {
+        "operationId": "oauthMetadata",
+        "summary": "Read the OAuth authorization server metadata",
+        "description": "RFC 8414-style metadata: the authorization endpoint (the CF Meet consent page), token, revocation and userinfo endpoints, scopes, PKCE S256, the code response type and both grant types. Anonymous. Flag DEVELOPER_PLATFORM_OAUTH_ENABLED.",
+        "tags": [
+          "OAuth"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthMetadata"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "description": "RFC error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "no-store",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/app-directory": {
+      "get": {
+        "operationId": "listAppDirectory",
+        "summary": "List the published public apps",
+        "description": "The app directory: PUBLISHED, PUBLIC, not suspended apps with their published manifest (name, description, logo, developer, scopes, privacy and terms URLs, whether they have an in-meeting surface). Anonymous. Flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED.",
+        "tags": [
+          "App directory"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.DirectoryAppList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/app-directory/{appId}": {
+      "get": {
+        "operationId": "getAppDirectoryEntry",
+        "summary": "Read one published public app",
+        "description": "One directory entry (anything not PUBLISHED, PUBLIC and live is 404). Anonymous. Flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED.",
+        "tags": [
+          "App directory"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.DirectoryApp"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5310,6 +7307,8 @@
           "APPROVAL_EXPIRED",
           "SELF_APPROVAL_FORBIDDEN",
           "PRODUCTION_ACCESS_REQUIRED",
+          "LIMIT_EXCEEDED",
+          "RATE_LIMITED",
           "CAPABILITY_UNAVAILABLE",
           "SERVICE_UNAVAILABLE",
           "INTERNAL_ERROR"
@@ -5487,6 +7486,567 @@
           }
         },
         "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.AllowedOrigins": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environmentId",
+          "origins"
+        ],
+        "properties": {
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "origins": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            }
+          }
+        },
+        "description": "ADR 0062: an environment's allowed websites (exact origins)."
+      },
+      "platform-developer.control.v1.ApnsPushCredentialUpload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "teamId",
+          "keyId",
+          "bundleId",
+          "voip",
+          "apnsHost",
+          "p8"
+        ],
+        "properties": {
+          "provider": {
+            "const": "APNS"
+          },
+          "teamId": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{10}$"
+          },
+          "keyId": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]{10}$"
+          },
+          "bundleId": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 155,
+            "pattern": "^[A-Za-z0-9.-]+$"
+          },
+          "voip": {
+            "type": "boolean"
+          },
+          "apnsHost": {
+            "enum": [
+              "SANDBOX",
+              "PRODUCTION"
+            ],
+            "description": "SANDBOX and TEST environments may only use SANDBOX."
+          },
+          "p8": {
+            "type": "string",
+            "maxLength": 8192,
+            "pattern": "^-----BEGIN PRIVATE KEY-----",
+            "description": "The APNs token signing key (.p8, PEM). Write-only."
+          }
+        }
+      },
+      "platform-developer.control.v1.App": {
+        "description": "ADR 0064 / 0065: the app registered on a project (clientId = projectId = the Platform Access application id). The live version is what Platform Access serves: the published version, else the approved one, else the current draft.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "appId",
+          "clientId",
+          "projectId",
+          "organizationId",
+          "status",
+          "currentVersion",
+          "submittedVersion",
+          "reviewedVersion",
+          "publishedVersion",
+          "liveVersion",
+          "pendingChanges",
+          "manifest",
+          "testAccountIds",
+          "secretIssuedAt",
+          "review",
+          "listedInDirectory",
+          "publishedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "appId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "clientId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "projectId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "organizationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.AppStatus"
+          },
+          "currentVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "submittedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "publishedVersion": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liveVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pendingChanges": {
+            "type": "boolean"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.AppManifest"
+          },
+          "testAccountIds": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          "secretIssuedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "review": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reasonCode",
+                  "decidedAt"
+                ],
+                "properties": {
+                  "reasonCode": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "decidedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "listedInDirectory": {
+            "type": "boolean"
+          },
+          "publishedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.AppClientSecret": {
+        "description": "ADR 0064: a new client secret, returned ONCE (an idempotent replay returns clientSecretRedacted instead).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "clientId",
+          "secretId",
+          "issuedAt"
+        ],
+        "properties": {
+          "clientId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "clientSecret": {
+            "type": "string",
+            "pattern": "^cfcs_(sbx|test|live)_[0-9a-f]{24}_[0-9a-f]{64}$"
+          },
+          "clientSecretRedacted": {
+            "const": true
+          },
+          "secretId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.AppGrant": {
+        "description": "ADR 0064: an installation of the app (never a CF Meet account id).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "target",
+          "organizationId",
+          "scopes",
+          "status",
+          "createdAt",
+          "revokedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "enum": [
+                  "USER",
+                  "ORGANIZATION"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "organizationId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform.common.v1.Uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "status": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.AppGrantList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.AppGrant"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.AppManifest": {
+        "description": "ADR 0064: an app manifest (normalized; every change is a new immutable version).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description",
+          "logoUrl",
+          "privacyUrl",
+          "termsUrl",
+          "redirectUris",
+          "userScopes",
+          "botScopes",
+          "eventTypes",
+          "meetingSurface",
+          "distribution"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logoUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privacyUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "termsUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "redirectUris": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]{1,5})?(/|$))[^#*]*$",
+              "maxLength": 2048
+            }
+          },
+          "userScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "events:meetings"
+              ]
+            }
+          },
+          "botScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "chat:read:bot",
+                "chat:write:bot"
+              ]
+            }
+          },
+          "eventTypes": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "app.grant_revoked",
+                "app.installed",
+                "app.uninstalled",
+                "artifact.deleted",
+                "artifact.ready",
+                "bot.mentioned",
+                "bot.message_received",
+                "conversation.created",
+                "conversation.member_added",
+                "conversation.member_removed",
+                "conversation.updated",
+                "meeting.created",
+                "meeting.ended",
+                "meeting.started",
+                "message.created",
+                "message.deleted",
+                "message.expired",
+                "message.moderated",
+                "participant.joined",
+                "participant.left"
+              ]
+            }
+          },
+          "meetingSurface": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "url",
+                  "origins"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "pattern": "^https://",
+                    "maxLength": 2048
+                  },
+                  "origins": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^https://[^/?#]+$"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distribution": {
+            "enum": [
+              "PRIVATE",
+              "PUBLIC"
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.AppStatus": {
+        "enum": [
+          "DRAFT",
+          "SUBMITTED",
+          "IN_REVIEW",
+          "APPROVED",
+          "REJECTED",
+          "PUBLISHED",
+          "SUSPENDED"
+        ],
+        "description": "ADR 0065 review status."
       },
       "platform-developer.control.v1.BillingAccount": {
         "type": "object",
@@ -5730,6 +8290,34 @@
           }
         }
       },
+      "platform-developer.control.v1.CreateEndUserRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "externalId"
+        ],
+        "properties": {
+          "externalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!-~]{1,128}$",
+            "description": "The partner's opaque user id (printable ASCII, no spaces); never a phone number, tel: / sip: URI."
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Display name (no control characters)."
+          },
+          "imageUrl": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^https://",
+            "description": "https:// image URL."
+          }
+        }
+      },
       "platform-developer.control.v1.CreateEnvironmentRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -5821,6 +8409,17 @@
             }
           }
         }
+      },
+      "platform-developer.control.v1.CreatePushCredentialRequest": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/platform-developer.control.v1.ApnsPushCredentialUpload"
+          },
+          {
+            "$ref": "#/components/schemas/platform-developer.control.v1.FcmPushCredentialUpload"
+          }
+        ],
+        "description": "Uploads (replaces) the environment's credential of that provider (APNS with voip false / true, or FCM)."
       },
       "platform-developer.control.v1.CreateServiceAccountRequest": {
         "type": "object",
@@ -6177,6 +8776,247 @@
             ]
           }
         }
+      },
+      "platform-developer.control.v1.DirectoryApp": {
+        "description": "ADR 0065: a PUBLISHED, PUBLIC app of the directory (its published manifest).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "appId",
+          "name",
+          "description",
+          "logoUrl",
+          "developerName",
+          "userScopes",
+          "botScopes",
+          "privacyUrl",
+          "termsUrl",
+          "meetingSurface",
+          "publishedAt"
+        ],
+        "properties": {
+          "appId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logoUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "developerName": {
+            "type": "string"
+          },
+          "userScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "events:meetings"
+              ]
+            }
+          },
+          "botScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "chat:read:bot",
+                "chat:write:bot"
+              ]
+            }
+          },
+          "privacyUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "termsUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetingSurface": {
+            "type": "boolean",
+            "description": "Whether the app has an in-meeting surface."
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.DirectoryAppList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.DirectoryApp"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.EndUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "externalId",
+          "displayName",
+          "imageUrl",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid",
+            "description": "The Platform Access principal id (kind EXTERNAL_APPLICATION_PRINCIPAL)."
+          },
+          "externalId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "displayName": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "imageUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.EndUserStatus"
+          },
+          "createdAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updatedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "ADR 0062: a partner user (a Platform Access principal of the credential's environment). DEACTIVATED: deleted (profile erased, id kept)."
+      },
+      "platform-developer.control.v1.EndUserList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.EndUser"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "A page of partner users; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.EndUserStatus": {
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "DEACTIVATED"
+        ]
       },
       "platform-developer.control.v1.EntitlementValues": {
         "type": "object",
@@ -6721,6 +9561,29 @@
         },
         "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
       },
+      "platform-developer.control.v1.FcmPushCredentialUpload": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "projectId",
+          "serviceAccountJson"
+        ],
+        "properties": {
+          "provider": {
+            "const": "FCM"
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$"
+          },
+          "serviceAccountJson": {
+            "type": "string",
+            "maxLength": 16384,
+            "description": "The Firebase service-account key JSON (type service_account; its project_id, when present, must equal projectId). Write-only."
+          }
+        }
+      },
       "platform-developer.control.v1.GrantScopeRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -6881,6 +9744,24 @@
           }
         }
       },
+      "platform-developer.control.v1.IssueUserTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "grants"
+        ],
+        "properties": {
+          "grants": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.UserTokenGrants"
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "description": "Token lifetime in seconds (default 3600)."
+          }
+        }
+      },
       "platform-developer.control.v1.IssuedCredential": {
         "type": "object",
         "additionalProperties": false,
@@ -6990,6 +9871,274 @@
           }
         },
         "description": "A page of results; pass `nextCursor` as `cursor` for the next page (null: last page)."
+      },
+      "platform-developer.control.v1.OAuthError": {
+        "description": "RFC 6749 §5.2 / RFC 6750 §3.1 error (fixed descriptions).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error",
+          "error_description"
+        ],
+        "properties": {
+          "error": {
+            "enum": [
+              "invalid_request",
+              "invalid_client",
+              "invalid_grant",
+              "unauthorized_client",
+              "unsupported_grant_type",
+              "invalid_scope",
+              "invalid_token",
+              "insufficient_scope",
+              "temporarily_unavailable",
+              "slow_down"
+            ]
+          },
+          "error_description": {
+            "type": "string"
+          }
+        }
+      },
+      "platform-developer.control.v1.OAuthMetadata": {
+        "description": "RFC 8414-style authorization server metadata.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "issuer",
+          "authorization_endpoint",
+          "token_endpoint",
+          "revocation_endpoint",
+          "userinfo_endpoint",
+          "scopes_supported",
+          "response_types_supported",
+          "grant_types_supported",
+          "code_challenge_methods_supported",
+          "token_endpoint_auth_methods_supported",
+          "revocation_endpoint_auth_methods_supported"
+        ],
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "authorization_endpoint": {
+            "type": "string",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "token_endpoint": {
+            "type": "string",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "revocation_endpoint": {
+            "type": "string",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "userinfo_endpoint": {
+            "type": "string",
+            "pattern": "^https://",
+            "maxLength": 2048
+          },
+          "scopes_supported": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "events:meetings",
+                "chat:read:bot",
+                "chat:write:bot"
+              ]
+            }
+          },
+          "response_types_supported": {
+            "const": [
+              "code"
+            ]
+          },
+          "grant_types_supported": {
+            "const": [
+              "authorization_code",
+              "refresh_token"
+            ]
+          },
+          "code_challenge_methods_supported": {
+            "const": [
+              "S256"
+            ]
+          },
+          "token_endpoint_auth_methods_supported": {
+            "const": [
+              "client_secret_basic",
+              "client_secret_post"
+            ]
+          },
+          "revocation_endpoint_auth_methods_supported": {
+            "const": [
+              "client_secret_basic",
+              "client_secret_post"
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OAuthRevokeRequest": {
+        "description": "RFC 7009 revocation request (application/x-www-form-urlencoded; same client authentication as the token endpoint).",
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "token_type_hint": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": "string"
+          }
+        }
+      },
+      "platform-developer.control.v1.OAuthToken": {
+        "description": "RFC 6749 token response (snake_case). bot_token only on the first authorization-code exchange of an ORGANIZATION install with bot scopes.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in"
+        ],
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "pattern": "^cfoa_"
+          },
+          "token_type": {
+            "const": "Bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "refresh_token": {
+            "type": "string",
+            "pattern": "^cfor_"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "installation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "target"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "target": {
+                "enum": [
+                  "USER",
+                  "ORGANIZATION"
+                ]
+              },
+              "organization_id": {
+                "type": "string"
+              }
+            }
+          },
+          "bot_token": {
+            "type": "string",
+            "pattern": "^cfob_"
+          }
+        }
+      },
+      "platform-developer.control.v1.OAuthTokenRequest": {
+        "description": "RFC 6749 token request (application/x-www-form-urlencoded). Client authentication: HTTP Basic (client_secret_basic) or client_id + client_secret in the body (client_secret_post), never both. PKCE (code_verifier, S256) is mandatory for authorization_code.",
+        "type": "object",
+        "required": [
+          "grant_type"
+        ],
+        "properties": {
+          "grant_type": {
+            "enum": [
+              "authorization_code",
+              "refresh_token"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "code_verifier": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 128
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": "string"
+          }
+        }
+      },
+      "platform-developer.control.v1.OAuthUserinfo": {
+        "description": "The signed-in user's profile for an app: sub is pairwise per app; email only with profile:email.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sub",
+          "name",
+          "picture"
+        ],
+        "properties": {
+          "sub": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "picture": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "email": {
+            "type": "string"
+          }
+        }
       },
       "platform-developer.control.v1.Organization": {
         "type": "object",
@@ -7616,7 +10765,9 @@
           "PUBLIC_NETWORK_CALLING",
           "PRIVACY_RELAY",
           "NUMBERS",
-          "SMS"
+          "SMS",
+          "END_USERS",
+          "PUSH"
         ]
       },
       "platform-developer.control.v1.ProductionRequestState": {
@@ -7788,6 +10939,367 @@
           "SUSPENDED",
           "ARCHIVED"
         ]
+      },
+      "platform-developer.control.v1.PushCredential": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credentialRef",
+          "environmentId",
+          "provider",
+          "voip",
+          "teamId",
+          "keyId",
+          "bundleId",
+          "apnsHost",
+          "projectId",
+          "fingerprint",
+          "status",
+          "lastVerifiedAt",
+          "lastError",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "credentialRef": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "provider": {
+            "enum": [
+              "APNS",
+              "FCM"
+            ]
+          },
+          "voip": {
+            "type": "boolean",
+            "description": "APNs VoIP (PushKit) key."
+          },
+          "teamId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z0-9]{10}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "keyId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z0-9]{10}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bundleId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 155
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "apnsHost": {
+            "oneOf": [
+              {
+                "enum": [
+                  "SANDBOX",
+                  "PRODUCTION"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "projectId": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 30
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the uploaded secret (hex)."
+          },
+          "status": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.PushCredentialStatus"
+          },
+          "lastVerifiedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastError": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z0-9_]{1,64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "ADR 0063: push credential METADATA. The secret (APNs .p8 key / FCM service-account JSON) is sealed to the Notification Service on receipt and never stored, logged or returned."
+      },
+      "platform-developer.control.v1.PushCredentialList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.PushCredential"
+            }
+          },
+          "nextCursor": {
+            "type": "null"
+          }
+        }
+      },
+      "platform-developer.control.v1.PushCredentialStatus": {
+        "enum": [
+          "UNVERIFIED",
+          "VERIFIED",
+          "FAILED"
+        ]
+      },
+      "platform-developer.control.v1.PutAllowedOriginsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "origins"
+        ],
+        "properties": {
+          "origins": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 300,
+              "pattern": "^(https://[a-z0-9.-]+(:[1-9][0-9]{0,4})?|http://(localhost|127\\.0\\.0\\.1)(:[1-9][0-9]{0,4})?)$"
+            }
+          }
+        },
+        "description": "The complete list (replaces it): exact `scheme://host[:port]`, lowercase host, no path, no wildcard, no explicit default port; https only, except http://localhost and http://127.0.0.1 in SANDBOX / TEST."
+      },
+      "platform-developer.control.v1.PutAppRequest": {
+        "description": "PUT /v1/projects/{projectId}/app: the manifest (http://localhost redirect URIs only while DRAFT; at least one user or bot scope; event types from the install-routable families).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "redirectUris"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logoUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "privacyUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "termsUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^https://",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "redirectUris": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 10,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]{1,5})?(/|$))[^#*]*$",
+              "maxLength": 2048
+            }
+          },
+          "userScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "profile:read",
+                "profile:email",
+                "meetings:read",
+                "meetings:write",
+                "chat:read",
+                "chat:write",
+                "events:meetings"
+              ]
+            }
+          },
+          "botScopes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "chat:read:bot",
+                "chat:write:bot"
+              ]
+            }
+          },
+          "eventTypes": {
+            "type": "array",
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "app.grant_revoked",
+                "app.installed",
+                "app.uninstalled",
+                "artifact.deleted",
+                "artifact.ready",
+                "bot.mentioned",
+                "bot.message_received",
+                "conversation.created",
+                "conversation.member_added",
+                "conversation.member_removed",
+                "conversation.updated",
+                "meeting.created",
+                "meeting.ended",
+                "meeting.started",
+                "message.created",
+                "message.deleted",
+                "message.expired",
+                "message.moderated",
+                "participant.joined",
+                "participant.left"
+              ]
+            }
+          },
+          "meetingSurface": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "pattern": "^https://",
+                    "maxLength": 2048
+                  },
+                  "origins": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^https://[^/?#]+$"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distribution": {
+            "enum": [
+              "PRIVATE",
+              "PUBLIC"
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.PutAppTestAccountsRequest": {
+        "description": "ADR 0064: the draft test accounts (CF Meet account ids, format checked only, at most 25).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "accountIds"
+        ],
+        "properties": {
+          "accountIds": {
+            "type": "array",
+            "maxItems": 25,
+            "items": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        }
       },
       "platform-developer.control.v1.PutBillingAccountRequest": {
         "type": "object",
@@ -7967,6 +11479,20 @@
           }
         ]
       },
+      "platform-developer.control.v1.RevokeSessionsResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tokensNotBefore"
+        ],
+        "properties": {
+          "tokensNotBefore": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Tokens issued before this instant (and every device credential derived from them) no longer work."
+          }
+        }
+      },
       "platform-developer.control.v1.Role": {
         "enum": [
           "OWNER",
@@ -8115,7 +11641,9 @@
                   "PUBLIC_NETWORK_CALLING",
                   "PRIVACY_RELAY",
                   "NUMBERS",
-                  "SMS"
+                  "SMS",
+                  "END_USERS",
+                  "PUSH"
                 ]
               },
               {
@@ -8404,6 +11932,47 @@
           }
         }
       },
+      "platform-developer.control.v1.UpdateEndUserRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "displayName": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "description": "Display name (no control characters)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "imageUrl": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 512,
+                "pattern": "^https://",
+                "description": "https:// image URL."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          }
+        },
+        "minProperties": 1,
+        "description": "Profile changes (`null` clears) and suspension / reactivation; deletion is DELETE."
+      },
       "platform-developer.control.v1.UpdateOrganizationRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -8485,6 +12054,45 @@
             }
           }
         }
+      },
+      "platform-developer.control.v1.UpsertUserTokenRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "externalId",
+          "grants"
+        ],
+        "properties": {
+          "externalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!-~]{1,128}$",
+            "description": "The partner's opaque user id (printable ASCII, no spaces); never a phone number, tel: / sip: URI."
+          },
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Display name (no control characters)."
+          },
+          "imageUrl": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^https://",
+            "description": "https:// image URL."
+          },
+          "grants": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.UserTokenGrants"
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "description": "Token lifetime in seconds (default 3600)."
+          }
+        },
+        "description": "Creates the user if new (idempotent on externalId), then mints a token."
       },
       "platform-developer.control.v1.UsageFactList": {
         "type": "object",
@@ -8736,7 +12344,8 @@
           "NUMBER_ACTIVE",
           "SMS_SEGMENT",
           "RECORDING_MINUTE",
-          "STORAGE_BYTE_TIME"
+          "STORAGE_BYTE_TIME",
+          "MESSAGE_SENT"
         ]
       },
       "platform-developer.control.v1.UsageUnit": {
@@ -8799,6 +12408,147 @@
             "items": {
               "$ref": "#/components/schemas/platform-developer.control.v1.UsageWarning"
             }
+          }
+        }
+      },
+      "platform-developer.control.v1.UserToken": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tokenId",
+          "expiresAt"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 2048,
+            "pattern": "^cfut_(sbx|test|live)_",
+            "description": "The CF Meet user token, shown ONCE (`Authorization: Bearer cfut_…` on the device)."
+          },
+          "tokenRedacted": {
+            "const": true,
+            "description": "An Idempotency-Key replay: the token is never returned again."
+          },
+          "tokenId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.UserTokenGrants": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "msg": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 2,
+            "items": {
+              "enum": [
+                "read",
+                "send"
+              ]
+            },
+            "description": "Chat: needs `messages.read` / `messages.send` on the minting credential."
+          },
+          "call": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 1,
+            "items": {
+              "enum": [
+                "receive"
+              ]
+            },
+            "description": "Receive calls: needs `calls.write`."
+          },
+          "mtg": {
+            "type": "array",
+            "maxItems": 10,
+            "description": "Meetings the user may join, with a role: needs `meetings.write`. The token's compact `{c, r}` form is accepted too.",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "conferenceId",
+                    "role"
+                  ],
+                  "properties": {
+                    "conferenceId": {
+                      "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                    },
+                    "role": {
+                      "enum": [
+                        "HOST",
+                        "CO_HOST",
+                        "PRESENTER",
+                        "PARTICIPANT",
+                        "VIEWER"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "c",
+                    "r"
+                  ],
+                  "properties": {
+                    "c": {
+                      "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                    },
+                    "r": {
+                      "enum": [
+                        "HOST",
+                        "CO_HOST",
+                        "PRESENTER",
+                        "PARTICIPANT",
+                        "VIEWER"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "description": "ADR 0062 user token grants; effective grants are re-intersected with the minting credential's CURRENT scopes on every verification."
+      },
+      "platform-developer.control.v1.UserWithToken": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "user",
+          "tokenId",
+          "expiresAt"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/platform-developer.control.v1.EndUser"
+          },
+          "token": {
+            "type": "string",
+            "maxLength": 2048,
+            "pattern": "^cfut_(sbx|test|live)_",
+            "description": "The CF Meet user token, shown ONCE (`Authorization: Bearer cfut_…` on the device)."
+          },
+          "tokenRedacted": {
+            "const": true
+          },
+          "tokenId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -9266,7 +13016,7 @@
       },
       "platform-developer.webhooks.v1.WebhookEventType": {
         "type": "string",
-        "description": "The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families.",
+        "description": "The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families. ADR 0064 install events: app.installed / app.uninstalled / app.grant_revoked (the installed app's own lifecycle) and bot.message_received / bot.mentioned (Messaging, ids only, never message text); events routed to an installed app carry data.installationId.",
         "enum": [
           "call.requested",
           "call.incoming",
@@ -9346,7 +13096,12 @@
           "credential.expired",
           "production_access.requested",
           "production_access.approved",
-          "production_access.rejected"
+          "production_access.rejected",
+          "app.installed",
+          "app.uninstalled",
+          "app.grant_revoked",
+          "bot.message_received",
+          "bot.mentioned"
         ]
       },
       "platform.common.v1.ApplicationEnvironmentKind": {

@@ -564,6 +564,28 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(2);
         }
     }
+    // ADR 0062: the device exchange of CF Meet user tokens (verified live with Platform
+    // Access, `platform-user-token.verify`). Off by default: the route does not exist.
+    if config.user_token_exchange_enabled {
+        let verifier = calling::platform::user_tokens::UserTokenVerifier::new(
+            Arc::new(calling::platform::user_tokens::HttpUserTokenAuthority::new(
+                state.service_auth.client_arc(),
+            )),
+            clock.clone(),
+        );
+        state = state.with_user_sessions(Some(Arc::new(verifier)));
+    }
+    tracing::info!(
+        user_token_exchange = config.user_token_exchange_enabled,
+        "CF Meet user-token device exchange (CALLING_USER_TOKEN_EXCHANGE_ENABLED)"
+    );
+    // ADR 0063: partner users' ring offers through the Notification Service (only sent
+    // by the `notifications` push transport).
+    state = state.with_partner_push(config.partner_push_enabled);
+    tracing::info!(
+        partner_push = config.partner_push_enabled,
+        "partner call push as platform-principal recipients (CALLING_PARTNER_PUSH_ENABLED)"
+    );
     state.organization_forwarding_enabled = config.organization_forwarding_enabled;
     tracing::info!(
         organization_forwarding = config.organization_forwarding_enabled,

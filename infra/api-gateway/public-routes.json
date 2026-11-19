@@ -12,7 +12,11 @@
     "CALENDAR_FILE_DIRECT_INGRESS": "RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API.",
     "FIRST_PARTY_ORGANIZATIONS": "The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations).",
     "FIRST_PARTY_SESSION_DEVICES": "First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens.",
-    "FIRST_PARTY_APP_NOTIFICATIONS": "The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API."
+    "FIRST_PARTY_APP_NOTIFICATIONS": "The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API.",
+    "FIRST_PARTY_COMMUNICATIONS_HUB": "The CF Meet app's own Communications Hub (contacts, CF Meet ID / QR, timeline, activity, call history): account-session only, served on the first-party direct ingress (/api/v2/communications), never a partner API. Partners use the Messaging, Calling and Meetings APIs with a platform credential.",
+    "FIRST_PARTY_APP_CONSENT": "The CF Meet app's own consent and connected-apps screens for CF Meet Apps (OAuth authorize context / decision, the account's and an organization's connected apps; ADR 0064): account session only, first-party direct ingress, never a partner route.",
+    "FIRST_PARTY_IN_MEETING_APPS": "The CF Meet app's in-meeting app panel (list of installed apps with a meeting surface, short-lived app-context tokens; ADR 0065): account session or participant token, first-party direct ingress.",
+    "APP_CONTEXT_KEYS_DIRECT": "Public JWKS that verifies in-meeting app-context tokens (ADR 0065): anonymous, served directly by the Meeting Service at /api/v2/app-context-keys; apps fetch it without a credential."
   },
   "operations": [
     {
@@ -4407,445 +4411,774 @@
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/activation",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me/capabilities",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me/public-id",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/me/public-id/rotate",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me/qr",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me/privacy",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PUT",
       "path": "/api/v2/communications/me/privacy",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/discovery/public-id/resolve",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/discovery/invites/resolve",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/invites",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/invites",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/invites/{inviteId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/contact-requests",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/contact-requests/incoming",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/contact-requests/outgoing",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/contact-requests/{requestId}/accept",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/contact-requests/{requestId}/decline",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/contact-requests/{requestId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/contacts",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/contacts/{contactId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PATCH",
       "path": "/api/v2/communications/contacts/{contactId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/contacts/{contactId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/contacts/{contactId}/common-groups",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/profiles/{cfMeetId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/profiles/{cfMeetId}/reports",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/blocks",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PUT",
       "path": "/api/v2/communications/profiles/{cfMeetId}/block",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/profiles/{cfMeetId}/block",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/bootstrap",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/inbox",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/activity",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/conversations/{conversationId}/timeline",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/conversations/{conversationId}/context",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/contacts/{contactId}/calls",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/calls/{callId}/participants",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/conversations/{conversationId}/calls",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/calls/history",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/calls/{callId}/context",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/sync",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/events",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/conversations/{conversationId}/media",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/conversations/{conversationId}/preferences",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PUT",
       "path": "/api/v2/communications/conversations/{conversationId}/preferences",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/conversations/{conversationId}/clear-for-me",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/saved-messages",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/saved-messages",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/saved-messages/{savedId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/contacts/favorites",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PUT",
       "path": "/api/v2/communications/contacts/{contactId}/favorite",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/contacts/{contactId}/favorite",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/contact-lists",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/contact-lists",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/contact-lists/{listId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PATCH",
       "path": "/api/v2/communications/contact-lists/{listId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/contact-lists/{listId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PUT",
       "path": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/contact-lists/{listId}/members/{contactId}",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me/notification-preferences",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PUT",
       "path": "/api/v2/communications/me/notification-preferences",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me/storage-summary",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/conversations/{conversationId}/shared-groups",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/devices",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/devices/link",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PUT",
       "path": "/api/v2/communications/devices/{deviceId}/push",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "DELETE",
       "path": "/api/v2/communications/devices/{deviceId}/push",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/devices/{deviceId}/revoke",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/devices/{deviceId}/sync-state",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "PUT",
       "path": "/api/v2/communications/devices/{deviceId}/sync-state",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me/notification-delivery-status",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/conversations/{conversationId}/meetings/instant",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/conversations/{conversationId}/meetings/share",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/conversations/{conversationId}/meetings",
-      "class": "PUBLIC_CUSTOMER"
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },
     {
       "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/me/recovery-state",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
+    },
+    {
+      "domain": "calling",
+      "method": "POST",
+      "path": "/v1/calling/user-sessions",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "POST",
+      "path": "/v1/messaging/user-sessions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
+      "path": "/v1/messaging/user-push-registrations/{installationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "DELETE",
+      "path": "/v1/messaging/user-push-registrations/{installationId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/users",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/users",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/users/tokens",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/users/{userId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PATCH",
+      "path": "/v1/users/{userId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "DELETE",
+      "path": "/v1/users/{userId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/users/{userId}/revoke-sessions",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/users/{userId}/tokens",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/users",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/test-user-tokens",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/allowed-origins",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/environments/{environmentId}/allowed-origins",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/environments/{environmentId}/push-credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/push-credentials",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "DELETE",
+      "path": "/v1/environments/{environmentId}/push-credentials/{credentialRef}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/push-credentials/{credentialRef}/verify",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/app",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/projects/{projectId}/app",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/app/secret",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/projects/{projectId}/app/submit",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/projects/{projectId}/app/grants",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "PUT",
+      "path": "/v1/projects/{projectId}/app/test-accounts",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/oauth/token",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/oauth/revoke",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/oauth/userinfo",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/oauth/metadata",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/app-directory",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "GET",
+      "path": "/v1/app-directory/{appId}",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/app-context-keys",
+      "class": "EXCLUDED",
+      "reason": "APP_CONTEXT_KEYS_DIRECT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/conferences/{id}/apps",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_IN_MEETING_APPS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/conferences/{id}/apps/{appId}/context",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_IN_MEETING_APPS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/apps",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/me/apps/{grantId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/oauth/authorize/approve",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/oauth/authorize/context",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/organizations/{id}/apps",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/organizations/{id}/apps/{grantId}",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_APP_CONSENT"
     }
   ]
 }

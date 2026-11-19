@@ -494,6 +494,16 @@ fn every_v2_route_is_documented() {
         ),
         ("post", "/api/v2/admin/organizations/{id}/owners"),
         ("post", "/api/v2/registrations/cancel"),
+        // ADR 0064 / 0065 — CF Meet Apps
+        ("get", "/api/v2/oauth/authorize/context"),
+        ("post", "/api/v2/oauth/authorize/approve"),
+        ("get", "/api/v2/me/apps"),
+        ("delete", "/api/v2/me/apps/{grantId}"),
+        ("get", "/api/v2/organizations/{id}/apps"),
+        ("delete", "/api/v2/organizations/{id}/apps/{grantId}"),
+        ("get", "/api/v2/conferences/{id}/apps"),
+        ("post", "/api/v2/conferences/{id}/apps/{appId}/context"),
+        ("get", "/api/v2/app-context-keys"),
     ];
     for (method, path) in expected {
         assert!(

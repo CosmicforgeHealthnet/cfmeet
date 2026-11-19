@@ -513,6 +513,33 @@ peer service ◄─ X-CF-Service-Authorization: Bearer <EdDSA JWS> ◄───�
 
 ADR: [0004 — Internal service authentication](../../docs/decisions/0004-internal-service-authentication.md).
 
+### CF Meet Platform devices and partner call push (ADR 0062 / 0063)
+
+`CALLING_USER_TOKEN_EXCHANGE_ENABLED` (`true` / `false`, **default `false`**). When on,
+`POST /v1/calling/user-sessions` is mounted (contract `userToken`, `Authorization: Bearer
+cfut_…`, body `{installationId, kind: WEB|MOBILE}`). The token is verified live with
+Platform Access (`POST /internal/v1/user-tokens/verify`, `platform-user-token.verify`; a
+success is reused ≤ 30 s), must hold the effective grant `call:receive`, and its minting
+credential (`crd` / `sva`) is re-verified live like a gateway forward (fully ACTIVE chain,
+EXTERNAL tenant, `calls.write`; the minting credential's rate limit applies). The user must
+be an ACTIVE `EXTERNAL_APPLICATION_PRINCIPAL` of that environment. The endpoint keyed
+`inst:<installationId>` is created (201) or reused (200) for the user (another user signing
+in on the same installation gets it after the previous endpoint is revoked); the answer is
+`{principalId, endpointId, signalingCredential, signalingCredentialExpiresAt}`, the `cfsig_`
+credential recording the token's `crd` / `sva` and expiring no later than the token
+(`src/endpoints/user_sessions.rs`, `src/platform/user_tokens.rs`). Refusals: 401 (token,
+user, minting credential, non-EXTERNAL tenant), 403 (`call:receive` / `calls.write`), 503
+(authority unreachable). Off: the path does not exist (404).
+
+`CALLING_PARTNER_PUSH_ENABLED` (`true` / `false`, **default `false`**). When on (and
+`CALLING_PUSH_TRANSPORT=notifications`), a ring offer to an ACTIVE
+`EXTERNAL_APPLICATION_PRINCIPAL` of an EXTERNAL tenant is also sent to the Notification
+Service I3 (`/internal/v1/push/call-invitations`) with the recipient
+`{kind: "platform-principal", tenantId, applicationId, environmentId, principalId}` (contract
+§6 N-P3) instead of push target references; one alert per (call, principal), background,
+bounded by `CALLING_PUSH_TIMEOUT_MS`, never retried (signaling and invitation recovery stay
+authoritative). The first-party `cfmeet-user:` path is unchanged.
+
 ### First-party organization requests (Blueprint Section 12 follow-up, CAL-007)
 
 `CALLING_ORGANIZATION_FORWARDING_ENABLED` (`true` / `false`, **default `false`**). When

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/notifications/events/v1.schema.json",
   "title": "CF Meet notification event envelope v1 (cfmeet.notifications.event)",
-  "description": "Envelope every producer posts to the Notification Service (I1, ingestNotificationEvents) from its transactional outbox, built with packages/notification-client (Document 4 §5). Aligned with cfmeet.platform.event-envelope. Rules beyond JSON Schema, enforced by notification-client and I1: total size ≤ 4 KiB (≤ 8 KiB with `sealed`); `producer` equals the authenticated service identity; the service accepts the current and previous eventVersion per type. `data` keys are camelCase and never contain secret, private, token, ciphertext, plaintext, content, body, password, email, phone, key or code (any case): such values travel only inside `sealed`, and `sealed` is allowed only for the catalogue types that declare it (#21–#25, #32–#38), with exactly the catalogue's `sealed` fields plus any of its `sealedOptional` fields. CRITICAL priority is allowed only for account.* types from cfmeet.meeting-service. Email categories that exist today carry today's idempotency key formats. Every event carries the producer's routing-fence decision (`route`). The control event notifications.cancel cancels pending items by cancelKey. A catalogue entry naming a `recipient` kind requires exactly one recipient of that kind. The catalogue is also published machine-readably under x-cfmeet-catalogue.",
+  "description": "Envelope every producer posts to the Notification Service (I1, ingestNotificationEvents) from its transactional outbox, built with packages/notification-client (Document 4 §5). Aligned with cfmeet.platform.event-envelope. Rules beyond JSON Schema, enforced by notification-client and I1: total size ≤ 4 KiB (≤ 8 KiB with `sealed`); `producer` equals the authenticated service identity; the service accepts the current and previous eventVersion per type. `data` keys are camelCase and never contain secret, private, token, ciphertext, plaintext, content, body, password, email, phone, key or code (any case): such values travel only inside `sealed`, and `sealed` is allowed only for the catalogue types that declare it (#21–#25, #32–#38), with exactly the catalogue's `sealed` fields plus any of its `sealedOptional` fields. CRITICAL priority is allowed only for account.* types from cfmeet.meeting-service. Email categories that exist today carry today's idempotency key formats. Every event carries the producer's routing-fence decision (`route`). The control event notifications.cancel cancels pending items by cancelKey. A catalogue entry naming a `recipient` kind requires exactly one recipient of that kind. The catalogue is also published machine-readably under x-cfmeet-catalogue. 1.4.0 (ADR 0063 N-P4, partner push): recipient kind platform-principal:<environmentId>:<principalId> (a partner's end user, delivered only through that environment's own push provider credentials) for the catalogue types marked partnerRecipients (messaging.message.created): metadata-only (ids, never content), never mixed with other recipient kinds, and in the envelope's scope when it names one. Accepted by the service only while NOTIFICATIONS_PARTNER_PUSH_ENABLED is on.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -2634,6 +2634,47 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": [
+          "recipients"
+        ],
+        "properties": {
+          "recipients": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "ref"
+              ],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^platform-principal:"
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "recipients": {
+            "items": {
+              "type": "object",
+              "required": [
+                "ref"
+              ],
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "pattern": "^platform-principal:"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "x-cfmeet-catalogue": [
@@ -2856,14 +2897,15 @@
       "sealed": null,
       "idempotencyKey": null,
       "optional": false,
-      "note": "ids only; recipients and entitlement via X3 at send and dispatch; category DIRECT_MESSAGES or GROUP_MESSAGES by conversationKind; never content; optional sequence (message sequence, 1.1.0) keeps the 5-key wake-up payload",
+      "note": "ids only; recipients and entitlement via X3 at send and dispatch; category DIRECT_MESSAGES or GROUP_MESSAGES by conversationKind; never content; optional sequence (message sequence, 1.1.0) keeps the 5-key wake-up payload; 1.4.0: may instead address platform-principal:<environmentId>:<principalId> recipients (partner push, ADR 0063): one metadata-only push per registered APNS / FCM installation through the partner's own credentials, collapsed per conversation",
       "dataKeys": [
         "conversationId",
         "conversationKind",
         "eventSequence",
         "securityProfile",
         "sequence"
-      ]
+      ],
+      "partnerRecipients": true
     },
     {
       "number": 14,

@@ -95,6 +95,282 @@ class ActivityList {
   Map<String, Object?> toJson() => json;
 }
 
+/// ADR 0062: an environment's allowed websites (exact origins).
+class AllowedOrigins {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AllowedOrigins.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AllowedOrigins.create({required Uuid environmentId, required List<String> origins}) =>
+      AllowedOrigins.fromJson(<String, Object?>{
+        'environmentId': environmentId,
+        'origins': origins,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get environmentId => json['environmentId']! as String;
+
+  List<String> get origins => (json['origins']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class ApnsPushCredentialUpload {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ApnsPushCredentialUpload.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ApnsPushCredentialUpload.create({required String apnsHost, required String bundleId, required String keyId, required String p8, required String provider, required String teamId, required bool voip}) =>
+      ApnsPushCredentialUpload.fromJson(<String, Object?>{
+        'apnsHost': apnsHost,
+        'bundleId': bundleId,
+        'keyId': keyId,
+        'p8': p8,
+        'provider': provider,
+        'teamId': teamId,
+        'voip': voip,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// SANDBOX and TEST environments may only use SANDBOX.
+  String get apnsHost => json['apnsHost']! as String;
+
+  String get bundleId => json['bundleId']! as String;
+
+  String get keyId => json['keyId']! as String;
+
+  /// The APNs token signing key (.p8, PEM). Write-only.
+  String get p8 => json['p8']! as String;
+
+  String get provider => json['provider']! as String;
+
+  String get teamId => json['teamId']! as String;
+
+  bool get voip => json['voip']! as bool;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0064 / 0065: the app registered on a project (clientId = projectId = the Platform Access application id). The live version is what Platform Access serves: the published version, else the approved one, else the current draft.
+class App {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const App.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory App.create({required Uuid appId, required Uuid clientId, required String createdAt, required int currentVersion, required bool listedInDirectory, required int liveVersion, required AppManifest manifest, required Uuid organizationId, required bool pendingChanges, required Uuid projectId, required String? publishedAt, required int? publishedVersion, required Map<String, Object?>? review, required int? reviewedVersion, required String? secretIssuedAt, required AppStatus status, required int? submittedVersion, required List<Uuid> testAccountIds, required String updatedAt}) =>
+      App.fromJson(<String, Object?>{
+        'appId': appId,
+        'clientId': clientId,
+        'createdAt': createdAt,
+        'currentVersion': currentVersion,
+        'listedInDirectory': listedInDirectory,
+        'liveVersion': liveVersion,
+        'manifest': manifest.toJson(),
+        'organizationId': organizationId,
+        'pendingChanges': pendingChanges,
+        'projectId': projectId,
+        'publishedAt': publishedAt,
+        'publishedVersion': publishedVersion,
+        'review': review,
+        'reviewedVersion': reviewedVersion,
+        'secretIssuedAt': secretIssuedAt,
+        'status': status,
+        'submittedVersion': submittedVersion,
+        'testAccountIds': testAccountIds,
+        'updatedAt': updatedAt,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get appId => json['appId']! as String;
+
+  Uuid get clientId => json['clientId']! as String;
+
+  String get createdAt => json['createdAt']! as String;
+
+  int get currentVersion => (json['currentVersion']! as num).toInt();
+
+  bool get listedInDirectory => json['listedInDirectory']! as bool;
+
+  int get liveVersion => (json['liveVersion']! as num).toInt();
+
+  AppManifest get manifest => AppManifest.fromJson(json['manifest']! as Map<String, Object?>);
+
+  Uuid get organizationId => json['organizationId']! as String;
+
+  bool get pendingChanges => json['pendingChanges']! as bool;
+
+  Uuid get projectId => json['projectId']! as String;
+
+  String? get publishedAt => json['publishedAt'] as String?;
+
+  int? get publishedVersion => (json['publishedVersion'] as num?)?.toInt();
+
+  Map<String, Object?>? get review => json['review'] == null ? null : json['review']! as Map<String, Object?>;
+
+  int? get reviewedVersion => (json['reviewedVersion'] as num?)?.toInt();
+
+  String? get secretIssuedAt => json['secretIssuedAt'] as String?;
+
+  AppStatus get status => json['status']! as String;
+
+  int? get submittedVersion => (json['submittedVersion'] as num?)?.toInt();
+
+  List<Uuid> get testAccountIds => (json['testAccountIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  String get updatedAt => json['updatedAt']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0064: a new client secret, returned ONCE (an idempotent replay returns clientSecretRedacted instead).
+class AppClientSecret {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AppClientSecret.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AppClientSecret.create({required Uuid clientId, String? clientSecret, bool? clientSecretRedacted, required String issuedAt, required String? secretId}) =>
+      AppClientSecret.fromJson(<String, Object?>{
+        'clientId': clientId,
+        if (clientSecret != null) 'clientSecret': clientSecret,
+        if (clientSecretRedacted != null) 'clientSecretRedacted': clientSecretRedacted,
+        'issuedAt': issuedAt,
+        'secretId': secretId,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get clientId => json['clientId']! as String;
+
+  String? get clientSecret => json['clientSecret'] as String?;
+
+  bool? get clientSecretRedacted => json['clientSecretRedacted'] as bool?;
+
+  String get issuedAt => json['issuedAt']! as String;
+
+  String? get secretId => json['secretId'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0064: an installation of the app (never a CF Meet account id).
+class AppGrant {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AppGrant.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AppGrant.create({required String? createdAt, required Uuid id, required Uuid? organizationId, required String? revokedAt, required List<String> scopes, required String? status, required String? target}) =>
+      AppGrant.fromJson(<String, Object?>{
+        'createdAt': createdAt,
+        'id': id,
+        'organizationId': organizationId,
+        'revokedAt': revokedAt,
+        'scopes': scopes,
+        'status': status,
+        'target': target,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String? get createdAt => json['createdAt'] as String?;
+
+  Uuid get id => json['id']! as String;
+
+  Uuid? get organizationId => json['organizationId'] as String?;
+
+  String? get revokedAt => json['revokedAt'] as String?;
+
+  List<String> get scopes => (json['scopes']! as List<Object?>).map((e) => e! as String).toList();
+
+  String? get status => json['status'] as String?;
+
+  String? get target => json['target'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+class AppGrantList {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AppGrantList.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AppGrantList.create({required List<AppGrant> items, required String? nextCursor}) =>
+      AppGrantList.fromJson(<String, Object?>{
+        'items': items.map((e) => e.toJson()).toList(),
+        'nextCursor': nextCursor,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<AppGrant> get items => (json['items']! as List<Object?>).map((e) => AppGrant.fromJson(e! as Map<String, Object?>)).toList();
+
+  String? get nextCursor => json['nextCursor'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0064: an app manifest (normalized; every change is a new immutable version).
+class AppManifest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const AppManifest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory AppManifest.create({required List<String> botScopes, required String? description, required String distribution, required List<String> eventTypes, required String? logoUrl, required Map<String, Object?>? meetingSurface, required String name, required String? privacyUrl, required List<String> redirectUris, required String? termsUrl, required List<String> userScopes}) =>
+      AppManifest.fromJson(<String, Object?>{
+        'botScopes': botScopes,
+        'description': description,
+        'distribution': distribution,
+        'eventTypes': eventTypes,
+        'logoUrl': logoUrl,
+        'meetingSurface': meetingSurface,
+        'name': name,
+        'privacyUrl': privacyUrl,
+        'redirectUris': redirectUris,
+        'termsUrl': termsUrl,
+        'userScopes': userScopes,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<String> get botScopes => (json['botScopes']! as List<Object?>).map((e) => e! as String).toList();
+
+  String? get description => json['description'] as String?;
+
+  String get distribution => json['distribution']! as String;
+
+  List<String> get eventTypes => (json['eventTypes']! as List<Object?>).map((e) => e! as String).toList();
+
+  String? get logoUrl => json['logoUrl'] as String?;
+
+  Map<String, Object?>? get meetingSurface => json['meetingSurface'] == null ? null : json['meetingSurface']! as Map<String, Object?>;
+
+  String get name => json['name']! as String;
+
+  String? get privacyUrl => json['privacyUrl'] as String?;
+
+  List<String> get redirectUris => (json['redirectUris']! as List<Object?>).map((e) => e! as String).toList();
+
+  String? get termsUrl => json['termsUrl'] as String?;
+
+  List<String> get userScopes => (json['userScopes']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0065 review status.
+///
+/// One of: DRAFT, SUBMITTED, IN_REVIEW, APPROVED, REJECTED, PUBLISHED, SUSPENDED.
+typedef AppStatus = String;
+
 /// Kind of a customer application environment (Part B section 7).
 ///
 /// One of: SANDBOX, TEST, PRODUCTION.
@@ -385,6 +661,33 @@ class CreateCredentialRequest {
   Map<String, Object?> toJson() => json;
 }
 
+class CreateEndUserRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const CreateEndUserRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory CreateEndUserRequest.create({String? displayName, required String externalId, String? imageUrl}) =>
+      CreateEndUserRequest.fromJson(<String, Object?>{
+        if (displayName != null) 'displayName': displayName,
+        'externalId': externalId,
+        if (imageUrl != null) 'imageUrl': imageUrl,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Display name (no control characters).
+  String? get displayName => json['displayName'] as String?;
+
+  /// The partner's opaque user id (printable ASCII, no spaces); never a phone number, tel: / sip: URI.
+  String get externalId => json['externalId']! as String;
+
+  /// https:// image URL.
+  String? get imageUrl => json['imageUrl'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
 class CreateEnvironmentRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const CreateEnvironmentRequest.fromJson(this.json);
@@ -475,6 +778,9 @@ class CreateProjectRequest {
 
   Map<String, Object?> toJson() => json;
 }
+
+/// Uploads (replaces) the environment's credential of that provider (APNS with voip false / true, or FCM).
+typedef CreatePushCredentialRequest = Object;
 
 /// Creates a service account in a SANDBOX / TEST environment (PRODUCTION is refused: production-access workflow). No credential is issued (Section 54).
 class CreateServiceAccountRequest {
@@ -669,6 +975,140 @@ class CredentialPolicy {
 ///
 /// One of: PENDING, DELIVERING, RETRY_SCHEDULED, SUCCEEDED, FAILED, CANCELLED, SHADOW.
 typedef DeliveryStatus = String;
+
+/// ADR 0065: a PUBLISHED, PUBLIC app of the directory (its published manifest).
+class DirectoryApp {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const DirectoryApp.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory DirectoryApp.create({required Uuid appId, required List<String> botScopes, required String? description, required String developerName, required String? logoUrl, required bool meetingSurface, required String name, required String? privacyUrl, required String publishedAt, required String? termsUrl, required List<String> userScopes}) =>
+      DirectoryApp.fromJson(<String, Object?>{
+        'appId': appId,
+        'botScopes': botScopes,
+        'description': description,
+        'developerName': developerName,
+        'logoUrl': logoUrl,
+        'meetingSurface': meetingSurface,
+        'name': name,
+        'privacyUrl': privacyUrl,
+        'publishedAt': publishedAt,
+        'termsUrl': termsUrl,
+        'userScopes': userScopes,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  Uuid get appId => json['appId']! as String;
+
+  List<String> get botScopes => (json['botScopes']! as List<Object?>).map((e) => e! as String).toList();
+
+  String? get description => json['description'] as String?;
+
+  String get developerName => json['developerName']! as String;
+
+  String? get logoUrl => json['logoUrl'] as String?;
+
+  /// Whether the app has an in-meeting surface.
+  bool get meetingSurface => json['meetingSurface']! as bool;
+
+  String get name => json['name']! as String;
+
+  String? get privacyUrl => json['privacyUrl'] as String?;
+
+  String get publishedAt => json['publishedAt']! as String;
+
+  String? get termsUrl => json['termsUrl'] as String?;
+
+  List<String> get userScopes => (json['userScopes']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class DirectoryAppList {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const DirectoryAppList.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory DirectoryAppList.create({required List<DirectoryApp> items, required String? nextCursor}) =>
+      DirectoryAppList.fromJson(<String, Object?>{
+        'items': items.map((e) => e.toJson()).toList(),
+        'nextCursor': nextCursor,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<DirectoryApp> get items => (json['items']! as List<Object?>).map((e) => DirectoryApp.fromJson(e! as Map<String, Object?>)).toList();
+
+  String? get nextCursor => json['nextCursor'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0062: a partner user (a Platform Access principal of the credential's environment). DEACTIVATED: deleted (profile erased, id kept).
+class EndUser {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const EndUser.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory EndUser.create({required String? createdAt, required String? displayName, required String externalId, required Uuid id, required String? imageUrl, required EndUserStatus status, required String? updatedAt}) =>
+      EndUser.fromJson(<String, Object?>{
+        'createdAt': createdAt,
+        'displayName': displayName,
+        'externalId': externalId,
+        'id': id,
+        'imageUrl': imageUrl,
+        'status': status,
+        'updatedAt': updatedAt,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String? get createdAt => json['createdAt'] as String?;
+
+  String? get displayName => json['displayName'] as String?;
+
+  String get externalId => json['externalId']! as String;
+
+  /// The Platform Access principal id (kind EXTERNAL_APPLICATION_PRINCIPAL).
+  Uuid get id => json['id']! as String;
+
+  String? get imageUrl => json['imageUrl'] as String?;
+
+  EndUserStatus get status => json['status']! as String;
+
+  String? get updatedAt => json['updatedAt'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// A page of partner users; pass `nextCursor` as `cursor` for the next page (null: last page).
+class EndUserList {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const EndUserList.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory EndUserList.create({required List<EndUser> items, required String? nextCursor}) =>
+      EndUserList.fromJson(<String, Object?>{
+        'items': items.map((e) => e.toJson()).toList(),
+        'nextCursor': nextCursor,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<EndUser> get items => (json['items']! as List<Object?>).map((e) => EndUser.fromJson(e! as Map<String, Object?>)).toList();
+
+  String? get nextCursor => json['nextCursor'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// One of: ACTIVE, SUSPENDED, DEACTIVATED.
+typedef EndUserStatus = String;
 
 class EndpointHealth {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -986,6 +1426,31 @@ class ErrorModel {
   Map<String, Object?> toJson() => json;
 }
 
+class FcmPushCredentialUpload {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const FcmPushCredentialUpload.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory FcmPushCredentialUpload.create({required String projectId, required String provider, required String serviceAccountJson}) =>
+      FcmPushCredentialUpload.fromJson(<String, Object?>{
+        'projectId': projectId,
+        'provider': provider,
+        'serviceAccountJson': serviceAccountJson,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get projectId => json['projectId']! as String;
+
+  String get provider => json['provider']! as String;
+
+  /// The Firebase service-account key JSON (type service_account; its project_id, when present, must equal projectId). Write-only.
+  String get serviceAccountJson => json['serviceAccountJson']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
 class GrantScopeRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const GrantScopeRequest.fromJson(this.json);
@@ -1111,6 +1576,28 @@ class InvitationWithToken {
   Map<String, Object?> toJson() => json;
 }
 
+class IssueUserTokenRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const IssueUserTokenRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory IssueUserTokenRequest.create({required UserTokenGrants grants, int? ttlSeconds}) =>
+      IssueUserTokenRequest.fromJson(<String, Object?>{
+        'grants': grants.toJson(),
+        if (ttlSeconds != null) 'ttlSeconds': ttlSeconds,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  UserTokenGrants get grants => UserTokenGrants.fromJson(json['grants']! as Map<String, Object?>);
+
+  /// Token lifetime in seconds (default 3600).
+  int? get ttlSeconds => (json['ttlSeconds'] as num?)?.toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// Section 54: an issued or rotated credential; the secret is returned once only.
 class IssuedCredential {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -1202,6 +1689,207 @@ class MemberList {
   List<Member> get items => (json['items']! as List<Object?>).map((e) => Member.fromJson(e! as Map<String, Object?>)).toList();
 
   String? get nextCursor => json['nextCursor'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// RFC 6749 §5.2 / RFC 6750 §3.1 error (fixed descriptions).
+class OAuthError {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const OAuthError.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory OAuthError.create({required String error, required String errorDescription}) =>
+      OAuthError.fromJson(<String, Object?>{
+        'error': error,
+        'error_description': errorDescription,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get error => json['error']! as String;
+
+  String get errorDescription => json['error_description']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// RFC 8414-style authorization server metadata.
+class OAuthMetadata {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const OAuthMetadata.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory OAuthMetadata.create({required String authorizationEndpoint, required Object? codeChallengeMethodsSupported, required Object? grantTypesSupported, required String issuer, required Object? responseTypesSupported, required String revocationEndpoint, required Object? revocationEndpointAuthMethodsSupported, required List<String> scopesSupported, required String tokenEndpoint, required Object? tokenEndpointAuthMethodsSupported, required String userinfoEndpoint}) =>
+      OAuthMetadata.fromJson(<String, Object?>{
+        'authorization_endpoint': authorizationEndpoint,
+        'code_challenge_methods_supported': codeChallengeMethodsSupported,
+        'grant_types_supported': grantTypesSupported,
+        'issuer': issuer,
+        'response_types_supported': responseTypesSupported,
+        'revocation_endpoint': revocationEndpoint,
+        'revocation_endpoint_auth_methods_supported': revocationEndpointAuthMethodsSupported,
+        'scopes_supported': scopesSupported,
+        'token_endpoint': tokenEndpoint,
+        'token_endpoint_auth_methods_supported': tokenEndpointAuthMethodsSupported,
+        'userinfo_endpoint': userinfoEndpoint,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get authorizationEndpoint => json['authorization_endpoint']! as String;
+
+  Object? get codeChallengeMethodsSupported => json['code_challenge_methods_supported'];
+
+  Object? get grantTypesSupported => json['grant_types_supported'];
+
+  String get issuer => json['issuer']! as String;
+
+  Object? get responseTypesSupported => json['response_types_supported'];
+
+  String get revocationEndpoint => json['revocation_endpoint']! as String;
+
+  Object? get revocationEndpointAuthMethodsSupported => json['revocation_endpoint_auth_methods_supported'];
+
+  List<String> get scopesSupported => (json['scopes_supported']! as List<Object?>).map((e) => e! as String).toList();
+
+  String get tokenEndpoint => json['token_endpoint']! as String;
+
+  Object? get tokenEndpointAuthMethodsSupported => json['token_endpoint_auth_methods_supported'];
+
+  String get userinfoEndpoint => json['userinfo_endpoint']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// RFC 7009 revocation request (application/x-www-form-urlencoded; same client authentication as the token endpoint).
+class OAuthRevokeRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const OAuthRevokeRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory OAuthRevokeRequest.create({String? clientId, String? clientSecret, required String token, String? tokenTypeHint}) =>
+      OAuthRevokeRequest.fromJson(<String, Object?>{
+        if (clientId != null) 'client_id': clientId,
+        if (clientSecret != null) 'client_secret': clientSecret,
+        'token': token,
+        if (tokenTypeHint != null) 'token_type_hint': tokenTypeHint,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String? get clientId => json['client_id'] as String?;
+
+  String? get clientSecret => json['client_secret'] as String?;
+
+  String get token => json['token']! as String;
+
+  String? get tokenTypeHint => json['token_type_hint'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// RFC 6749 token response (snake_case). bot_token only on the first authorization-code exchange of an ORGANIZATION install with bot scopes.
+class OAuthToken {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const OAuthToken.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory OAuthToken.create({required String accessToken, String? botToken, required int expiresIn, Map<String, Object?>? installation, String? refreshToken, String? scope, required String tokenType}) =>
+      OAuthToken.fromJson(<String, Object?>{
+        'access_token': accessToken,
+        if (botToken != null) 'bot_token': botToken,
+        'expires_in': expiresIn,
+        if (installation != null) 'installation': installation,
+        if (refreshToken != null) 'refresh_token': refreshToken,
+        if (scope != null) 'scope': scope,
+        'token_type': tokenType,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get accessToken => json['access_token']! as String;
+
+  String? get botToken => json['bot_token'] as String?;
+
+  int get expiresIn => (json['expires_in']! as num).toInt();
+
+  Map<String, Object?>? get installation => json['installation'] == null ? null : json['installation']! as Map<String, Object?>;
+
+  String? get refreshToken => json['refresh_token'] as String?;
+
+  String? get scope => json['scope'] as String?;
+
+  String get tokenType => json['token_type']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// RFC 6749 token request (application/x-www-form-urlencoded). Client authentication: HTTP Basic (client_secret_basic) or client_id + client_secret in the body (client_secret_post), never both. PKCE (code_verifier, S256) is mandatory for authorization_code.
+class OAuthTokenRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const OAuthTokenRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory OAuthTokenRequest.create({String? clientId, String? clientSecret, String? code, String? codeVerifier, required String grantType, String? redirectUri, String? refreshToken}) =>
+      OAuthTokenRequest.fromJson(<String, Object?>{
+        if (clientId != null) 'client_id': clientId,
+        if (clientSecret != null) 'client_secret': clientSecret,
+        if (code != null) 'code': code,
+        if (codeVerifier != null) 'code_verifier': codeVerifier,
+        'grant_type': grantType,
+        if (redirectUri != null) 'redirect_uri': redirectUri,
+        if (refreshToken != null) 'refresh_token': refreshToken,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String? get clientId => json['client_id'] as String?;
+
+  String? get clientSecret => json['client_secret'] as String?;
+
+  String? get code => json['code'] as String?;
+
+  String? get codeVerifier => json['code_verifier'] as String?;
+
+  String get grantType => json['grant_type']! as String;
+
+  String? get redirectUri => json['redirect_uri'] as String?;
+
+  String? get refreshToken => json['refresh_token'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// The signed-in user's profile for an app: sub is pairwise per app; email only with profile:email.
+class OAuthUserinfo {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const OAuthUserinfo.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory OAuthUserinfo.create({String? email, required String? name, required String? picture, required String sub}) =>
+      OAuthUserinfo.fromJson(<String, Object?>{
+        if (email != null) 'email': email,
+        'name': name,
+        'picture': picture,
+        'sub': sub,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String? get email => json['email'] as String?;
+
+  String? get name => json['name'] as String?;
+
+  String? get picture => json['picture'] as String?;
+
+  String get sub => json['sub']! as String;
 
   Map<String, Object?> toJson() => json;
 }
@@ -1505,7 +2193,7 @@ class ProductionAccessStatus {
   Map<String, Object?> toJson() => json;
 }
 
-/// One of: PLATFORM_CONTROL, MEETINGS, MESSAGING, APP_CALLING, PUBLIC_NETWORK_CALLING, PRIVACY_RELAY, NUMBERS, SMS.
+/// One of: PLATFORM_CONTROL, MEETINGS, MESSAGING, APP_CALLING, PUBLIC_NETWORK_CALLING, PRIVACY_RELAY, NUMBERS, SMS, END_USERS, PUSH.
 typedef ProductionCapability = String;
 
 /// One of: PRODUCTION_REQUESTED, UNDER_REVIEW, APPROVED, REJECTED, CANCELLED, LIVE, SUSPENDED.
@@ -1609,6 +2297,180 @@ class ProjectScopes {
 
 /// One of: ACTIVE, SUSPENDED, ARCHIVED.
 typedef ProjectStatus = String;
+
+/// ADR 0063: push credential METADATA. The secret (APNs .p8 key / FCM service-account JSON) is sealed to the Notification Service on receipt and never stored, logged or returned.
+class PushCredential {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PushCredential.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PushCredential.create({required String? apnsHost, required String? bundleId, required String createdAt, required Uuid credentialRef, required Uuid environmentId, required String fingerprint, required String? keyId, required String? lastError, required String? lastVerifiedAt, required String? projectId, required String provider, required PushCredentialStatus status, required String? teamId, required String updatedAt, required bool voip}) =>
+      PushCredential.fromJson(<String, Object?>{
+        'apnsHost': apnsHost,
+        'bundleId': bundleId,
+        'createdAt': createdAt,
+        'credentialRef': credentialRef,
+        'environmentId': environmentId,
+        'fingerprint': fingerprint,
+        'keyId': keyId,
+        'lastError': lastError,
+        'lastVerifiedAt': lastVerifiedAt,
+        'projectId': projectId,
+        'provider': provider,
+        'status': status,
+        'teamId': teamId,
+        'updatedAt': updatedAt,
+        'voip': voip,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String? get apnsHost => json['apnsHost'] as String?;
+
+  String? get bundleId => json['bundleId'] as String?;
+
+  String get createdAt => json['createdAt']! as String;
+
+  Uuid get credentialRef => json['credentialRef']! as String;
+
+  Uuid get environmentId => json['environmentId']! as String;
+
+  /// SHA-256 of the uploaded secret (hex).
+  String get fingerprint => json['fingerprint']! as String;
+
+  String? get keyId => json['keyId'] as String?;
+
+  String? get lastError => json['lastError'] as String?;
+
+  String? get lastVerifiedAt => json['lastVerifiedAt'] as String?;
+
+  String? get projectId => json['projectId'] as String?;
+
+  String get provider => json['provider']! as String;
+
+  PushCredentialStatus get status => json['status']! as String;
+
+  String? get teamId => json['teamId'] as String?;
+
+  String get updatedAt => json['updatedAt']! as String;
+
+  /// APNs VoIP (PushKit) key.
+  bool get voip => json['voip']! as bool;
+
+  Map<String, Object?> toJson() => json;
+}
+
+class PushCredentialList {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PushCredentialList.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PushCredentialList.create({required List<PushCredential> items, required Object? nextCursor}) =>
+      PushCredentialList.fromJson(<String, Object?>{
+        'items': items.map((e) => e.toJson()).toList(),
+        'nextCursor': nextCursor,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<PushCredential> get items => (json['items']! as List<Object?>).map((e) => PushCredential.fromJson(e! as Map<String, Object?>)).toList();
+
+  Object? get nextCursor => json['nextCursor'];
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// One of: UNVERIFIED, VERIFIED, FAILED.
+typedef PushCredentialStatus = String;
+
+/// The complete list (replaces it): exact `scheme://host(:port)`, lowercase host, no path, no wildcard, no explicit default port; https only, except http://localhost and http://127.0.0.1 in SANDBOX / TEST.
+class PutAllowedOriginsRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PutAllowedOriginsRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PutAllowedOriginsRequest.create({required List<String> origins}) =>
+      PutAllowedOriginsRequest.fromJson(<String, Object?>{
+        'origins': origins,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<String> get origins => (json['origins']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// PUT /v1/projects/{projectId}/app: the manifest (http://localhost redirect URIs only while DRAFT; at least one user or bot scope; event types from the install-routable families).
+class PutAppRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PutAppRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PutAppRequest.create({List<String>? botScopes, String? description, String? distribution, List<String>? eventTypes, String? logoUrl, Map<String, Object?>? meetingSurface, required String name, String? privacyUrl, required List<String> redirectUris, String? termsUrl, List<String>? userScopes}) =>
+      PutAppRequest.fromJson(<String, Object?>{
+        if (botScopes != null) 'botScopes': botScopes,
+        if (description != null) 'description': description,
+        if (distribution != null) 'distribution': distribution,
+        if (eventTypes != null) 'eventTypes': eventTypes,
+        if (logoUrl != null) 'logoUrl': logoUrl,
+        if (meetingSurface != null) 'meetingSurface': meetingSurface,
+        'name': name,
+        if (privacyUrl != null) 'privacyUrl': privacyUrl,
+        'redirectUris': redirectUris,
+        if (termsUrl != null) 'termsUrl': termsUrl,
+        if (userScopes != null) 'userScopes': userScopes,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<String>? get botScopes => json['botScopes'] == null ? null : (json['botScopes']! as List<Object?>).map((e) => e! as String).toList();
+
+  String? get description => json['description'] as String?;
+
+  String? get distribution => json['distribution'] as String?;
+
+  List<String>? get eventTypes => json['eventTypes'] == null ? null : (json['eventTypes']! as List<Object?>).map((e) => e! as String).toList();
+
+  String? get logoUrl => json['logoUrl'] as String?;
+
+  Map<String, Object?>? get meetingSurface => json['meetingSurface'] == null ? null : json['meetingSurface']! as Map<String, Object?>;
+
+  String get name => json['name']! as String;
+
+  String? get privacyUrl => json['privacyUrl'] as String?;
+
+  List<String> get redirectUris => (json['redirectUris']! as List<Object?>).map((e) => e! as String).toList();
+
+  String? get termsUrl => json['termsUrl'] as String?;
+
+  List<String>? get userScopes => json['userScopes'] == null ? null : (json['userScopes']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0064: the draft test accounts (CF Meet account ids, format checked only, at most 25).
+class PutAppTestAccountsRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const PutAppTestAccountsRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory PutAppTestAccountsRequest.create({required List<Uuid> accountIds}) =>
+      PutAppTestAccountsRequest.fromJson(<String, Object?>{
+        'accountIds': accountIds,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  List<Uuid> get accountIds => (json['accountIds']! as List<Object?>).map((e) => e! as String).toList();
+
+  Map<String, Object?> toJson() => json;
+}
 
 class PutBillingAccountRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
@@ -1737,6 +2599,25 @@ typedef QuotaRestrictionValues = Map<String, Object?>;
 
 /// Server-generated identifier of one request / one service hop.
 typedef RequestId = String;
+
+class RevokeSessionsResult {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const RevokeSessionsResult.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory RevokeSessionsResult.create({required String tokensNotBefore}) =>
+      RevokeSessionsResult.fromJson(<String, Object?>{
+        'tokensNotBefore': tokensNotBefore,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Tokens issued before this instant (and every device credential derived from them) no longer work.
+  String get tokensNotBefore => json['tokensNotBefore']! as String;
+
+  Map<String, Object?> toJson() => json;
+}
 
 /// Part VI workspace role (Section 50 permission matrix).
 ///
@@ -2065,6 +2946,31 @@ class TransferOwnershipRequest {
   Map<String, Object?> toJson() => json;
 }
 
+/// Profile changes (`null` clears) and suspension / reactivation; deletion is DELETE.
+class UpdateEndUserRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UpdateEndUserRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UpdateEndUserRequest.create({String? displayName, String? imageUrl, String? status}) =>
+      UpdateEndUserRequest.fromJson(<String, Object?>{
+        if (displayName != null) 'displayName': displayName,
+        if (imageUrl != null) 'imageUrl': imageUrl,
+        if (status != null) 'status': status,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String? get displayName => json['displayName'] as String?;
+
+  String? get imageUrl => json['imageUrl'] as String?;
+
+  String? get status => json['status'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
 class UpdateOrganizationRequest {
   /// Wraps a decoded JSON object (unknown fields are kept).
   const UpdateOrganizationRequest.fromJson(this.json);
@@ -2146,6 +3052,41 @@ class UpdateWebhookRequest {
 
   /// Public https endpoint. Server-side validation additionally refuses every loopback / private / link-local / CGNAT / metadata address and re-checks the resolved address at connection time (DNS rebinding); redirects are never followed.
   String? get url => json['url'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// Creates the user if new (idempotent on externalId), then mints a token.
+class UpsertUserTokenRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UpsertUserTokenRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UpsertUserTokenRequest.create({String? displayName, required String externalId, required UserTokenGrants grants, String? imageUrl, int? ttlSeconds}) =>
+      UpsertUserTokenRequest.fromJson(<String, Object?>{
+        if (displayName != null) 'displayName': displayName,
+        'externalId': externalId,
+        'grants': grants.toJson(),
+        if (imageUrl != null) 'imageUrl': imageUrl,
+        if (ttlSeconds != null) 'ttlSeconds': ttlSeconds,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Display name (no control characters).
+  String? get displayName => json['displayName'] as String?;
+
+  /// The partner's opaque user id (printable ASCII, no spaces); never a phone number, tel: / sip: URI.
+  String get externalId => json['externalId']! as String;
+
+  UserTokenGrants get grants => UserTokenGrants.fromJson(json['grants']! as Map<String, Object?>);
+
+  /// https:// image URL.
+  String? get imageUrl => json['imageUrl'] as String?;
+
+  /// Token lifetime in seconds (default 3600).
+  int? get ttlSeconds => (json['ttlSeconds'] as num?)?.toInt();
 
   Map<String, Object?> toJson() => json;
 }
@@ -2281,7 +3222,7 @@ class UsageSummary {
   Map<String, Object?> toJson() => json;
 }
 
-/// One of: API_OPERATION, MEETING_PARTICIPANT_MINUTE, CALL_MINUTE_APP, CALL_MINUTE_PUBLIC_NETWORK, NUMBER_ACTIVE, SMS_SEGMENT, RECORDING_MINUTE, STORAGE_BYTE_TIME.
+/// One of: API_OPERATION, MEETING_PARTICIPANT_MINUTE, CALL_MINUTE_APP, CALL_MINUTE_PUBLIC_NETWORK, NUMBER_ACTIVE, SMS_SEGMENT, RECORDING_MINUTE, STORAGE_BYTE_TIME, MESSAGE_SENT.
 typedef UsageType = String;
 
 /// One of: OPERATION, MILLISECOND, SEGMENT, BYTE_SECOND.
@@ -2337,6 +3278,94 @@ class UsageWarnings {
   String get generatedAt => json['generatedAt']! as String;
 
   List<UsageWarning> get items => (json['items']! as List<Object?>).map((e) => UsageWarning.fromJson(e! as Map<String, Object?>)).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class UserToken {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UserToken.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UserToken.create({required String expiresAt, String? token, required Uuid tokenId, bool? tokenRedacted}) =>
+      UserToken.fromJson(<String, Object?>{
+        'expiresAt': expiresAt,
+        if (token != null) 'token': token,
+        'tokenId': tokenId,
+        if (tokenRedacted != null) 'tokenRedacted': tokenRedacted,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get expiresAt => json['expiresAt']! as String;
+
+  /// The CF Meet user token, shown ONCE (`Authorization: Bearer cfut_…` on the device).
+  String? get token => json['token'] as String?;
+
+  Uuid get tokenId => json['tokenId']! as String;
+
+  /// An Idempotency-Key replay: the token is never returned again.
+  bool? get tokenRedacted => json['tokenRedacted'] as bool?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// ADR 0062 user token grants; effective grants are re-intersected with the minting credential's CURRENT scopes on every verification.
+class UserTokenGrants {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UserTokenGrants.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UserTokenGrants.create({List<String>? call, List<String>? msg, List<Object?>? mtg}) =>
+      UserTokenGrants.fromJson(<String, Object?>{
+        if (call != null) 'call': call,
+        if (msg != null) 'msg': msg,
+        if (mtg != null) 'mtg': mtg,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Receive calls: needs `calls.write`.
+  List<String>? get call => json['call'] == null ? null : (json['call']! as List<Object?>).map((e) => e! as String).toList();
+
+  /// Chat: needs `messages.read` / `messages.send` on the minting credential.
+  List<String>? get msg => json['msg'] == null ? null : (json['msg']! as List<Object?>).map((e) => e! as String).toList();
+
+  /// Meetings the user may join, with a role: needs `meetings.write`. The token's compact `{c, r}` form is accepted too.
+  List<Object?>? get mtg => json['mtg'] == null ? null : (json['mtg']! as List<Object?>).map((e) => e).toList();
+
+  Map<String, Object?> toJson() => json;
+}
+
+class UserWithToken {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const UserWithToken.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory UserWithToken.create({required String expiresAt, String? token, required Uuid tokenId, bool? tokenRedacted, required EndUser user}) =>
+      UserWithToken.fromJson(<String, Object?>{
+        'expiresAt': expiresAt,
+        if (token != null) 'token': token,
+        'tokenId': tokenId,
+        if (tokenRedacted != null) 'tokenRedacted': tokenRedacted,
+        'user': user.toJson(),
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  String get expiresAt => json['expiresAt']! as String;
+
+  /// The CF Meet user token, shown ONCE (`Authorization: Bearer cfut_…` on the device).
+  String? get token => json['token'] as String?;
+
+  Uuid get tokenId => json['tokenId']! as String;
+
+  bool? get tokenRedacted => json['tokenRedacted'] as bool?;
+
+  EndUser get user => EndUser.fromJson(json['user']! as Map<String, Object?>);
 
   Map<String, Object?> toJson() => json;
 }
@@ -2450,7 +3479,7 @@ class WebhookDelivery {
   Map<String, Object?> toJson() => json;
 }
 
-/// The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families.
+/// The public event catalog: Calling, Privacy Relay, SMS Gateway and Messaging families (Part G §68, unchanged) plus the Section 53 meeting, participant, artifact, number, credential and production-access families. ADR 0064 install events: app.installed / app.uninstalled / app.grant_revoked (the installed app's own lifecycle) and bot.message_received / bot.mentioned (Messaging, ids only, never …
 ///
 /// One of: call.requested, call.incoming, call.ringing, call.ring_cancelled, call.accepted, call.declined, call.cancelled, call.answered, call.connected, call.route_changed, call.held, call.resumed, call.transfer_started, call.transferred, call.transfer_failed, call.ended, call.failed, call.no_answer, call.busy, call.answered_elsewhere, call.invitation_expired, call.kind_changed, …
 typedef WebhookEventType = String;

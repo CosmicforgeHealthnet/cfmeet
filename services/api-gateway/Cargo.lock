@@ -64,6 +64,7 @@ dependencies = [
  "cf-service-auth",
  "chrono",
  "dotenvy",
+ "ed25519-dalek",
  "futures-util",
  "http-body-util",
  "jsonschema",

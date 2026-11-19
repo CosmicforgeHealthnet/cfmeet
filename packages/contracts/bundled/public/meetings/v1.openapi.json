@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CF Meet public API — meetings",
+    "title": "CF Meet Platform API — meetings",
     "description": "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
     "contact": {
       "name": "CosmicForge Team",
@@ -17,7 +17,7 @@
   "servers": [
     {
       "url": "https://api.cfmeet.com",
-      "description": "CF Meet public API Gateway"
+      "description": "CF Meet Platform API Gateway"
     }
   ],
   "paths": {
@@ -75,6 +75,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read",
@@ -83,7 +88,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -588,6 +594,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read",
@@ -596,7 +607,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -1791,6 +1803,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -1799,7 +1816,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -2303,6 +2321,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -2311,7 +2334,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -2757,7 +2781,7 @@
           "Conferences (v2)"
         ],
         "summary": "Join (or reconnect to) a conference.",
-        "description": "Identity, role and admission are resolved server-side. A WAITING participant never receives\nan RTC credential.",
+        "description": "Identity, role and admission are resolved server-side. A WAITING participant never receives\nan RTC credential.\n\nPartner users (CF Meet Platform, `userToken`) present their CF Meet user token as\n`Authorization: Bearer cfut_…` (accepted only here, while the deployment enables it). They join\nonly conferences of meetings owned by the token's application environment (any other conference\nis CONFERENCE_NOT_FOUND) whose id the token's effective meeting grants name\n(MEETING_ACCESS_DENIED otherwise). The role comes from the grant, limited to what the meeting's\nowner may grant; the display name comes from the user profile (a `displayName` in the body is\nignored); invitation tokens and passcodes do not apply. A re-join keeps the same participant and\nreturns a fresh `participantToken`, which the device uses for every other participant\noperation. A refused, expired or revoked user token is AUTHENTICATION_REQUIRED.",
         "operationId": "v2_join_conference",
         "parameters": [
           {
@@ -2812,6 +2836,16 @@
               }
             }
           },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "409": {
             "description": "CONFERENCE_NOT_LIVE / MEETING_CAPACITY_REACHED",
             "content": {
@@ -2833,7 +2867,7 @@
             }
           },
           "503": {
-            "description": "RTC_PROVIDER_UNAVAILABLE",
+            "description": "RTC_PROVIDER_UNAVAILABLE / SERVICE_UNAVAILABLE",
             "content": {
               "application/json": {
                 "schema": {
@@ -2850,13 +2884,17 @@
           },
           {
             "participant_token": []
+          },
+          {
+            "userToken": []
           }
         ],
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_join_conference",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PARTICIPANT_TOKEN"
+          "PARTICIPANT_TOKEN",
+          "USER_TOKEN"
         ]
       }
     },
@@ -3552,6 +3590,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read",
@@ -3560,7 +3603,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -4287,6 +4331,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -4295,7 +4344,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -7507,6 +7557,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -7515,7 +7570,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -8027,6 +8083,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read",
@@ -8035,7 +8096,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -8122,6 +8184,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -8130,7 +8197,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -8197,6 +8265,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -8205,7 +8278,8 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -8267,6 +8341,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -8274,7 +8353,8 @@
         "x-cfmeet-route-id": "meetings.v2_create_instant_meeting",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -8774,6 +8854,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read",
@@ -8781,7 +8866,8 @@
         "x-cfmeet-route-id": "meetings.v2_list_meeting_spaces",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "post": {
@@ -8885,6 +8971,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -8892,7 +8983,8 @@
         "x-cfmeet-route-id": "meetings.v2_create_meeting_space",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -8956,6 +9048,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read",
@@ -8963,7 +9060,8 @@
         "x-cfmeet-route-id": "meetings.v2_get_meeting_space",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "patch": {
@@ -9035,6 +9133,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -9042,7 +9145,8 @@
         "x-cfmeet-route-id": "meetings.v2_update_meeting_space",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -9107,6 +9211,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -9114,7 +9223,8 @@
         "x-cfmeet-route-id": "meetings.v2_archive_meeting_space",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -9192,6 +9302,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read",
@@ -9199,7 +9314,8 @@
         "x-cfmeet-route-id": "meetings.v2_list_conferences",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "post": {
@@ -9303,6 +9419,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -9310,7 +9431,8 @@
         "x-cfmeet-route-id": "meetings.v2_create_conference",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -9431,6 +9553,11 @@
             "platformCredential": [
               "meetings.read"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.read",
@@ -9438,7 +9565,8 @@
         "x-cfmeet-route-id": "meetings.v2_list_invitations",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       },
       "post": {
@@ -9520,6 +9648,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -9527,7 +9660,8 @@
         "x-cfmeet-route-id": "meetings.v2_create_invitation",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -9591,6 +9725,11 @@
             "platformCredential": [
               "meetings.write"
             ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
           }
         ],
         "x-cfmeet-required-scope": "meetings.write",
@@ -9598,7 +9737,8 @@
         "x-cfmeet-route-id": "meetings.v2_revoke_invitation",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
-          "PLATFORM_CREDENTIAL"
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
         ]
       }
     },
@@ -10930,6 +11070,1700 @@
         "x-cfmeet-auth": [
           "MEETING_SESSION"
         ]
+      }
+    },
+    "/v1/meetings/conferences/{id}": {
+      "get": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Read a conference. Callers without authority get the SUMMARY view.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `GET /api/v2/conferences/{id}`; the CF Meet apps call that path directly.\n\nWorks with or without authentication. The space owner, members and admitted participants get the\nFULL view (schedule, lock, recording/transcription state, version); anyone else gets the SUMMARY\nview with the id, meeting space id, status and — except for HEALTHCARE / HIGH_SECURITY /\nhealthcare-appointment meetings — the scheduled start and end (pre-join countdown).",
+        "operationId": "platform_v2_get_conference",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.read",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_get_conference",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_get_conference"
+      }
+    },
+    "/v1/meetings/conferences/{id}/attendance": {
+      "get": {
+        "tags": [
+          "Artifacts (v2)"
+        ],
+        "summary": "Conference attendance (Part J).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `GET /api/v2/conferences/{id}/attendance`; the CF Meet apps call that path directly.\n\nA thin read over the same aggregation as the `ATTENDANCE_REPORT` export; nothing is stored\nand no artefact is created.",
+        "operationId": "platform_v2_conference_attendance",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attendance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttendanceReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CONFERENCE_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.read",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_conference_attendance",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_conference_attendance"
+      }
+    },
+    "/v1/meetings/conferences/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Cancel an unstarted conference (single-occurrence exception for recurring series).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/conferences/{id}/cancel`; the CF Meet apps call that path directly.\n\nMoves a CREATED, PREPARING or WAITING conference to CANCELLED and releases any media room\nalready prepared. Requires `conference.start`. For an occurrence of a recurring series only that\noccurrence is cancelled. Cancelling an already cancelled conference is a no-op\n(`changed: false`); live or finished conferences return CONFERENCE_STATE_CONFLICT.",
+        "operationId": "platform_v2_cancel_conference",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Applied (or idempotent no-op)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceActionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_cancel_conference",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_cancel_conference"
+      }
+    },
+    "/v1/meetings/conferences/{id}/end": {
+      "post": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "LIVE → ENDING. Admission and new join credentials stop immediately; ENDED follows provider termination (Part E).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/conferences/{id}/end`; the CF Meet apps call that path directly.\n\nEnds a LIVE conference for everyone: active recordings are stopped and the media room is\nterminated with the RTC provider. Requires `conference.end`; a conference that never went live\nreturns CONFERENCE_NOT_LIVE (cancel it instead). Repeating the call while ENDING or ENDED is a\nno-op (`changed: false`); while ENDING it retries provider termination. `providerEnforcement`\nis ENFORCED once the conference is ENDED.",
+        "operationId": "platform_v2_end_conference",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Applied (or idempotent no-op)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceActionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_end_conference",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_end_conference"
+      }
+    },
+    "/v1/meetings/conferences/{id}/participants": {
+      "get": {
+        "tags": [
+          "Participants (v2)"
+        ],
+        "summary": "Admitted participants (roster).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `GET /api/v2/conferences/{id}/participants`; the CF Meet apps call that path directly.\n\nReturns the participants currently ADMITTED to the conference, ordered by admission time.\nAvailable to admitted participants and to the space owner and members; other callers (including\nwaiting, denied, removed or banned participants) get PERMISSION_DENIED. A VIEWER (a webinar or\ntown-hall attendee) sees only the people running the session (presenters and above) and\nthemselves, never the other attendees.",
+        "operationId": "platform_v2_list_participants",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Roster",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ParticipantResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.read",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_list_participants",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_list_participants"
+      }
+    },
+    "/v1/meetings/conferences/{id}/participants/{participantId}/remove": {
+      "post": {
+        "tags": [
+          "Participants (v2)"
+        ],
+        "summary": "Remove a participant (business authority; media disconnect enforced by the RTC provider).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/conferences/{id}/participants/{participantId}/remove`; the CF Meet apps call that path directly.\n\nSets the participant to REMOVED and disconnects their active media sessions; an optional\n`reason` is recorded in the audit log. Requires `participant.remove`, and the target must be\nless privileged than the caller (never yourself). Idempotent for participants already removed or\nbanned; `providerEnforcement` tells whether the RTC provider has confirmed the disconnect.",
+        "operationId": "platform_v2_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "description": "Participant id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveParticipantRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModerationResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_remove",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_remove"
+      }
+    },
+    "/v1/meetings/conferences/{id}/start": {
+      "post": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Start a conference. Concurrent starts yield exactly one LIVE authority.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/conferences/{id}/start`; the CF Meet apps call that path directly.\n\nMoves a CREATED, PREPARING or WAITING conference to LIVE (a CREATED one is prepared first).\nRequires `conference.start`, an active meeting space, and the current time within the start\nwindow (from the space's early-start allowance before the scheduled start until its grace period\nafter the scheduled end). Starting a LIVE conference is a no-op (`changed: false`), and only one\nconference per meeting space can be LIVE at a time.",
+        "operationId": "platform_v2_start_conference",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Applied (or idempotent no-op)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceActionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_STATE_CONFLICT / CONFERENCE_NOT_LIVE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_start_conference",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_start_conference"
+      }
+    },
+    "/v1/meetings/conferences/{id}/waiting-room": {
+      "get": {
+        "tags": [
+          "Waiting Room (v2)"
+        ],
+        "summary": "Waiting queue (requires `participant.admit`).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `GET /api/v2/conferences/{id}/waiting-room`; the CF Meet apps call that path directly.\n\nReturns the participants currently WAITING for admission, oldest request first. The caller's\nconference role (from an admitted participant or a space membership) must hold\n`participant.admit`. Returns FEATURE_DISABLED when the waiting room is not enabled.",
+        "operationId": "platform_v2_get_waiting_room",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Waiting participants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitingRoomResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.read",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_get_waiting_room",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_get_waiting_room"
+      }
+    },
+    "/v1/meetings/conferences/{id}/waiting-room/admit": {
+      "post": {
+        "tags": [
+          "Waiting Room (v2)"
+        ],
+        "summary": "Admit one, selected or all waiting participants (transactional, idempotent).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/conferences/{id}/waiting-room/admit`; the CF Meet apps call that path directly.\n\nMoves WAITING participants to ADMITTED: pass `participantIds` (up to 500) or `all: true` for\neveryone currently waiting. Requires `participant.admit` and a LIVE conference, and respects the\nmeeting's capacity. Any id outside this conference fails the whole request; already admitted ids\nare reported as `unchanged`, and banned or otherwise ineligible ones as `skipped`.",
+        "operationId": "platform_v2_admit",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdmitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkAdmissionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND (incl. ids of other conferences)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_NOT_LIVE (e.g. ENDING)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_admit",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_admit"
+      }
+    },
+    "/v1/meetings/conferences/{id}/waiting-room/deny": {
+      "post": {
+        "tags": [
+          "Waiting Room (v2)"
+        ],
+        "summary": "Deny one, selected or all waiting participants.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/conferences/{id}/waiting-room/deny`; the CF Meet apps call that path directly.\n\nMoves WAITING participants to DENIED: pass `participantIds` (up to 500) or `all: true`. Optional\n`reasonCode` (max 64 chars) and `message` (max 500 chars, shown to the denied participant), plus\nan `internalNote` that is never shown to them. Requires `participant.deny`; any id outside this\nconference fails the whole request, already denied ids are `unchanged` and others `skipped`.",
+        "operationId": "platform_v2_deny",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DenyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkAdmissionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PARTICIPANT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_deny",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_deny"
+      }
+    },
+    "/v1/meetings/instant-meetings": {
+      "post": {
+        "tags": [
+          "Meeting Spaces (v2)"
+        ],
+        "summary": "Instant meeting: creates a meeting space and a LIVE conference atomically.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/instant-meetings`; the CF Meet apps call that path directly.\n\nCreates a meeting space owned by the caller and a conference that is LIVE immediately, in one\nstep, and returns both. The body is optional: the title defaults to \"Instant meeting\" and the\naccess policy to PUBLIC; timezone, waiting-room policy and passcode may be set. Requires a\nsigned-in user with v2 meetings enabled for the account. The conference's media room is prepared\nright away on a best-effort basis.",
+        "operationId": "platform_v2_create_instant_meeting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstantMeetingRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstantMeetingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_create_instant_meeting",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_create_instant_meeting"
+      }
+    },
+    "/v1/meetings/meeting-spaces": {
+      "get": {
+        "tags": [
+          "Meeting Spaces (v2)"
+        ],
+        "summary": "List meeting spaces the caller owns or is a member of.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `GET /api/v2/meeting-spaces`; the CF Meet apps call that path directly.\n\nReturns every non-deleted meeting space the signed-in caller owns or is an active member of,\nnewest first; archived spaces are included. Each item carries the caller's role and its\ncanonical conference (the LIVE one, else the next unstarted one whose start window is still\nopen, else the latest). Owners, hosts and co-hosts get the full view, other members the summary\nview. Without `limit` and `cursor` the complete list is returned (legacy behaviour); with\neither, one page of `limit` (1-200, default 50) items and `nextCursor` while more exist.",
+        "operationId": "platform_v2_list_meeting_spaces",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from nextCursor",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200 (default 50 when paginating)",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Spaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingSpaceListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.read",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_list_meeting_spaces",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_list_meeting_spaces"
+      },
+      "post": {
+        "tags": [
+          "Meeting Spaces (v2)"
+        ],
+        "summary": "Create a meeting space. The owner is always the authenticated caller.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/meeting-spaces`; the CF Meet apps call that path directly.\n\nCreates an ACTIVE meeting space with a newly generated meeting code; any owner sent by the\nclient is ignored. Requires a signed-in user with v2 meetings enabled for the account\n(FEATURE_DISABLED otherwise). An `organizationId` is accepted only if the caller is a verified\nmember of that organization, and an optional passcode is validated and stored only as a hash. No\nconference is created; schedule one separately or use `POST /api/v2/instant-meetings`. Send an\n`Idempotency-Key` header (1-128 visible ASCII characters, kept 24 hours per caller) to make\nretries safe: a retry with the same key and body returns the same space (header\n`Idempotent-Replayed: true`); the same key with a different body is IDEMPOTENCY_CONFLICT.",
+        "operationId": "platform_v2_create_meeting_space",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional retry key (1-128 visible ASCII characters)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMeetingSpaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created (or replayed for the same Idempotency-Key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingSpaceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_create_meeting_space",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_create_meeting_space"
+      }
+    },
+    "/v1/meetings/meeting-spaces/{id}": {
+      "get": {
+        "tags": [
+          "Meeting Spaces (v2)"
+        ],
+        "summary": "Read a meeting space by v2 id, v2 meeting code, legacy meeting id or legacy code.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `GET /api/v2/meeting-spaces/{id}`; the CF Meet apps call that path directly.\n\nCallers without management rights receive the SUMMARY view; resolution never implies\nauthorization. An ORGANIZATION_ONLY space is disclosed only to its owner / members, verified\nmembers of its organization and callers with calendar access (invitation, registration,\nparticipation): a signed-out caller gets AUTHENTICATION_REQUIRED, anyone else\nMEETING_NOT_FOUND.",
+        "operationId": "platform_v2_get_meeting_space",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Space UUID, meeting code, legacy meeting UUID or legacy code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Space",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingSpaceResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED (ORGANIZATION_ONLY space, signed out)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEETING_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.read",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_get_meeting_space",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_get_meeting_space"
+      },
+      "patch": {
+        "tags": [
+          "Meeting Spaces (v2)"
+        ],
+        "summary": "Update a meeting space (optimistic concurrency via `version`).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `PATCH /api/v2/meeting-spaces/{id}`; the CF Meet apps call that path directly.\n\nPartially updates the space's settings and policies; omitted fields are left unchanged. Requires\nthe owner or a host, v2 meetings enabled for the account, and the space's current `version` (a\nstale version returns MEETING_VERSION_CONFLICT). Archived spaces cannot be modified. A passcode\ncan be set or cleared with `clearPasscode`; changing the timezone re-anchors an active\nrecurrence to the new timezone at the same wall-clock time. Ownership cannot be changed here;\nuse the owner-transfer endpoint.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
+        "operationId": "platform_v2_update_meeting_space",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMeetingSpaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingSpaceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "MEETING_VERSION_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_update_meeting_space",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_update_meeting_space"
+      }
+    },
+    "/v1/meetings/meeting-spaces/{id}/archive": {
+      "post": {
+        "tags": [
+          "Meeting Spaces (v2)"
+        ],
+        "summary": "Soft-archive a meeting space (owner only). History is preserved.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/meeting-spaces/{id}/archive`; the CF Meet apps call that path directly.\n\nArchives the space: it can no longer be modified, its recurring series is ended and unstarted\nfuture occurrences are cancelled, while past conferences, participants and audit history are\nkept. Only the owner (or a platform administrator) may archive. The optional body `version` is\nchecked against the current version (MEETING_VERSION_CONFLICT on mismatch). Archiving an\nalready-archived space returns it unchanged.\nOrganization OWNER / ADMIN holding `meetings.organization.manage` (Organizations authoritative\nmode) may also do this for their organization's meeting spaces (ORG-011).",
+        "operationId": "platform_v2_archive_meeting_space",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Optional expected version",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VersionedRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "Archived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingSpaceResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_archive_meeting_space",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_archive_meeting_space"
+      }
+    },
+    "/v1/meetings/meeting-spaces/{id}/conferences": {
+      "get": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "List occurrences of a meeting space (members only).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `GET /api/v2/meeting-spaces/{id}/conferences`; the CF Meet apps call that path directly.\n\nReturns the conferences of the meeting space (full view), ordered by scheduled start. Optional\n`from` (inclusive) and `to` (exclusive) RFC 3339 timestamps filter on the scheduled start time.\nRequires a bearer user token of the space owner or an active member.",
+        "operationId": "platform_v2_list_conferences",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC 3339",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC 3339",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Occurrences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.read",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_list_conferences",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_list_conferences"
+      },
+      "post": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Create a one-time scheduled conference occurrence.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/meeting-spaces/{id}/conferences`; the CF Meet apps call that path directly.\n\nAdds a single (non-recurring) conference to an active meeting space in state CREATED, with\noptional `scheduledStartAt` / `scheduledEndAt` (the end requires a start, must be after it and\nat most 24 hours later; a start more than 5 minutes in the past is rejected). Requires a bearer\nuser token whose space role may schedule conferences. Send an `Idempotency-Key` header (1-128\nvisible ASCII characters, kept 24 hours per caller and space) to make retries safe: the same\nkey and body return the same conference (header `Idempotent-Replayed: true`); the same key\nwith a different body is IDEMPOTENCY_CONFLICT.",
+        "operationId": "platform_v2_create_conference",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional retry key (1-128 visible ASCII characters)",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created (or replayed for the same Idempotency-Key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "IDEMPOTENCY_CONFLICT / CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (per-account creation budget)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_create_conference",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_create_conference"
+      }
+    },
+    "/v1/meetings/meeting-spaces/{id}/invitations": {
+      "get": {
+        "tags": [
+          "Invitations (v2)"
+        ],
+        "summary": "List invitations of a space (no tokens or hashes).",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `GET /api/v2/meeting-spaces/{id}/invitations`; the CF Meet apps call that path directly.\n\nReturns all invitations of the meeting space, newest first, including revoked and expired ones,\nwith their status and usage count. Requires a bearer user token with invite authority in the\nspace (a role allowed to admit participants).",
+        "operationId": "platform_v2_list_invitations",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invitations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InvitationResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.read"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:read"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.read",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_list_invitations",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_list_invitations"
+      },
+      "post": {
+        "tags": [
+          "Invitations (v2)"
+        ],
+        "summary": "Create an invitation. The raw token is returned once and never stored.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/meeting-spaces/{id}/invitations`; the CF Meet apps call that path directly.\n\nIssues a bearer invitation for an active meeting space, optionally limited to one conference\n(`conferenceId`), bound to a verified account email (`inviteeEmail`) or capped by `useLimit`\n(1–10000). It expires after `expiresInHours` (default 168, capped by server policy) and grants\n`role` (default PARTICIPANT), which must be below the inviter's own role. Requires a bearer user\ntoken with invite authority in the space (a role allowed to admit participants); store the token\nfrom the response, it cannot be retrieved again. With `sendEmail: true` (requires `inviteeEmail`)\nthe link is also emailed to the invitee when notification email is enabled on the deployment;\n`emailDelivery` reports the outcome and at most a configured number of invitation emails per\nhour can be requested (`429 RATE_LIMITED`). Machine callers cannot request emails.",
+        "operationId": "platform_v2_create_invitation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInvitationRequest"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateInvitationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR (incl. sendEmail without inviteeEmail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED (incl. role above grant authority)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (invitation emails per hour)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_create_invitation",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_create_invitation"
+      }
+    },
+    "/v1/meetings/meeting-spaces/{id}/invitations/{invitationId}/revoke": {
+      "post": {
+        "tags": [
+          "Invitations (v2)"
+        ],
+        "summary": "Revoke an invitation.",
+        "description": "Partner server route (platform credential or CF Meet Apps OAuth access token) of `POST /api/v2/meeting-spaces/{id}/invitations/{invitationId}/revoke`; the CF Meet apps call that path directly.\n\nMarks the invitation REVOKED so it can no longer be resolved or used to join. Requires a bearer\nuser token with invite authority in the space (a role allowed to admit participants). Revoking\nan already revoked invitation is a no-op that returns it unchanged.",
+        "operationId": "platform_v2_revoke_invitation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Meeting space id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "invitationId",
+            "in": "path",
+            "description": "Invitation id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "platformCredential": [
+              "meetings.write"
+            ]
+          },
+          {
+            "oauthAccessToken": [
+              "meetings:write"
+            ]
+          }
+        ],
+        "x-cfmeet-required-scope": "meetings.write",
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.platform.v2_revoke_invitation",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "OAUTH_ACCESS_TOKEN"
+        ],
+        "x-cfmeet-alias-of": "meetings.v2_revoke_invitation"
       }
     }
   },
@@ -13664,6 +15498,8 @@
           "AVATAR_NOT_FOUND",
           "DEVICE_KEY_IN_USE",
           "DEVICE_LINK_INVALID",
+          "APP_NOT_FOUND",
+          "OAUTH_REQUEST_INVALID",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -18633,6 +20469,12 @@
         "type": "http",
         "scheme": "bearer"
       },
+      "oauthAccessToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfoa_<sbx|test|live>_…",
+        "description": "OAuth access token of a CF Meet App acting for one CF Meet user (ADR 0064), sent to the public API Gateway as `Authorization: Bearer cfoa_…`. The roles listed are the OAuth scopes the grant must hold (meetings:read / meetings:write). The app acts as that user on the user's own meetings only (read: meetings the user owns, hosts or co-hosts; write: meetings the user owns; any other meeting is 404) and can never join, receive media, read recordings or administer. Bot tokens are refused."
+      },
       "participant_token": {
         "type": "apiKey",
         "in": "header",
@@ -18643,6 +20485,12 @@
         "scheme": "bearer",
         "bearerFormat": "cfmk_<sbx|test|live>_<public id>_<secret>",
         "description": "Customer platform API credential issued to an application environment's service account, sent to the CF Meet public API Gateway as `Authorization: Bearer <credential>`. The roles listed in an operation's security requirement are the platform scopes the credential must hold (meetings.read / meetings.write). The gateway forwards the request without the credential; the Meeting Service has Platform Access re-verify it and acts as the environment's machine caller, which manages only meetings owned by its own application environment (any other meeting is 404). Never accepted on internal routes."
+      },
+      "userToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cfut",
+        "description": "CF Meet user token of a partner user (`cfut_<sbx|test|live>_<JWS>`), minted by the partner's server for one user of its application environment and sent by the device as `Authorization: Bearer cfut_…`. Platform Access verifies it live on every use (a successful answer is cached for at most 30 seconds): the user must be ACTIVE and the minting credential, environment, application and tenant active. Only the conference join accepts it; the join returns the participant token the device uses afterwards."
       }
     }
   }

@@ -19,7 +19,7 @@
 //! Every mutable operation must be classified in [`CLASSIFIED`]; the test FAILS when the
 //! contract gains a mutable operation that is not classified (or a classified one
 //! disappears). Operations that cannot be reached in the test world would be listed in
-//! [`UNREACHABLE`] with a reason (currently none: every operation is reached).
+//! [`UNREACHABLE`] with a reason (only the default-off ADR 0062 device exchange).
 //!
 //! Further: targeted success and version / state / idempotency conflict (409) checks for
 //! a representative set of operations, and the combined scope × ownership rule (owning
@@ -320,10 +320,16 @@ const CLASSIFIED: &[(&str, Probe)] = &[
     ("POST /v1/blocks", Probe::Body),
     ("DELETE /v1/blocks/{block_id}", Probe::HiddenPath),
     ("POST /v1/calls/{call_id}/abuse-reports", Probe::Body),
+    ("POST /v1/calling/user-sessions", Probe::Body),
 ];
 
-/// Operations that cannot be reached in the test world, with the reason (none today).
-const UNREACHABLE: &[(&str, &str)] = &[];
+/// Operations that cannot be reached in the test world, with the reason.
+const UNREACHABLE: &[(&str, &str)] = &[(
+    "POST /v1/calling/user-sessions",
+    "ADR 0062 device exchange behind the default-off CALLING_USER_TOKEN_EXCHANGE_ENABLED \
+     (not mounted in this deployment); its refusals (no / foreign / revoked token, missing \
+     grant, FIRST_PARTY, malformed body) without effect are certified by user_sessions.rs",
+)];
 
 /// Tables that legitimately change on a refused request, and why.
 const BOOKKEEPING: &[(&str, &str)] = &[(
@@ -357,6 +363,8 @@ enum Auth {
     Service,
     Signaling,
     ProviderSignature,
+    /// A CF Meet user token (ADR 0062; only operations listed in [`UNREACHABLE`]).
+    UserToken,
 }
 
 #[derive(Debug, Clone)]
@@ -396,6 +404,7 @@ fn mutable_operations() -> Vec<Operation> {
                 "cfServiceAuth" => Auth::Service,
                 "signalingCredential" => Auth::Signaling,
                 "mediaProviderSignature" => Auth::ProviderSignature,
+                "userToken" => Auth::UserToken,
                 other => panic!("{method} {path}: unclassified security scheme {other}"),
             };
             out.push(Operation {
@@ -913,6 +922,7 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
         };
         let probe_body = json!({});
         match op.auth {
+            Auth::UserToken => unreachable!("{}: user-token operations are UNREACHABLE", op.key),
             Auth::Platform => {
                 // 1. No credential.
                 let r = p
@@ -1122,6 +1132,7 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                     .request(op.method.clone(), &path, Some(own), Some(bad.clone()))
                     .await
             }
+            (Auth::UserToken, _) => unreachable!("{}", op.key),
             (Auth::ProviderSignature, _) => {
                 let signature = common::fake_media::sign_raw(bad.to_string().as_bytes());
                 p.h()

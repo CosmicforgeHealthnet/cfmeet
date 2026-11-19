@@ -89,6 +89,7 @@ impl SessionRow {
                 .map(str::to_string)
                 .collect(),
             principal_restriction: Some([self.principal_id].into_iter().collect()),
+            oauth: None,
         })
     }
 
@@ -150,10 +151,13 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
     // client sees must not depend on which signal reached this gateway first. A session
     // device (Section 13) is checked in its own table, and ends when the operator
     // switches session devices off.
+    let mut partner_credential = None;
     let device_active = if current.is_session_device() {
-        super::session_devices::active(
+        // ADR 0062: a partner session device (exchanged from a CF Meet user token) is
+        // usable only while the partner flag is on; a first-party one while session
+        // devices are on.
+        match super::session_devices::active_device(
             &state.db,
-            state.realtime.settings.session_devices_enabled,
             current.device_id,
             current.principal_id,
             current.environment_id,
@@ -161,6 +165,14 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
         )
         .await
         .map_err(|_| Invalid::Unavailable)?
+        {
+            Some(d) if d.is_partner() => {
+                partner_credential = Some(current.credential_id);
+                state.partner.settings.session_devices_enabled
+            }
+            Some(_) => state.realtime.settings.session_devices_enabled,
+            None => false,
+        }
     } else {
         db::scalar_i64(
             &state.db,
@@ -181,6 +193,18 @@ pub async fn validate(state: &AppState, session: &SessionRow) -> std::result::Re
         return Err(Invalid::Expired);
     }
     let scope = current.owner_scope().ok_or(Invalid::SessionRevoked)?;
+    // ADR 0062: revoking the partner's minting credential ends its partner devices (at
+    // use and on the periodic re-validation of open connections).
+    if let Some(credential) = partner_credential {
+        match state.partner.credential_active(&scope, credential).await {
+            Ok(true) => {}
+            Ok(false) => return Err(Invalid::SessionRevoked),
+            Err(e) => {
+                tracing::warn!(error = %e, "credential status unavailable during session validation");
+                return Err(Invalid::Unavailable);
+            }
+        }
+    }
     let personal = cf_communications_policy::Scope {
         tenant_id: scope.tenant_id,
         application_id: scope.application_id,
