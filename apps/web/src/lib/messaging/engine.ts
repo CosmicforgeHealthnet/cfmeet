@@ -334,6 +334,8 @@ export class MessagingEngine {
   private generation = 0;
   private pendingSends = new Map<string, MessageView[]>();
   private deviceChecks = new Map<string, number>();
+  /** Per chat: when a sender last checked for new devices right before sending. */
+  private sendDeviceChecks = new Map<string, number>();
   private lastStockCheck = 0;
   private missingSince = new Map<string, number>();
   /** Group changes of this device (worker snapshot / rollback) run one at a time. */
@@ -1481,9 +1483,9 @@ export class MessagingEngine {
    */
   private async addMissingDevices(conv: ServerConversation, urgent = false): Promise<void> {
     const id = conv.conversationId;
-    const last = this.deviceChecks.get(id) ?? 0;
-    if (Date.now() - last < (urgent ? SEND_DEVICE_CHECK_MS : DEVICE_CHECK_MS) || !this.crypto || !conv.encryption.mlsGroupId) return;
-    this.deviceChecks.set(id, Date.now());
+    const checks = urgent ? this.sendDeviceChecks : this.deviceChecks;
+    if (Date.now() - (checks.get(id) ?? 0) < (urgent ? SEND_DEVICE_CHECK_MS : DEVICE_CHECK_MS) || !this.crypto || !conv.encryption.mlsGroupId) return;
+    checks.set(id, Date.now());
     const gid = b64u.dec(conv.encryption.mlsGroupId);
     if (!(await this.crypto.call<boolean>("hasGroup", { groupId: gid }))) return;
     const inTree = new Set(await this.crypto.call<string[]>("members", { groupId: gid }));
@@ -1520,7 +1522,15 @@ export class MessagingEngine {
       if (ok) verified.push(d.deviceId);
     }
     if (!verified.length) return;
-    await this.addDevicesOf(conv, missing, verified).catch(() => {});
+    try {
+      await this.addDevicesOf(conv, missing, verified);
+    } catch (e) {
+      // The group moved on (another commit won the epoch): catch up once and add again.
+      // (Only before a send: during a sync the next sync catches up.)
+      if (!urgent || !(e instanceof MessagingApiError && e.status === 409)) return;
+      await this.sync(id);
+      await this.addDevicesOf(conv, missing, verified).catch(() => {});
+    }
     if (this.snapshot.awaitingSetup[id]) void this.flushDrafts(id);
   }
 
