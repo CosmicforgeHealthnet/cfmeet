@@ -803,6 +803,96 @@
       "if": {
         "properties": {
           "eventType": {
+            "const": "organizations.organization.archived"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "organizations.organization.reactivated"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "producer": {
+            "const": "cfmeet.organizations"
+          },
+          "delivery": {
+            "properties": {
+              "priority": {
+                "const": "NORMAL"
+              }
+            }
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "sealed"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
             "const": "communications.connection.requested"
           }
         },
@@ -3235,6 +3325,38 @@
       "dataKeys": [
         "changedAt",
         "side"
+      ]
+    },
+    {
+      "number": 39,
+      "eventType": "organizations.organization.archived",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "Gap audit G19 (1.4.0): mirrors #10; published by Organizations only with ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED.",
+      "dataKeys": [
+        "organizationId"
+      ]
+    },
+    {
+      "number": 40,
+      "eventType": "organizations.organization.reactivated",
+      "producer": "cfmeet.organizations",
+      "priority": "NORMAL",
+      "lane": "STANDARD",
+      "category": "ORGANIZATION_UPDATES",
+      "subjectKind": "ORGANIZATION",
+      "sealed": null,
+      "idempotencyKey": null,
+      "optional": false,
+      "note": "Gap audit G19 (1.4.0): mirrors #10; published by Organizations only with ORGANIZATIONS_LIFECYCLE_NOTIFICATIONS_ENABLED.",
+      "dataKeys": [
+        "organizationId"
       ]
     },
     {

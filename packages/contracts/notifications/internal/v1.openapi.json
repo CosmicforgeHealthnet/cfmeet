@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Notification Service internal API",
-    "version": "1.2.0",
-    "description": "Internal signed API of the unified Notification Service (cfmeet.notifications; blueprint Document 4 §3.3): I1–I11, the optional I12 (approved under D-15) and I13 (roadmap N9, the Messaging push-registration facade and D-1b copy). Frozen by roadmap N1 before the service exists (lifecycle experimental). Every route except I12 requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle (x-cfmeet-internal-permission); durable jti nonces; request binding emitted from day one. Never routed by public ingress. Health (/health, /ready with routingProtocol and per-lane heartbeats) is not counted as an API."
+    "version": "1.3.0",
+    "description": "Internal signed API of the unified Notification Service (cfmeet.notifications; blueprint Document 4 §3.3): I1–I11, the optional I12 (approved under D-15) and I13 (roadmap N9, the Messaging push-registration facade and D-1b copy) and I3c (1.3.0, gap audit C1: the cancellation of a call ring). Frozen by roadmap N1 before the service exists (lifecycle experimental). Every route except I12 requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle (x-cfmeet-internal-permission); durable jti nonces; request binding emitted from day one. Never routed by public ingress. Health (/health, /ready with routingProtocol and per-lane heartbeats) is not counted as an API."
   },
   "paths": {
     "/internal/v1/notification-events": {
@@ -280,7 +280,7 @@
       "post": {
         "operationId": "dispatchCallPush",
         "summary": "Call-invitation push fast lane (I3)",
-        "description": "Synchronous, ≤ 1 s, no queue, no retry (the WebSocket ring and the recovery API cover failure). Called post-commit, best-effort, by Calling; ringing and first-answer arbitration stay in Calling. APNs VoIP / FCM high priority / Web Push urgency high. 1.2.0 (N9): the TTL is what is left of the invitation (expiresAt, at most 300 s), call alerts collapse (Web Push Topic / apns-collapse-id / FCM collapse_key cfmeet-call), APNS_VOIP endpoints receive a PushKit VoIP push; the device payload is the metadata {v, type: call} only.",
+        "description": "Synchronous, ≤ 1 s, no queue, no retry (the WebSocket ring and the recovery API cover failure). Called post-commit, best-effort, by Calling; ringing and first-answer arbitration stay in Calling. APNs VoIP / FCM high priority / Web Push urgency high. 1.2.0 (N9): the TTL is what is left of the invitation (expiresAt, at most 300 s), call alerts collapse (Web Push Topic / apns-collapse-id / FCM collapse_key cfmeet-call), APNS_VOIP endpoints receive a PushKit VoIP push; the device payload is the metadata {v, type: call} only. 1.3.0 (gap audit S15): when recipientAccountRef is present, the account's incomingCalls preference (the Hub switch copied by N10) and the push channel of INCOMING_CALLS apply; off answers PREFERENCE_OFF and nothing is sent.",
         "tags": [
           "Call push"
         ],
@@ -368,7 +368,158 @@
                               "UNKNOWN_TARGET",
                               "RETRYABLE_FAILURE",
                               "PERMANENT_FAILURE",
-                              "EXPIRED"
+                              "EXPIRED",
+                              "PREFERENCE_OFF"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (FORBIDDEN): the issuer does not hold the permission in the receiver's trust bundle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/push/call-invitations/cancellations": {
+      "post": {
+        "operationId": "cancelCallPush",
+        "summary": "Cancel a call-invitation push (I3c)",
+        "description": "1.3.0 (gap audit C1). Called post-commit, best-effort, by Calling when a ringing invitation of a first-party recipient ends without being answered on that endpoint: answered elsewhere, cancelled by the caller, expired, or the Call ended. Same permission and bounds as I3 (synchronous, ≤ 1 s, no queue, no retry; off unless CALL_INVITATIONS is ACTIVE: NOT_CONFIGURED). The device payload is the metadata {v, type: call-cancel} only, sent with the ring's collapse id (cfmeet-call: a ring still waiting at the provider is replaced, so the device never rings) and a 60 s TTL. Never a PushKit VoIP push: APNS_VOIP endpoints answer SKIPPED_VOIP (the app ends its CallKit call from signaling / recovery). Only the recipient account's endpoints are reached (another account's pushTargetRef answers UNKNOWN_TARGET); the incomingCalls preference applies as for I3 (PREFERENCE_OFF: no ring was sent). No call id, number, name or other call detail is accepted.",
+        "tags": [
+          "Call push"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "notifications-call-push.dispatch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "pushTargetRefs",
+                  "recipientAccountRef"
+                ],
+                "properties": {
+                  "pushTargetRefs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "recipientAccountRef": {
+                    "description": "The invited CF Meet account (cfmeet-user:<uuid>). Required: only this account's endpoints are reached.",
+                    "type": "string",
+                    "pattern": "^cfmeet-user:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-target outcomes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "results"
+                  ],
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "pushTargetRef",
+                          "outcome"
+                        ],
+                        "properties": {
+                          "pushTargetRef": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "enum": [
+                              "SENT",
+                              "NOT_CONFIGURED",
+                              "INVALID_HANDLE",
+                              "DISABLED",
+                              "UNKNOWN_TARGET",
+                              "RETRYABLE_FAILURE",
+                              "PERMANENT_FAILURE",
+                              "EXPIRED",
+                              "PREFERENCE_OFF",
+                              "SKIPPED_VOIP"
                             ]
                           }
                         }
