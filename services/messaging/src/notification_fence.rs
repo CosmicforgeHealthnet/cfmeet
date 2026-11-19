@@ -227,6 +227,21 @@ pub async fn route_message(
     expires_at: DateTime<Utc>,
     new_capable: bool,
 ) -> Result<Decision, FenceError> {
+    route_message_with(txn, key, category, expires_at, new_capable, false).await
+}
+
+/// [`route_message`], where `always_new` (gap audit S1: an organization conversation's
+/// wake-up while `MESSAGING_ORGANIZATION_WAKEUPS` is on, whose legacy path reaches nobody)
+/// makes a fresh decision `NEW` in every mode — still sticky, still `OLD` with reason
+/// `RECIPIENT_LIMIT` when the audience does not fit one envelope.
+pub async fn route_message_with(
+    txn: &DatabaseTransaction,
+    key: &str,
+    category: &str,
+    expires_at: DateTime<Utc>,
+    new_capable: bool,
+    always_new: bool,
+) -> Result<Decision, FenceError> {
     if !valid_key(key) {
         return Err(FenceError::InvalidKey);
     }
@@ -245,6 +260,7 @@ pub async fn route_message(
     .ok_or_else(|| FenceError::UnknownCategory(category.to_owned()))?;
     let mode = Mode::parse(&state.mode).ok_or(FenceError::Corrupt)?;
     let mut route = match mode {
+        _ if always_new => Route::New,
         Mode::FencedNew if canary(key, state.canary_percent) => Route::New,
         _ => Route::Old,
     };

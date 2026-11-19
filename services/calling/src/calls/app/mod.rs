@@ -79,7 +79,7 @@ use crate::{
     privacy_relay::{PrivacyRelayAuthority, UnconfiguredPrivacyRelay},
     signaling::{
         bus::{RealtimeSignalBus, SignalEnvelope},
-        push::{NoPushTransport, PushDispatcher, PushOffer},
+        push::{NoPushTransport, PushCancel, PushDispatcher, PushOffer},
         signals::{self, SignalType},
     },
 };
@@ -509,6 +509,8 @@ pub struct CommandOutcome {
 pub(crate) struct PendingSignals {
     signals: Vec<SignalEnvelope>,
     pushes: Vec<PushOffer>,
+    /// Gap audit C1: rings to cancel (invitations that ended unanswered on their endpoint).
+    cancels: Vec<PushCancel>,
 }
 
 impl PendingSignals {
@@ -533,6 +535,9 @@ impl AppCallService {
         }
         for offer in signals.pushes {
             self.push.dispatch_offer(offer).await;
+        }
+        for cancel in signals.cancels {
+            self.push.dispatch_cancel(cancel).await;
         }
     }
 
@@ -634,12 +639,53 @@ impl AppCallService {
             self.push_offer(db, pending, call, invitation, caller.as_deref())
                 .await?;
         }
+        if ends_ring_unanswered(kind) {
+            self.push_cancel(db, pending, call, invitation).await?;
+        }
         pending.push(vec![invitation.endpoint_id], signal);
         Ok(())
     }
 }
 
+/// Gap audit C1: the invitation signals that end a ring without it being answered on that
+/// endpoint (answered elsewhere, cancelled — by the caller, the Call's end, a revoked
+/// endpoint or a closed queue / group —, or expired). Accepted and declined come from the
+/// device itself, which stops ringing on its own.
+pub(crate) fn ends_ring_unanswered(kind: SignalType) -> bool {
+    matches!(
+        kind,
+        SignalType::RingCancelled | SignalType::AnsweredElsewhere | SignalType::InvitationExpired
+    )
+}
+
 impl AppCallService {
+    /// Queues the cancellation of an invitation's ring when its endpoint has a push target
+    /// (the transport decides whether the recipient is first-party and dispatches).
+    async fn push_cancel<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        pending: &mut PendingSignals,
+        call: &calls::Model,
+        invitation: &call_invitations::Model,
+    ) -> CallResult<()> {
+        let Some(endpoint) = call_endpoints::Entity::find_by_id(invitation.endpoint_id)
+            .one(db)
+            .await?
+        else {
+            return Ok(());
+        };
+        let Some(target) = endpoint.push_target_ref else {
+            return Ok(());
+        };
+        let first_party_account = first_party_account(db, &endpoint).await?;
+        pending.cancels.push(PushCancel {
+            push_target_ref: target,
+            call_id: call.id,
+            first_party_account,
+        });
+        Ok(())
+    }
+
     /// Queues the push-ready payload of a new offer when its endpoint has a push target.
     async fn push_offer<C: ConnectionTrait>(
         &self,
@@ -735,4 +781,24 @@ pub(crate) fn state_signal(state: super::state::CallState) -> Option<SignalType>
         Cancelled => SignalType::Cancelled,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod push_cancel_tests {
+    use super::*;
+
+    /// Gap audit C1: exactly the signals that end a ring unanswered on its endpoint cancel
+    /// the ring's push; the device's own answer, refusal and every call-level signal do not.
+    #[test]
+    fn only_unanswered_ring_endings_cancel_the_push() {
+        for kind in SignalType::ALL {
+            let expected = matches!(
+                kind,
+                SignalType::RingCancelled
+                    | SignalType::AnsweredElsewhere
+                    | SignalType::InvitationExpired
+            );
+            assert_eq!(ends_ring_unanswered(*kind), expected, "{kind:?}");
+        }
+    }
 }

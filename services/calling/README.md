@@ -38,15 +38,21 @@ Provider room / dialog / carrier / request identifiers are never Call identities
 | **Part IV Workstream L** Calls to and from Digital Communications Numbers (DCNs) owned by `services/numbering` (inbound DCN offers verified against Numbering, outbound DCN presentation with enterprise membership policy and single-use caller-identity grants) | **Implemented** (ADR 0041; summary below) |
 | **Part G §63–§70** Durable event publication, customer webhooks, `call.route_changed`, usage facts and `GET /v1/usage`, tenant → application → service account → credential limits and the principal axis, `GET /v1/limits`, limit notices | **Implemented** (ADR 0028; summary below) |
 
-**Push (current state):** Calling builds the transport-neutral
-`cfmeet.calling.push-invitation` payload for endpoints that registered a `pushTargetRef`,
-but the service runs with `NoPushTransport` (`src/main.rs`), so nothing is pushed. The
-Notification Service's internal call-push route (`POST /internal/v1/push/call-invitations`)
-exists, but Calling is not wired to it yet. Incoming calls therefore reach a device only
-through its open signaling WebSocket or the recovery API (see [Flow](#flow)).
+**Push (current state, gap audit C1):** Calling builds the transport-neutral
+`cfmeet.calling.push-invitation` payload for endpoints that registered a `pushTargetRef`.
+`CALLING_PUSH_TRANSPORT` selects the transport: `none` (default, `NoPushTransport`: nothing
+is pushed; incoming calls reach a device through its open signaling WebSocket or the
+recovery API, see [Flow](#flow)) or `notifications` (with `CF_NOTIFICATIONS_BASE_URL`): the
+offer of a CF Meet first-party recipient goes to the Notification Service's call fast lane
+(I3, `POST /internal/v1/push/call-invitations`, `notifications-call-push.dispatch`) — a
+high-priority push living only as long as the invitation, metadata `{v, type: call}` only
+(never a number, name or call detail). When the ring ends unanswered on that endpoint
+(answered elsewhere, cancelled, expired, the Call ended) Calling cancels it through I3c
+(`POST /internal/v1/push/call-invitations/cancellations`, same permission). Both are
+fire-and-forget after commit, bounded by `CALLING_PUSH_TIMEOUT_MS`; ringing never waits
+for push.
 
-**Deferred (later sections / services):** wiring Calling's push dispatcher to the
-Notification Service, a message-broker transport for
+**Deferred (later sections / services):** a message-broker transport for
 platform events, quality metrics from providers that do not offer them, Numbering's own
 lifecycle and number administration (it is a separate service), billing / invoicing / pricing, and the Part F items listed below.
 

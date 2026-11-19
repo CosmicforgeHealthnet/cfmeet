@@ -742,6 +742,9 @@ pub(crate) async fn record_created_notify<C: ConnectionTrait>(
                 // Never accepted from the message request or exposed as push payload.
                 "initiating_service_account_id": ctx.scope.service_account_id,
                 "environment_kind": ctx.scope.environment_kind.as_str(),
+                // Gap audit S1: the authenticated tenant classification (Platform Access),
+                // so a delayed worker knows an organization's first-party scope.
+                "first_party": ctx.first_party,
             }),
         ),
     };

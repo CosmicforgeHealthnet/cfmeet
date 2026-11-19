@@ -203,6 +203,7 @@ impl OutboxEvent {
         if let Some(payload) = envelope["payload"].as_object_mut() {
             payload.remove("initiating_service_account_id");
             payload.remove("environment_kind");
+            payload.remove("first_party");
         }
         if let Some(cause) = self
             .causation_id

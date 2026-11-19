@@ -19,6 +19,16 @@
 //!   `notifications-call-push.dispatch`) in a background task bounded by
 //!   `CALLING_PUSH_TIMEOUT_MS`: ringing is never delayed and never fails because of push.
 //!   One alert per (call, push target): repeats are dropped until the invitation expires.
+//!
+//! Cancellation (gap audit C1): when a ringing invitation ends without being answered on
+//! its endpoint — answered elsewhere, cancelled by the caller, expired, or the Call ended —
+//! Calling queues a [`PushCancel`] after commit, like the offer. The `notifications`
+//! transport sends it to I3c (`POST /internal/v1/push/call-invitations/cancellations`,
+//! same permission): the service sends `{v, type: call-cancel}` with the ring's collapse id,
+//! so a ring still waiting at the provider is replaced and a ringing device stops. Only the
+//! push target and the recipient's account reference leave Calling — never the call id, a
+//! number, a name or any other call detail. Same bounds as the ring (fire and forget,
+//! `CALLING_PUSH_TIMEOUT_MS`), one cancellation per (call, push target).
 
 use std::{
     collections::HashMap,
@@ -43,6 +53,16 @@ pub struct PushOffer {
     pub first_party_account: Option<String>,
 }
 
+/// The end of a ringing invitation on one push target (gap audit C1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushCancel {
+    pub push_target_ref: Uuid,
+    pub call_id: Uuid,
+    /// As [`PushOffer::first_party_account`]: only first-party recipients are cancelled
+    /// through the Notification Service.
+    pub first_party_account: Option<String>,
+}
+
 /// A push transport. Dispatch is best effort: a lost push never loses state (the offer is
 /// recoverable through `GET /v1/calling/invitations`).
 #[async_trait]
@@ -54,6 +74,10 @@ pub trait PushDispatcher: Send + Sync + 'static {
     async fn dispatch_offer(&self, offer: PushOffer) {
         self.dispatch(offer.push_target_ref, offer.payload).await
     }
+
+    /// Cancels the ring of an invitation that ended unanswered on this target (default:
+    /// nothing — a transport without cancellation leaves it to signaling and recovery).
+    async fn dispatch_cancel(&self, _cancel: PushCancel) {}
 }
 
 /// No push transport configured: offers reach endpoints through signaling and recovery.
@@ -101,6 +125,8 @@ impl PushTransportSetting {
 #[async_trait]
 pub trait CallPushSink: Send + Sync + 'static {
     async fn call_push(&self, body: Value) -> Result<Value, String>;
+    /// I3c (gap audit C1).
+    async fn call_push_cancel(&self, body: Value) -> Result<Value, String>;
 }
 
 /// The service-authenticated I3 of the Notification Service.
@@ -116,6 +142,8 @@ impl NotificationServiceCallPush {
 
 /// I3, nested under the Notification Service's internal base URL.
 pub const CALL_PUSH_PATH: &str = "/internal/v1/push/call-invitations";
+/// I3c (gap audit C1), same base URL and permission.
+pub const CALL_PUSH_CANCEL_PATH: &str = "/internal/v1/push/call-invitations/cancellations";
 
 #[async_trait]
 impl CallPushSink for NotificationServiceCallPush {
@@ -123,6 +151,16 @@ impl CallPushSink for NotificationServiceCallPush {
         let request = OutboundServiceRequest::new_operation(ServiceId::notifications());
         self.client
             .post_json(&request, CALL_PUSH_PATH, &body)
+            .await
+            .map_err(|e| e.to_string())?
+            .json::<Value>()
+            .map_err(|e| e.to_string())
+    }
+
+    async fn call_push_cancel(&self, body: Value) -> Result<Value, String> {
+        let request = OutboundServiceRequest::new_operation(ServiceId::notifications());
+        self.client
+            .post_json(&request, CALL_PUSH_CANCEL_PATH, &body)
             .await
             .map_err(|e| e.to_string())?
             .json::<Value>()
@@ -138,7 +176,11 @@ pub struct NotificationsPushTransport {
     sink: Arc<dyn CallPushSink>,
     timeout: StdDuration,
     seen: Mutex<HashMap<(Uuid, Uuid), Instant>>,
+    cancelled: Mutex<HashMap<(Uuid, Uuid), Instant>>,
 }
+
+/// How long a sent cancellation is remembered (a repeat inside it is dropped).
+const CANCEL_MEMORY: StdDuration = StdDuration::from_secs(300);
 
 impl NotificationsPushTransport {
     pub fn new(sink: Arc<dyn CallPushSink>, timeout: StdDuration) -> Self {
@@ -146,7 +188,32 @@ impl NotificationsPushTransport {
             sink,
             timeout,
             seen: Mutex::default(),
+            cancelled: Mutex::default(),
         }
+    }
+
+    /// Records a cancellation of (call, target); `false` when it was already sent.
+    fn first_cancel(&self, call: Uuid, target: Uuid) -> bool {
+        let now = Instant::now();
+        let mut done = self.cancelled.lock().expect("dedupe");
+        if done.len() > DEDUPE_MAX {
+            done.retain(|_, t| *t > now);
+        }
+        match done.get(&(call, target)) {
+            Some(t) if *t > now => false,
+            _ => {
+                done.insert((call, target), now + CANCEL_MEMORY);
+                true
+            }
+        }
+    }
+
+    /// The I3c body of a cancellation: the target and the account only.
+    pub fn cancel_body(cancel: &PushCancel, account: &str) -> Value {
+        json!({
+            "pushTargetRefs": [cancel.push_target_ref],
+            "recipientAccountRef": account,
+        })
     }
 
     /// Records (call, target); `false` when it was already alerted and not yet expired.
@@ -231,6 +298,34 @@ impl PushDispatcher for NotificationsPushTransport {
                     "call push not dispatched (recoverable via signaling)"
                 );
             }
+        });
+    }
+
+    async fn dispatch_cancel(&self, cancel: PushCancel) {
+        let Some(account) = cancel.first_party_account.clone() else {
+            crate::metrics::inc(
+                "calling_push_cancellations_total",
+                &[("outcome", "not_first_party")],
+            );
+            return;
+        };
+        if !self.first_cancel(cancel.call_id, cancel.push_target_ref) {
+            crate::metrics::inc(
+                "calling_push_cancellations_total",
+                &[("outcome", "duplicate")],
+            );
+            return;
+        }
+        let body = Self::cancel_body(&cancel, &account);
+        let sink = self.sink.clone();
+        let timeout = self.timeout;
+        tokio::spawn(async move {
+            let outcome = match tokio::time::timeout(timeout, sink.call_push_cancel(body)).await {
+                Ok(Ok(_)) => "dispatched",
+                Ok(Err(_)) => "failed",
+                Err(_) => "timeout",
+            };
+            crate::metrics::inc("calling_push_cancellations_total", &[("outcome", outcome)]);
         });
     }
 }

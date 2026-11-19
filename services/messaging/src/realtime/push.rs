@@ -220,6 +220,9 @@ pub struct WakeupAuthorization {
     /// The event's non-secret authority references (as for delayed policy checks).
     pub initiating_service_account_id: Option<Uuid>,
     pub environment_kind: Option<String>,
+    /// The event's authenticated tenant classification was FIRST_PARTY (gap audit S1;
+    /// `false` for events recorded before the field existed).
+    pub first_party: bool,
     /// Push job candidates: ACTIVE members other than the sender (empty when the event
     /// wakes nobody). Jobs are created for these at commit; delivery is gated by
     /// `entitled` again at dispatch, so a later departure or block still suppresses it.
@@ -313,6 +316,7 @@ pub async fn authorize_wakeups<C: sea_orm::ConnectionTrait>(
             .get("environment_kind")
             .and_then(Value::as_str)
             .map(str::to_owned),
+        first_party: payload.get("first_party").and_then(Value::as_bool) == Some(true),
         candidates: Vec::new(),
         entitled: Vec::new(),
     };
@@ -421,6 +425,7 @@ pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
     let expires_at = now + chrono::Duration::hours(24);
     let new_capable =
         decision.candidates.len() <= crate::notification_publications::NEW_ROUTE_MAX_CANDIDATES;
+    let organization = crate::notifications::organization_scope(state, &decision);
     let values = vec![
         event.id.into(),
         conversation.into(),
@@ -430,17 +435,26 @@ pub async fn fanout_jobs(state: &AppState, event: &OutboxEvent) -> Result<u64> {
         expires_at.into(),
         decision.candidates.into(),
     ];
+    // Gap audit S1: an organization conversation's members have no push registration in
+    // the organization's scope (their devices register once, in the personal scope), so
+    // the legacy path cannot reach them. With the switch on, its wake-ups are routed `NEW`
+    // in every fence mode (one publication, no legacy jobs: never both). Without the fence
+    // history (no decision can be recorded) they keep the legacy path.
     match fence::current_mode(&state.db, fence::MESSAGE_WAKEUPS).await? {
-        None | Some(Mode::LegacyOnly) => return Ok(db::exec(&state.db, INSERT_JOBS, values).await?),
+        None => return Ok(db::exec(&state.db, INSERT_JOBS, values).await?),
+        Some(Mode::LegacyOnly) if !organization => {
+            return Ok(db::exec(&state.db, INSERT_JOBS, values).await?)
+        }
         Some(_) => {}
     }
     let txn = state.db.begin().await?;
-    let route = fence::route_message(
+    let route = fence::route_message_with(
         &txn,
         &fence::push_key(event.id),
         fence::MESSAGE_WAKEUPS,
         expires_at,
         new_capable,
+        organization,
     )
     .await?;
     let jobs = match route.route {
