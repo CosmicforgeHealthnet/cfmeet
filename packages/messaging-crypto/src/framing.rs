@@ -9,7 +9,8 @@
 //! message posing as a commit (and vice versa).
 
 use openmls::prelude::{
-    tls_codec::Deserialize as _, ContentType, MlsMessageIn, ProtocolMessage, WireFormat,
+    tls_codec::Deserialize as _, BasicCredential, ContentType, MlsMessageBodyIn, MlsMessageIn,
+    ProtocolMessage, Sender, WireFormat,
 };
 
 /// Upper bound of one inspected MLS message (an application message is bounded by the
@@ -39,6 +40,22 @@ pub struct Framing {
     pub epoch: u64,
     pub content: FramedContent,
     pub wire_format: FramedWireFormat,
+    /// A `PublicMessage` commit whose sender is `new_member_commit`: an external commit,
+    /// by which a device joins the group by itself (RFC 9420 §12.4.3.2). Its sender type
+    /// is in the clear; the joiner's identity is verified by every member's client.
+    pub new_member_commit: bool,
+}
+
+/// The public header of an encoded `GroupInfo` (RFC 9420 §12.4.3): its group and epoch,
+/// and the device ids of the leaves of the ratchet tree it carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupInfoHeader {
+    pub group_id: Vec<u8>,
+    pub epoch: u64,
+    /// The CF Meet device ids of the tree's leaves (`None` without a ratchet tree
+    /// extension). A device absent here is not in the group at this epoch: an external
+    /// commit built from this GroupInfo encrypts nothing to it.
+    pub member_devices: Option<Vec<uuid::Uuid>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -66,6 +83,12 @@ pub fn inspect(encoded: &[u8]) -> Result<Framing, FramingError> {
         ContentType::Proposal => FramedContent::Proposal,
         ContentType::Commit => FramedContent::Commit,
     };
+    let new_member_commit = match &protocol {
+        ProtocolMessage::PublicMessage(m) => {
+            matches!(m.sender(), Sender::NewMemberCommit) && content == FramedContent::Commit
+        }
+        _ => false,
+    };
     let wire_format = match protocol.wire_format() {
         WireFormat::PrivateMessage => FramedWireFormat::Private,
         WireFormat::PublicMessage => FramedWireFormat::Public,
@@ -76,12 +99,48 @@ pub fn inspect(encoded: &[u8]) -> Result<Framing, FramingError> {
         epoch: protocol.epoch().as_u64(),
         content,
         wire_format,
+        new_member_commit,
     })
+}
+
+/// Reads the group id and epoch of an encoded `MLSMessage` carrying a `GroupInfo` (exact
+/// decoding). Its signature is verified by the joining client against the signer's leaf.
+pub fn inspect_group_info(encoded: &[u8]) -> Result<GroupInfoHeader, FramingError> {
+    if encoded.len() > MAX_FRAMED_BYTES {
+        return Err(FramingError::TooLarge);
+    }
+    let message =
+        MlsMessageIn::tls_deserialize_exact(encoded).map_err(|_| FramingError::Malformed)?;
+    match message.extract() {
+        MlsMessageBodyIn::GroupInfo(info) => {
+            let member_devices = match info.extensions().ratchet_tree() {
+                Some(tree) => Some(
+                    tree.ratchet_tree()
+                        .leaves()
+                        .map(|leaf| {
+                            BasicCredential::try_from(leaf.credential().clone())
+                                .ok()
+                                .and_then(|c| {
+                                    crate::binding::parse_device_credential_identity(c.identity())
+                                })
+                                .ok_or(FramingError::Malformed)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+                None => None,
+            };
+            Ok(GroupInfoHeader {
+                group_id: info.group_id().as_slice().to_vec(),
+                epoch: info.epoch().as_u64(),
+                member_devices,
+            })
+        }
+        _ => Err(FramingError::Malformed),
+    }
 }
 
 /// Whether `encoded` is a well-formed MLS `Welcome` message (structure only).
 pub fn is_welcome(encoded: &[u8]) -> bool {
-    use openmls::prelude::MlsMessageBodyIn;
     encoded.len() <= MAX_FRAMED_BYTES
         && matches!(
             MlsMessageIn::tls_deserialize_exact(encoded).map(|m| m.extract()),
@@ -102,6 +161,7 @@ mod tests {
             Err(FramingError::TooLarge)
         );
         assert!(!is_welcome(b"nope"));
+        assert_eq!(inspect_group_info(b"nope"), Err(FramingError::Malformed));
         let mut x: u64 = 0x1234_5678_9abc_def1;
         for len in 0..300usize {
             let bytes: Vec<u8> = (0..len)
@@ -113,6 +173,7 @@ mod tests {
                 })
                 .collect();
             let _ = inspect(&bytes);
+            let _ = inspect_group_info(&bytes);
         }
     }
 }

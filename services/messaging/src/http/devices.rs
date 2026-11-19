@@ -261,10 +261,29 @@ async fn directory(
         }
     }
     let rows = devices::active_devices(&state, ctx, principal_id).await?;
+    // The acting principal's OWN devices also show their KeyPackage stock, so each device
+    // keeps enough published for others to add it while it is offline (never shown for
+    // another principal's devices).
+    let stock = if principal_id == acting.principal_id {
+        devices::available_key_packages(
+            &state.db,
+            &rows.iter().map(|d| d.id).collect::<Vec<_>>(),
+            state.now(),
+        )
+        .await?
+    } else {
+        Default::default()
+    };
     let head = transparency::tree_head(&state.db).await?;
     Ok(Json(json!({
         "principalId": principal_id,
-        "devices": rows.iter().map(devices::device_view).collect::<Vec<_>>(),
+        "devices": rows.iter().map(|d| {
+            let mut v = devices::device_view(d);
+            if principal_id == acting.principal_id {
+                v["keyPackagesAvailable"] = json!(stock.get(&d.id).copied().unwrap_or(0));
+            }
+            v
+        }).collect::<Vec<_>>(),
         "treeHead": tree_head_view(&state, &head).await?,
     })))
 }

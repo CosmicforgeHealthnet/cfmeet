@@ -87,7 +87,7 @@ pub fn check_framing(
     bytes: &[u8],
     expected: FramedContent,
     epoch: u64,
-) -> Result<()> {
+) -> Result<framing::Framing> {
     let f = framing::inspect(bytes)
         .map_err(|_| Error::reason(ErrorCode::ContentRejected, "NOT_AN_MLS_MESSAGE"))?;
     // OpenMLS parses PublicMessage application bodies as well as PrivateMessage.
@@ -118,7 +118,7 @@ pub fn check_framing(
             "EPOCH_FIELD_MISMATCH",
         ));
     }
-    Ok(())
+    Ok(f)
 }
 
 /// One E2EE row to insert.

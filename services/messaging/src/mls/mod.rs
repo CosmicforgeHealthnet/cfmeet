@@ -17,6 +17,15 @@
 //!   verifies the actual roster when it merges the commit (client SDK duty).
 //! * [`claim_key_packages`] hands out the published KeyPackages of ACTIVE members'
 //!   devices (single use; `FOR UPDATE SKIP LOCKED`) so a member can add them.
+//! * Self-join (RFC 9420 §12.4.3.2): a commit may carry the GroupInfo of the epoch it
+//!   creates (PUBLIC material signed by the committer); the latest one is stored and served
+//!   to members while its epoch is current. An ACTIVE device of an ACTIVE member that is
+//!   not in the tree joins BY ITSELF with an external commit (a `PublicMessage` whose
+//!   sender is `new_member_commit`, visible in the clear framing) — no other member has to
+//!   be online. The server accepts it only from the acting principal's own ACTIVE device,
+//!   never while removals are pending (the joiner's UpdatePath would reach a removed leaf)
+//!   and never with Welcomes or removals; every member's client verifies that the joining
+//!   leaf is that registered device with its logged key before merging it.
 
 pub mod http;
 
@@ -76,6 +85,43 @@ pub async fn refresh_rekey<C: ConnectionTrait>(
     Ok(pending)
 }
 
+/// Pending removals of devices that are NOT leaves of the group's tree at its current
+/// epoch are moot (nothing is encrypted to a device outside the tree): they are dropped.
+/// The tree is the one of the current epoch's GroupInfo, which the committer of that epoch
+/// published with its commit (the same attestation as `removedDeviceIds`; every member's
+/// client verifies the tree hash when it joins from it). Without a current GroupInfo
+/// nothing is dropped. Returns whether removals are still pending.
+pub async fn prune_moot_removals<C: ConnectionTrait>(
+    db: &C,
+    conversation_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<bool> {
+    #[derive(FromQueryResult)]
+    struct I {
+        group_info: Vec<u8>,
+    }
+    let info: Option<I> = db::one(
+        db,
+        "SELECT i.group_info FROM messaging_mls_group_infos i \
+           JOIN messaging_mls_groups g ON g.conversation_id = i.conversation_id AND g.mls_epoch = i.mls_epoch \
+          WHERE i.conversation_id = $1",
+        vec![conversation_id.into()],
+    )
+    .await?;
+    if let Some(tree) = info
+        .and_then(|i| framing::inspect_group_info(&i.group_info).ok())
+        .and_then(|h| h.member_devices)
+    {
+        db::exec(
+            db,
+            "DELETE FROM messaging_mls_pending_removals WHERE conversation_id = $1 AND NOT (device_id = ANY($2))",
+            vec![conversation_id.into(), tree.into()],
+        )
+        .await?;
+    }
+    refresh_rekey(db, conversation_id, now).await
+}
+
 /// Every ACTIVE device of `principal` must leave the group's MLS tree.
 pub async fn require_removal_of_principal<C: ConnectionTrait>(
     db: &C,
@@ -94,7 +140,7 @@ pub async fn require_removal_of_principal<C: ConnectionTrait>(
         vec![conversation_id.into(), principal.into(), reason.into(), now.into()],
     )
     .await?;
-    refresh_rekey(db, conversation_id, now).await
+    prune_moot_removals(db, conversation_id, now).await
 }
 
 /// A revoked device must leave the MLS tree of every E2EE conversation its principal is
@@ -107,14 +153,18 @@ pub async fn device_revoked<C: ConnectionTrait>(
     device_id: Uuid,
     now: DateTime<Utc>,
 ) -> Result<u64> {
-    let n = db::exec(
+    #[derive(FromQueryResult)]
+    struct Inserted {
+        conversation_id: Uuid,
+    }
+    let inserted: Vec<Inserted> = db::all(
         db,
         "INSERT INTO messaging_mls_pending_removals (conversation_id, device_id, principal_id, reason, created_at) \
          SELECT m.conversation_id, $3, $2, 'DEVICE_REVOKED', $4 FROM messaging_conversation_members m \
            JOIN messaging_conversations c ON c.id = m.conversation_id \
           WHERE m.environment_id = $1 AND m.principal_id = $2 AND m.state = 'ACTIVE' \
             AND c.security_profile = 'PRIVATE_E2EE' \
-         ON CONFLICT DO NOTHING",
+         ON CONFLICT DO NOTHING RETURNING conversation_id",
         vec![environment_id.into(), principal.into(), device_id.into(), now.into()],
     )
     .await?;
@@ -126,6 +176,18 @@ pub async fn device_revoked<C: ConnectionTrait>(
         vec![device_id.into(), now.into()],
     )
     .await?;
+    // A revoked device that never entered a group's tree (e.g. a browser whose storage was
+    // lost before it joined) must not block that group until someone commits its removal.
+    let mut n = 0;
+    for i in &inserted {
+        prune_moot_removals(db, i.conversation_id, now).await?;
+        n += db::scalar_i64(
+            db,
+            "SELECT count(*) FROM messaging_mls_pending_removals WHERE conversation_id = $1 AND device_id = $2",
+            vec![i.conversation_id.into(), device_id.into()],
+        )
+        .await? as u64;
+    }
     Ok(n)
 }
 
@@ -144,6 +206,11 @@ pub struct CommitRequest {
     /// Devices this commit removes from the tree (the committer's attestation).
     #[serde(default)]
     pub removed_device_ids: Vec<Uuid>,
+    /// The GroupInfo of the epoch this commit creates (`MLSMessage` of wire format
+    /// `mls_group_info`, signed by the committer, with the ratchet tree and
+    /// `external_pub`): lets a member's new device join by itself.
+    #[serde(default)]
+    pub group_info: Option<String>,
 }
 
 #[derive(FromQueryResult)]
@@ -196,12 +263,38 @@ pub async fn submit_commit(
         None => None,
     };
     require_own_device(&state.db, ctx, acting.principal_id, request.device_id).await?;
-    check_framing(
+    let framed = check_framing(
         &conversation,
         commit.as_bytes(),
         FramedContent::Commit,
         request.epoch,
     )?;
+    // An external commit: the acting principal's own device joins by itself. It can
+    // neither welcome nor remove anyone (RFC 9420 §12.4.3.2: only its own stale leaf).
+    let external = framed.new_member_commit;
+    if external && (welcome.is_some() || !request.removed_device_ids.is_empty()) {
+        return Err(Error::reason(
+            ErrorCode::ContentRejected,
+            "EXTERNAL_COMMIT_CANNOT_WELCOME_OR_REMOVE",
+        ));
+    }
+    let group_info = match &request.group_info {
+        Some(g) => {
+            let bytes = decode_b64("groupInfo", g, MAX_MLS_MESSAGE_BYTES)?;
+            let header = framing::inspect_group_info(&bytes)
+                .map_err(|_| Error::reason(ErrorCode::ContentRejected, "NOT_A_GROUP_INFO"))?;
+            if Some(header.group_id.as_slice()) != conversation.mls_group_id.as_deref()
+                || header.epoch != request.epoch + 1
+            {
+                return Err(Error::reason(
+                    ErrorCode::ContentRejected,
+                    "GROUP_INFO_MISMATCH",
+                ));
+            }
+            Some(bytes)
+        }
+        None => None,
+    };
     // Welcomed devices: ACTIVE devices of ACTIVE members of this conversation.
     if !request.welcome_device_ids.is_empty() {
         let owners: Vec<DeviceOwner> = db::all(
@@ -256,6 +349,11 @@ pub async fn submit_commit(
                 if group.mls_epoch as u64 != request.epoch {
                     return Err(Error::code(ErrorCode::EpochMismatch));
                 }
+                // An external join is built from the current GroupInfo: removals of devices
+                // that are not in its tree are moot and dropped first.
+                if external {
+                    prune_moot_removals(txn, conversation.id, now).await?;
+                }
                 // A commit while removals are pending must remove every pending device.
                 #[derive(FromQueryResult)]
                 struct P {
@@ -268,7 +366,10 @@ pub async fn submit_commit(
                 )
                 .await?;
                 if pending.iter().any(|p| !request.removed_device_ids.contains(&p.device_id)) {
-                    return Err(Error::reason(ErrorCode::MlsRekeyRequired, "COMMIT_MISSING_REMOVALS"));
+                    return Err(Error::reason(
+                        ErrorCode::MlsRekeyRequired,
+                        if external { "REMOVALS_PENDING_BEFORE_JOIN" } else { "COMMIT_MISSING_REMOVALS" },
+                    ));
                 }
                 let row = e2ee::insert(
                     txn,
@@ -301,6 +402,27 @@ pub async fn submit_commit(
                     .await?;
                 }
                 refresh_rekey(txn, conversation.id, now).await?;
+                if let Some(info) = &group_info {
+                    db::exec(
+                        txn,
+                        "INSERT INTO messaging_mls_group_infos (conversation_id, mls_epoch, group_info, publisher_device_id, updated_at) \
+                         VALUES ($1, $2, $3, $4, $5) \
+                         ON CONFLICT (conversation_id) DO UPDATE SET mls_epoch = EXCLUDED.mls_epoch, \
+                           group_info = EXCLUDED.group_info, publisher_device_id = EXCLUDED.publisher_device_id, \
+                           updated_at = EXCLUDED.updated_at",
+                        vec![
+                            conversation.id.into(),
+                            (request.epoch as i64 + 1).into(),
+                            info.clone().into(),
+                            request.device_id.into(),
+                            now.into(),
+                        ],
+                    )
+                    .await?;
+                }
+                if external {
+                    crate::metrics::inc("messaging_mls_external_joins_total", &[]);
+                }
                 record_created(txn, &ctx2, &row, &request_ctx, now).await?;
                 if let Some(w) = &welcome {
                     for device in &request.welcome_device_ids {
@@ -391,6 +513,19 @@ pub async fn group_state(
         vec![conversation_id.into()],
     )
     .await?;
+    #[derive(FromQueryResult)]
+    struct I {
+        mls_epoch: i64,
+        group_info: Vec<u8>,
+    }
+    // Only the CURRENT epoch's GroupInfo is useful (an external commit must be created in
+    // the current epoch); an older one is never served.
+    let info: Option<I> = db::one(
+        &state.db,
+        "SELECT mls_epoch, group_info FROM messaging_mls_group_infos WHERE conversation_id = $1 AND mls_epoch = $2",
+        vec![conversation_id.into(), g.mls_epoch.into()],
+    )
+    .await?;
     Ok(json!({
         "conversationId": conversation_id,
         "mlsEpoch": g.mls_epoch,
@@ -400,6 +535,8 @@ pub async fn group_state(
         "pendingRemovals": pending.iter().map(|p| json!({
             "deviceId": p.device_id, "principalId": p.principal_id, "reason": p.reason,
         })).collect::<Vec<_>>(),
+        "groupInfo": info.as_ref().map(|i| crate::messages::b64(&i.group_info)),
+        "groupInfoEpoch": info.as_ref().map(|i| i.mls_epoch),
     }))
 }
 

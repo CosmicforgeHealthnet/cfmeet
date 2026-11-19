@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Messaging API",
-    "version": "1.19.0",
-    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read)."
+    "version": "1.20.0",
+    "description": "HTTP surface of services/messaging: GET /health, /ready, /openapi.json (public, no data); the customer API under /v1/messaging and /v1/conversations (CF Meet API credential verified by Platform Access — afresh for every mutation; a verified acting principal; 503 when Platform Access is unreachable — fail closed; client tokens are accepted only on the member operations whose security lists clientToken (elsewhere 401 CLIENT_TOKENS_NOT_ENABLED); the device-direct realtime routes /v1/realtime/tickets (client token) and /v1/realtime (WebSocket, single-use ticket) authenticate themselves). /internal/v1/** is service-authenticated and exposes no operation yet. Request bodies are limited to 512 KiB. 1.13.0: GET /v1/conversations/{conversationId}/messages/{messageId}/thread (thread summary); pin expiry; conversation retentionSeconds / expiryGraceSeconds. Member roles, invitations (POST .../invitation/accept|decline, GET /v1/messaging/invitations). 1.14.0: existing DIRECT creation accepts counterpartCfMeetId, and membership addition accepts cfMeetId, as exclusive alternatives to principal UUIDs. Personal scope only; server-authenticated actor, purpose-bound resolution and authoritative policy checks; no new endpoints. 1.16.0: x-cfmeet-required-scope (the API Gateway scope pre-check) on the 92 credential operations whose handler requires exactly one registry scope (including the Section 13 session-device issue / revoke: messages.read / messages.send); GET /v1/conversations, GET /v1/conversations/{id} and GET/DELETE …/members keep a per-request choice (messages.read with an acting principal, else conversations.manage) and stay upstream-checked (Section 15, PLT-011). 1.17.0: GET /v1/messaging/push/configuration (push platforms of the deployment and the Web Push application-server key; messages.read). 1.20.0: MLS self-join: submitMlsCommit accepts groupInfo (the GroupInfo of the new epoch) and external commits of the acting principal's own ACTIVE device; getMlsGroupState returns the current epoch's groupInfo; the device directory shows keyPackagesAvailable for the acting principal's own devices."
   },
   "tags": [
     {
@@ -2127,7 +2127,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.send",
-        "description": "Scope messages.send, acting member. The MLS Delivery Service accepts exactly one commit per epoch (the first; others EPOCH_MISMATCH), stores it as an MLS_COMMIT message in the canonical sequence and the Welcome per welcomed device (ACTIVE devices of ACTIVE members only).",
+        "description": "Scope messages.send, acting member. The MLS Delivery Service accepts exactly one commit per epoch (the first; others EPOCH_MISMATCH), stores it as an MLS_COMMIT message in the canonical sequence and the Welcome per welcomed device (ACTIVE devices of ACTIVE members only). A commit may carry the GroupInfo of the epoch it creates (stored and served by getMlsGroupState while current). An external commit (sender new_member_commit) is the acting principal's own ACTIVE device joining by itself, without any other member online: never with welcome or removedDeviceIds (422 EXTERNAL_COMMIT_CANNOT_WELCOME_OR_REMOVE), never while a removal of a device still in the tree is pending (409 MLS_REKEY_REQUIRED, reason REMOVALS_PENDING_BEFORE_JOIN).",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -2221,7 +2221,7 @@
           }
         ],
         "x-cfmeet-required-scope": "messages.read",
-        "description": "Scope messages.read, acting member: the group's current epoch and pending removals.",
+        "description": "Scope messages.read, acting member: the group's current epoch, pending removals and the current epoch's GroupInfo (null when none was published for it), from which a member's device that is not in the tree joins by an external commit.",
         "parameters": [
           {
             "name": "CF-Acting-Principal",
@@ -9705,6 +9705,11 @@
             "items": {
               "$ref": "#/components/schemas/platform.common.v1.Uuid"
             }
+          },
+          "groupInfo": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]*$",
+            "description": "base64url MLSMessage (wire format mls_group_info) of the epoch this commit creates, signed by the committer, with the ratchet tree and external_pub extensions: PUBLIC material that lets a member's new device join by itself (RFC 9420 section 12.4.3.2). Its group id must be the conversation's and its epoch the commit's epoch + 1."
           }
         },
         "required": [
@@ -9713,7 +9718,7 @@
           "epoch",
           "commit"
         ],
-        "description": "An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all."
+        "description": "An MLS Commit created in the group's current epoch. removedDeviceIds is the committer's attestation of the leaves it removes; while removals are pending it must cover them all. An external commit (a PublicMessage whose sender is new_member_commit, RFC 9420 section 12.4.3.2) is a member's own ACTIVE device joining by itself: accepted only from the acting principal's own device, without welcome or removedDeviceIds, and not while a removal of a device still in the tree is pending; every member's client verifies the joining leaf against the device directory before merging it."
       },
       "messaging.common.v1.ContextClass": {
         "type": "string",
@@ -10652,6 +10657,11 @@
           "version": {
             "type": "integer",
             "minimum": 1
+          },
+          "keyPackagesAvailable": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Published, unexpired, unclaimed KeyPackages of this device. Only in the acting principal's view of its OWN devices, so each device keeps a stock that others can add it from while it is offline."
           }
         },
         "description": "A Messaging device: PUBLIC key material only (never a private key)."
@@ -12827,6 +12837,30 @@
                 "reason"
               ]
             }
+          },
+          "groupInfo": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "base64url GroupInfo of the CURRENT epoch (as its committer published it), or null when none was published for this epoch. A member's device that is not in the tree joins from it by an external commit."
+          },
+          "groupInfoEpoch": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The epoch of groupInfo (always mlsEpoch when present)."
           }
         },
         "required": [

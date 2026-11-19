@@ -931,6 +931,33 @@ pub async fn directory_lookup_allowed(state: &AppState, ctx: &TrustedContext) ->
     }
 }
 
+/// AVAILABLE, unexpired KeyPackages per device (devices without any are absent).
+pub async fn available_key_packages<C: ConnectionTrait>(
+    db: &C,
+    device_ids: &[Uuid],
+    now: DateTime<Utc>,
+) -> Result<std::collections::HashMap<Uuid, i64>> {
+    #[derive(FromQueryResult)]
+    struct Stock {
+        device_id: Uuid,
+        available: i64,
+    }
+    if device_ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let rows: Vec<Stock> = db::all(
+        db,
+        "SELECT device_id, count(*) AS available FROM messaging_key_packages \
+          WHERE device_id = ANY($1) AND status = 'AVAILABLE' AND not_after > $2 GROUP BY device_id",
+        vec![device_ids.to_vec().into(), now.into()],
+    )
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.device_id, r.available))
+        .collect())
+}
+
 /// The ACTIVE devices of a principal of the caller's environment.
 pub async fn active_devices(
     state: &AppState,

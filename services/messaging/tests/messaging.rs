@@ -1456,3 +1456,458 @@ async fn old_conversation_events_are_pruned_and_replay_asks_for_resync() {
         0
     );
 }
+
+use cf_messaging_crypto::{device::Device, group::Processed};
+use serde_json::Value;
+
+/// An external commit as a device of `acting` submits it (`extra` adds or overrides fields).
+async fn external_commit(
+    h: &Harness,
+    c: &Customer,
+    cid: &str,
+    acting: Uuid,
+    device: Uuid,
+    commit: &[u8],
+    extra: Value,
+) -> Response {
+    let mut body = json!({
+        "clientMessageId": Uuid::new_v4(), "deviceId": device, "epoch": 1, "commit": b64(commit),
+    });
+    for (k, v) in extra.as_object().unwrap() {
+        body[k] = v.clone();
+    }
+    h.post(
+        c,
+        Some(acting),
+        &format!("/v1/conversations/{cid}/mls/commits"),
+        body,
+    )
+    .await
+}
+
+/// The production incident: a private 1:1 chat was created while the recipient had no
+/// device in the group, and the recipient's browser then waited for "someone in the chat
+/// to be online" for hours. Now the sender's device publishes the GroupInfo with its
+/// commit, and the recipient's device joins BY ITSELF (an MLS external commit) while the
+/// sender is offline; the sender's client merges the join only after verifying the joining
+/// device against the directory (its registered key), and both read each other.
+#[tokio::test]
+async fn a_member_device_joins_by_itself_while_no_other_member_is_online() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let mut alice = h.member(&c, 1).await;
+    // Bob has no messaging device yet when Alice starts the chat.
+    let bob_principal = h.principal(&c);
+    let r = h
+        .create_conversation(
+            &c,
+            alice.principal,
+            json!({ "contextClass": "DIRECT", "counterpartPrincipalId": bob_principal }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let conv = r.json;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    let gid = unb64(&conv["encryption"]["mlsGroupId"]);
+    let claim = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/key-package-claims"),
+            json!({ "principalIds": [bob_principal] }),
+        )
+        .await;
+    assert_eq!(claim.status, StatusCode::OK, "{}", claim.text);
+    assert_eq!(claim.json["keyPackages"], json!([]));
+    // Nothing to add yet: Alice's group starts with her device, and she publishes its
+    // GroupInfo with a self-update commit.
+    let mut group = alice.device.create_group(&gid).unwrap();
+    let out = alice.device.update_keys(&mut group).unwrap();
+    let info = alice.device.export_group_info(&group).unwrap();
+    alice.group = Some(group);
+    let r = h
+        .post(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/commits"),
+            json!({
+                "clientMessageId": Uuid::new_v4(), "deviceId": alice.device_id(), "epoch": out.epoch,
+                "commit": b64(&out.commit), "removedDeviceIds": [], "groupInfo": b64(&info),
+            }),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    alice.cursor = r.json["sequence"].as_i64().unwrap();
+    let sent = h.send_e2ee(&c, &conv, &mut alice, "sent at 8:36").await;
+    assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
+    alice.cursor = sent.json["sequence"].as_i64().unwrap();
+
+    // Alice goes offline. Bob's phone browser registers later (no KeyPackage needed).
+    let mut bob = h.device_of(&c, bob_principal, 0).await;
+    let state = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.status, StatusCode::OK, "{}", state.text);
+    assert_eq!(state.json["groupInfoEpoch"], state.json["mlsEpoch"]);
+    let (gb, join) = bob
+        .device
+        .join_by_external_commit(&unb64(&state.json["groupInfo"]))
+        .unwrap();
+    let new_info = bob.device.export_group_info(&gb).unwrap();
+    let joined = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob.device_id(),
+        &join.commit,
+        json!({ "epoch": join.epoch, "groupInfo": b64(&new_info) }),
+    )
+    .await;
+    assert_eq!(joined.status, StatusCode::CREATED, "{}", joined.text);
+    assert_eq!(joined.json["kind"], "MLS_COMMIT");
+    assert_eq!(joined.json["senderDeviceId"], json!(bob.device_id()));
+    let state = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["mlsEpoch"], gb.epoch());
+    assert_eq!(state.json["groupInfoEpoch"], gb.epoch());
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/MlsGroupState",
+        &state.json,
+    );
+    // Bob writes at once. The message from before his device existed stays unreadable to
+    // it (MLS forward secrecy); the client shows a placeholder for it.
+    bob.cursor = joined.json["sequence"].as_i64().unwrap();
+    bob.group = Some(gb);
+    let hi = h.send_e2ee(&c, &conv, &mut bob, "hi from the phone").await;
+    assert_eq!(hi.status, StatusCode::CREATED, "{}", hi.text);
+
+    // Alice comes back: the external commit is merged only for Bob's registered device
+    // with exactly its directory key.
+    let dir = h
+        .get(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/messaging/principals/{bob_principal}/devices"),
+        )
+        .await;
+    assert_eq!(dir.status, StatusCode::OK, "{}", dir.text);
+    assert!(
+        dir.json["devices"][0].get("keyPackagesAvailable").is_none(),
+        "another principal's KeyPackage stock is not shown"
+    );
+    let registered: Vec<(Uuid, Vec<u8>)> = dir.json["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| (uuid(&d["deviceId"]), unb64(&d["signaturePublicKey"])))
+        .collect();
+    let list = h
+        .get(
+            &c,
+            Some(alice.principal),
+            &format!(
+                "/v1/conversations/{cid}/messages?afterSequence={}",
+                alice.cursor
+            ),
+        )
+        .await;
+    let msgs = list.json["messages"].as_array().unwrap().clone();
+    assert_eq!(msgs.len(), 2, "{}", list.text);
+    assert_eq!(msgs[0]["kind"], "MLS_COMMIT");
+    let joiner = uuid(&msgs[0]["senderDeviceId"]);
+    let ga = alice.group.as_mut().unwrap();
+    let processed = alice
+        .device
+        .process_with_joiners(ga, &unb64(&msgs[0]["e2ee"]["ciphertext"]), |d, k| {
+            d == joiner && registered.iter().any(|(id, key)| *id == d && key == k)
+        })
+        .unwrap();
+    assert!(
+        matches!(processed, Processed::ExternalJoin { device_id, .. } if device_id == bob.device_id())
+    );
+    match alice
+        .device
+        .process(ga, &unb64(&msgs[1]["e2ee"]["ciphertext"]))
+        .unwrap()
+    {
+        Processed::Application { plaintext, .. } => assert_eq!(plaintext, b"hi from the phone"),
+        other => panic!("{other:?}"),
+    }
+    alice.cursor = msgs[1]["sequence"].as_i64().unwrap();
+    let reply = h.send_e2ee(&c, &conv, &mut alice, "got it").await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.text);
+    assert_eq!(h.receive(&c, &conv, &mut bob).await[0].1, "got it");
+    // Bob's own directory view shows his KeyPackage stock (none published).
+    let own = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/principals/{bob_principal}/devices"),
+        )
+        .await;
+    assert_eq!(own.json["devices"][0]["keyPackagesAvailable"], 0);
+    conforms(
+        "messaging/common/v1.schema.json#/$defs/Device",
+        &own.json["devices"][0],
+    );
+    let dump = h.dump().await;
+    for canary in ["sent at 8:36", "hi from the phone", "got it"] {
+        assert!(
+            !dump.contains(canary),
+            "plaintext `{canary}` in the database"
+        );
+    }
+}
+
+/// Only the acting principal's own ACTIVE device, of an ACTIVE member, joins by an
+/// external commit — never a non-member, another principal's device or a revoked device,
+/// never past a pending removal of a device still in the tree; it welcomes and removes
+/// nobody. A revoked device that never entered the tree blocks nothing.
+#[tokio::test]
+async fn external_commits_only_admit_own_active_devices_of_members() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let c = h.customer(ALL_SCOPES);
+    let (conv, mut alice, bob) = h.e2ee_direct(&c).await;
+    let cid = conv["conversationId"].as_str().unwrap().to_string();
+    // The establishing commit carried no GroupInfo: none is served.
+    let state = h
+        .get(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["groupInfo"], Value::Null);
+    let info = alice
+        .device
+        .export_group_info(alice.group.as_ref().unwrap())
+        .unwrap();
+    let ext = |device: &Device| device.join_by_external_commit(&info).unwrap().1.commit;
+    // A non-member's device.
+    let carol = h.member(&c, 0).await;
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        carol.principal,
+        carol.device_id(),
+        &ext(&carol.device),
+        json!({}),
+    )
+    .await;
+    assert!(
+        r.status == StatusCode::NOT_FOUND || r.status == StatusCode::FORBIDDEN,
+        "{}",
+        r.text
+    );
+    // Another principal's device.
+    let bob2 = h.device_of(&c, bob.principal, 0).await;
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        alice.principal,
+        bob2.device_id(),
+        &ext(&bob2.device),
+        json!({}),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.text);
+    // With a Welcome, or removing someone.
+    let mut other = alice.device.create_group(&[3u8; 32]).unwrap();
+    let welcome = alice
+        .device
+        .add_devices(&mut other, &[carol.device.key_package().unwrap()])
+        .unwrap()
+        .welcome
+        .unwrap();
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &ext(&bob2.device),
+        json!({ "welcome": b64(&welcome), "welcomeDeviceIds": [bob2.device_id()] }),
+    )
+    .await;
+    assert_eq!(
+        r.reason(),
+        "EXTERNAL_COMMIT_CANNOT_WELCOME_OR_REMOVE",
+        "{}",
+        r.text
+    );
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &ext(&bob2.device),
+        json!({ "removedDeviceIds": [alice.device_id()] }),
+    )
+    .await;
+    assert_eq!(
+        r.reason(),
+        "EXTERNAL_COMMIT_CANNOT_WELCOME_OR_REMOVE",
+        "{}",
+        r.text
+    );
+    // A GroupInfo of another epoch than the one the commit creates.
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &ext(&bob2.device),
+        json!({ "groupInfo": b64(&info) }),
+    )
+    .await;
+    assert_eq!(r.reason(), "GROUP_INFO_MISMATCH", "{}", r.text);
+    // A revoked device.
+    let bob3 = h.device_of(&c, bob.principal, 0).await;
+    let revoke = h
+        .post(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/devices/{}/revoke", bob3.device_id()),
+            json!({ "reason": "USER_REQUESTED" }),
+        )
+        .await;
+    assert_eq!(revoke.status, StatusCode::OK, "{}", revoke.text);
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob3.device_id(),
+        &ext(&bob3.device),
+        json!({}),
+    )
+    .await;
+    assert_eq!(r.code(), "DEVICE_REVOKED", "{}", r.text);
+    // Alice publishes the GroupInfo with a self-update; bob3 is not in its tree, so its
+    // revocation is moot there and does not block anyone.
+    let out = alice
+        .device
+        .update_keys(alice.group.as_mut().unwrap())
+        .unwrap();
+    let info2 = alice
+        .device
+        .export_group_info(alice.group.as_ref().unwrap())
+        .unwrap();
+    let r = h
+        .post(&c, Some(alice.principal), &format!("/v1/conversations/{cid}/mls/commits"), json!({
+            "clientMessageId": Uuid::new_v4(), "deviceId": alice.device_id(), "epoch": out.epoch,
+            "commit": b64(&out.commit), "removedDeviceIds": [bob3.device_id()], "groupInfo": b64(&info2),
+        }))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let bob4 = h.device_of(&c, bob.principal, 0).await;
+    let revoke = h
+        .post(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/devices/{}/revoke", bob4.device_id()),
+            json!({ "reason": "USER_REQUESTED" }),
+        )
+        .await;
+    assert_eq!(revoke.status, StatusCode::OK, "{}", revoke.text);
+    let state = h
+        .get(
+            &c,
+            Some(alice.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["rekeyRequired"], false, "{}", state.text);
+    assert_eq!(state.json["pendingRemovals"], json!([]));
+    // A device still IN the tree (Bob's first) is revoked: nobody joins until its removal
+    // is committed — the joiner's UpdatePath would reach the removed leaf.
+    let revoke = h
+        .post(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/messaging/devices/{}/revoke", bob.device_id()),
+            json!({ "reason": "LOST_OR_STOLEN" }),
+        )
+        .await;
+    assert_eq!(revoke.status, StatusCode::OK, "{}", revoke.text);
+    let (_, join) = bob2.device.join_by_external_commit(&info2).unwrap();
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &join.commit,
+        json!({ "epoch": 2 }),
+    )
+    .await;
+    assert_eq!(r.code(), "MLS_REKEY_REQUIRED", "{}", r.text);
+    assert_eq!(r.reason(), "REMOVALS_PENDING_BEFORE_JOIN", "{}", r.text);
+    // Once Alice committed the removal (with a GroupInfo), Bob's other device joins.
+    let out = alice
+        .device
+        .remove_devices(alice.group.as_mut().unwrap(), &[bob.device_id()])
+        .unwrap();
+    let info3 = alice
+        .device
+        .export_group_info(alice.group.as_ref().unwrap())
+        .unwrap();
+    let r = h
+        .post(&c, Some(alice.principal), &format!("/v1/conversations/{cid}/mls/commits"), json!({
+            "clientMessageId": Uuid::new_v4(), "deviceId": alice.device_id(), "epoch": out.epoch,
+            "commit": b64(&out.commit), "removedDeviceIds": [bob.device_id()], "groupInfo": b64(&info3),
+        }))
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    let state = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["groupInfoEpoch"], 3);
+    let (_, join) = bob2
+        .device
+        .join_by_external_commit(&unb64(&state.json["groupInfo"]))
+        .unwrap();
+    let r = external_commit(
+        &h,
+        &c,
+        &cid,
+        bob.principal,
+        bob2.device_id(),
+        &join.commit,
+        json!({ "epoch": join.epoch }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text);
+    // That commit carried no GroupInfo: none is served for the new epoch, never a stale one.
+    let state = h
+        .get(
+            &c,
+            Some(bob.principal),
+            &format!("/v1/conversations/{cid}/mls/state"),
+        )
+        .await;
+    assert_eq!(state.json["mlsEpoch"], 4);
+    assert_eq!(state.json["groupInfo"], Value::Null);
+}

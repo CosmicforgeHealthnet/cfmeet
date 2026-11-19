@@ -1,6 +1,6 @@
 # Messaging — native authenticated API map
 
-Generated from the Account relay and Messaging 1.19.0 contract.
+Generated from the Account relay and Messaging 1.20.0 contract.
 Canonical SDK contract: **103 operations**; audience-filtered public Swagger:
 **87 operations**; native Account transports: **73 operations**.
 There are no new canonical message/conversation/device endpoints.

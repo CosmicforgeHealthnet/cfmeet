@@ -139,6 +139,9 @@ async fn template(admin: &str) -> String {
             messaging_migration::GapClosureMigrator::up(&tmpl, None)
                 .await
                 .expect("gap-closure migrations apply");
+            messaging_migration::MlsJoinMigrator::up(&tmpl, None)
+                .await
+                .expect("MLS self-join migrations apply");
             tmpl.close().await.ok();
             name
         })
