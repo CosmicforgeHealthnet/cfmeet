@@ -27,7 +27,9 @@ const ERR: &str = "platform-developer/common/v1.schema.json#/$defs/Error";
 const SECRET_MARKER: &str = "SUPERSECRETKEYMATERIAL";
 
 fn p8() -> String {
-    format!("-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg{SECRET_MARKER}\n-----END PRIVATE KEY-----")
+    format!(
+        "-----BEGIN PRIVATE KEY-----\nfixture-not-a-key-{SECRET_MARKER}\n-----END PRIVATE KEY-----"
+    )
 }
 
 fn all_on() -> BuildFeatures {

@@ -51,11 +51,11 @@ class MessagingJourney(Journey):
         swagger = self.request('meeting-service', '/api-docs/messaging.json')
         operations = [operation for item in swagger['paths'].values() for method, operation in item.items()
                       if method in ('get', 'post', 'put', 'patch', 'delete', 'options', 'head')]
-        assert len(operations) == 97  # public Messaging bundle (Section 16, PLT-006; +push configuration)
-        assert sum('x-cfmeet-native-path' in operation for operation in operations) == 72
-        assert swagger['info']['version'] == '1.17.0'
+        assert len(operations) == 106  # public Messaging bundle (Section 16, PLT-006; +push configuration; +partner user sessions and push registrations)
+        assert sum('x-cfmeet-native-path' in operation for operation in operations) == 73
+        assert swagger['info']['version'] == '1.21.0'
         assert not any(path.startswith('/internal/') for path in swagger['paths'])
-        self.report['servedSwagger'] = {'version': swagger['info']['version'], 'operations': len(operations), 'nativeBindings': 72}
+        self.report['servedSwagger'] = {'version': swagger['info']['version'], 'operations': len(operations), 'nativeBindings': 73}
         self.done('served_consumer_swagger_matches_native_backend_contract')
         for path in ('/metrics', '/internal/v1/communications/policy/check'):
             self.request('meeting-service', path, expected=(404,))

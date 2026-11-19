@@ -277,7 +277,7 @@ mod tests {
     fn short_secrets_seal_to_one_part_and_long_ones_to_bounded_parts() {
         let k = key();
         let s = scope();
-        let p8 = b"-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg\n-----END PRIVATE KEY-----\n";
+        let p8 = b"-----BEGIN PRIVATE KEY-----\nfixture-not-a-key\n-----END PRIVATE KEY-----\n";
         let sealed: Value =
             serde_json::from_str(&seal_secret(&k, &s, "APNS", p8).unwrap()).unwrap();
         assert_eq!(sealed["v"], 1);

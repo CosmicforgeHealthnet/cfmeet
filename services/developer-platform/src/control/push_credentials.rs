@@ -609,7 +609,8 @@ pub async fn verify(
 mod tests {
     use super::*;
 
-    pub const P8: &str = "-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgSECRETSECRET\n-----END PRIVATE KEY-----";
+    pub const P8: &str =
+        "-----BEGIN PRIVATE KEY-----\nfixture-not-a-key-SECRETSECRET\n-----END PRIVATE KEY-----";
 
     fn apns(host: &str) -> Value {
         json!({ "provider": "APNS", "teamId": "ABCDE12345", "keyId": "KEY1234567",
