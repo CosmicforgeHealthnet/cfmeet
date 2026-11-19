@@ -695,7 +695,9 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
     let (mut a, b) = tokio::try_join!(account(s), account(s))?;
     assert_ne!(a.principal, b.principal);
     assert_ne!(a.public_id, b.public_id);
-    let swagger = status(
+    // ADR 0061: the Communications Hub is first-party only, so its Swagger family is no
+    // longer served publicly (the Meeting Service swagger test pins the same 404).
+    status(
         request(
             s,
             "meeting-service",
@@ -706,23 +708,9 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
             None,
         )
         .await?,
-        200,
-        "public Swagger family",
+        404,
+        "Communications Swagger family is not public",
     )?;
-    assert_eq!(
-        swagger["paths"]
-            .as_object()
-            .unwrap()
-            .values()
-            .map(|v| v.as_object().unwrap().len())
-            .sum::<usize>(),
-        74
-    );
-    assert!(swagger["paths"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .all(|p| p.starts_with("/api/v2/communications/")));
     assert_eq!(
         request(
             s,
