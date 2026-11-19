@@ -818,6 +818,17 @@ mod tests {
         assert_eq!(e.event_type, "bot.mentioned");
         assert!(!Value::Object(e.data.clone()).to_string().contains("deploy"));
         assert_eq!(e.data["subjectPrincipalId"], bot);
+        let sender = "88888888-8888-4888-8888-888888888888";
+        let env = json!({ "event_type": "messaging.bot.message-received", "payload": {
+            "conversation_id": c, "message_id": "22222222-2222-4222-8222-222222222222",
+            "sender_principal_id": sender, "subject_principal_id": bot, "body": "hello bot" } });
+        let e = project(PRODUCER_MESSAGING, &env).unwrap().unwrap();
+        assert_eq!(e.event_type, "bot.message_received");
+        assert_eq!(
+            Value::Object(e.data),
+            json!({ "conversationId": c, "messageId": "22222222-2222-4222-8222-222222222222",
+                    "senderPrincipalId": sender, "subjectPrincipalId": bot })
+        );
         // Without the bot it names, a bot event is not public.
         let env = json!({ "event_type": "messaging.bot.message-received",
             "payload": { "conversation_id": c } });
