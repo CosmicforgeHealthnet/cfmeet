@@ -34,6 +34,7 @@ pub mod cache;
 
 use std::{collections::BTreeSet, sync::Arc};
 
+use axum::http::Method;
 use cf_service_auth::{
     client::{InternalCallError, InternalResponse, InternalServiceClient},
     services, CorrelationId, OutboundServiceRequest, ServiceId,
@@ -511,7 +512,12 @@ impl PlatformAccessAuthority {
             .with_delegated_context(ctx.clone());
         let response = self
             .client
-            .get(&request, "/internal/v1/identity/context")
+            .exchange_json(
+                &request,
+                Method::GET,
+                "/internal/v1/identity/context",
+                None::<&Value>,
+            )
             .await
             .map_err(unavailable)?;
         match response.status() {
