@@ -4306,7 +4306,8 @@
           "email_masked": {
             "type": "string",
             "maxLength": 120,
-            "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com). Never the address."
+            "pattern": "^(\\*\\*\\*|[^@\\s*]\\*\\*\\*@[^@\\s*.]\\*\\*\\*(\\.[^@\\s*.]{1,63})?)$",
+            "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Only a masked value can match; never the address."
           },
           "email_verified": {
             "type": "boolean"

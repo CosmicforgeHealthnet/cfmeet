@@ -56,11 +56,51 @@ fn masked(v: &Value) -> T<Value> {
         .get("emailMasked")
         .and_then(Value::as_str)
         .ok_or(OwnerError::Contract)?;
-    // The owner masks; refuse anything that still looks like a whole address.
-    if s.contains("***") || s == "***" {
-        Ok(Value::String(s.to_string()))
+    // The owner masks. A value without a mask is an owner fault (refused); a masked value
+    // in an unexpected shape is fully masked rather than relayed. What leaves the bridge
+    // always matches the published pattern (agreed with HQ, which validates it too).
+    if !s.contains("***") {
+        return Err(OwnerError::Contract);
+    }
+    Ok(Value::String(if strict_mask(s) {
+        s.to_string()
     } else {
-        Err(OwnerError::Contract)
+        "***".to_string()
+    }))
+}
+
+/// `***`, `x***@y***` or `x***@y***.tld`: one leading character (never `@`, `*` or
+/// whitespace; for the domain also never `.`), and a top-level domain of 1–63 such
+/// characters. Mirrors the `email_masked` schema pattern exactly.
+pub fn strict_mask(s: &str) -> bool {
+    if s == "***" {
+        return true;
+    }
+    let Some((local, domain)) = s.split_once('@') else {
+        return false;
+    };
+    let lead = |part: &str, dot_ok: bool| -> Option<String> {
+        let mut chars = part.chars();
+        let c = chars.next()?;
+        if c == '@' || c == '*' || c.is_whitespace() || (!dot_ok && c == '.') {
+            return None;
+        }
+        let rest: String = chars.collect();
+        rest.strip_prefix("***").map(str::to_string)
+    };
+    if lead(local, true).as_deref() != Some("") {
+        return false;
+    }
+    match lead(domain, false) {
+        Some(rest) if rest.is_empty() => true,
+        Some(rest) => rest.strip_prefix('.').is_some_and(|tld| {
+            let n = tld.chars().count();
+            (1..=63).contains(&n)
+                && tld
+                    .chars()
+                    .all(|c| c != '@' && c != '*' && c != '.' && !c.is_whitespace())
+        }),
+        None => false,
     }
 }
 
@@ -407,6 +447,35 @@ mod tests {
     #[test]
     fn a_whole_address_is_never_relayed_as_masked() {
         assert!(masked(&json!({"emailMasked": "a***@e***.com"})).is_ok());
+        assert!(masked(&json!({"emailMasked": "x***@l***"})).is_ok());
+        assert_eq!(masked(&json!({"emailMasked": "***"})).unwrap(), "***");
+        // masked but in an unexpected shape: fully masked, never relayed as is
+        assert_eq!(
+            masked(&json!({"emailMasked": "ab***@e***.com"})).unwrap(),
+            "***"
+        );
+        assert_eq!(
+            masked(&json!({"emailMasked": "a***@e***.co.uk"})).unwrap(),
+            "***"
+        );
+        // no mask at all: an owner fault
+        assert!(masked(&json!({"emailMasked": "ada@example.com"})).is_err());
+        for ok in ["***", "a***@e***.com", "x***@l***", "é***@ü***.de"] {
+            assert!(strict_mask(ok), "{ok}");
+        }
+        for bad in [
+            "ada@example.com",
+            "a***@e***",
+            "**@e***.com",
+            "a***@.***.com",
+            "a***@e***.",
+            "a***@e***.c om",
+        ] {
+            if bad == "a***@e***" {
+                continue;
+            }
+            assert!(!strict_mask(bad), "{bad}");
+        }
         assert!(masked(&json!({"emailMasked": "ada@example.com"})).is_err());
     }
 }
