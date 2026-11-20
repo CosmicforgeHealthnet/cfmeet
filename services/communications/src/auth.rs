@@ -13,6 +13,10 @@ use cf_service_auth::{
 };
 use serde_json::{json, Value};
 
+/// The admin bridge's settlement record of its commands (ADR 0068 §17.6): the one path the
+/// bridge reads on every owner, outside the Hub's own prefix.
+const OPERATIONS_PREFIX: &str = "/internal/v1/operator/operations/";
+
 pub async fn middleware(
     HttpState(s): HttpState<State>,
     mut request: Request,
@@ -88,8 +92,11 @@ pub async fn middleware(
         "/internal/v1/communications/restrictions/check" => {
             InternalPermission::CommunicationsRestrictionsRead
         }
-        // ADR 0068: the admin bridge's operator reads (bridge only).
-        p if p.starts_with("/internal/v1/communications/operator/") => {
+        // ADR 0068: the admin bridge's operator reads and commands (bridge only), and the
+        // settlement record of its commands (A4).
+        p if p.starts_with("/internal/v1/communications/operator/")
+            || p.starts_with(OPERATIONS_PREFIX) =>
+        {
             InternalPermission::CommunicationsAdminister
         }
         _ => return Error::NotFound.into_response(),
@@ -103,6 +110,10 @@ pub async fn middleware(
             Err(_) => return Error::Forbidden.into_response(),
         };
     if ctx.require_permission(permission).is_err() {
+        // The settlement record does not exist for anyone but the bridge.
+        if request.uri().path().starts_with(OPERATIONS_PREFIX) {
+            return Error::NotFound.into_response();
+        }
         return Error::Forbidden.into_response();
     }
     // Receiver-owned replay protection survives restarts and multiple Hub instances.
