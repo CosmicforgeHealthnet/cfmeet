@@ -90,7 +90,7 @@ pub fn app(state: AppState) -> Router {
             delete(internal::remove_suppression),
         )
         .route("/admin/reroute/cancel", post(internal::reroute_cancel))
-        // ADR 0067: the admin bridge's operator reads (notifications.administer + X-CF-Operator).
+        // ADR 0068: the admin bridge's operator reads (notifications.administer + X-CF-Operator).
         .route("/operator/deliveries", get(operator::deliveries))
         .route(
             "/operator/failed-deliveries",

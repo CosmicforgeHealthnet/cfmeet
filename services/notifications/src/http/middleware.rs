@@ -43,7 +43,7 @@ fn route_pattern(request: &Request) -> String {
 #[derive(Debug, Clone)]
 pub struct Caller {
     pub context: InternalServiceContext,
-    /// Operator attribution (ADR 0067): present only for `cfmeet.admin-bridge` requests that
+    /// Operator attribution (ADR 0068): present only for `cfmeet.admin-bridge` requests that
     /// name the HQ staff member (`X-CF-Operator`); attribution headers from any other caller
     /// are refused before the handler runs.
     pub operator: Option<cf_service_auth::OperatorAttribution>,
