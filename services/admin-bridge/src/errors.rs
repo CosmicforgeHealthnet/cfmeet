@@ -1,5 +1,9 @@
 //! Bridge error codes: the complete, published list (`signing-profile.md`). Messages
 //! never echo a request value.
+//!
+//! HQ parses the generated "## Error codes" table (`| `CODE` | HTTP | meaning |`) and fails
+//! its CI on an unmapped code: tell HQ Track B before adding a code, and say whether it
+//! means "nothing was done" for a command ([`ErrorCode::nothing_done`]).
 
 macro_rules! codes {
     ($($variant:ident => ($code:literal, $status:literal, $meaning:literal)),+ $(,)?) => {
@@ -51,4 +55,55 @@ codes! {
     OwnerRefused => ("OWNER_REFUSED", 422, "the owning service refused the command (FAILED)"),
     UnknownOutcome => ("UNKNOWN_OUTCOME", 502, "a command was sent and no clear answer came back; settle by reading back, never resend"),
     Internal => ("INTERNAL", 500, "unexpected bridge failure"),
+}
+
+impl ErrorCode {
+    /// For a command: true when this code GUARANTEES the owner was never called (nothing
+    /// was done; HQ may record FAILED). Every 4xx, plus the bridge-side 5xx refusals that
+    /// are raised before the owner call. Any other 5xx after a command was sent is an
+    /// unknown outcome, settled only by reading back. Command handlers (A3+) must never
+    /// return one of these codes once the owner has been called.
+    pub const fn nothing_done(self) -> bool {
+        self.status() < 500
+            || matches!(
+                self,
+                ErrorCode::BridgeDisabled
+                    | ErrorCode::BridgeUnavailable
+                    | ErrorCode::CapabilityDisabled
+                    | ErrorCode::PolicyUnavailable
+                    | ErrorCode::AuditUnavailable
+            )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ErrorCode;
+
+    /// Agreed with HQ Track B: exactly these 5xx codes mean "nothing was done".
+    #[test]
+    fn the_nothing_done_5xx_codes_are_exactly_the_agreed_five() {
+        let five: Vec<&str> = ErrorCode::ALL
+            .iter()
+            .filter(|e| e.status() >= 500 && e.nothing_done())
+            .map(|e| e.code())
+            .collect();
+        assert_eq!(
+            five,
+            [
+                "BRIDGE_DISABLED",
+                "BRIDGE_UNAVAILABLE",
+                "POLICY_UNAVAILABLE",
+                "CAPABILITY_DISABLED",
+                "AUDIT_UNAVAILABLE"
+            ]
+        );
+        for e in [
+            ErrorCode::UnknownOutcome,
+            ErrorCode::Internal,
+            ErrorCode::OwnerUnavailable,
+        ] {
+            assert!(!e.nothing_done(), "{}", e.code());
+        }
+    }
 }
