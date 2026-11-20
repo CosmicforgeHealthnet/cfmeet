@@ -35,7 +35,8 @@ HQ web → HQ API → Product Integration Core (PIC) → cfmeet-admin (centraliz
 
 | Topic | Decision |
 |---|---|
-| Environments | HQ staging connects to CF Meet production, read-only at first. Actions are switched on one family at a time after certification |
+| Environments | HQ staging connects to CF Meet production, read-only at first (S3/S5). Actions are switched on one family at a time after certification |
+| Reads and changes (HQ gate G1, 2026-11-20) | HQ staging may **read and modify** CF Meet production: the owner's words are "They can read and also modify, turn on the full functionality." Commands still go live only when the bridge serves them, one A3+ family at a time. For each family: the pinned contract marks it served, `ADMIN_BRIDGE_WRITES_ENABLED=true`, a signed policy revision adds its permissions, HQ re-pins and lists it in `CFMEET_ADMIN_ENABLED_COMMANDS`. Governance is unchanged: Idempotency-Key, audit, independent approval for R3/R4 and TWO_PERSON (12-hour claims), and readback on `UNKNOWN_OUTCOME` |
 | Pricing | Covers partners and CF Meet users (Free / Pro / Business). Card charging waits for a payment provider |
 | Feature switch-ons | HQ can request them with two-person approval. The bridge runs the existing release workflow |
 | Reviewer name lists | Removed. Approvals come from HQ staff |

@@ -32,6 +32,13 @@ The bridge **stays disabled**. Later phases add one `ADMIN_BRIDGE_GRANTS` row pe
 
 ## 3. Enabling for HQ (HQ stage S3), operator steps
 
+**Scope (owner decision, HQ gate G1, 2026-11-20):** HQ staging may read **and modify** CF Meet production. This section switches on the **reads** (HQ stages S3/S5). Commands follow per family once A3+ serves them:
+- `ADMIN_BRIDGE_WRITES_ENABLED=true`, through a write-enabled counterpart of `activate-admin-bridge-hq` for HQ stage S6 (not built yet);
+- an access policy revision, signed offline, that adds the family's command permissions;
+- HQ re-pins the contract and lists the family in `CFMEET_ADMIN_ENABLED_COMMANDS`.
+
+Until then, safe defaults keep writes off.
+
 Steps 1, 2 and 4 are operator steps; step 3 is the `activate-admin-bridge-hq` operation, which refuses to run until steps 1 and 2 are complete. Never hand-edit the container: safe defaults refuse `ADMIN_BRIDGE_ENABLED=true` until that operation is recorded.
 
 Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`) on `cfmeet-core-private`, with the runtime `DATABASE_URL` in a 0600 env file, never on the command line.
