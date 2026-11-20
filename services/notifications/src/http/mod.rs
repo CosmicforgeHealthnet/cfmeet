@@ -13,6 +13,7 @@
 
 pub mod internal;
 pub mod middleware;
+mod operator;
 pub mod partner;
 pub mod provider;
 pub mod user;
@@ -89,6 +90,14 @@ pub fn app(state: AppState) -> Router {
             delete(internal::remove_suppression),
         )
         .route("/admin/reroute/cancel", post(internal::reroute_cancel))
+        // ADR 0067: the admin bridge's operator reads (notifications.administer + X-CF-Operator).
+        .route("/operator/deliveries", get(operator::deliveries))
+        .route(
+            "/operator/failed-deliveries",
+            get(operator::failed_deliveries),
+        )
+        .route("/operator/email-suppressions", get(operator::suppressions))
+        .route("/operator/providers", get(operator::providers))
         .route("/operator-alerts", post(internal::operator_alerts))
         .fallback(not_found)
         .with_state(state.clone())
