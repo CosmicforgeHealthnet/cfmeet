@@ -1533,7 +1533,7 @@
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The HQ staff member the admin bridge reads for (ADR 0067). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
@@ -1650,7 +1650,7 @@
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The HQ staff member the admin bridge reads for (ADR 0067). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
@@ -1793,7 +1793,7 @@
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The HQ staff member the admin bridge reads for (ADR 0067). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
@@ -1931,7 +1931,7 @@
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The HQ staff member the admin bridge reads for (ADR 0067). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
@@ -2080,7 +2080,7 @@
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The HQ staff member the admin bridge reads for (ADR 0067). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"

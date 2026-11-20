@@ -1,4 +1,4 @@
-//! The admin bridge's operator reads (ADR 0067, design §6.5): `/internal/v1/communications/operator/*`.
+//! The admin bridge's operator reads (ADR 0068, design §6.5): `/internal/v1/communications/operator/*`.
 //!
 //! Only `cfmeet.admin-bridge` can hold `communications.administer`, and every request must
 //! name the HQ staff member it reads for (`X-CF-Operator`; refused otherwise). The reads are
