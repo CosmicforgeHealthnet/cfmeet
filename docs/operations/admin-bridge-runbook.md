@@ -50,10 +50,14 @@ Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`)
    - `ADMIN_BRIDGE_HQ_WORKLOAD_URI` (HQ's single URI SAN, e.g. `cf://staging/product-admin/cfmeet`)
    - `ADMIN_BRIDGE_ENROLLED_MARKETS`, `ADMIN_BRIDGE_ENROLLED_TENANTS`
    - mounts for `ADMIN_BRIDGE_TLS_CERT_FILE`, `ADMIN_BRIDGE_TLS_KEY_FILE`, `ADMIN_BRIDGE_CLIENT_CA_FILE` and `ADMIN_BRIDGE_HMAC_KEY_DIR`
-4. **HQ port** (`ADMIN_BRIDGE_HQ_PORT`, 8460). Install the passthrough relay `cfmeet-admin-bridge-hq-relay`:
-   - `admin_bridge_hq_relay_config(<HQ staging egress IPv4>)`: nginx `stream`, `allow <source>; deny all;`, TLS **not** terminated.
-   - On the host firewall, allow TCP 8460 **only** from HQ staging's egress address.
+4. **HQ connection: private tunnel only** (owner decision 2026-11-20). HQ connects only to a pinned private IP, so HQ staging reaches the bridge over a private tunnel (e.g. WireGuard) between the HQ staging host and the CF Meet host. Setting up the tunnel is a privileged operator step; the addresses move out of band, never via chat or git.
+   - Bring up the tunnel. Note the CF Meet host's tunnel address (`ADMIN_BRIDGE_HQ_LISTEN_ADDRESS`) and HQ's tunnel address (`ADMIN_BRIDGE_HQ_ALLOWED_SOURCE`). Both must be private IPv4 (RFC 1918 or 100.64/10); the tool refuses public addresses.
+   - Install the passthrough relay `cfmeet-admin-bridge-hq-relay` from `admin_bridge_hq_relay_config(<listen>, <source>)`. It is an nginx `stream` relay with `listen <tunnel address>:8460; allow <HQ tunnel address>; deny all;`, and TLS is **not** terminated.
+   - On the host firewall, allow TCP 8460 only on the tunnel interface and only from HQ's tunnel address. Keep 8460 closed on every public interface.
    - Never add 8460 to `api.cfmeet.com`, the public site, or the private TLS proxy.
+   - **Server certificate:** issue it from CF Meet's private admin-bridge CA with DNS SAN `admin-bridge.cfmeet.internal` (HQ uses it as SNI), never a public name. Give HQ the CA bundle and the leaf SHA-256 fingerprint out of band. HQ pins both, so send the new fingerprint **before** each rotation.
+   - **HQ's client certificate:** exactly one URI SAN, `cf://staging/product-admin/cfmeet`. Enrol the leaf's DER SHA-256 with `enroll-cert`.
+   - **Enrolled scope:** `ADMIN_BRIDGE_ENROLLED_MARKETS=GLOBAL`; `ADMIN_BRIDGE_ENROLLED_TENANTS=<CF Meet first-party tenant id>`.
 5. **Verify.**
    - `/ready` returns `{"ready":true,"enabled":true,"policy_revision":1,"openapi_sha256":<pinned hash>}`.
    - HQ's `bridge.capabilities.read` returns the same `openapi_sha256` as HQ's pin.
@@ -62,7 +66,7 @@ Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`)
 ## 4. Rollback
 
 - Set `ADMIN_BRIDGE_ENABLED=false`, or run `rollback` on the operation. Every HQ request then answers `503 BRIDGE_DISABLED`.
-- Remove the relay and the firewall rule.
+- Remove the relay and the firewall rule. The tunnel can stay up: with the relay gone, nothing listens on 8460.
 - Grants added by `activate-admin-bridge` are undone by rolling that operation back.
 
 ## 5. Keys: rotation and revocation
