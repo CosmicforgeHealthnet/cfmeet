@@ -241,7 +241,7 @@ SERVICES = {
                     'organization-integration-migration', 'account-communications-migration',
                     'lifecycle-delivery-migration', 'notification-fence-migration',
                     'gap-closure-migration', 'platform-build-migration', 'meeting-audit-migration',
-                    'account-privacy-migration'],
+                    'account-privacy-migration', 'admin-operations-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
