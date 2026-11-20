@@ -306,6 +306,11 @@ pub async fn platform_credential(
             return refuse("service_token_invalid", &route);
         }
     };
+    // ADR 0068: operator attribution only from the admin bridge, on every internal route.
+    if crate::services::admin_operator::attribution_refused(caller.authenticated_service(), headers)
+    {
+        return refuse("operator_attribution_refused", &route);
+    }
     if caller.authenticated_service() != &ServiceId::api_gateway()
         || caller
             .require_permission(InternalPermission::MeetingRequestForward)

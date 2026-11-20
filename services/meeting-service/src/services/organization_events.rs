@@ -253,6 +253,17 @@ async fn ingest(State(s): State<EventsState>, request: Request) -> Response {
         }
     };
     let rid = ctx.request_id().as_str().to_string();
+    if crate::services::admin_operator::attribution_refused(
+        ctx.authenticated_service(),
+        request.headers(),
+    ) {
+        return error(
+            StatusCode::FORBIDDEN,
+            "INTERNAL_PERMISSION_DENIED",
+            "Operator attribution is accepted only from the admin bridge.",
+            Some(&rid),
+        );
+    }
     if ctx
         .require_permission(InternalPermission::MeetingOrganizationEventsApply)
         .is_err()

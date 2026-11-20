@@ -588,6 +588,16 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Notification Service owner APIs enabled");
     }
 
+    // ADR 0068: the admin bridge's operator reads (ADMIN_OPERATOR_API_ENABLED, default off).
+    let admin_operator = backend::services::admin_operator::AdminOperatorConfig::from_env()
+        .and_then(|c| c.map(|c| c.verifier()).transpose())
+        .unwrap_or_else(|e| panic!("admin operator API configuration error: {e}"));
+    let operator_router = admin_operator
+        .map(|verifier| backend::services::admin_operator::router(state.clone(), verifier));
+    if operator_router.is_some() {
+        tracing::info!("admin bridge operator reads enabled");
+    }
+
     // Final closure: Organizations event ingress (ORGANIZATION_EVENTS_ENABLED). Its tables
     // live in their own additive history (`organization-integration-migration up`).
     let organization_events =
@@ -663,6 +673,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Some(events) = events_router {
         app = app.merge(events);
+    }
+    if let Some(operator) = operator_router {
+        app = app.merge(operator);
     }
     if let Some(owner) = owner_router {
         app = app.merge(owner);
