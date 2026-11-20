@@ -217,7 +217,6 @@ impl B {
         }
         self
     }
-    #[allow(dead_code)]
     fn body(mut self, schema: &'static str) -> B {
         self.0.body = Some(schema);
         self
@@ -226,7 +225,6 @@ impl B {
         self.0.result = Some(schema);
         self
     }
-    #[allow(dead_code)]
     fn source(mut self, endpoint: &'static str) -> B {
         self.0.source_endpoint = Some(endpoint);
         self
@@ -2370,6 +2368,9 @@ pub fn catalog() -> Vec<Capability> {
     );
 
     // ---- 6.10 Verification -------------------------------------------------------
+    // A3: the verification queue (HQ's shared case shape) and its decisions, scoped to CF
+    // Meet's first-party tenant (an operator function); served through the command core.
+    const DP_CASES: &str = "GET /internal/v1/operator/verification/cases";
     c.push(
         dp(
             get(
@@ -2380,7 +2381,10 @@ pub fn catalog() -> Vec<Capability> {
             S::New,
             P::A3,
         )
-        .risk(R::R1, V::Internal),
+        .risk(R::R1, V::Internal)
+        .source(DP_CASES)
+        .result("VerificationCasePage")
+        .served(&["verification_reads_are_strict_hq_case_shapes"]),
     );
     c.push(
         dp(
@@ -2392,7 +2396,10 @@ pub fn catalog() -> Vec<Capability> {
             S::New,
             P::A3,
         )
-        .risk(R::R1, V::Internal),
+        .risk(R::R1, V::Internal)
+        .source("GET /internal/v1/operator/verification/cases/{caseId}")
+        .result("VerificationCaseDetail")
+        .served(&["verification_reads_are_strict_hq_case_shapes"]),
     );
     c.push(
         dp(
@@ -2404,7 +2411,10 @@ pub fn catalog() -> Vec<Capability> {
             S::New,
             P::A3,
         )
-        .risk(R::R1, V::OperationsMinimized),
+        .risk(R::R1, V::OperationsMinimized)
+        .source("GET /internal/v1/operator/verification/cases/{caseId}/history")
+        .result("VerificationCaseHistory")
+        .served(&["verification_reads_are_strict_hq_case_shapes"]),
     );
     c.push(
         dp(
@@ -2415,35 +2425,58 @@ pub fn catalog() -> Vec<Capability> {
             S::Exists,
             P::A3,
         )
-        .risk(R::R2, V::Internal),
+        .risk(R::R2, V::Internal)
+        .source("POST /internal/v1/operator/{production-access-requests|apps}/{id}/review")
+        .body("VerificationClaimRequest")
+        .result("VerificationCommandResult")
+        .served(&["verification_commands_reach_the_right_owner_route_once"]),
     );
-    for (id, path) in [
+    for (id, path, body, source) in [
         (
             "verification.partner-go-live.approve",
             "/verification/cases/{case_id}/partner-go-live/approve",
+            "PartnerGoLiveApproveRequest",
+            "POST /internal/v1/operator/production-access-requests/{requestId}/approve",
         ),
         (
             "verification.partner-go-live.reject",
             "/verification/cases/{case_id}/partner-go-live/reject",
+            "VerificationRejectRequest",
+            "POST /internal/v1/operator/production-access-requests/{requestId}/reject",
         ),
         (
             "verification.partner-go-live.suspend",
             "/verification/cases/{case_id}/partner-go-live/suspend",
+            "VerificationDecisionRequest",
+            "POST /internal/v1/operator/production-access-requests/{requestId}/suspend",
         ),
         (
             "verification.app-review.approve",
             "/verification/cases/{case_id}/app-review/approve",
+            "VerificationDecisionRequest",
+            "POST /internal/v1/operator/apps/{appId}/approve",
         ),
         (
             "verification.app-review.reject",
             "/verification/cases/{case_id}/app-review/reject",
+            "VerificationRejectRequest",
+            "POST /internal/v1/operator/apps/{appId}/reject",
         ),
         (
             "verification.app-review.publish",
             "/verification/cases/{case_id}/app-review/publish",
+            "VerificationDecisionRequest",
+            "POST /internal/v1/operator/apps/{appId}/publish",
         ),
     ] {
-        c.push(dp(cmd(id, path), S::Exists, P::A3).risk(R::R4, V::Internal));
+        c.push(
+            dp(cmd(id, path), S::Exists, P::A3)
+                .risk(R::R4, V::Internal)
+                .source(source)
+                .body(body)
+                .result("VerificationCommandResult")
+                .served(&["verification_commands_reach_the_right_owner_route_once"]),
+        );
     }
     c.push(
         og(

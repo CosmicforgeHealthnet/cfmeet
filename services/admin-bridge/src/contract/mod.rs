@@ -14,3 +14,4 @@ pub mod schemas_identity;
 pub mod schemas_meetings;
 pub mod schemas_messaging;
 pub mod schemas_partners;
+pub mod schemas_verification;

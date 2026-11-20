@@ -1,0 +1,17 @@
+{
+  "description": "A settled verification command: its operation (as bridge.operations.read shows it) and the case after the change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "$ref": "#/components/schemas/VerificationCaseDetail"
+    }
+  }
+}
