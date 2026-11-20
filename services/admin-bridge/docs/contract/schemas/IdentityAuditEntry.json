@@ -1,0 +1,75 @@
+{
+  "description": "One Platform Access operator audit row, without its detail.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "actor",
+    "correlation_id",
+    "action",
+    "target_kind",
+    "target_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "occurred_at"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 140
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "target_kind": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "target_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
