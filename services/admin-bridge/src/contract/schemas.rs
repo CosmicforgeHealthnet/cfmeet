@@ -394,6 +394,128 @@ pub fn components() -> Map<String, Value> {
         page(json!({"$ref": "#/components/schemas/OrganizationBinding"})),
     );
 
+    // ---- Notifications (A2.2) ---------------------------------------------------------
+    let n_uuid = json!({"type": "string", "format": "uuid"});
+    let n_code = json!({"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"});
+    let n_nullable_code = json!({"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{0,63}$"});
+    let n_dt = json!({"type": "string", "format": "date-time"});
+    let n_nullable_dt = json!({"type": ["string", "null"], "format": "date-time"});
+    let n_page = |item: Value| {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["items", "next_cursor"],
+            "properties": {
+                "items": {"type": "array", "maxItems": 100, "items": item},
+                "next_cursor": {"type": ["string", "null"], "pattern": CURSOR_PATTERN}
+            }
+        })
+    };
+    m.insert(
+        "NotificationDelivery".into(),
+        json!({
+            "description": "One notification delivery: ids, category, lane, channel, state and times. Never an address, handle, code, token or rendered text.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["delivery_id", "notification_id", "category", "lane", "channel", "status", "attempts", "last_error_class", "created_at", "completed_at"],
+            "properties": {
+                "delivery_id": n_uuid, "notification_id": n_uuid, "category": n_code, "lane": n_code,
+                "channel": {"enum": ["EMAIL", "PUSH", "IN_APP", "OPERATOR", "WEBHOOK"]}, "status": n_code,
+                "attempts": {"type": "integer", "minimum": 0}, "last_error_class": n_nullable_code,
+                "created_at": n_dt, "completed_at": n_nullable_dt
+            }
+        }),
+    );
+    m.insert(
+        "NotificationDeliveryPage".into(),
+        n_page(json!({"$ref": "#/components/schemas/NotificationDelivery"})),
+    );
+    m.insert(
+        "NotificationSuppression".into(),
+        json!({
+            "description": "The effective suppression of one recipient, by the Notification Service's keyed digest only. The address is never relayed.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["recipient_digest", "channel", "reason", "created_at"],
+            "properties": {
+                "recipient_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "channel": {"const": "EMAIL"},
+                "reason": {"enum": ["COMPLAINED", "HARD_BOUNCE", "MANUAL"]},
+                "created_at": n_dt
+            }
+        }),
+    );
+    m.insert(
+        "NotificationSuppressionPage".into(),
+        n_page(json!({"$ref": "#/components/schemas/NotificationSuppression"})),
+    );
+    m.insert(
+        "NotificationRouting".into(),
+        json!({
+            "description": "Routing per category and channel, and the hourly route audit (accepted decisions per producer and category).",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["routing_protocols", "routes", "audit"],
+            "properties": {
+                "routing_protocols": {"type": "array", "maxItems": 16, "items": {"type": "integer", "minimum": 1}},
+                "routes": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["category", "channel", "mode", "version", "canary_percent", "fence_at"],
+                        "properties": {
+                            "category": n_code, "channel": {"enum": ["EMAIL", "PUSH", "IN_APP", "OPERATOR"]}, "mode": n_code,
+                            "version": {"type": "integer", "minimum": 0}, "canary_percent": {"type": "integer", "minimum": 0, "maximum": 100},
+                            "fence_at": n_dt
+                        }
+                    }
+                },
+                "audit": {
+                    "type": "array",
+                    "maxItems": 2000,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["producer", "category", "hour", "accepted_decisions"],
+                        "properties": {
+                            "producer": {"type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$"},
+                            "category": n_code, "hour": n_dt, "accepted_decisions": {"type": "integer", "minimum": 0}
+                        }
+                    }
+                }
+            }
+        }),
+    );
+    m.insert(
+        "NotificationProviders".into(),
+        json!({
+            "description": "Per-channel provider status from configuration and recent deliveries. Never a credential, key or provider response.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["checked_at", "providers"],
+            "properties": {
+                "checked_at": n_dt,
+                "providers": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["channel", "configured", "status", "last_success_at", "last_failure_at", "last_error_class", "recent_deliveries"],
+                        "properties": {
+                            "channel": {"enum": ["EMAIL", "PUSH"]}, "configured": {"type": "boolean"},
+                            "status": {"enum": ["OK", "DEGRADED", "UNKNOWN", "NOT_CONFIGURED"]},
+                            "last_success_at": n_nullable_dt, "last_failure_at": n_nullable_dt,
+                            "last_error_class": n_nullable_code, "recent_deliveries": {"type": "integer", "minimum": 0}
+                        }
+                    }
+                }
+            }
+        }),
+    );
+
     m.insert(
         "Purpose".into(),
         json!({"enum": names(Purpose::ALL, Purpose::as_str)}),

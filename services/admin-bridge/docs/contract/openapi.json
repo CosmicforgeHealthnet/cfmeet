@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Admin Bridge (HQ interface v1)",
-    "version": "1.2.0",
+    "version": "1.4.0",
     "description": "Private HQ -> CF Meet admin bridge. Transport, signing, staff assertion and authorization rules: signing-profile.md. Artifact state never authorizes anything at runtime."
   },
   "servers": [
@@ -57030,7 +57030,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/NotificationDeliveryPage"
                     },
                     "error": {
                       "type": "null"
@@ -57156,7 +57156,7 @@
         "x-cfmeet-permission": "notifications.deliveries.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "notifications"
       }
     },
@@ -57299,7 +57299,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/NotificationDeliveryPage"
                     },
                     "error": {
                       "type": "null"
@@ -57425,7 +57425,7 @@
         "x-cfmeet-permission": "notifications.failed-deliveries.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "notifications"
       }
     },
@@ -57821,7 +57821,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/NotificationSuppressionPage"
                     },
                     "error": {
                       "type": "null"
@@ -57947,7 +57947,7 @@
         "x-cfmeet-permission": "notifications.suppressions.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "notifications"
       }
     },
@@ -58314,7 +58314,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/NotificationRouting"
                     },
                     "error": {
                       "type": "null"
@@ -58440,7 +58440,7 @@
         "x-cfmeet-permission": "notifications.routing.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "notifications"
       },
       "post": {
@@ -59056,7 +59056,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/NotificationProviders"
                     },
                     "error": {
                       "type": "null"
@@ -59182,7 +59182,7 @@
         "x-cfmeet-permission": "notifications.providers.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "notifications"
       }
     },
@@ -64484,6 +64484,330 @@
               "null"
             ],
             "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "NotificationDelivery": {
+        "description": "One notification delivery: ids, category, lane, channel, state and times. Never an address, handle, code, token or rendered text.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "delivery_id",
+          "notification_id",
+          "category",
+          "lane",
+          "channel",
+          "status",
+          "attempts",
+          "last_error_class",
+          "created_at",
+          "completed_at"
+        ],
+        "properties": {
+          "delivery_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "notification_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "lane": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "channel": {
+            "enum": [
+              "EMAIL",
+              "PUSH",
+              "IN_APP",
+              "OPERATOR",
+              "WEBHOOK"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_error_class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "NotificationDeliveryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/NotificationDelivery"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "NotificationSuppression": {
+        "description": "The effective suppression of one recipient, by the Notification Service's keyed digest only. The address is never relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recipient_digest",
+          "channel",
+          "reason",
+          "created_at"
+        ],
+        "properties": {
+          "recipient_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "channel": {
+            "const": "EMAIL"
+          },
+          "reason": {
+            "enum": [
+              "COMPLAINED",
+              "HARD_BOUNCE",
+              "MANUAL"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "NotificationSuppressionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/NotificationSuppression"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "NotificationRouting": {
+        "description": "Routing per category and channel, and the hourly route audit (accepted decisions per producer and category).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "routing_protocols",
+          "routes",
+          "audit"
+        ],
+        "properties": {
+          "routing_protocols": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "routes": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "category",
+                "channel",
+                "mode",
+                "version",
+                "canary_percent",
+                "fence_at"
+              ],
+              "properties": {
+                "category": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "channel": {
+                  "enum": [
+                    "EMAIL",
+                    "PUSH",
+                    "IN_APP",
+                    "OPERATOR"
+                  ]
+                },
+                "mode": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "canary_percent": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "fence_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "audit": {
+            "type": "array",
+            "maxItems": 2000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "producer",
+                "category",
+                "hour",
+                "accepted_decisions"
+              ],
+              "properties": {
+                "producer": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9.-]{0,63}$"
+                },
+                "category": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "hour": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "accepted_decisions": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotificationProviders": {
+        "description": "Per-channel provider status from configuration and recent deliveries. Never a credential, key or provider response.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "checked_at",
+          "providers"
+        ],
+        "properties": {
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "providers": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "channel",
+                "configured",
+                "status",
+                "last_success_at",
+                "last_failure_at",
+                "last_error_class",
+                "recent_deliveries"
+              ],
+              "properties": {
+                "channel": {
+                  "enum": [
+                    "EMAIL",
+                    "PUSH"
+                  ]
+                },
+                "configured": {
+                  "type": "boolean"
+                },
+                "status": {
+                  "enum": [
+                    "OK",
+                    "DEGRADED",
+                    "UNKNOWN",
+                    "NOT_CONFIGURED"
+                  ]
+                },
+                "last_success_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "last_failure_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "last_error_class": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "recent_deliveries": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
           }
         }
       },

@@ -1,0 +1,70 @@
+{
+  "description": "One notification delivery: ids, category, lane, channel, state and times. Never an address, handle, code, token or rendered text.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "delivery_id",
+    "notification_id",
+    "category",
+    "lane",
+    "channel",
+    "status",
+    "attempts",
+    "last_error_class",
+    "created_at",
+    "completed_at"
+  ],
+  "properties": {
+    "delivery_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "notification_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "category": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "lane": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "channel": {
+      "enum": [
+        "EMAIL",
+        "PUSH",
+        "IN_APP",
+        "OPERATOR",
+        "WEBHOOK"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_error_class": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}
