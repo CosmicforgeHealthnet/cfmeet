@@ -38,7 +38,7 @@ Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`)
 
 1. **Enrol HQ.** Use the values HQ sends out of band; no secret passes through chat or tickets.
    - `enroll-cert --fingerprint <sha256 of HQ client cert DER> --not-before … --expires … --operator <you>`
-   - `enroll-hmac --kid <X-HQ-Key-ID> --key-file /secure/<kid>.key --expires … --operator <you>`. Only the sha256 is stored. The key file itself goes in `ADMIN_BRIDGE_HMAC_KEY_DIR` as `<kid>.key` (0400, owned by uid 10001).
+   - `enroll-hmac --kid <X-HQ-Key-ID> --key-file /secure/<kid>.key --expires … --operator <you>`. Only the sha256 is stored. The key file itself goes in `ADMIN_BRIDGE_HMAC_KEY_DIR` as `<kid>.key` (0400, owned by uid 10001). The file is **base64url text of at least 32 key bytes** (padding optional), the same file HQ reads as `CFMEET_BRIDGE_HMAC_KEY_FILE`; generate it once, for example `head -c 32 /dev/urandom | basenc --base64url -w0 | tr -d '='`, and deliver the same sealed file to both sides.
    - `enroll-staff-key --kid <jws kid> --public-key-hex … --issuer cosmicforge-hq --audience cfmeet-admin-bridge --expires … --operator <you>`
 2. **Access policy.**
    - `policy-ceiling --revision 1 > policy.json`, then edit it down to a READ-ONLY policy: the reads only, no command permission.
