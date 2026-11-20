@@ -75,7 +75,7 @@ pub async fn register<C: ConnectionTrait>(
     local_test_allowed: bool,
 ) -> Result<Uuid, RegisterError> {
     let platform = req.platform.as_str();
-    if !PLATFORMS.contains(&platform) && !(local_test_allowed && platform == "LOCAL_TEST") {
+    if !(PLATFORMS.contains(&platform) || (local_test_allowed && platform == "LOCAL_TEST")) {
         return Err(RegisterError::Invalid(
             "platform is APNS, APNS_VOIP, FCM or WEB_PUSH",
         ));
@@ -283,7 +283,7 @@ pub async fn mirror_one<C: ConnectionTrait>(
         return invalid("ACCOUNT_REF").await;
     };
     let platform = item.platform.as_str();
-    if !MIRROR_PLATFORMS.contains(&platform) && !(local_test_allowed && platform == "LOCAL_TEST") {
+    if !(MIRROR_PLATFORMS.contains(&platform) || (local_test_allowed && platform == "LOCAL_TEST")) {
         return invalid("PLATFORM").await;
     }
     let Some(handle) = item
