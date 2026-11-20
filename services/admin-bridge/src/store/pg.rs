@@ -29,6 +29,35 @@ fn get<T: sea_orm::TryGetable>(row: &QueryResult, col: &str) -> StoreResult<T> {
         .map_err(|_| StoreError::Invalid("unexpected column type"))
 }
 
+const OPERATION_COLUMNS: &str = "principal_sub, idempotency_key, operation_id, capability, owner, purpose, \
+     scope, intent_sha256, target, expected_version, approval_id, correlation_id, status, source_status, \
+     source_version, error_code, created_at, sent_at, settled_at";
+
+fn operation_row(r: &QueryResult) -> StoreResult<Operation> {
+    let status: String = get(r, "status")?;
+    Ok(Operation {
+        principal_sub: get(r, "principal_sub")?,
+        idempotency_key: get(r, "idempotency_key")?,
+        operation_id: get(r, "operation_id")?,
+        capability: get(r, "capability")?,
+        owner: get(r, "owner")?,
+        purpose: get(r, "purpose")?,
+        scope: get(r, "scope")?,
+        intent_sha256: get(r, "intent_sha256")?,
+        target: get(r, "target")?,
+        expected_version: get(r, "expected_version")?,
+        approval_id: get(r, "approval_id")?,
+        correlation_id: get(r, "correlation_id")?,
+        status: OpStatus::parse(&status).ok_or(StoreError::Invalid("operation status"))?,
+        source_status: get(r, "source_status")?,
+        source_version: get(r, "source_version")?,
+        error_code: get(r, "error_code")?,
+        created_at: get(r, "created_at")?,
+        sent_at: get(r, "sent_at")?,
+        settled_at: get(r, "settled_at")?,
+    })
+}
+
 #[derive(Clone)]
 pub struct PgStore {
     db: DatabaseConnection,
@@ -302,6 +331,128 @@ impl Store for PgStore {
                 })
             })
             .collect()
+    }
+
+    async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome> {
+        let inserted = self
+            .db
+            .execute(stmt(
+                "INSERT INTO admin_operations (principal_sub, idempotency_key, operation_id, capability, owner, \
+                 purpose, scope, intent_sha256, target, expected_version, approval_id, correlation_id, status, \
+                 created_at) VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8, $9, $10, $11, $12, 'PENDING', $13) \
+                 ON CONFLICT DO NOTHING",
+                vec![
+                    op.principal_sub.clone().into(),
+                    op.idempotency_key.into(),
+                    op.operation_id.into(),
+                    op.capability.clone().into(),
+                    op.owner.clone().into(),
+                    op.purpose.clone().into(),
+                    json_text(&op.scope).into(),
+                    op.intent_sha256.clone().into(),
+                    op.target.clone().into(),
+                    op.expected_version.clone().into(),
+                    op.approval_id.clone().into(),
+                    op.correlation_id.into(),
+                    op.created_at.trunc_subsecs(6).into(),
+                ],
+            ))
+            .await
+            .map_err(unavailable)?
+            .rows_affected();
+        if inserted == 1 {
+            return Ok(BeginOutcome::Started);
+        }
+        match self
+            .operation(&op.principal_sub, op.idempotency_key)
+            .await?
+        {
+            Some(existing) => Ok(BeginOutcome::Existing(Box::new(existing))),
+            None => Ok(BeginOutcome::VersionTaken),
+        }
+    }
+
+    async fn mark_sent(&self, sub: &str, key: uuid::Uuid, at: DateTime<Utc>) -> StoreResult<bool> {
+        let n = self
+            .db
+            .execute(stmt(
+                "UPDATE admin_operations SET status = 'SENT', sent_at = $3 \
+                 WHERE principal_sub = $1 AND idempotency_key = $2 AND status = 'PENDING'",
+                vec![sub.into(), key.into(), at.trunc_subsecs(6).into()],
+            ))
+            .await
+            .map_err(unavailable)?
+            .rows_affected();
+        Ok(n == 1)
+    }
+
+    async fn settle_operation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        st: &Settlement,
+    ) -> StoreResult<bool> {
+        let from: &[&str] = match st.status {
+            OpStatus::Sent => &["PENDING"],
+            OpStatus::UnknownOutcome => &["SENT"],
+            OpStatus::Succeeded => &["SENT", "UNKNOWN_OUTCOME"],
+            OpStatus::Failed => &["PENDING", "SENT", "UNKNOWN_OUTCOME"],
+            OpStatus::Pending => return Ok(false),
+        };
+        let settled_at = st.status.settled().then(|| st.at.trunc_subsecs(6));
+        let n = self
+            .db
+            .execute(stmt(
+                "UPDATE admin_operations SET status = $3, source_status = $4, source_version = $5, \
+                 error_code = $6, settled_at = $7 \
+                 WHERE principal_sub = $1 AND idempotency_key = $2 AND status = ANY($8)",
+                vec![
+                    sub.into(),
+                    key.into(),
+                    st.status.as_str().into(),
+                    st.source_status.clone().into(),
+                    st.source_version.clone().into(),
+                    st.error_code.clone().into(),
+                    settled_at.into(),
+                    from.iter().map(|s| s.to_string()).collect::<Vec<String>>().into(),
+                ],
+            ))
+            .await
+            .map_err(unavailable)?
+            .rows_affected();
+        Ok(n == 1)
+    }
+
+    async fn operation(&self, sub: &str, key: uuid::Uuid) -> StoreResult<Option<Operation>> {
+        let row = self
+            .db
+            .query_one(stmt(
+                &format!("SELECT {OPERATION_COLUMNS} FROM admin_operations WHERE principal_sub = $1 AND idempotency_key = $2"),
+                vec![sub.into(), key.into()],
+            ))
+            .await
+            .map_err(unavailable)?;
+        row.as_ref().map(operation_row).transpose()
+    }
+
+    async fn open_operations(
+        &self,
+        before: DateTime<Utc>,
+        limit: u32,
+    ) -> StoreResult<Vec<Operation>> {
+        let rows = self
+            .db
+            .query_all(stmt(
+                &format!(
+                    "SELECT {OPERATION_COLUMNS} FROM admin_operations \
+                     WHERE status IN ('PENDING', 'SENT', 'UNKNOWN_OUTCOME') AND created_at < $1 \
+                     ORDER BY created_at ASC LIMIT $2"
+                ),
+                vec![before.into(), i64::from(limit).into()],
+            ))
+            .await
+            .map_err(unavailable)?;
+        rows.iter().map(operation_row).collect()
     }
 
     async fn cleanup(&self, now: DateTime<Utc>) -> StoreResult<CleanupStats> {

@@ -47,6 +47,8 @@ codes! {
     CapabilityDisabled => ("CAPABILITY_DISABLED", 503, "capability not served in this build, its module switch is off, or writes are off"),
     IdempotencyKeyRequired => ("IDEMPOTENCY_KEY_REQUIRED", 400, "command without a valid Idempotency-Key"),
     IdempotencyConflict => ("IDEMPOTENCY_CONFLICT", 409, "Idempotency-Key reused with a different request"),
+    VersionConflict => ("VERSION_CONFLICT", 409, "another operation already holds this target's expected version (in flight or succeeded); nothing was done: read back and use the current version"),
+    CommandBodyInvalid => ("COMMAND_BODY_INVALID", 400, "command body is not exactly the capability's request schema"),
     RateLimited => ("RATE_LIMITED", 429, "per staff member, permission and scope limit reached"),
     AuditUnavailable => ("AUDIT_UNAVAILABLE", 503, "the audit row could not be written; nothing was done and no data is returned"),
     DatasetNotFound => ("DATASET_NOT_FOUND", 404, "unknown dataset id"),

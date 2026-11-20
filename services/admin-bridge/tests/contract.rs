@@ -126,6 +126,7 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "bridge.capabilities.read",
             "bridge.health.read",
             "bridge.datasets.read",
+            "bridge.operations.read",
             "hq.projections.status",
             "accounts.users.search",
             "accounts.users.read",

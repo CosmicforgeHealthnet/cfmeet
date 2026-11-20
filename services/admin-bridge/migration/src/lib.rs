@@ -7,6 +7,7 @@
 pub use sea_orm_migration::prelude::*;
 
 pub mod m20261119_000001_admin_bridge_foundation;
+pub mod m20261121_000001_admin_operations;
 
 pub use m20261119_000001_admin_bridge_foundation::AUDIT_LOCK_KEY;
 
@@ -18,9 +19,10 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(
-            m20261119_000001_admin_bridge_foundation::Migration,
-        )]
+        vec![
+            Box::new(m20261119_000001_admin_bridge_foundation::Migration),
+            Box::new(m20261121_000001_admin_operations::Migration),
+        ]
     }
 
     fn migration_table_name() -> DynIden {

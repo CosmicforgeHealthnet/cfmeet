@@ -634,3 +634,35 @@ Every staff role also reaches discovery (`admin-ui-capabilities`) and datasets (
 ### 17.5 Reads that use POST
 
 Only `pricing.charges.simulate` (its input is a usage vector). Every other non-GET route is a command.
+
+### 17.6 Commands: the operations ledger and readback (A3.0, agreed with HQ)
+
+No command is served by A3.0 itself; it is the core every A3+ family runs through (`services/admin-bridge/src/routes/commands.rs`).
+
+- **One UUID per HQ command.** `Idempotency-Key` = body `operation_id` = the readback key. A body whose `operation_id` differs is `COMMAND_BODY_INVALID`.
+- **Every command body** is `{operation_id, expected_version, reason_code?, note?}` plus the family's own fields; unknown fields are refused.
+- **Ledger** (`admin_operations`), keyed by staff member + `Idempotency-Key`:
+  - A replay with the same intent (capability, path parameters, purpose, scope, exact body, approval) returns the stored outcome and does not consume the approval again.
+  - A different intent under the same key is `IDEMPOTENCY_CONFLICT`.
+  - Only one non-failed operation may hold a target's expected version: `VERSION_CONFLICT` (409, nothing done). An owner's 409 is also `VERSION_CONFLICT`.
+- **Send once.** `PENDING` → `SENT` is recorded before the owner call. The owner gets the bridge's own service token, `X-CF-Operator`, `Idempotency-Key` and, for two-person commands, `X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`.
+  - 2xx: `SUCCEEDED`.
+  - 4xx: `FAILED` (404 `RESOURCE_NOT_FOUND`, 409 `VERSION_CONFLICT`, otherwise `OWNER_REFUSED`).
+  - Never sent (owner not configured): `FAILED`, `CAPABILITY_DISABLED`.
+  - Anything else: `UNKNOWN_OUTCOME` (502).
+  - Every outcome is audited after the accepted request's own audit row.
+- **Settlement, never a resend.** `GET /internal/v1/operator/operations/{idempotency_key}` on the owner returns `{idempotency_key, outcome: APPLIED|REFUSED, source_status, source_version}`, or 404.
+  - Every owner that serves a command must provide this record. It must write the key in the same transaction as the change.
+  - The bridge asks on each readback and in a one-minute sweep.
+  - With no record 600 s after sending, the operation is `FAILED` with `source_status` `NOT_RECEIVED`.
+  - A `PENDING` row older than 120 s was never sent: `FAILED`, `NOT_SENT`.
+- **`bridge.operations.read`**, `GET /hq/operations/{idempotency_key}` (SCOPED). Its roles and purposes are those of every command.
+  - It finds only the calling staff member's own operations; another's key is `RESOURCE_NOT_FOUND`.
+  - The original command's purpose (`PURPOSE_NOT_ALLOWED` otherwise) and exact scope (`SCOPE_DENIED` otherwise) are required.
+  - Result: `{idempotency_key, capability_id, status, source_status, source_version, settled_at}`.
+  - HQ settles on `SUCCEEDED` and `FAILED`; `PENDING`, `SENT` and `UNKNOWN_OUTCOME` stay unknown.
+- **Verification scope (A3.1+).** `verification.*` reads and commands are operator functions scoped to CF Meet's first-party Platform Access tenant (the one HQ enrols). The partner's tenant is the case field `partner_tenant_id`.
+- **Staff link (A3.2).**
+  - Without `x-cf-operator-user-id`, an R4 decision is allowed and the owner records `link_status=UNLINKED`.
+  - With it, a member of the partner's workspace is refused (no self-review).
+  - Two-person approval (requester ≠ approver) applies either way.

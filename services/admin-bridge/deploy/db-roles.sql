@@ -10,7 +10,10 @@
 --                            UPDATE (revoked_at)                 admin_remote_principals
 --                            UPDATE                              admin_rate_limits,
 --                                                                admin_dataset_days,
---                                                                admin_projections
+--                                                                admin_projections,
+--                                                                admin_operations (its
+--                                                                trigger allows only the
+--                                                                send-once transitions)
 --                            DELETE                              admin_security_claims,
 --                                                                admin_rate_limits (cleanup)
 --                          The append-only tables (audit, revocations, policy revisions)
@@ -75,10 +78,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE admin_bridge_migrator IN SCHEMA public REVOKE 
 
 GRANT SELECT, INSERT ON
     admin_remote_principals, admin_security_claims, admin_revocations, admin_rate_limits,
-    admin_policy_revisions, admin_audit_entries, admin_dataset_days, admin_projections
+    admin_policy_revisions, admin_audit_entries, admin_dataset_days, admin_projections,
+    admin_operations
     TO admin_bridge_runtime;
 GRANT UPDATE (revoked_at) ON admin_remote_principals TO admin_bridge_runtime;
-GRANT UPDATE ON admin_rate_limits, admin_dataset_days, admin_projections TO admin_bridge_runtime;
+GRANT UPDATE ON admin_rate_limits, admin_dataset_days, admin_projections, admin_operations TO admin_bridge_runtime;
 GRANT DELETE ON admin_security_claims, admin_rate_limits TO admin_bridge_runtime;
 -- Identity columns (audit sequence, revocation id).
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO admin_bridge_runtime;
@@ -93,7 +97,8 @@ BEGIN
      WHERE grantee = 'admin_bridge_runtime'
        AND (privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER')
             OR (privilege_type IN ('UPDATE', 'DELETE')
-                AND table_name IN ('admin_audit_entries', 'admin_revocations', 'admin_policy_revisions')));
+                AND table_name IN ('admin_audit_entries', 'admin_revocations', 'admin_policy_revisions'))
+            OR (privilege_type = 'DELETE' AND table_name = 'admin_operations'));
     IF bad IS NOT NULL THEN
         RAISE EXCEPTION 'admin_bridge_runtime has forbidden privileges: %', bad;
     END IF;
