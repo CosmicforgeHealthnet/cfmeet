@@ -1,4 +1,4 @@
-# Admin bridge runbook (HQ → CF Meet, ADR 0067)
+# Admin bridge runbook (HQ → CF Meet, ADR 0068)
 
 The admin bridge (`services/admin-bridge`, identity `cfmeet.admin-bridge`) is the only doorway from the
 CosmicForge central admin (HQ) into CF Meet. Design: `docs/admin/cfmeet-admin-bridge.md`. Contract HQ pins:
