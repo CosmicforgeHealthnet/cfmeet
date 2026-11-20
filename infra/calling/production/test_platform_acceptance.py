@@ -81,7 +81,7 @@ class FakePlatform:
         scopes = self.scopes[env]
         need = {'msg': 'messages.read', 'call': 'calls.write', 'mtg': 'meetings.write'}
         if any(need[k] not in scopes for k in grants):
-            return 403, {'error': {'code': 'SCOPE_REQUIRED'}}
+            return 403, {'error': {'code': 'INSUFFICIENT_SCOPE'}}  # the Developer Platform's code
         token = 'cfut_sbx_%s.payload.SIG%s' % (self.id('t'), 'x')
         self.n += 1
         self.tokens[token] = dict(env=env, user=user, grants=grants, iat=self.n)
@@ -89,7 +89,7 @@ class FakePlatform:
 
     def new_user(self, env, body):
         if not re.fullmatch(r'[!-~]{1,128}', body['externalId']) or re.fullmatch(r'\+?[0-9]{6,15}', body['externalId']):
-            return 422, {'error': {'code': 'VALIDATION_ERROR'}}
+            return 400, {'error': {'code': 'VALIDATION_ERROR'}}
         for uid, u in self.users.items():
             if u['env'] == env and u['externalId'] == body['externalId']:
                 return 200, dict(u, id=uid)
@@ -128,10 +128,14 @@ class FakePlatform:
         env = self.machine_env(bearer)
         if env:
             return self.machine(env, method, path, bare, body, headers)
+        scheme, _, credential = headers.get('Authorization', '').partition(' ')
+        if scheme == 'CF-Client-Token':
+            ct = self.client_tokens.get(credential)
+            return self.device_client(ct, method, bare, body) if ct else (401, {'error': {'code': 'AUTHENTICATION_FAILED'}})
         if bearer and bearer.startswith('cfut_'):
             return self.device_user_token(method, bare, body, bearer)
         if bearer in self.client_tokens:
-            return self.device_client(self.client_tokens[bearer], method, bare, body)
+            return 401, {'error': {'code': 'AUTHENTICATION_FAILED'}}  # client tokens never ride Bearer
         if bearer in self.signaling:
             return self.device_signaling(self.signaling[bearer], method, bare)
         if headers.get('X-Participant-Token') in self.participant_tokens:
@@ -187,7 +191,7 @@ class FakePlatform:
             if feature == 'allowed-origins':
                 if method == 'PUT':
                     if any('*' in o for o in body['origins']):
-                        return 422, {'error': {'code': 'VALIDATION_ERROR'}}
+                        return 400, {'error': {'code': 'VALIDATION_ERROR'}}
                     self.origins[env] = list(body['origins'])
                 return 200, {'environmentId': env, 'origins': self.origins.get(env, [])}
             if feature == 'test-user-tokens':
@@ -195,7 +199,10 @@ class FakePlatform:
                 _, minted = self.mint(env, created['id'], body['grants'])
                 return 201, dict(minted, user=created)
             if method == 'POST':
-                return 422, {'error': {'code': 'VALIDATION_ERROR'}}
+                # A well-shaped key with the PRODUCTION APNs host in a SANDBOX environment.
+                if body.get('apnsHost') == 'PRODUCTION' and str(body.get('p8', '')).startswith('-----BEGIN PRIVATE KEY-----'):
+                    return 422, {'error': {'code': 'POLICY_VIOLATION'}}
+                return 400, {'error': {'code': 'VALIDATION_ERROR'}}
             return 200, {'items': self.push.get(env, [])}
         return 404, {}
 
@@ -245,7 +252,7 @@ class FakePlatform:
             target = body['targetPrincipalIds'][0]
             invitation = self.id('inv')
             self.invitations[invitation] = dict(call=call, user=target)
-            return 201, {'call': {'id': call, 'state': 'RINGING'}, 'liveInvitationCount': 1}
+            return 201, {'call': {'callId': call, 'state': 'RINGING'}, 'liveInvitationCount': 1}
         m = re.fullmatch(r'/v1/calls/(\w+)(/cancel)?', bare)
         if m:
             c = self.calls_.get(m.group(1))
@@ -256,7 +263,8 @@ class FakePlatform:
         t = self.user_token(bearer)
         if path == '/v1/messaging/user-sessions':
             if not self.on('chat'):
-                return self.nf()
+                # The route is always mounted; off it answers 503 FEATURE_DISABLED (a valid token).
+                return (503, {'error': {'code': 'FEATURE_DISABLED'}}) if t else (401, {})
             if not t:
                 return 401, {'error': {'code': 'USER_TOKEN_INVALID'}}
             ct = 'cfct_' + self.id()
@@ -270,6 +278,13 @@ class FakePlatform:
             sig = 'cfsig_' + self.id()
             self.signaling[sig] = dict(env=t['env'], user=t['user'])
             return 201, {'principalId': t['user'], 'endpointId': self.id('ep'), 'signalingCredential': sig}
+        m = re.fullmatch(r'/v1/messaging/user-push-registrations/([\w.-]+)', path)
+        if m:
+            if not t:
+                return 401, {}
+            if method == 'PUT':
+                return 200, {'installationId': m.group(1), 'platform': body['platform'], 'status': 'ACTIVE'}
+            return 204, {}
         m = re.fullmatch(r'/api/v2/conferences/(\w+)/join', path)
         if m:
             if not self.on('meetings'):
@@ -293,18 +308,15 @@ class FakePlatform:
     def device_client(self, ct, method, path, body):
         if path == '/v1/realtime/tickets':
             return 201, {'ticket': 'rt_x'}
-        m = re.fullmatch(r'/v1/messaging/user-push-registrations/([\w.-]+)', path)
-        if m:
-            if method == 'PUT':
-                return 200, {'installationId': m.group(1), 'platform': body['platform'], 'status': 'ACTIVE'}
-            return 204, {}
+        if re.fullmatch(r'/v1/messaging/user-push-registrations/([\w.-]+)', path):
+            return 401, {}  # these take the user token, never a client token
         m = re.fullmatch(r'/v1/conversations/(\w+)/(messages|mls/state)', path)
         if m:
             c = self.conversations.get(m.group(1))
             if not c or c['env'] != ct['env'] or ct['user'] not in c['members']:
                 return self.nf()
             if m.group(2) == 'mls/state':
-                return 404, {}
+                return 401, {'error': {'code': 'CLIENT_TOKENS_NOT_ENABLED'}}  # not a partner device route
             log = self.messages.setdefault(m.group(1), [])
             if method == 'POST':
                 log.append(dict(body))
@@ -586,7 +598,7 @@ class Journey(unittest.TestCase):
         self.assertEqual({k: v for k, v in checks.items() if v != 'PASS'}, {})
         self.assertEqual(api.scopes['paenv'], {'principals.read', 'principals.write', 'user_tokens.issue'})
         self.assertTrue(all(t['grants'] == {} or set(t['grants']) == {'mtg'} for t in api.tokens.values()))
-        self.assertIn("tokens A: grant without its scope refused (403 SCOPE_REQUIRED)", checks)
+        self.assertIn("tokens A: grant without its scope refused (403 INSUFFICIENT_SCOPE)", checks)
         # Every phase that is not on is proven off.
         for stage in ('chat', 'calls', 'push', 'meetings'):
             self.assertTrue(any(k.startswith('flag off %s' % stage) for k in checks), stage)

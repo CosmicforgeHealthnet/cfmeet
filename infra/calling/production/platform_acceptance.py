@@ -84,6 +84,15 @@ WEB_ORIGIN = 'https://cfmeet.com'
 UNREGISTERED_ORIGIN = 'https://unregistered.acceptance.example.com'
 PHONE_LIKE_ID = '+14155550123'
 REFUSED = (401, 403, 404, 405)
+# A PEM-shaped placeholder (no real key): passes the console's shape check, so the SANDBOX
+# "production APNs host" rule is what refuses it; nothing is sealed or stored before that rule.
+PEM_PLACEHOLDER = '-----BEGIN PRIVATE KEY-----\n' + 'A' * 64 + '\n-----END PRIVATE KEY-----'
+
+
+def off_status(answer):
+    """A switched-off feature's status: 503 counts as off only with FEATURE_DISABLED."""
+    status, value = answer
+    return status if status != 503 or error_code(value) == 'FEATURE_DISABLED' else 599
 CORS_WAIT = (12, 5)        # attempts, seconds: the gateway polls the origins feed every <= 30 s
 REVOCATION_WAIT = (12, 5)  # verify results are cached for <= 30 s
 
@@ -133,7 +142,7 @@ class Client(da.Client):
         if status == 401 and 401 not in expected and self.account and not token:
             raise da.Expired()
         if status not in expected:
-            code = (value.get('error') or {}).get('code') if isinstance(value, dict) else None
+            code = error_code(value)
             raise da.Failed('%s %s answered %d %s' % (method, path.split('?')[0], status, code or ''))
         return status, value
 
@@ -151,8 +160,19 @@ def data(value):
     return value if isinstance(value, dict) else {}
 
 
+def error_code(value):
+    """The stable error code: {"error": {"code": ...}} (CF Meet APIs) or {"error": "..."} (OAuth)."""
+    err = value.get('error') if isinstance(value, dict) else None
+    return err.get('code') if isinstance(err, dict) else err
+
+
 def code(value):
-    return ((value or {}).get('error') or {}).get('code') if isinstance(value, dict) else None
+    return error_code(value)
+
+
+def device(client_token):
+    """A partner session device: client tokens use the CF-Client-Token scheme, never Bearer."""
+    return Client(headers={'Authorization': 'CF-Client-Token ' + client_token})
 
 
 def retry(fn, attempts, delay):
@@ -310,9 +330,9 @@ class Journey:
         _, patched = machine.call('PATCH', '/v1/users/%s' % rider['id'], {'displayName': 'Acceptance rider %s' % label})
         self.check('users %s: profile updated' % label,
                    patched.get('displayName') == 'Acceptance rider %s' % label)
-        status, value = machine.call('POST', '/v1/users', {'externalId': PHONE_LIKE_ID}, expected=(201, 422))
-        self.check('users %s: phone-number externalId refused (422)' % label,
-                   status == 422 and code(value) == 'VALIDATION_ERROR')
+        status, value = machine.call('POST', '/v1/users', {'externalId': PHONE_LIKE_ID}, expected=(201, 400, 422))
+        self.check('users %s: phone-number externalId refused (400 VALIDATION_ERROR)' % label,
+                   status == 400 and code(value) == 'VALIDATION_ERROR')
         if status == 201:
             self.undo(machine, 'DELETE', '/v1/users/%s' % value.get('id'))
         _, console = t['console'].call('GET', '/v1/environments/%s/users' % t['env']['id'])
@@ -354,8 +374,8 @@ class Journey:
         if not self.on('meetings'):
             status, value = self.mint(t, t['rider'], {'mtg': [{'c': str(uuid.uuid4()), 'r': 'PARTICIPANT'}]},
                                       expected=(201, 403))
-            self.check('tokens %s: grant without its scope refused (403 SCOPE_REQUIRED)' % label,
-                       status == 403 and code(value) == 'SCOPE_REQUIRED')
+            self.check('tokens %s: grant without its scope refused (403 INSUFFICIENT_SCOPE)' % label,
+                       status == 403 and code(value) == 'INSUFFICIENT_SCOPE')
         status, generated = t['console'].call('POST', '/v1/environments/%s/test-user-tokens' % t['env']['id'],
                                               {'externalId': 'console-%s-%s' % (label.lower(), self.tag), 'grants': {}},
                                               expected=(201,))
@@ -369,8 +389,10 @@ class Journey:
         self.undo(t['console'], 'PUT', path)
         _, origins = t['console'].call('GET', path)
         self.check('tokens %s: allowed website stored' % label, origins.get('origins') == [t['origin']])
-        status, value = t['console'].call('PUT', path, {'origins': ['https://*.acceptance.example.com']}, expected=(200, 422))
-        self.check('tokens %s: wildcard origin refused (422)' % label, status == 422)
+        status, value = t['console'].call('PUT', path, {'origins': ['https://*.acceptance.example.com']},
+                                          expected=(200, 400, 422))
+        self.check('tokens %s: wildcard origin refused (400 VALIDATION_ERROR)' % label,
+                   status == 400 and code(value) == 'VALIDATION_ERROR')
 
     def preflight(self, path, origin, method='GET'):
         status, headers = 0, {}
@@ -430,10 +452,10 @@ class Journey:
                    conversationId=conversation.get('conversationId'))
         conv = conversation['conversationId']
         message_id = str(uuid.uuid4())
-        Client(rider['clientToken']).call('POST', '/v1/conversations/%s/messages' % conv,
+        device(rider['clientToken']).call('POST', '/v1/conversations/%s/messages' % conv,
                                           {'clientMessageId': message_id, 'text': 'acceptance %s' % self.tag},
                                           expected=(200, 201), idempotent=True)
-        reader = Client(customer['clientToken'])
+        reader = device(customer['clientToken'])
 
         def received():
             _, page = reader.call('GET', '/v1/conversations/%s/messages' % conv)
@@ -441,15 +463,16 @@ class Journey:
         self.check('chat %s: rider\'s device sends, customer\'s device receives' % label, bool(retry(received, 6, 2)))
         status, ticket = reader.call('POST', '/v1/realtime/tickets', {}, expected=(200, 201))
         self.check('chat %s: realtime ticket for the partner session device' % label, bool(ticket.get('ticket')))
-        status, _ = reader.call('GET', '/v1/conversations/%s/mls/state' % conv, expected=(200, 403, 404))
-        self.check('chat %s: MLS refused to a partner session device' % label, status in (403, 404))
+        status, value = reader.call('GET', '/v1/conversations/%s/mls/state' % conv, expected=(200, 401, 403, 404))
+        self.check('chat %s: MLS refused to a partner session device' % label,
+                   status in (403, 404) or (status == 401 and code(value) == 'CLIENT_TOKENS_NOT_ENABLED'))
         t.update(conversation=conv, riderClient=rider['clientToken'], customerClient=customer['clientToken'])
 
     def chat_isolation(self, a, b):
         path = '/v1/conversations/%s/messages' % a['conversation']
-        status, _ = Client(b['customerClient']).call('GET', path, expected=(200, 403, 404))
+        status, _ = device(b['customerClient']).call('GET', path, expected=(200, 403, 404))
         self.check('isolation chat: B\'s device reads A\'s conversation -> 404/403', status in (403, 404))
-        status, _ = Client(b['riderClient']).call('POST', path, {'clientMessageId': str(uuid.uuid4()), 'text': 'x'},
+        status, _ = device(b['riderClient']).call('POST', path, {'clientMessageId': str(uuid.uuid4()), 'text': 'x'},
                                                   expected=(200, 201, 403, 404), idempotent=True)
         self.check('isolation chat: B\'s device sends into A\'s conversation -> 404/403', status in (403, 404))
         status, _ = b['machine'].call('GET', '/v1/conversations/%s' % a['conversation'], expected=(200, 403, 404))
@@ -477,20 +500,21 @@ class Journey:
         _, placed = t['machine'].call('POST', '/v1/calls', {
             'kind': 'VOICE', 'initiatorPrincipalId': t['rider']['id'], 'initiatorEndpointId': rider['endpointId'],
             'targetPrincipalIds': [t['customer']['id']]}, expected=(201,), idempotent=True)
-        call = placed.get('call') or {}
-        if call.get('id'):
-            self.undo(t['machine'], 'POST', '/v1/calls/%s/cancel' % call['id'])
+        call = placed.get('call') or {}  # calling.common.v1.CallSummary: the id is `callId`
+        if call.get('callId'):
+            self.undo(t['machine'], 'POST', '/v1/calls/%s/cancel' % call['callId'])
         self.check('calls %s: partner server places rider -> customer' % label,
-                   bool(call.get('id')) and (placed.get('liveInvitationCount') or 0) >= 1, fatal=True, callId=call.get('id'))
+                   bool(call.get('callId')) and (placed.get('liveInvitationCount') or 0) >= 1, fatal=True,
+                   callId=call.get('callId'))
         device = Client(customer['signalingCredential'])
 
         def invitation():
             _, page = device.call('GET', '/v1/calling/invitations')
-            return next((i for i in page.get('data', []) if i.get('callId') == call['id']), None)
+            return next((i for i in page.get('data', []) if i.get('callId') == call['callId']), None)
         offer = retry(invitation, 6, 2)
         self.check('calls %s: customer\'s device sees the invitation' % label, bool(offer),
                    invitationId=(offer or {}).get('invitationId'))
-        t.update(call=call['id'], invitation=(offer or {}).get('invitationId'), customerSignaling=customer['signalingCredential'])
+        t.update(call=call['callId'], invitation=(offer or {}).get('invitationId'), customerSignaling=customer['signalingCredential'])
 
     def calls_isolation(self, a, b):
         status, _ = b['machine'].call('GET', '/v1/calls/%s' % a['call'], expected=(200, 403, 404))
@@ -509,16 +533,16 @@ class Journey:
         self.check('push %s: push credentials listed (feature on)' % label, isinstance(before, dict))
         status, value = t['console'].call('POST', path, {
             'provider': 'APNS', 'teamId': 'ACCEPT0001', 'keyId': 'ACCEPT0001', 'bundleId': 'com.example.acceptance',
-            'voip': True, 'apnsHost': 'PRODUCTION', 'p8': 'not a key'}, expected=(201, 422))
+            'voip': True, 'apnsHost': 'PRODUCTION', 'p8': PEM_PLACEHOLDER}, expected=(201, 400, 422))
         _, after = t['console'].call('GET', path)
-        self.check('push %s: production APNs host / invalid key refused in SANDBOX (422), nothing stored' % label,
-                   status == 422 and after == before)
-        if t.get('riderClient'):
+        self.check('push %s: production APNs host refused in SANDBOX (422 POLICY_VIOLATION), nothing stored' % label,
+                   status == 422 and code(value) == 'POLICY_VIOLATION' and after == before)
+        if self.on('chat') and t.get('riderToken'):  # the msg grant is minted only with chat on
             installation = 'acc-rider-%s' % self.tag
-            device = Client(t['riderClient'])
-            _, registered = device.call('PUT', '/v1/messaging/user-push-registrations/%s' % installation,
+            partner = Client(t['riderToken'])  # contract: user-push-registrations take the user token
+            _, registered = partner.call('PUT', '/v1/messaging/user-push-registrations/%s' % installation,
                                         {'platform': 'FCM', 'handle': 'acceptance-%s' % uuid.uuid4().hex}, expected=(200, 201))
-            status, _ = device.call('DELETE', '/v1/messaging/user-push-registrations/%s?platform=FCM' % installation,
+            status, _ = partner.call('DELETE', '/v1/messaging/user-push-registrations/%s?platform=FCM' % installation,
                                     expected=(204,))
             self.check('push %s: device push registration stored and removed' % label,
                        registered.get('installationId') == installation and status == 204)
@@ -801,8 +825,10 @@ class Journey:
             'users': lambda: machine.call('POST', '/v1/users', {'externalId': 'off-%s' % self.tag},
                                           expected=(201,) + REFUSED)[0],
             'tokens': lambda: console.call('GET', '/v1/environments/%s/allowed-origins' % env, expected=session)[0],
-            'chat': lambda: Client().call('POST', '/v1/messaging/user-sessions', {'installationId': 'off-%s' % self.tag},
-                                          token=token, expected=(200, 201) + REFUSED)[0],
+            # Messaging always mounts the route; off it answers 503 FEATURE_DISABLED (contract).
+            'chat': lambda: off_status(Client().call('POST', '/v1/messaging/user-sessions',
+                                                     {'installationId': 'off-%s' % self.tag},
+                                                     token=token, expected=(200, 201, 503) + REFUSED)),
             'calls': lambda: Client().call('POST', '/v1/calling/user-sessions', {'installationId': 'off-%s' % self.tag,
                                                                                  'kind': 'MOBILE'},
                                            token=token, expected=(200, 201) + REFUSED)[0],
@@ -814,7 +840,7 @@ class Journey:
         for stage in STAGES:
             if not self.on(stage):
                 status = probes[stage]()
-                self.check('flag off %s: refused (%d)' % (stage, status), status in REFUSED)
+                self.check('flag off %s: refused (%d)' % (stage, status), status in REFUSED + (503,))
 
     def revocation(self, t):
         _, value = t['machine'].call('POST', '/v1/users/%s/revoke-sessions' % t['rider']['id'])
