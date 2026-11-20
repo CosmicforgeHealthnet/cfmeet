@@ -24,6 +24,7 @@ use crate::{
     models::{conference_sessions, meeting_members, meeting_spaces, users},
     services::{
         actor::ActorContext,
+        admin_operations::{self, BridgeCommand},
         collaboration::policy::CollaborationPolicyPatch,
         conference::{insert_conference, NewConference},
         meeting_core::{
@@ -1195,11 +1196,29 @@ impl MeetingSpaceService {
         id: Uuid,
         version: Option<i32>,
     ) -> ApiResult<meeting_spaces::Model> {
-        let platform_admin = match ctx.platform() {
-            Some(_) => false,
-            None => ctx.require_registered()?.platform_admin,
+        self.archive_with(ctx, id, version, None).await
+    }
+
+    /// [`Self::archive`], or (ADR 0068, `meetings.space.archive`) the same archive by an
+    /// HQ staff member through the admin bridge (`operator`): authorized like a platform
+    /// administrator, locked at HQ's expected version, audited as the operator, and
+    /// recorded in the archive's transaction (`meeting_admin_operations`, `ARCHIVED`).
+    pub async fn archive_with(
+        &self,
+        ctx: &ActorContext,
+        id: Uuid,
+        version: Option<i32>,
+        operator: Option<&BridgeCommand>,
+    ) -> ApiResult<meeting_spaces::Model> {
+        let platform_admin = match (operator, ctx.platform()) {
+            (Some(_), _) => true,
+            (None, Some(_)) => false,
+            (None, None) => ctx.require_registered()?.platform_admin,
         };
         let txn = self.core.db.begin().await?;
+        if let Some(cmd) = operator {
+            admin_operations::claim(&txn, cmd).await?;
+        }
         let space = lock_space(&txn, id).await?;
         if !platform_admin {
             self.require_space_permission(&txn, &space, ctx, SpacePermission::Archive)
@@ -1213,7 +1232,13 @@ impl MeetingSpaceService {
                 ));
             }
         }
-        let audit_actor = AuditActor::from(ctx);
+        if let Some(cmd) = operator {
+            admin_operations::check_version(cmd, space.version as i64)?;
+        }
+        let audit_actor = match operator {
+            Some(cmd) => operator_actor(cmd),
+            None => AuditActor::from(ctx),
+        };
         let reason = if platform_admin {
             TerminationReason::Admin
         } else {
@@ -1224,6 +1249,17 @@ impl MeetingSpaceService {
             let ended = conferences
                 .end_live_for_archive(&txn, id, &audit_actor, reason)
                 .await?;
+            if let Some(cmd) = operator {
+                admin_operations::record(
+                    &txn,
+                    cmd,
+                    admin_operations::subject::MEETING_SPACE,
+                    id,
+                    "ARCHIVED",
+                    Some(space.version as i64),
+                )
+                .await?;
+            }
             txn.commit().await?;
             if !ended.is_empty() {
                 crate::services::ops_metrics::add(
@@ -1284,6 +1320,17 @@ impl MeetingSpaceService {
             },
         )
         .await?;
+        if let Some(cmd) = operator {
+            admin_operations::record(
+                &txn,
+                cmd,
+                admin_operations::subject::MEETING_SPACE,
+                id,
+                "ARCHIVED",
+                Some(updated.version as i64),
+            )
+            .await?;
+        }
         txn.commit().await?;
         if !ended.is_empty() {
             crate::services::ops_metrics::add(
@@ -1368,10 +1415,33 @@ impl MeetingSpaceService {
         id: Uuid,
         req: OwnerTransferRequest,
     ) -> ApiResult<meeting_spaces::Model> {
-        let actor = ctx.require_registered()?;
+        self.transfer_owner_with(ctx, id, req, None).await
+    }
+
+    /// [`Self::transfer_owner`], or (ADR 0068, `meetings.space.transfer`) the same transfer
+    /// by an HQ staff member through the admin bridge (`operator`, whose expected version is
+    /// `req.version`): authorized like a platform administrator, audited as the operator and
+    /// recorded in the transfer's transaction (`meeting_admin_operations`, `TRANSFERRED`).
+    pub async fn transfer_owner_with(
+        &self,
+        ctx: &ActorContext,
+        id: Uuid,
+        req: OwnerTransferRequest,
+        operator: Option<&BridgeCommand>,
+    ) -> ApiResult<meeting_spaces::Model> {
+        let (platform_admin, actor_user) = match operator {
+            Some(_) => (true, None),
+            None => {
+                let actor = ctx.require_registered()?;
+                (actor.platform_admin, Some(actor.user_id))
+            }
+        };
         let txn = self.core.db.begin().await?;
+        if let Some(cmd) = operator {
+            admin_operations::claim(&txn, cmd).await?;
+        }
         let space = lock_space(&txn, id).await?;
-        if !actor.platform_admin {
+        if !platform_admin {
             self.require_space_permission(&txn, &space, ctx, SpacePermission::TransferOwnership)
                 .await?;
         }
@@ -1383,10 +1453,14 @@ impl MeetingSpaceService {
             ));
         };
         if space.version != req.version {
-            return Err(ApiError::domain(
-                ErrorCode::MeetingVersionConflict,
-                "Meeting was modified",
-            ));
+            // The bridge's expected version is `req.version`; its conflict code is the
+            // bridge contract's.
+            let code = if operator.is_some() {
+                ErrorCode::VersionConflict
+            } else {
+                ErrorCode::MeetingVersionConflict
+            };
+            return Err(ApiError::domain(code, "Meeting was modified"));
         }
         if space.status != SpaceStatus::Active {
             return Err(state_conflict(
@@ -1431,7 +1505,7 @@ impl MeetingSpaceService {
                 user_id: Set(Some(previous_owner)),
                 role: Set(Role::Host),
                 status: Set(MemberStatus::Active),
-                created_by: Set(Some(actor.user_id)),
+                created_by: Set(actor_user),
                 created_at: Set(now),
                 updated_at: Set(now),
                 revoked_at: Set(None),
@@ -1446,7 +1520,10 @@ impl MeetingSpaceService {
         am.version = Set(space.version + 1);
         am.updated_at = Set(now);
         let updated = am.update(&txn).await?;
-        let audit_actor = AuditActor::from(ctx);
+        let audit_actor = match operator {
+            Some(cmd) => operator_actor(cmd),
+            None => AuditActor::from(ctx),
+        };
         audit(
             &txn,
             &audit_actor,
@@ -1475,8 +1552,27 @@ impl MeetingSpaceService {
             },
         )
         .await?;
+        if let Some(cmd) = operator {
+            admin_operations::record(
+                &txn,
+                cmd,
+                admin_operations::subject::MEETING_SPACE,
+                id,
+                "TRANSFERRED",
+                Some(updated.version as i64),
+            )
+            .await?;
+        }
         txn.commit().await?;
         Ok(updated)
+    }
+}
+
+/// The audit actor of an HQ staff member acting through the admin bridge (ADR 0068).
+pub fn operator_actor(cmd: &BridgeCommand) -> AuditActor {
+    AuditActor {
+        actor_type: "OPERATOR".into(),
+        actor_ref: Some(cmd.operator().to_string()),
     }
 }
 

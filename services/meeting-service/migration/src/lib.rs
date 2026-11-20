@@ -71,6 +71,7 @@ pub async fn account_phone_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>
         .await?
         .is_empty())
 }
+mod m20261120_000001_admin_operations;
 
 pub mod phase2_backfill;
 
@@ -587,6 +588,28 @@ pub async fn account_privacy_ready<C: sea_orm_migration::sea_orm::ConnectionTrai
     db: &C,
 ) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
     Ok(pending_migrations::<AccountPrivacyMigrator, _>(db)
+        .await?
+        .is_empty())
+}
+
+/// ADR 0068, phases A4–A7: the admin bridge's operations ledger (`meeting_admin_operations`)
+/// and the account administration version (`users.account_version`), in their own
+/// additive history so the previous image still starts after a rollback.
+pub struct AdminOperationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AdminOperationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(m20261120_000001_admin_operations::Migration)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("meeting_admin_operations_migrations").into_iden()
+    }
+}
+
+pub async fn admin_operations_ready<C: sea_orm_migration::sea_orm::ConnectionTrait>(
+    db: &C,
+) -> Result<bool, sea_orm_migration::sea_orm::DbErr> {
+    Ok(pending_migrations::<AdminOperationsMigrator, _>(db)
         .await?
         .is_empty())
 }

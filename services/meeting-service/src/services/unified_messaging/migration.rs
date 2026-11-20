@@ -33,6 +33,7 @@ use uuid::Uuid;
 use super::{all, exec, one, rfc3339, UnifiedMessaging};
 use crate::{
     error::{ApiError, ApiResult, ErrorCode},
+    services::admin_operations::{self, BridgeCommand},
     services::ops_metrics::{inc, OPS_METRICS as OM},
 };
 
@@ -265,6 +266,23 @@ impl UnifiedMessaging {
         actor: &str,
         request: TransitionRequest,
     ) -> ApiResult<MigrationStatusView> {
+        self.transition_with(actor, request, None).await
+    }
+
+    /// [`Self::transition`], or (ADR 0068, `meetings.chat-migration.change`) the same
+    /// transition by an HQ staff member through the admin bridge (`bridge`): the actor is
+    /// `hq:<staff>`, HQ's second person (`X-CF-Approver`) is the approver of a cutover or
+    /// retirement, the key is claimed and the command recorded in the transition's
+    /// transaction (`meeting_admin_operations`, the new state and version).
+    pub async fn transition_with(
+        &self,
+        actor: &str,
+        mut request: TransitionRequest,
+        bridge: Option<&BridgeCommand>,
+    ) -> ApiResult<MigrationStatusView> {
+        if let Some(cmd) = bridge {
+            request.approved_by = cmd.approver().map(str::to_string);
+        }
         let reason = request.reason.trim().to_string();
         if !(3..=500).contains(&reason.chars().count()) {
             return Err(ApiError::domain(
@@ -286,6 +304,9 @@ impl UnifiedMessaging {
         }
         let target = request.target_state;
         let txn = self.db.begin().await?;
+        if let Some(cmd) = bridge {
+            admin_operations::claim(&txn, cmd).await?;
+        }
         let r = one(
             &txn,
             "SELECT state, version, changed_at FROM conference_chat_migration WHERE id = 1 FOR UPDATE",
@@ -299,7 +320,11 @@ impl UnifiedMessaging {
         let changed_at = row_time(&r, 2)?;
         if version != request.expected_version {
             return Err(ApiError::domain(
-                ErrorCode::MeetingVersionConflict,
+                if bridge.is_some() {
+                    ErrorCode::VersionConflict
+                } else {
+                    ErrorCode::MeetingVersionConflict
+                },
                 format!("The migration state changed (version {version}); review and retry"),
             ));
         }
@@ -387,6 +412,17 @@ impl UnifiedMessaging {
             ],
         )
         .await?;
+        if let Some(cmd) = bridge {
+            admin_operations::record(
+                &txn,
+                cmd,
+                admin_operations::subject::CHAT_MIGRATION,
+                Uuid::nil(),
+                target.as_str(),
+                Some(next),
+            )
+            .await?;
+        }
         txn.commit().await?;
         inc(&OM.unified_messaging_cutover_transitions);
         tracing::warn!(

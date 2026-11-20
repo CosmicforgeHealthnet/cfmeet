@@ -47,6 +47,7 @@ use crate::{
     error::{ApiError, ApiResult, ErrorCode},
     models::users,
     services::account_security::{self as security, ActorKind, Outcome, SecurityEvent},
+    services::admin_operations::{self, BridgeCommand},
     state::AppState,
 };
 
@@ -2039,6 +2040,94 @@ pub async fn revoke_device(
         replaced_device_id: None,
         ended_sessions: ended.len() as i64,
     })
+}
+
+/// The operator view of one device after an admin-bridge revocation (ids, states, times).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorDeviceState {
+    pub device_id: Uuid,
+    pub state: String,
+    pub revoked_at: Option<DateTime<Utc>>,
+    pub revoke_reason: Option<String>,
+}
+
+/// The device's state, if it is the account's.
+pub async fn operator_device_state<C: ConnectionTrait>(
+    db: &C,
+    user_id: Uuid,
+    device_id: Uuid,
+) -> ApiResult<Option<OperatorDeviceState>> {
+    Ok(find_device(db, user_id, device_id, false)
+        .await?
+        .map(|d| OperatorDeviceState {
+            device_id: d.id,
+            state: d.state,
+            revoked_at: d.revoked_at,
+            revoke_reason: d.revoke_reason,
+        }))
+}
+
+/// ADR 0068 `accounts.device.revoke`: an HQ staff member revokes one device of the account
+/// through the admin bridge (R3, approved by a second person). As a revocation by another
+/// trusted device: every sign-in of the device ends (and the account's undeclared
+/// sign-ins, which may be that device), pending links are cancelled and every downstream
+/// credential it holds is revoked; other devices are untouched. Reason `ADMIN_REVOKED`.
+/// A device already revoked stays as it is. The command is recorded in the same
+/// transaction (`meeting_admin_operations`, state `REVOKED`).
+pub async fn operator_revoke_device(
+    state: &AppState,
+    user_id: Uuid,
+    device_id: Uuid,
+    cmd: &BridgeCommand,
+) -> ApiResult<()> {
+    let txn = state.db.begin().await?;
+    admin_operations::claim(&txn, cmd).await?;
+    lock_account(&txn, user_id).await?;
+    let current = find_device(&txn, user_id, device_id, true)
+        .await?
+        .ok_or_else(|| err(ErrorCode::DeviceNotFound, "Device not found"))?;
+    let mut ended = vec![];
+    if current.state != "REVOKED" {
+        ended = end_device_sessions(&txn, device_id, "DEVICE_REVOKED", None).await?;
+        ended.extend(end_unclassified_sessions(&txn, user_id, "DEVICE_REVOKED", None).await?);
+        txn.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_devices SET state = 'REVOKED', revoked_at = now(),                     revoke_reason = 'ADMIN_REVOKED', updated_at = now() WHERE id = $1",
+            [device_id.into()],
+        ))
+        .await?;
+        txn.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_device_links SET status = 'CANCELLED', finished_at = now()              WHERE device_id = $1 AND status IN ('PENDING', 'APPROVED')",
+            [device_id.into()],
+        ))
+        .await?;
+        security::record_event(
+            &txn,
+            SecurityEvent::new("DEVICE_REVOKED", Outcome::Success)
+                .user(user_id)
+                .actor(ActorKind::Admin, None)
+                .detail(json!({
+                    "deviceId": device_id, "deviceClass": current.device_class,
+                    "wasPrimary": current.device_class == "MOBILE" && current.state == "ACTIVE",
+                    "sessionsEnded": ended.len(),
+                    "operator": cmd.operator(), "approver": cmd.approver(),
+                })),
+        )
+        .await?;
+    }
+    admin_operations::record(
+        &txn,
+        cmd,
+        admin_operations::subject::ACCOUNT_DEVICE,
+        device_id,
+        "REVOKED",
+        None,
+    )
+    .await?;
+    txn.commit().await?;
+    session_effects(state, user_id, &ended).await;
+    Ok(())
 }
 
 /// Sign out everywhere: every live device of the account is revoked too (the sessions and
