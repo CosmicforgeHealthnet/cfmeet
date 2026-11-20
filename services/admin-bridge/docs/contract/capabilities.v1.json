@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.14.0",
+  "contract_version": "1.15.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "d4e73131c41785207f27f34725353ca99a7d41d804e1c336e2a04ddecfd39e02",
-    "capability_matrix_sha256": "33fc32c80ae2a0d8a1fb14d95b0ed8805b1e60c1ae8f686a10b39738804bae65"
+    "openapi_sha256": "0d7c795a9ac3fc0f30b99025990cfd53615191adb7cc53731a49bc97bb609bd0",
+    "capability_matrix_sha256": "f6e081d40fc42febb1c8abd85c6c1bbef87c2148912b92e60e5cd40ace14d52b"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 247,
     "by_state": {
-      "READ_ONLY": 96,
-      "AVAILABLE": 43,
-      "DISABLED": 71,
-      "BLOCKED_DEPENDENCY": 37
+      "READ_ONLY": 98,
+      "AVAILABLE": 51,
+      "DISABLED": 63,
+      "BLOCKED_DEPENDENCY": 35
     }
   },
   "capabilities": [
@@ -7045,7 +7045,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/partners/workspaces/{workspace_id}/state",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/organizations/{workspace_id}/state",
       "path_params": [
         {
           "name": "workspace_id",
@@ -7070,14 +7070,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWorkspaceStateChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWorkspaceStateChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.workspace.state.change",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -7086,8 +7086,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -7779,11 +7781,11 @@
       "module": "partners",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/partners/workspaces/{workspace_id}/push-keys/{push_key_id}/disable",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/organizations/{workspace_id}/push-providers/{push_key_id}/disable",
       "path_params": [
         {
           "name": "workspace_id",
@@ -7813,14 +7815,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerPushKeyDisableRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerPushKeyDisableResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.push-key.disable",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -7829,8 +7831,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -8072,11 +8076,11 @@
       "module": "partners",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/partners/workspaces/{workspace_id}/webhook-deliveries/{delivery_id}/retry",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/organizations/{workspace_id}/webhook-deliveries/{delivery_id}/retry",
       "path_params": [
         {
           "name": "workspace_id",
@@ -8106,14 +8110,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWebhookDeliveryRetryRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWebhookDeliveryRetryResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.webhook-delivery.retry",
       "risk": "R2",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -8122,8 +8126,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -8167,9 +8173,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerUsagePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.usage.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -8178,8 +8184,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_usage_and_incidents_map_the_window"
+      ],
       "contact_search": false
     },
     {
@@ -8192,7 +8200,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/partners/usage/reprocess",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/usage/rollups/rebuild",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -8210,14 +8218,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerUsageReprocessRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerUsageReprocessResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.usage.reprocess",
       "risk": "R2",
       "privacy": "INTERNAL",
@@ -8226,8 +8234,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -8240,7 +8250,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/partners/workspaces/{workspace_id}/support-tier",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/organizations/{workspace_id}/support-profile",
       "path_params": [
         {
           "name": "workspace_id",
@@ -8265,14 +8275,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerSupportTierChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerSupportProfileCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.support-tier.change",
       "risk": "R2",
       "privacy": "INTERNAL",
@@ -8281,8 +8291,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -8320,9 +8332,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerIncidentPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "partners.incidents.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -8331,8 +8343,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS",
-      "blocker": "Phase A2: new developer-platform operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "partners_usage_and_incidents_map_the_window"
+      ],
       "contact_search": false
     },
     {
@@ -8345,7 +8359,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/partners/incidents",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/organizations/{workspace_id}/incidents",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -8362,14 +8376,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerIncidentRecordRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerSupportProfileCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.incident.record",
       "risk": "R2",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -8378,8 +8392,10 @@
       "idempotency_required": true,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9913,7 +9929,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/apps/apps/{app_id}/suspend",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/apps/{app_id}/suspend",
       "path_params": [
         {
           "name": "app_id",
@@ -9938,14 +9954,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/AppSuspendRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AppCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "apps.app.suspend",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -9954,8 +9970,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9964,11 +9982,11 @@
       "module": "apps",
       "kind": "COMMAND",
       "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/apps/apps/{app_id}/lift-suspension",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/apps/{app_id}/lift-suspension",
       "path_params": [
         {
           "name": "app_id",
@@ -9993,14 +10011,14 @@
         "cfmeet.trust_safety"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/AppLiftSuspensionRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AppCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "apps.app.lift-suspension",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -10009,8 +10027,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_APPS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {

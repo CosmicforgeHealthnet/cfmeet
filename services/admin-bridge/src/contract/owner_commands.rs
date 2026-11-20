@@ -32,6 +32,12 @@ pub enum In {
     Object,
     /// Distinct values of the list, at most this many.
     EnumList(&'static [&'static str], usize),
+    /// An RFC 3339 UTC time (`...Z`).
+    Time,
+    /// A calendar day `YYYY-MM-DD`.
+    Date,
+    /// A JSON object the owner validates, or null (e.g. "remove the override").
+    NullableObject,
 }
 
 /// Where a body field goes.
@@ -45,6 +51,21 @@ pub enum Place {
     BodyAndTarget,
     /// Never sent by HQ: the owner body always carries this value.
     Fixed(&'static str),
+    /// Never sent by HQ: the owner body carries the request's `tenant` scope (a Platform
+    /// Access tenant id, lowercase UUID; any other tenant names nothing). It also names
+    /// the resource in the ledger target.
+    Tenant,
+}
+
+/// What becomes of the command core's optional `reason_code`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reason {
+    /// Optional; forwarded as `reasonCode` when present.
+    Forward,
+    /// Required; forwarded as `reasonCode` (the owner requires a reason).
+    Required,
+    /// Optional; kept in the bridge's record only (the owner's body has no reason field).
+    Ledger,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +93,8 @@ pub enum Out {
     /// Identifier-like strings ([`Out::Str`]), at most 64.
     StrList,
     Obj(&'static [OutField]),
+    /// Objects of these fields, at most 100.
+    ObjList(&'static [OutField]),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +115,8 @@ pub struct OwnerCommand {
     /// means "none yet" where the owner allows it) is required and forwarded as
     /// `expectedVersion`. `None`: unversioned, every command is its own ledger slot.
     pub version: Option<i64>,
+    /// The command core's `reason_code`.
+    pub reason: Reason,
     pub body: &'static [BodyField],
     /// The owner's possible `status` values (empty: any UPPER_SNAKE code).
     pub statuses: &'static [&'static str],
@@ -286,6 +311,7 @@ const fn org_lifecycle(
         owner: Owner::Organizations,
         source,
         version: Some(1),
+        reason: Reason::Forward,
         body: &[],
         statuses,
         resource: ORG,
@@ -406,6 +432,88 @@ const fn pa(
         owner: Owner::PlatformAccess,
         source,
         version,
+        reason: Reason::Forward,
+        body,
+        statuses,
+        resource,
+        body_schema,
+        result_schema,
+    }
+}
+
+// ---- Developer Platform (A4): partner and app commands -----------------------------
+
+const DP_WORKSPACE: &[OutField] = &[
+    o("workspace_id", "organizationId", Out::Uuid, false),
+    o("state", "state", Out::Code, false),
+    o("state_reason", "stateReason", Out::Code, true),
+    o("updated_at", "updatedAt", Out::Time, false),
+    o("closed_at", "closedAt", Out::Time, true),
+];
+const DP_INCIDENT: &[OutField] = &[
+    o("reference", "reference", Out::Text, false),
+    o("occurred_at", "occurredAt", Out::Time, true),
+];
+const DP_SUPPORT: &[OutField] = &[
+    o("workspace_id", "organizationId", Out::Uuid, false),
+    o("support_tier", "supportTier", Out::Code, false),
+    o("last_incident", "lastIncident", Out::Obj(DP_INCIDENT), true),
+    o("updated_at", "updatedAt", Out::Time, true),
+];
+const DP_PUSH_KEY: &[OutField] = &[
+    o("push_key_id", "pushKeyId", Out::Uuid, false),
+    o("workspace_id", "organizationId", Out::Uuid, false),
+    o("project_id", "projectId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("provider", "provider", Out::Code, false),
+    o("state", "state", Out::Code, false),
+    o("disabled_at", "disabledAt", Out::Time, true),
+    o("disabled_reason", "disabledReason", Out::Code, true),
+    o("updated_at", "updatedAt", Out::Time, false),
+];
+const DP_DELIVERY: &[OutField] = &[
+    o("delivery_id", "deliveryId", Out::Uuid, false),
+    o("retry_of", "retryOf", Out::Uuid, true),
+    o("subscription_id", "subscriptionId", Out::Uuid, false),
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("state", "state", Out::Code, false),
+    o("created_at", "createdAt", Out::Time, false),
+];
+const DP_REPROCESS: &[OutField] = &[
+    o("environment_id", "environmentId", Out::Uuid, true),
+    o("from", "from", Out::Str, false),
+    o("to", "to", Out::Str, false),
+    o("removed", "removed", Out::Int, true),
+    o("rebuilt", "rebuilt", Out::Int, true),
+];
+const DP_APP: &[OutField] = &[
+    o("app_id", "appId", Out::Uuid, false),
+    o("workspace_id", "organizationId", Out::Uuid, false),
+    o("state", "state", Out::Code, false),
+    o("published_version", "publishedVersion", Out::Int, true),
+    o("updated_at", "updatedAt", Out::Time, false),
+];
+const WORKSPACE_STATES: &[&str] = &["INVITED", "ACTIVE", "RESTRICTED", "SUSPENDED", "CLOSED"];
+const SUPPORT_TIERS: &[&str] = &["COMMUNITY", "STANDARD", "PREMIUM", "ENTERPRISE", "INTERNAL"];
+
+#[allow(clippy::too_many_arguments)]
+const fn dp(
+    id: &'static str,
+    source: &'static str,
+    version: Option<i64>,
+    reason: Reason,
+    body: &'static [BodyField],
+    statuses: &'static [&'static str],
+    resource: &'static [OutField],
+    body_schema: &'static str,
+    result_schema: &'static str,
+) -> OwnerCommand {
+    OwnerCommand {
+        id,
+        owner: Owner::DeveloperPlatform,
+        source,
+        version,
+        reason,
         body,
         statuses,
         resource,
@@ -420,6 +528,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Communications,
         source: "POST /internal/v1/communications/operator/profiles/{cfmeet_id}/suspend",
         version: Some(1),
+        reason: Reason::Forward,
         body: &[b(
             "reason",
             "reason",
@@ -436,6 +545,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Communications,
         source: "POST /internal/v1/communications/operator/profiles/{cfmeet_id}/restore",
         version: Some(1),
+        reason: Reason::Forward,
         body: &[],
         statuses: &["RESTORED", "SUSPENDED"],
         resource: COMM_PROFILE,
@@ -447,6 +557,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Communications,
         source: "POST /internal/v1/communications/operator/reports/{report_id}/review",
         version: Some(1),
+        reason: Reason::Forward,
         body: &[
             b(
                 "decision",
@@ -472,6 +583,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Communications,
         source: "POST /internal/v1/communications/operator/backfill",
         version: None,
+        reason: Reason::Forward,
         body: &[
             b("limit", "limit", In::Int(1, 100), true),
             b("cursor", "cursor", In::NullableUuid, false),
@@ -491,6 +603,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Communications,
         source: "POST /internal/v1/communications/operator/replay",
         version: None,
+        reason: Reason::Forward,
         body: &[b("event_id", "eventId", In::Uuid, true)],
         statuses: &["REQUEUED"],
         resource: &[
@@ -506,6 +619,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Notifications,
         source: "POST /internal/v1/operator/deliveries/{delivery_id}/retry",
         version: None,
+        reason: Reason::Forward,
         body: &[],
         statuses: &["RETRIED"],
         resource: NOTIF_DELIVERY,
@@ -517,6 +631,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Notifications,
         source: "POST /internal/v1/operator/email-suppressions/{suppression_id}/remove",
         version: Some(1),
+        reason: Reason::Forward,
         body: &[],
         statuses: &["REMOVED"],
         resource: &[
@@ -531,6 +646,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Notifications,
         source: "POST /internal/v1/operator/routing/{category}/{channel}/mode",
         version: Some(1),
+        reason: Reason::Forward,
         body: &[
             p("category", In::Code),
             p("channel", In::Enum(&["EMAIL", "PUSH", "IN_APP", "OPERATOR"])),
@@ -546,6 +662,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Notifications,
         source: "POST /internal/v1/operator/reroute/{reroute_id}/cancel",
         version: None,
+        reason: Reason::Forward,
         body: &[],
         statuses: &["CANCELLED"],
         resource: NOTIF_DECISION,
@@ -558,6 +675,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Organizations,
         source: "POST /internal/v1/admin/organizations",
         version: None,
+        reason: Reason::Forward,
         body: &[
             b("name", "name", In::Str(1, 120), true),
             b("slug", "slug", In::Str(1, 64), true),
@@ -592,6 +710,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         source: "POST /internal/v1/admin/organizations/{organization_id}/owners",
         // The user's current membership version, 0 when they have none.
         version: Some(0),
+        reason: Reason::Forward,
         body: &[
             bt("user_id", "userId", In::Uuid),
             b("reason", "reason", In::Str(1, 500), true),
@@ -607,6 +726,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         source: "POST /internal/v1/admin/organizations/{organization_id}/scopes/primary/service-bindings/{service}/change",
         // The binding version, 0 when there is none.
         version: Some(0),
+        reason: Reason::Forward,
         body: &[
             b("action", "action", In::Enum(&["SET", "CLEAR"]), true),
             b("service_account_id", "serviceAccountId", In::Uuid, false),
@@ -622,6 +742,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Organizations,
         source: "POST /internal/v1/admin/organizations/{organization_id}/provisioning/retry",
         version: None,
+        reason: Reason::Forward,
         body: &[],
         statuses: &[],
         resource: ORG_PROVISIONING,
@@ -633,6 +754,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Organizations,
         source: "POST /internal/v1/admin/organizations/{organization_id}/members/{member_id}/change",
         version: Some(1),
+        reason: Reason::Forward,
         body: &[
             b("role", "role", In::Enum(ROLES), false),
             b("membership_state", "status", In::Enum(&["ACTIVE", "SUSPENDED", "REMOVED"]), false),
@@ -647,6 +769,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Organizations,
         source: "POST /internal/v1/admin/organizations/{organization_id}/teams/{team_id}/change",
         version: Some(1),
+        reason: Reason::Forward,
         body: &[
             b("name", "name", In::Str(1, 120), false),
             b("description", "description", In::NullableStr(0, 500), false),
@@ -663,6 +786,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         source: "POST /internal/v1/admin/organizations/{organization_id}/policies/change",
         // The policy revision, 0 while on defaults.
         version: Some(0),
+        reason: Reason::Forward,
         body: &[b("policy", "policy", In::Object, true)],
         statuses: &["UPDATED", "UNCHANGED"],
         resource: ORG_POLICIES,
@@ -674,6 +798,7 @@ pub const COMMANDS: &[OwnerCommand] = &[
         owner: Owner::Organizations,
         source: "POST /internal/v1/admin/event-delivery/replay",
         version: None,
+        reason: Reason::Forward,
         body: &[
             b("destination", "destination", In::Str(1, 64), false),
             b("event_ids", "eventIds", In::UuidList(500), false),
@@ -831,6 +956,112 @@ pub const COMMANDS: &[OwnerCommand] = &[
         PA_SIGNED_OUT,
         "PartnerUserSignOutRequest",
         "PartnerUserSignOutResult",
+    ),
+    // Developer Platform: partners and apps.
+    dp(
+        "partners.workspace.state.change",
+        "POST /internal/v1/operator/organizations/{workspace_id}/state",
+        Some(1),
+        Reason::Ledger,
+        &[
+            b("state", "state", In::Enum(WORKSPACE_STATES), true),
+            b("reason", "reason", In::Code, true),
+        ],
+        WORKSPACE_STATES,
+        DP_WORKSPACE,
+        "PartnerWorkspaceStateChangeRequest",
+        "PartnerWorkspaceStateChangeResult",
+    ),
+    dp(
+        "partners.push-key.disable",
+        "POST /internal/v1/operator/organizations/{workspace_id}/push-providers/{push_key_id}/disable",
+        Some(1),
+        Reason::Forward,
+        &[],
+        &["DISABLED"],
+        DP_PUSH_KEY,
+        "PartnerPushKeyDisableRequest",
+        "PartnerPushKeyDisableResult",
+    ),
+    dp(
+        "partners.webhook-delivery.retry",
+        "POST /internal/v1/operator/organizations/{workspace_id}/webhook-deliveries/{delivery_id}/retry",
+        None,
+        Reason::Ledger,
+        &[],
+        &["RETRIED"],
+        DP_DELIVERY,
+        "PartnerWebhookDeliveryRetryRequest",
+        "PartnerWebhookDeliveryRetryResult",
+    ),
+    dp(
+        "partners.usage.reprocess",
+        "POST /internal/v1/operator/usage/rollups/rebuild",
+        None,
+        Reason::Ledger,
+        &[
+            b("from", "from", In::Date, true),
+            b("to", "to", In::Date, true),
+            b("environment_id", "environmentId", In::Uuid, false),
+        ],
+        &["REPROCESSED"],
+        DP_REPROCESS,
+        "PartnerUsageReprocessRequest",
+        "PartnerUsageReprocessResult",
+    ),
+    dp(
+        "partners.support-tier.change",
+        "POST /internal/v1/operator/organizations/{workspace_id}/support-profile",
+        // The support profile version, 0 while the workspace has none.
+        Some(0),
+        Reason::Ledger,
+        &[
+            b("support_tier", "supportTier", In::Enum(SUPPORT_TIERS), true),
+            b("support_reference", "supportReference", In::Str(1, 160), false),
+        ],
+        SUPPORT_TIERS,
+        DP_SUPPORT,
+        "PartnerSupportTierChangeRequest",
+        "PartnerSupportProfileCommandResult",
+    ),
+    dp(
+        "partners.incident.record",
+        "POST /internal/v1/operator/organizations/{workspace_id}/incidents",
+        // The workspace's support profile version, 0 while it has none.
+        Some(0),
+        Reason::Ledger,
+        &[
+            p("workspace_id", In::Uuid),
+            b("incident_ref", "incidentRef", In::Str(1, 160), true),
+            b("occurred_at", "occurredAt", In::Time, true),
+        ],
+        &["RECORDED"],
+        DP_SUPPORT,
+        "PartnerIncidentRecordRequest",
+        "PartnerSupportProfileCommandResult",
+    ),
+    dp(
+        "apps.app.suspend",
+        "POST /internal/v1/operator/apps/{app_id}/suspend",
+        Some(1),
+        Reason::Forward,
+        &[],
+        &["SUSPENDED"],
+        DP_APP,
+        "AppSuspendRequest",
+        "AppCommandResult",
+    ),
+    dp(
+        "apps.app.lift-suspension",
+        "POST /internal/v1/operator/apps/{app_id}/lift-suspension",
+        // Back to the state the app had before its suspension.
+        Some(1),
+        Reason::Forward,
+        &[],
+        &[],
+        DP_APP,
+        "AppLiftSuspensionRequest",
+        "AppCommandResult",
     ),
 ];
 

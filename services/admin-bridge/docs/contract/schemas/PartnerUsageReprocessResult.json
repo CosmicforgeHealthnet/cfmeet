@@ -1,0 +1,54 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment_id",
+        "from",
+        "to",
+        "removed",
+        "rebuilt"
+      ],
+      "properties": {
+        "environment_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "removed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "rebuilt": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "description": "The resource after partners.usage.reprocess; status: REPROCESSED."
+    }
+  }
+}

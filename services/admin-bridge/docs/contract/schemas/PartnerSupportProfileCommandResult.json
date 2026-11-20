@@ -1,0 +1,65 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "support_tier",
+        "last_incident",
+        "updated_at"
+      ],
+      "properties": {
+        "workspace_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "support_tier": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "last_incident": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "reference",
+            "occurred_at"
+          ],
+          "properties": {
+            "reference": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "occurred_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after partners.incident.record; status: RECORDED."
+    }
+  }
+}

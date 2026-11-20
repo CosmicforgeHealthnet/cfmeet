@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.14.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.15.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -238,6 +238,7 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `partners.workspaces.search`
 - `partners.workspaces.read`
 - `partners.workspace-activity.list`
+- `partners.workspace.state.change`
 - `partners.projects.list`
 - `partners.environments.list`
 - `partners.members.list`
@@ -249,10 +250,17 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `partners.websites.list`
 - `partners.website.remove`
 - `partners.push-keys.list`
+- `partners.push-key.disable`
 - `partners.users.list`
 - `partners.user.sign-out`
 - `partners.webhooks.list`
 - `partners.webhook-deliveries.list`
+- `partners.webhook-delivery.retry`
+- `partners.usage.read`
+- `partners.usage.reprocess`
+- `partners.support-tier.change`
+- `partners.incidents.list`
+- `partners.incident.record`
 - `identity.tenants.list`
 - `identity.applications.list`
 - `identity.environments.list`
@@ -278,6 +286,8 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `apps.apps.read`
 - `apps.versions.list`
 - `apps.installs.list`
+- `apps.app.suspend`
+- `apps.app.lift-suspension`
 - `verification.cases.list`
 - `verification.cases.read`
 - `verification.case-history.list`
