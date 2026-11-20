@@ -1,4 +1,4 @@
-//! ADR 0067 — the admin bridge's operator reads of partner resources and the operator
+//! ADR 0068 — the admin bridge's operator reads of partner resources and the operator
 //! attribution rule, through the REAL router (CI: real PostgreSQL).
 
 mod common;

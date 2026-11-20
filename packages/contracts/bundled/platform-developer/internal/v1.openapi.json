@@ -3,7 +3,7 @@
   "info": {
     "title": "CF Meet Developer Platform internal API",
     "version": "1.12.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0067, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read."
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read."
   },
   "tags": [
     {
@@ -6754,7 +6754,7 @@
         }
       },
       "platform-developer.control.v1.OperatorAppInstallation": {
-        "description": "ADR 0067: one installation grant of an app (targets are opaque ids; scopes are counted, not listed).",
+        "description": "ADR 0068: one installation grant of an app (targets are opaque ids; scopes are counted, not listed).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -6844,7 +6844,7 @@
         }
       },
       "platform-developer.control.v1.OperatorAppSummary": {
-        "description": "ADR 0067: an app in operator search results (the current manifest's name and distribution).",
+        "description": "ADR 0068: an app in operator search results (the current manifest's name and distribution).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -6941,7 +6941,7 @@
         }
       },
       "platform-developer.control.v1.OperatorAppVersion": {
-        "description": "ADR 0067: one manifest version of an app (name and distribution only).",
+        "description": "ADR 0068: one manifest version of an app (name and distribution only).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7003,7 +7003,7 @@
         }
       },
       "platform-developer.control.v1.OperatorEnvironment": {
-        "description": "ADR 0067: an environment of a workspace's project.",
+        "description": "ADR 0068: an environment of a workspace's project.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7084,7 +7084,7 @@
         }
       },
       "platform-developer.control.v1.OperatorInvitation": {
-        "description": "ADR 0067: a workspace invitation without the invitee's address or token.",
+        "description": "ADR 0068: a workspace invitation without the invitee's address or token.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7153,7 +7153,7 @@
         }
       },
       "platform-developer.control.v1.OperatorMember": {
-        "description": "ADR 0067: a workspace membership (opaque CF Meet user id; no name or address).",
+        "description": "ADR 0068: a workspace membership (opaque CF Meet user id; no name or address).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7322,7 +7322,7 @@
         }
       },
       "platform-developer.control.v1.OperatorProject": {
-        "description": "ADR 0067: a project of a workspace for operators (no description, labels or support address).",
+        "description": "ADR 0068: a project of a workspace for operators (no description, labels or support address).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7409,7 +7409,7 @@
         }
       },
       "platform-developer.control.v1.OperatorPushProvider": {
-        "description": "ADR 0067: push credential DETAILS (provider identifiers and the credential fingerprint); the sealed credential never leaves the vault.",
+        "description": "ADR 0068: push credential DETAILS (provider identifiers and the credential fingerprint); the sealed credential never leaves the vault.",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7594,7 +7594,7 @@
         }
       },
       "platform-developer.control.v1.OperatorWebhook": {
-        "description": "ADR 0067: a webhook subscription: the endpoint HOST only (never the URL path or query, the signing secret or the description).",
+        "description": "ADR 0068: a webhook subscription: the endpoint HOST only (never the URL path or query, the signing secret or the description).",
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7689,7 +7689,7 @@
         }
       },
       "platform-developer.control.v1.OperatorWebhookDelivery": {
-        "description": "ADR 0067: a webhook delivery outcome (no payload, no response body).",
+        "description": "ADR 0068: a webhook delivery outcome (no payload, no response body).",
         "type": "object",
         "additionalProperties": false,
         "required": [

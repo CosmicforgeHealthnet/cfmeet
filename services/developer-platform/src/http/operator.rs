@@ -455,7 +455,7 @@ struct ActivityQuery {
     operator: Option<String>,
     #[serde(default)]
     action: Option<String>,
-    /// ADR 0067: optional window (RFC 3339), at most 31 days when both are given.
+    /// ADR 0068: optional window (RFC 3339), at most 31 days when both are given.
     #[serde(default)]
     since: Option<String>,
     #[serde(default)]

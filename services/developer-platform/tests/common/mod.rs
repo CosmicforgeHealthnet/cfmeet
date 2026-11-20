@@ -201,7 +201,7 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// A key nobody trusts, claiming to be the gateway.
     pub rogue_gateway: Arc<ServiceTokenSigner>,
-    /// The admin bridge (ADR 0067); granted `developer-platform.administer` only in the
+    /// The admin bridge (ADR 0068); granted `developer-platform.administer` only in the
     /// [`Control`] harness bundle.
     pub bridge: Arc<ServiceTokenSigner>,
 }
@@ -1915,7 +1915,7 @@ impl Control {
             .map(|(c, w)| (c, w.expect("producers").producers))
     }
 
-    /// A GET from the admin bridge with the given attribution headers (ADR 0067).
+    /// A GET from the admin bridge with the given attribution headers (ADR 0068).
     pub async fn bridge(&self, path: &str, attribution: &[(&str, &str)]) -> Response {
         self.signed_with(&self.peers.bridge, path, attribution)
             .await

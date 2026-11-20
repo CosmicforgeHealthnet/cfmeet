@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json",
   "title": "CF Meet Developer Platform control plane v1",
-  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's. 1.2.0 (Part VI Chapters 10–13): credentials (metadata only; the secret once), credential policy and quota restrictions, scope registry and grants, production-access requests / status / decisions, usage summaries, facts, limits and warnings, support profiles, entitlement overrides and the usage ingestion / reconciliation contract. 1.4.0 (ADR 0062 / 0063, CF Meet Platform Build): partner users (EndUser, EndUserList, Create/UpdateEndUserRequest), user tokens (UserTokenGrants, IssueUserTokenRequest, UpsertUserTokenRequest, UserToken, UserWithToken, RevokeSessionsResult), allowed websites (AllowedOrigins, PutAllowedOriginsRequest), push credential metadata (PushCredential(List), CreatePushCredentialRequest; secrets are write-only and sealed), production capabilities END_USERS and PUSH, usage type MESSAGE_SENT. 1.5.0 (ADR 0064 / 0065, CF Meet Apps): App, AppManifest, PutAppRequest, AppStatus, AppClientSecret (once), AppGrant(List), PutAppTestAccountsRequest, OperatorApp, AppDecisionRequest, DirectoryApp(List) and the OAuth wire shapes (snake_case): OAuthTokenRequest, OAuthRevokeRequest, OAuthToken, OAuthError, OAuthUserinfo, OAuthMetadata. 1.6.0 (ADR 0067): operator read models for the admin bridge (OperatorProject, OperatorEnvironment, OperatorMember, OperatorInvitation, OperatorPushProvider, OperatorWebhook, OperatorWebhookDelivery, OperatorAppSummary, OperatorAppVersion, OperatorAppInstallation and their lists): identifiers, names, states, counts and timestamps only.",
+  "description": "Section 50 control-plane resources: organizations (Platform Access tenants), human workspace members and invitations, projects (Platform Access applications), environments (Platform Access environments), service accounts (read through Platform Access delegation; never credentials), commercial plan / assignment / billing-account references, immutable activity events and effective entitlements. Identity, credentials and scopes stay Platform Access's. 1.2.0 (Part VI Chapters 10–13): credentials (metadata only; the secret once), credential policy and quota restrictions, scope registry and grants, production-access requests / status / decisions, usage summaries, facts, limits and warnings, support profiles, entitlement overrides and the usage ingestion / reconciliation contract. 1.4.0 (ADR 0062 / 0063, CF Meet Platform Build): partner users (EndUser, EndUserList, Create/UpdateEndUserRequest), user tokens (UserTokenGrants, IssueUserTokenRequest, UpsertUserTokenRequest, UserToken, UserWithToken, RevokeSessionsResult), allowed websites (AllowedOrigins, PutAllowedOriginsRequest), push credential metadata (PushCredential(List), CreatePushCredentialRequest; secrets are write-only and sealed), production capabilities END_USERS and PUSH, usage type MESSAGE_SENT. 1.5.0 (ADR 0064 / 0065, CF Meet Apps): App, AppManifest, PutAppRequest, AppStatus, AppClientSecret (once), AppGrant(List), PutAppTestAccountsRequest, OperatorApp, AppDecisionRequest, DirectoryApp(List) and the OAuth wire shapes (snake_case): OAuthTokenRequest, OAuthRevokeRequest, OAuthToken, OAuthError, OAuthUserinfo, OAuthMetadata. 1.6.0 (ADR 0068): operator read models for the admin bridge (OperatorProject, OperatorEnvironment, OperatorMember, OperatorInvitation, OperatorPushProvider, OperatorWebhook, OperatorWebhookDelivery, OperatorAppSummary, OperatorAppVersion, OperatorAppInstallation and their lists): identifiers, names, states, counts and timestamps only.",
   "anyOf": [
     {
       "$ref": "#/$defs/Organization"
@@ -6334,7 +6334,7 @@
       }
     },
     "OperatorProject": {
-      "description": "ADR 0067: a project of a workspace for operators (no description, labels or support address).",
+      "description": "ADR 0068: a project of a workspace for operators (no description, labels or support address).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -6421,7 +6421,7 @@
       }
     },
     "OperatorEnvironment": {
-      "description": "ADR 0067: an environment of a workspace's project.",
+      "description": "ADR 0068: an environment of a workspace's project.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -6502,7 +6502,7 @@
       }
     },
     "OperatorMember": {
-      "description": "ADR 0067: a workspace membership (opaque CF Meet user id; no name or address).",
+      "description": "ADR 0068: a workspace membership (opaque CF Meet user id; no name or address).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -6586,7 +6586,7 @@
       }
     },
     "OperatorInvitation": {
-      "description": "ADR 0067: a workspace invitation without the invitee's address or token.",
+      "description": "ADR 0068: a workspace invitation without the invitee's address or token.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -6655,7 +6655,7 @@
       }
     },
     "OperatorPushProvider": {
-      "description": "ADR 0067: push credential DETAILS (provider identifiers and the credential fingerprint); the sealed credential never leaves the vault.",
+      "description": "ADR 0068: push credential DETAILS (provider identifiers and the credential fingerprint); the sealed credential never leaves the vault.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -6792,7 +6792,7 @@
       }
     },
     "OperatorWebhook": {
-      "description": "ADR 0067: a webhook subscription: the endpoint HOST only (never the URL path or query, the signing secret or the description).",
+      "description": "ADR 0068: a webhook subscription: the endpoint HOST only (never the URL path or query, the signing secret or the description).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -6914,7 +6914,7 @@
       }
     },
     "OperatorWebhookDelivery": {
-      "description": "ADR 0067: a webhook delivery outcome (no payload, no response body).",
+      "description": "ADR 0068: a webhook delivery outcome (no payload, no response body).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -7008,7 +7008,7 @@
       }
     },
     "OperatorAppSummary": {
-      "description": "ADR 0067: an app in operator search results (the current manifest's name and distribution).",
+      "description": "ADR 0068: an app in operator search results (the current manifest's name and distribution).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -7105,7 +7105,7 @@
       }
     },
     "OperatorAppVersion": {
-      "description": "ADR 0067: one manifest version of an app (name and distribution only).",
+      "description": "ADR 0068: one manifest version of an app (name and distribution only).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -7167,7 +7167,7 @@
       }
     },
     "OperatorAppInstallation": {
-      "description": "ADR 0067: one installation grant of an app (targets are opaque ids; scopes are counted, not listed).",
+      "description": "ADR 0068: one installation grant of an app (targets are opaque ids; scopes are counted, not listed).",
       "type": "object",
       "additionalProperties": false,
       "required": [
