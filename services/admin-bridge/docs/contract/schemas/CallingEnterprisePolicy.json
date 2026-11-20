@@ -1,0 +1,99 @@
+{
+  "description": "An enterprise calling policy: feature switches and operator-granted administrative capabilities.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policy_id",
+    "environment_id",
+    "application_id",
+    "name",
+    "is_default",
+    "status",
+    "internal_calling_enabled",
+    "external_public_calling_allowed",
+    "public_destination_countries",
+    "forwarding_allowed",
+    "public_forwarding_allowed",
+    "voicemail_allowed",
+    "transfer_allowed",
+    "admin_capabilities",
+    "version",
+    "updated_at",
+    "disabled_at"
+  ],
+  "properties": {
+    "policy_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "is_default": {
+      "type": "boolean"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "internal_calling_enabled": {
+      "type": "boolean"
+    },
+    "external_public_calling_allowed": {
+      "type": "boolean"
+    },
+    "public_destination_countries": {
+      "type": "array",
+      "maxItems": 300,
+      "items": {
+        "type": "string",
+        "pattern": "^([A-Z]{2}|\\*)$"
+      }
+    },
+    "forwarding_allowed": {
+      "type": "boolean"
+    },
+    "public_forwarding_allowed": {
+      "type": "boolean"
+    },
+    "voicemail_allowed": {
+      "type": "boolean"
+    },
+    "transfer_allowed": {
+      "type": "boolean"
+    },
+    "admin_capabilities": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+      }
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "disabled_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

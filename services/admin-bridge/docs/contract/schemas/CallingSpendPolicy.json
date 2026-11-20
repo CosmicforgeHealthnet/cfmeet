@@ -1,0 +1,80 @@
+{
+  "description": "A telecom spend / velocity policy; amounts in minor units of its own currency, never summed across currencies.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environment_id",
+    "application_id",
+    "currency",
+    "enabled",
+    "leg_allowance_minor",
+    "max_leg_seconds",
+    "daily_limit_minor",
+    "monthly_limit_minor",
+    "max_concurrent_legs",
+    "max_originations_per_minute",
+    "revision",
+    "updated_at"
+  ],
+  "properties": {
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "leg_allowance_minor": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "max_leg_seconds": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "daily_limit_minor": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "monthly_limit_minor": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "max_concurrent_legs": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "max_originations_per_minute": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

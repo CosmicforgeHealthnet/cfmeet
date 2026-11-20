@@ -1,0 +1,21 @@
+{
+  "description": "The tenant's spend policies (at most 100; truncated beyond).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environments",
+    "truncated"
+  ],
+  "properties": {
+    "environments": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/components/schemas/CallingSpendPolicy"
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  }
+}

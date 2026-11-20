@@ -520,6 +520,7 @@ pub fn components() -> Map<String, Value> {
     super::schemas_communications::insert(&mut m);
     super::schemas_meetings::insert(&mut m);
     super::schemas_messaging::insert(&mut m);
+    super::schemas_calling::insert(&mut m);
 
     m.insert(
         "Purpose".into(),

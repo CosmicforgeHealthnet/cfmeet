@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.9.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.10.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -188,6 +188,21 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `messaging.incidents.list`
 - `messaging.failed-messages.list`
 - `messaging.key-transparency.read`
+- `calling.calls.list`
+- `calling.calls.read`
+- `calling.live.list`
+- `calling.abuse-reports.list`
+- `calling.blocks.list`
+- `calling.limits.read`
+- `calling.routing.read`
+- `calling.enterprise-features.read`
+- `calling.spend-limits.read`
+- `calling.recordings.list`
+- `calling.voicemail.list`
+- `calling.retention-holds.list`
+- `calling.incidents.list`
+- `calling.webhook-keys.list`
+- `calling.audit.list`
 - `communications.profiles.read`
 - `communications.reports.list`
 - `communications.holds.list`

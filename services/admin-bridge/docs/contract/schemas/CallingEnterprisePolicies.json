@@ -1,0 +1,21 @@
+{
+  "description": "The tenant's enterprise calling policies (at most 100; truncated beyond).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policies",
+    "truncated"
+  ],
+  "properties": {
+    "policies": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/components/schemas/CallingEnterprisePolicy"
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  }
+}

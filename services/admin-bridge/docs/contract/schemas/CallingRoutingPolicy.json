@@ -1,0 +1,83 @@
+{
+  "description": "An environment's routing policy summary. Destination and duplicate-risk sub-policies are not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "environment_id",
+    "application_id",
+    "revision",
+    "updated_at",
+    "allowed_route_classes",
+    "app_first",
+    "public_calling_enabled",
+    "callback_relay_enabled",
+    "require_verified_contacts",
+    "max_failover_attempts",
+    "compliance_required_countries"
+  ],
+  "properties": {
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "allowed_route_classes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+      }
+    },
+    "app_first": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "public_calling_enabled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "callback_relay_enabled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "require_verified_contacts": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "max_failover_attempts": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "compliance_required_countries": {
+      "type": "array",
+      "maxItems": 300,
+      "items": {
+        "type": "string",
+        "pattern": "^([A-Z]{2}|\\*)$"
+      }
+    }
+  }
+}

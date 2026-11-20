@@ -6146,6 +6146,1491 @@
           }
         }
       },
+      "CallingCall": {
+        "description": "One call of the tenant: ids, kind, state, origin, counts and times. Never a telephone number, SIP URI or display name.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call_id",
+          "application_id",
+          "environment_id",
+          "call_kind",
+          "state",
+          "origin",
+          "participant_count",
+          "terminal_reason",
+          "failure_category",
+          "requested_at",
+          "answered_at",
+          "connected_at",
+          "ended_at",
+          "created_at",
+          "version"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "origin": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "participant_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "terminal_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "failure_category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "requested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "answered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CallingCallPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingCall"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingCallParticipant": {
+        "description": "One participant: principal id, kind, role and times only.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principal_id",
+          "principal_kind",
+          "role",
+          "is_host",
+          "joined_at",
+          "left_at"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "principal_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "is_host": {
+            "type": "boolean"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "left_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingCallDetail": {
+        "description": "One call with its participants (at most 500).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "call_id",
+          "application_id",
+          "environment_id",
+          "call_kind",
+          "state",
+          "origin",
+          "participant_count",
+          "terminal_reason",
+          "failure_category",
+          "requested_at",
+          "answered_at",
+          "connected_at",
+          "ended_at",
+          "created_at",
+          "version",
+          "participants"
+        ],
+        "properties": {
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "origin": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "participant_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "terminal_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "failure_category": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "requested_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "answered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "connected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "participants": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/CallingCallParticipant"
+            }
+          }
+        }
+      },
+      "CallingAbuseReport": {
+        "description": "One OPEN abuse report of the tenant: bounded codes and opaque ids, never free text.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "abuse_report_id",
+          "application_id",
+          "environment_id",
+          "call_id",
+          "reporting_principal_id",
+          "reported_principal_id",
+          "category",
+          "comment_code",
+          "status",
+          "created_at",
+          "reviewed_at",
+          "version"
+        ],
+        "properties": {
+          "abuse_report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reporting_principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reported_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "comment_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reviewed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CallingAbuseReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingAbuseReport"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingBlockRule": {
+        "description": "One block rule. A blocked contact is only reported as present, never named.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "block_rule_id",
+          "application_id",
+          "environment_id",
+          "blocker_kind",
+          "blocker_principal_id",
+          "blocked_kind",
+          "blocked_principal_id",
+          "has_contact_reference",
+          "reason_code",
+          "status",
+          "created_at",
+          "released_at",
+          "version"
+        ],
+        "properties": {
+          "block_rule_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "blocker_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "blocker_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "blocked_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "blocked_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "has_contact_reference": {
+            "type": "boolean"
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CallingBlockRulePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingBlockRule"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingLimitPolicy": {
+        "description": "A limit policy; null fields are not configured.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "requests_per_minute",
+          "max_concurrent_communications",
+          "telecom_spend_daily_limit_minor",
+          "telecom_spend_monthly_limit_minor",
+          "updated_at"
+        ],
+        "properties": {
+          "requests_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrent_communications": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "telecom_spend_daily_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "telecom_spend_monthly_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingApplicationLimitPolicy": {
+        "description": "An application's limit policy.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "application_id",
+          "requests_per_minute",
+          "max_concurrent_communications",
+          "telecom_spend_daily_limit_minor",
+          "telecom_spend_monthly_limit_minor",
+          "updated_at"
+        ],
+        "properties": {
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requests_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrent_communications": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "telecom_spend_daily_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "telecom_spend_monthly_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingLimits": {
+        "description": "The tenant's limit policies (at most 100 applications; truncated beyond). Spend limits are in minor units of the tenant's billing currency.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenant_id",
+          "currency",
+          "tenant",
+          "applications",
+          "truncated"
+        ],
+        "properties": {
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "tenant": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CallingLimitPolicy"
+              }
+            ]
+          },
+          "applications": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingApplicationLimitPolicy"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingRoutingPolicy": {
+        "description": "An environment's routing policy summary. Destination and duplicate-risk sub-policies are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environment_id",
+          "application_id",
+          "revision",
+          "updated_at",
+          "allowed_route_classes",
+          "app_first",
+          "public_calling_enabled",
+          "callback_relay_enabled",
+          "require_verified_contacts",
+          "max_failover_attempts",
+          "compliance_required_countries"
+        ],
+        "properties": {
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "allowed_route_classes": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            }
+          },
+          "app_first": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "public_calling_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "callback_relay_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "require_verified_contacts": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "max_failover_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "compliance_required_countries": {
+            "type": "array",
+            "maxItems": 300,
+            "items": {
+              "type": "string",
+              "pattern": "^([A-Z]{2}|\\*)$"
+            }
+          }
+        }
+      },
+      "CallingRoutingPolicies": {
+        "description": "The tenant's routing policies (at most 100; truncated beyond).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environments",
+          "truncated"
+        ],
+        "properties": {
+          "environments": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingRoutingPolicy"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingEnterprisePolicy": {
+        "description": "An enterprise calling policy: feature switches and operator-granted administrative capabilities.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policy_id",
+          "environment_id",
+          "application_id",
+          "name",
+          "is_default",
+          "status",
+          "internal_calling_enabled",
+          "external_public_calling_allowed",
+          "public_destination_countries",
+          "forwarding_allowed",
+          "public_forwarding_allowed",
+          "voicemail_allowed",
+          "transfer_allowed",
+          "admin_capabilities",
+          "version",
+          "updated_at",
+          "disabled_at"
+        ],
+        "properties": {
+          "policy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "internal_calling_enabled": {
+            "type": "boolean"
+          },
+          "external_public_calling_allowed": {
+            "type": "boolean"
+          },
+          "public_destination_countries": {
+            "type": "array",
+            "maxItems": 300,
+            "items": {
+              "type": "string",
+              "pattern": "^([A-Z]{2}|\\*)$"
+            }
+          },
+          "forwarding_allowed": {
+            "type": "boolean"
+          },
+          "public_forwarding_allowed": {
+            "type": "boolean"
+          },
+          "voicemail_allowed": {
+            "type": "boolean"
+          },
+          "transfer_allowed": {
+            "type": "boolean"
+          },
+          "admin_capabilities": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            }
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disabled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingEnterprisePolicies": {
+        "description": "The tenant's enterprise calling policies (at most 100; truncated beyond).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "policies",
+          "truncated"
+        ],
+        "properties": {
+          "policies": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingEnterprisePolicy"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingSpendPolicy": {
+        "description": "A telecom spend / velocity policy; amounts in minor units of its own currency, never summed across currencies.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environment_id",
+          "application_id",
+          "currency",
+          "enabled",
+          "leg_allowance_minor",
+          "max_leg_seconds",
+          "daily_limit_minor",
+          "monthly_limit_minor",
+          "max_concurrent_legs",
+          "max_originations_per_minute",
+          "revision",
+          "updated_at"
+        ],
+        "properties": {
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "leg_allowance_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_leg_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "daily_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "monthly_limit_minor": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_concurrent_legs": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_originations_per_minute": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingSpendPolicies": {
+        "description": "The tenant's spend policies (at most 100; truncated beyond).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environments",
+          "truncated"
+        ],
+        "properties": {
+          "environments": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingSpendPolicy"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CallingRecording": {
+        "description": "Recording metadata only: never an object key or media URL.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recording_id",
+          "call_id",
+          "environment_id",
+          "state",
+          "capture_source",
+          "duration_ms",
+          "size_bytes",
+          "retention_until",
+          "created_at",
+          "deleted_at"
+        ],
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "capture_source": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "retention_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingRecordingPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingRecording"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingVoicemail": {
+        "description": "Voicemail metadata only: never an object key, media URL or caller identity.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message_id",
+          "call_id",
+          "mailbox_id",
+          "environment_id",
+          "state",
+          "read_state",
+          "duration_ms",
+          "size_bytes",
+          "retention_until",
+          "received_at",
+          "deleted_at"
+        ],
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "mailbox_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "read_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "retention_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingVoicemailPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingVoicemail"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingRetentionHold": {
+        "description": "A retention hold of the tenant or the platform. The placing operator is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hold_id",
+          "scope",
+          "data_class",
+          "resource_id",
+          "environment_id",
+          "reason_code",
+          "active",
+          "created_at",
+          "released_at"
+        ],
+        "properties": {
+          "hold_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "enum": [
+              "PLATFORM",
+              "TENANT"
+            ]
+          },
+          "data_class": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "resource_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingRetentionHoldPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingRetentionHold"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingIncident": {
+        "description": "An operational incident of the tenant or the platform. Restricted evidence and dedupe keys are never relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "incident_id",
+          "scope",
+          "category",
+          "severity",
+          "status",
+          "call_id",
+          "resource_type",
+          "resource_id",
+          "occurrences",
+          "first_seen_at",
+          "last_seen_at",
+          "resolved_at"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "enum": [
+              "PLATFORM",
+              "TENANT"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "severity": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "call_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "resource_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resource_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "occurrences": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingIncidentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingIncident"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingWebhookKey": {
+        "description": "Webhook subscriptions per signing-secret sealing key id (counts only, never a secret or sealed value).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key_id",
+          "subscriptions",
+          "active_subscriptions",
+          "last_updated_at"
+        ],
+        "properties": {
+          "key_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 32
+          },
+          "subscriptions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_subscriptions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingWebhookKeyPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingWebhookKey"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CallingAuditEntry": {
+        "description": "One operator audit entry of the tenant. The detail document is never relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "actor",
+          "action",
+          "target_kind",
+          "target_id",
+          "application_id",
+          "environment_id",
+          "occurred_at"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "target_kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "target_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CallingAuditEntryPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CallingAuditEntry"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
       "Purpose": {
         "enum": [
           "support-review",

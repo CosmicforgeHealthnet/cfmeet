@@ -1408,7 +1408,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/calls",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.calls.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -1417,8 +1417,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: new calling operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_calls_are_tenant_scoped_and_minimized"
+    ]
   },
   {
     "id": "calling.calls.read",
@@ -1427,7 +1429,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/calls/{call_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.calls.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -1436,8 +1438,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: new calling operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_call_detail_lists_participants_by_id_only"
+    ]
   },
   {
     "id": "calling.live.list",
@@ -1446,7 +1450,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/live",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.live.read",
     "risk": "R0",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1455,8 +1459,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling keeps this in its database only; operator read API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_lists_translate_strictly"
+    ]
   },
   {
     "id": "calling.abuse-reports.list",
@@ -1465,7 +1471,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/abuse-reports",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.abuse-reports.read",
     "risk": "R1",
     "privacy": "SAFETY_EVIDENCE",
@@ -1474,8 +1480,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_lists_translate_strictly"
+    ]
   },
   {
     "id": "calling.abuse-report.resolve",
@@ -1503,7 +1511,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/blocks",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.blocks.read",
     "risk": "R1",
     "privacy": "SAFETY_EVIDENCE",
@@ -1512,8 +1520,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_blocks_never_name_a_contact"
+    ]
   },
   {
     "id": "calling.block.release",
@@ -1541,7 +1551,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/limits",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.limits.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -1550,8 +1560,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_configuration_reads_are_bounded"
+    ]
   },
   {
     "id": "calling.limits.change",
@@ -1579,7 +1591,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/routing",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.routing.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -1588,8 +1600,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_configuration_reads_are_bounded"
+    ]
   },
   {
     "id": "calling.routing.change",
@@ -1617,7 +1631,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/enterprise-features",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.enterprise-features.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -1626,8 +1640,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_configuration_reads_are_bounded"
+    ]
   },
   {
     "id": "calling.enterprise-features.change",
@@ -1655,7 +1671,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/spend-limits",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.spend-limits.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -1664,8 +1680,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_configuration_reads_are_bounded"
+    ]
   },
   {
     "id": "calling.spend-limits.change",
@@ -1693,7 +1711,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/recordings",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.recordings.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -1702,8 +1720,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: new calling operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_media_reads_are_metadata_only"
+    ]
   },
   {
     "id": "calling.voicemail.list",
@@ -1712,7 +1732,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/voicemail",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.voicemail.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -1721,8 +1741,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: new calling operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_media_reads_are_metadata_only"
+    ]
   },
   {
     "id": "calling.recording.delete",
@@ -1750,7 +1772,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/retention-holds",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.retention-holds.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1759,8 +1781,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_lists_translate_strictly"
+    ]
   },
   {
     "id": "calling.retention-hold.place",
@@ -1807,7 +1831,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/incidents",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.incidents.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1816,8 +1840,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_lists_translate_strictly"
+    ]
   },
   {
     "id": "calling.incident.record",
@@ -1845,7 +1871,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/webhook-keys",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.webhook-keys.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -1854,8 +1880,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_lists_translate_strictly"
+    ]
   },
   {
     "id": "calling.webhook-key.reseal",
@@ -1883,7 +1911,7 @@
     "method": "GET",
     "bridge_endpoint": "/calling/audit",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "calling.audit.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1892,8 +1920,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_CALLING",
-    "blocker": "Phase A2: calling keeps this in its database only; operator read API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "calling_lists_translate_strictly"
+    ]
   },
   {
     "id": "communications.profiles.read",

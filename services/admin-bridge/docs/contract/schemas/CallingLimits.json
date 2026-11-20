@@ -1,0 +1,42 @@
+{
+  "description": "The tenant's limit policies (at most 100 applications; truncated beyond). Spend limits are in minor units of the tenant's billing currency.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "tenant_id",
+    "currency",
+    "tenant",
+    "applications",
+    "truncated"
+  ],
+  "properties": {
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "tenant": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/components/schemas/CallingLimitPolicy"
+        }
+      ]
+    },
+    "applications": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/components/schemas/CallingApplicationLimitPolicy"
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  }
+}

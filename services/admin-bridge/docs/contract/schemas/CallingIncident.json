@@ -1,0 +1,83 @@
+{
+  "description": "An operational incident of the tenant or the platform. Restricted evidence and dedupe keys are never relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "incident_id",
+    "scope",
+    "category",
+    "severity",
+    "status",
+    "call_id",
+    "resource_type",
+    "resource_id",
+    "occurrences",
+    "first_seen_at",
+    "last_seen_at",
+    "resolved_at"
+  ],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "scope": {
+      "enum": [
+        "PLATFORM",
+        "TENANT"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "severity": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "call_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "resource_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "resource_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "occurrences": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "first_seen_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_seen_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "resolved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}
