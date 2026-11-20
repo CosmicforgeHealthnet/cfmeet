@@ -3251,6 +3251,1435 @@
           }
         }
       },
+      "PricingPriceBook": {
+        "description": "One price book (a lineage of versions for a product line and market).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "price_book_id",
+          "product_line",
+          "currency",
+          "market_code",
+          "effective_version_id",
+          "frozen",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "product_line": {
+            "enum": [
+              "PARTNER_PLATFORM",
+              "CONSUMER"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "market_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "effective_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "frozen": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "PricingPriceBookPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PricingPriceBook"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "PricingVersion": {
+        "description": "One price version (its state and content digest; no rates).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version_id",
+          "price_book_id",
+          "seq",
+          "version_state",
+          "rates_digest",
+          "submitted_at",
+          "approved_at",
+          "approval_expires_at",
+          "rejected_reason",
+          "decided_at",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "version_state": {
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED",
+              "SUPERSEDED"
+            ]
+          },
+          "rates_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "submitted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approval_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "rejected_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "PricingVersionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PricingVersion"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "PricingVersionDetail": {
+        "description": "One price version with its content and who drafted, submitted and approved it.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version_id",
+          "price_book_id",
+          "seq",
+          "version_state",
+          "rates_digest",
+          "submitted_at",
+          "approved_at",
+          "approval_expires_at",
+          "rejected_reason",
+          "decided_at",
+          "created_at",
+          "updated_at",
+          "version",
+          "product_line",
+          "market_code",
+          "partner_rates",
+          "consumer_plans",
+          "submitted_digest",
+          "drafted_by",
+          "submitted_by",
+          "approved_by",
+          "approver_ref",
+          "effective"
+        ],
+        "properties": {
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "version_state": {
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED",
+              "SUPERSEDED"
+            ]
+          },
+          "rates_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "submitted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approval_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "rejected_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "decided_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "product_line": {
+            "enum": [
+              "PARTNER_PLATFORM",
+              "CONSUMER"
+            ]
+          },
+          "market_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "partner_rates": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 7,
+            "items": {
+              "description": "The rate of one usage type.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "usage_type",
+                "unit_amount_minor",
+                "included_quantity",
+                "minimum_monthly_minor",
+                "tiers"
+              ],
+              "properties": {
+                "usage_type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "unit_amount_minor": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "included_quantity": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "minimum_monthly_minor": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "tiers": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "maxItems": 16,
+                  "items": {
+                    "description": "A graduated tier over the quantity beyond the included amount (up_to null: open).",
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "up_to",
+                      "unit_amount_minor"
+                    ],
+                    "properties": {
+                      "up_to": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0
+                      },
+                      "unit_amount_minor": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "description": "PARTNER_PLATFORM content (null for CONSUMER)."
+          },
+          "consumer_plans": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 20,
+            "items": {
+              "description": "One CF Meet user plan.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "plan_code",
+                "label",
+                "monthly_minor",
+                "yearly_minor",
+                "limits"
+              ],
+              "properties": {
+                "plan_code": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40
+                },
+                "monthly_minor": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "yearly_minor": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "limits": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "description": "Plan limits (an override sets a subset; an absent limit is null).",
+                  "additionalProperties": false,
+                  "required": [
+                    "meeting_minutes",
+                    "participants",
+                    "recording",
+                    "storage_bytes",
+                    "attachment_bytes",
+                    "webinars"
+                  ],
+                  "properties": {
+                    "meeting_minutes": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "participants": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "recording": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "storage_bytes": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "attachment_bytes": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "webinars": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "description": "CONSUMER content (null for PARTNER_PLATFORM)."
+          },
+          "submitted_digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "drafted_by": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+            "description": "The HQ staff member (hq:<sub>)."
+          },
+          "submitted_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "approved_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "approver_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "effective": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PricingActivation": {
+        "description": "One append-only activation of a price version.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "activation_id",
+          "price_book_id",
+          "version_id",
+          "kind",
+          "effective_from",
+          "operator_ref",
+          "approver_ref",
+          "recorded_at"
+        ],
+        "properties": {
+          "activation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "SCHEDULED",
+              "ACTIVATED",
+              "ROLLED_BACK"
+            ]
+          },
+          "effective_from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operator_ref": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+            "description": "The HQ staff member (hq:<sub>)."
+          },
+          "approver_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PricingActivationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PricingActivation"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "PricingFreeze": {
+        "description": "One market's price freeze.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "market_code",
+          "freeze_state",
+          "reason_code",
+          "changed_by",
+          "frozen_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "market_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "freeze_state": {
+            "enum": [
+              "FROZEN",
+              "UNFROZEN"
+            ]
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "changed_by": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+            "description": "The HQ staff member (hq:<sub>)."
+          },
+          "frozen_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "PricingFreezePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PricingFreeze"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "PricingPlan": {
+        "description": "One CF Meet user plan of a CONSUMER lineage's effective version (FREE always).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "price_book_id",
+          "currency",
+          "market_code",
+          "version_id",
+          "plan_code",
+          "label",
+          "monthly_minor",
+          "yearly_minor",
+          "limits"
+        ],
+        "properties": {
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "market_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "plan_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "monthly_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "yearly_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Plan limits (an override sets a subset; an absent limit is null).",
+            "additionalProperties": false,
+            "required": [
+              "meeting_minutes",
+              "participants",
+              "recording",
+              "storage_bytes",
+              "attachment_bytes",
+              "webinars"
+            ],
+            "properties": {
+              "meeting_minutes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "participants": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "recording": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "storage_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "attachment_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "webinars": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "PricingPlanPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PricingPlan"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        },
+        "description": "Every plan in one page (next_cursor is always null)."
+      },
+      "PricingPlanAssignment": {
+        "description": "One plan assignment of a user or organization (append-only history).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment_id",
+          "holder_kind",
+          "holder_id",
+          "plan_code",
+          "price_book_id",
+          "reason_code",
+          "assigned_by",
+          "effective_from",
+          "current"
+        ],
+        "properties": {
+          "assignment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "holder_kind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holder_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "assigned_by": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+            "description": "The HQ staff member (hq:<sub>)."
+          },
+          "effective_from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PricingPlanAssignmentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PricingPlanAssignment"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "PricingOverride": {
+        "description": "One holder's limit override.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "override_id",
+          "holder_kind",
+          "holder_id",
+          "override_state",
+          "limits",
+          "reason_code",
+          "changed_by",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "override_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "holder_kind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holder_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "override_state": {
+            "enum": [
+              "ACTIVE",
+              "REVOKED"
+            ]
+          },
+          "limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Plan limits (an override sets a subset; an absent limit is null).",
+            "additionalProperties": false,
+            "required": [
+              "meeting_minutes",
+              "participants",
+              "recording",
+              "storage_bytes",
+              "attachment_bytes",
+              "webinars"
+            ],
+            "properties": {
+              "meeting_minutes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "participants": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "recording": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "storage_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "attachment_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "webinars": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "changed_by": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+            "description": "The HQ staff member (hq:<sub>)."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer"
+          }
+        }
+      },
+      "PricingOverridePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PricingOverride"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "PricingChargeSimulationRequest": {
+        "description": "What a usage vector (PARTNER_PLATFORM: usage) or a plan (CONSUMER: plan_code, cycle) would cost under a version (default: the lineage's effective one). A read: nothing is charged and nothing changes.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "price_book_id"
+        ],
+        "properties": {
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "usage": {
+            "type": "object",
+            "maxProperties": 7,
+            "propertyNames": {
+              "enum": [
+                "MONTHLY_ACTIVE_USERS",
+                "MEETING_MINUTES",
+                "IN_APP_CALL_MINUTES",
+                "MESSAGES",
+                "RECORDING_MINUTES",
+                "STORAGE",
+                "API_CALLS"
+              ]
+            },
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000000000000
+            }
+          },
+          "plan_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,23}$"
+          },
+          "cycle": {
+            "enum": [
+              "MONTHLY",
+              "YEARLY"
+            ]
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "usage"
+            ]
+          },
+          {
+            "required": [
+              "plan_code"
+            ]
+          }
+        ]
+      },
+      "PricingChargeSimulation": {
+        "description": "An estimate in minor units of the book's currency (never a charge).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "price_book_id",
+          "version_id",
+          "version_state",
+          "currency",
+          "estimate",
+          "total_minor",
+          "lines",
+          "plan_code",
+          "cycle"
+        ],
+        "properties": {
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_state": {
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED",
+              "SUPERSEDED"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "estimate": {
+            "const": true
+          },
+          "total_minor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lines": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "maxItems": 16,
+            "items": {
+              "description": "One priced usage type: quantities and the amount in minor units.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "usage_type",
+                "quantity",
+                "included_quantity",
+                "billable_quantity",
+                "amount_minor"
+              ],
+              "properties": {
+                "usage_type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "included_quantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "billable_quantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "amount_minor": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "plan_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "cycle": {
+            "enum": [
+              "MONTHLY",
+              "YEARLY",
+              null
+            ]
+          }
+        }
+      },
+      "FinanceUsageRow": {
+        "description": "Metered usage of one workspace and usage type over the window.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "plan_code",
+          "usage_type",
+          "unit",
+          "quantity",
+          "fact_count"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "usage_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "fact_count": {
+            "type": "integer"
+          }
+        }
+      },
+      "FinanceUsageReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/FinanceUsageRow"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          }
+        },
+        "description": "Usage per workspace over the window's UTC days [from, to] (at most 31 days)."
+      },
+      "FinanceWorkspaceCharges": {
+        "description": "The estimated charges of one workspace.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "lines",
+          "total_minor"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lines": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+              "description": "One priced usage type: quantities and the amount in minor units.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "usage_type",
+                "quantity",
+                "included_quantity",
+                "billable_quantity",
+                "amount_minor"
+              ],
+              "properties": {
+                "usage_type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "included_quantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "billable_quantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "amount_minor": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "total_minor": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "FinanceEstimatedChargesReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor",
+          "from",
+          "to",
+          "price_book_id",
+          "version_id",
+          "currency",
+          "estimate"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/FinanceWorkspaceCharges"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "estimate": {
+            "const": true
+          }
+        },
+        "description": "Estimated charges (an estimate, one currency, minor units) under the PARTNER_PLATFORM price book of the request's market, over the window's UTC days [from, to]."
+      },
+      "FinancePlanSpread": {
+        "description": "Holders on one plan, and those assigned to it in the window.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plan_code",
+          "holder_kind",
+          "holders",
+          "assigned_in_window"
+        ],
+        "properties": {
+          "plan_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "holder_kind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holders": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "assigned_in_window": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "FinancePlanSpreadReport": {
+        "description": "The plan spread as of the window's end (one bounded list).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "as_of"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/FinancePlanSpread"
+            }
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "IdentityTenant": {
         "description": "One Platform Access tenant.",
         "type": "object",
@@ -11438,6 +12867,839 @@
             "type": "integer",
             "minimum": 1,
             "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "PricingVersionDraftRequest": {
+        "description": "Request of pricing.version.draft (POST /internal/v1/operator/pricing/price-books/{price_book_id}/versions).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "rates": {
+            "type": "object",
+            "description": "Validated by the owning service."
+          }
+        }
+      },
+      "PricingVersionCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "version_id",
+              "price_book_id",
+              "seq",
+              "version_state",
+              "rates_digest",
+              "submitted_at",
+              "approved_at",
+              "approval_expires_at",
+              "rejected_reason",
+              "decided_at",
+              "created_at",
+              "updated_at",
+              "version"
+            ],
+            "properties": {
+              "version_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "price_book_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "rates_digest": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "submitted_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "approved_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "approval_expires_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "rejected_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "decided_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after pricing.version.activate; status: ACTIVE."
+          }
+        }
+      },
+      "PricingVersionEditRequest": {
+        "description": "Request of pricing.version.edit (POST /internal/v1/operator/pricing/versions/{version_id}/edit).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "rates"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "rates": {
+            "type": "object",
+            "description": "Validated by the owning service."
+          }
+        }
+      },
+      "PricingVersionSubmitRequest": {
+        "description": "Request of pricing.version.submit (POST /internal/v1/operator/pricing/versions/{version_id}/submit).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "PricingVersionApproveRequest": {
+        "description": "Request of pricing.version.approve (POST /internal/v1/operator/pricing/versions/{version_id}/approve).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "PricingVersionRejectRequest": {
+        "description": "Request of pricing.version.reject (POST /internal/v1/operator/pricing/versions/{version_id}/reject).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "PricingVersionScheduleRequest": {
+        "description": "Request of pricing.version.schedule (POST /internal/v1/operator/pricing/versions/{version_id}/schedule).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "effective_from"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "effective_from": {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 40,
+            "pattern": "Z$"
+          }
+        }
+      },
+      "PricingVersionActivateRequest": {
+        "description": "Request of pricing.version.activate (POST /internal/v1/operator/pricing/versions/{version_id}/activate).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "PricingPriceBookRollbackRequest": {
+        "description": "Request of pricing.price-book.rollback (POST /internal/v1/operator/pricing/price-books/{price_book_id}/rollback).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "version_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PricingPriceBookRollbackResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "price_book_id",
+              "product_line",
+              "currency",
+              "market_code",
+              "effective_version_id",
+              "updated_at",
+              "version"
+            ],
+            "properties": {
+              "price_book_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "product_line": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "market_code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "effective_version_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after pricing.price-book.rollback; status: ROLLED_BACK."
+          }
+        }
+      },
+      "PricingMarketFreezeRequest": {
+        "description": "Request of pricing.market.freeze (POST /internal/v1/operator/pricing/markets/{market_code}/freeze).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "PricingMarketFreezeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "market_code",
+              "freeze_state",
+              "reason_code",
+              "frozen_at",
+              "updated_at",
+              "version"
+            ],
+            "properties": {
+              "market_code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "freeze_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "reason_code": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "frozen_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after pricing.market.unfreeze; status: UNFROZEN."
+          }
+        }
+      },
+      "PricingMarketUnfreezeRequest": {
+        "description": "Request of pricing.market.unfreeze (POST /internal/v1/operator/pricing/markets/{market_code}/unfreeze).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "PricingPlanAssignRequest": {
+        "description": "Request of pricing.plan.assign (POST /internal/v1/operator/pricing/plan-assignments).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "holder_kind",
+          "holder_id",
+          "plan_code",
+          "price_book_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "holder_kind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holder_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "price_book_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "billing_account_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "PricingPlanAssignResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "holder_kind",
+              "holder_id",
+              "plan_code",
+              "price_book_id",
+              "updated_at",
+              "version"
+            ],
+            "properties": {
+              "holder_kind": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "holder_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "plan_code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "price_book_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after pricing.plan.assign; status: any state code."
+          }
+        }
+      },
+      "PricingOverrideChangeRequest": {
+        "description": "Request of pricing.override.change (POST /internal/v1/operator/pricing/overrides).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "reason_code",
+          "expected_version",
+          "holder_kind",
+          "holder_id",
+          "limits"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "holder_kind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holder_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limits": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Validated by the owning service; null clears it."
+          }
+        }
+      },
+      "PricingOverrideChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "override_id",
+              "holder_kind",
+              "holder_id",
+              "override_state",
+              "limits",
+              "reason_code",
+              "updated_at",
+              "version"
+            ],
+            "properties": {
+              "override_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "holder_kind": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "holder_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "override_state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "limits": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "meeting_minutes",
+                  "participants",
+                  "recording",
+                  "storage_bytes",
+                  "attachment_bytes",
+                  "webinars"
+                ],
+                "properties": {
+                  "meeting_minutes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "participants": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "recording": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "storage_bytes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "attachment_bytes": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "webinars": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "reason_code": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "description": "The resource after pricing.override.change; status: ACTIVE, REVOKED."
           }
         }
       },

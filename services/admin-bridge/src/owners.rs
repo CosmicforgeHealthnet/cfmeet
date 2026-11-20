@@ -52,6 +52,9 @@ pub enum OwnerError {
     Unavailable,
     #[error("the owner answered outside its contract")]
     Contract,
+    /// A read that takes a body ([`OwnerPort::query`]): the owner refused the input.
+    #[error("the owner refused the request body as invalid")]
+    Rejected,
 }
 
 impl From<OwnerError> for ErrorCode {
@@ -60,6 +63,7 @@ impl From<OwnerError> for ErrorCode {
             OwnerError::NotFound => ErrorCode::ResourceNotFound,
             OwnerError::Unavailable => ErrorCode::OwnerUnavailable,
             OwnerError::Contract => ErrorCode::Internal,
+            OwnerError::Rejected => ErrorCode::CommandBodyInvalid,
         }
     }
 }
@@ -111,6 +115,18 @@ pub trait OwnerPort: Send + Sync + 'static {
         query: &[(&str, String)],
         operator: &str,
     ) -> Result<Value, OwnerError>;
+
+    /// `POST path` with a JSON body for a read that changes nothing (e.g.
+    /// `pricing.charges.simulate`): no `Idempotency-Key`, attributed to `operator`.
+    async fn query(
+        &self,
+        _owner: Owner,
+        _path: &str,
+        _body: &Value,
+        _operator: &str,
+    ) -> Result<Value, OwnerError> {
+        Err(OwnerError::Unavailable)
+    }
 
     /// Sends one command, once.
     async fn command(&self, _owner: Owner, _call: CommandCall<'_>) -> CommandOutcome {
@@ -224,6 +240,63 @@ impl OwnerPort for HttpOwners {
             ) => return Err(OwnerError::Contract),
             Err(e) => {
                 tracing::warn!(owner = owner.as_str(), error = %e, "owner read failed");
+                return Err(OwnerError::Unavailable);
+            }
+        };
+        if !(200..300).contains(&response.status()) {
+            return Err(OwnerError::Unavailable);
+        }
+        response.json::<Value>().map_err(|_| OwnerError::Contract)
+    }
+
+    async fn query(
+        &self,
+        owner: Owner,
+        path: &str,
+        body: &Value,
+        operator: &str,
+    ) -> Result<Value, OwnerError> {
+        let Some(target) = self.configured.get(&owner) else {
+            return Err(OwnerError::Unavailable);
+        };
+        let request = OutboundServiceRequest::new_operation(target.clone());
+        let headers = [("x-cf-operator", operator)];
+        let result = self
+            .client
+            .exchange_json_query_with_headers(
+                &request,
+                http::Method::POST,
+                path,
+                &[],
+                &headers,
+                Some(body),
+            )
+            .await;
+        let response = match result {
+            Ok(r) => r,
+            // No such resource, or nothing to answer with (e.g. no effective version).
+            Err(InternalCallError::Status {
+                status: 404 | 409, ..
+            }) => return Err(OwnerError::NotFound),
+            Err(InternalCallError::Status {
+                status: 400 | 422, ..
+            }) => return Err(OwnerError::Rejected),
+            Err(InternalCallError::Status { status, code, .. }) if (400..500).contains(&status) => {
+                tracing::error!(
+                    owner = owner.as_str(),
+                    status,
+                    code = code.as_deref().unwrap_or("-"),
+                    "owner refused a bridge query: check its grant"
+                );
+                return Err(OwnerError::Unavailable);
+            }
+            Err(
+                InternalCallError::InvalidPath
+                | InternalCallError::InvalidHeader
+                | InternalCallError::Encoding,
+            ) => return Err(OwnerError::Contract),
+            Err(e) => {
+                tracing::warn!(owner = owner.as_str(), error = %e, "owner query failed");
                 return Err(OwnerError::Unavailable);
             }
         };

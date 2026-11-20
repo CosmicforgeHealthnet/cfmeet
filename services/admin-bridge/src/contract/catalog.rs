@@ -2667,6 +2667,7 @@ pub fn catalog() -> Vec<Capability> {
             Q::Scoped,
         )
         .at(DeveloperPlatform, S::New, P::A6)
+        .body("PricingChargeSimulationRequest")
         .risk(R::R1, V::FinancialSensitive),
     );
 
@@ -3178,6 +3179,67 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "apps.installs.list",
         "AppInstallPage",
         &["partners_lists_translate_strictly"],
+    ),
+    // A6 Developer Platform: pricing, plans and finance.
+    (
+        "pricing.price-books.list",
+        "PricingPriceBookPage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.versions.list",
+        "PricingVersionPage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.versions.read",
+        "PricingVersionDetail",
+        &["pricing_version_detail_carries_the_content_by_product_line"],
+    ),
+    (
+        "pricing.activations.list",
+        "PricingActivationPage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.freezes.list",
+        "PricingFreezePage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.plans.list",
+        "PricingPlanPage",
+        &["pricing_plans_are_one_page"],
+    ),
+    (
+        "pricing.plan-assignments.list",
+        "PricingPlanAssignmentPage",
+        &["pricing_plan_assignments_search_by_holder_or_plan"],
+    ),
+    (
+        "pricing.overrides.list",
+        "PricingOverridePage",
+        &["pricing_lists_translate_strictly"],
+    ),
+    (
+        "pricing.charges.simulate",
+        "PricingChargeSimulation",
+        &["pricing_simulation_is_a_checked_post_read"],
+    ),
+    (
+        "finance.usage.report",
+        "FinanceUsageReport",
+        &["finance_reports_map_the_window"],
+    ),
+    (
+        "finance.estimated-charges.report",
+        "FinanceEstimatedChargesReport",
+        &["finance_estimated_charges_use_the_market_partner_book"],
+    ),
+    (
+        "finance.plan-spread.report",
+        "FinancePlanSpreadReport",
+        &["finance_reports_map_the_window"],
     ),
     // A2.3 Platform Access.
     (

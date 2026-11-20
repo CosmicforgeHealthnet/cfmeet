@@ -4019,7 +4019,7 @@
     "method": "GET",
     "bridge_endpoint": "/pricing/price-books",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.price-books.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4028,8 +4028,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_lists_translate_strictly"
+    ]
   },
   {
     "id": "pricing.versions.list",
@@ -4038,7 +4040,7 @@
     "method": "GET",
     "bridge_endpoint": "/pricing/price-books/{price_book_id}/versions",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.versions.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4047,8 +4049,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_lists_translate_strictly"
+    ]
   },
   {
     "id": "pricing.versions.read",
@@ -4057,7 +4061,7 @@
     "method": "GET",
     "bridge_endpoint": "/pricing/versions/{version_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.versions.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4066,8 +4070,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_version_detail_carries_the_content_by_product_line"
+    ]
   },
   {
     "id": "pricing.version.draft",
@@ -4075,8 +4081,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/price-books/{price_book_id}/versions",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/price-books/{price_book_id}/versions",
+    "state": "AVAILABLE",
     "permission": "pricing.version.draft",
     "risk": "R3",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4085,8 +4091,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.version.edit",
@@ -4094,8 +4102,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/versions/{version_id}/edit",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/edit",
+    "state": "AVAILABLE",
     "permission": "pricing.version.edit",
     "risk": "R3",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4104,8 +4112,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.version.submit",
@@ -4113,8 +4123,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/versions/{version_id}/submit",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/submit",
+    "state": "AVAILABLE",
     "permission": "pricing.version.submit",
     "risk": "R3",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4123,8 +4133,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.version.approve",
@@ -4132,8 +4144,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/versions/{version_id}/approve",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/approve",
+    "state": "AVAILABLE",
     "permission": "pricing.version.approve",
     "risk": "R4",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4142,8 +4154,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.version.reject",
@@ -4151,8 +4165,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/versions/{version_id}/reject",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/reject",
+    "state": "AVAILABLE",
     "permission": "pricing.version.reject",
     "risk": "R4",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4161,8 +4175,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.activations.list",
@@ -4171,7 +4187,7 @@
     "method": "GET",
     "bridge_endpoint": "/pricing/price-books/{price_book_id}/activations",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.activations.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4180,8 +4196,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_lists_translate_strictly"
+    ]
   },
   {
     "id": "pricing.version.schedule",
@@ -4189,8 +4207,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/versions/{version_id}/schedule",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/schedule",
+    "state": "AVAILABLE",
     "permission": "pricing.version.schedule",
     "risk": "R4",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4199,8 +4217,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.version.activate",
@@ -4208,8 +4228,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/versions/{version_id}/activate",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/versions/{version_id}/activate",
+    "state": "AVAILABLE",
     "permission": "pricing.version.activate",
     "risk": "R4",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4218,8 +4238,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.price-book.rollback",
@@ -4227,8 +4249,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/price-books/{price_book_id}/rollback",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/price-books/{price_book_id}/rollback",
+    "state": "AVAILABLE",
     "permission": "pricing.price-book.rollback",
     "risk": "R4",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4237,8 +4259,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.freezes.list",
@@ -4247,7 +4271,7 @@
     "method": "GET",
     "bridge_endpoint": "/pricing/freezes",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.freezes.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4256,8 +4280,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_lists_translate_strictly"
+    ]
   },
   {
     "id": "pricing.market.freeze",
@@ -4265,8 +4291,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/markets/{market_code}/freeze",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/markets/{market_code}/freeze",
+    "state": "AVAILABLE",
     "permission": "pricing.market.freeze",
     "risk": "R4",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4275,8 +4301,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.market.unfreeze",
@@ -4284,8 +4312,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/markets/{market_code}/unfreeze",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/markets/{market_code}/unfreeze",
+    "state": "AVAILABLE",
     "permission": "pricing.market.unfreeze",
     "risk": "R4",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4294,8 +4322,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.plans.list",
@@ -4304,7 +4334,7 @@
     "method": "GET",
     "bridge_endpoint": "/pricing/plans",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.plans.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4313,8 +4343,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_plans_are_one_page"
+    ]
   },
   {
     "id": "pricing.plan-assignments.list",
@@ -4323,7 +4355,7 @@
     "method": "GET",
     "bridge_endpoint": "/pricing/plan-assignments",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.plan-assignments.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4332,8 +4364,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_plan_assignments_search_by_holder_or_plan"
+    ]
   },
   {
     "id": "pricing.plan.assign",
@@ -4341,8 +4375,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/plan-assignments",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/plan-assignments",
+    "state": "AVAILABLE",
     "permission": "pricing.plan.assign",
     "risk": "R3",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4351,8 +4385,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.overrides.list",
@@ -4361,7 +4397,7 @@
     "method": "GET",
     "bridge_endpoint": "/pricing/overrides",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.overrides.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4370,8 +4406,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_lists_translate_strictly"
+    ]
   },
   {
     "id": "pricing.override.change",
@@ -4379,8 +4417,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/pricing/overrides",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/pricing/overrides",
+    "state": "AVAILABLE",
     "permission": "pricing.override.change",
     "risk": "R4",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4389,8 +4427,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A6: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "pricing.charges.simulate",
@@ -4399,7 +4439,7 @@
     "method": "POST",
     "bridge_endpoint": "/pricing/simulations",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "pricing.charges.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4408,8 +4448,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRICING",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "pricing_simulation_is_a_checked_post_read"
+    ]
   },
   {
     "id": "finance.usage.report",
@@ -4418,7 +4460,7 @@
     "method": "GET",
     "bridge_endpoint": "/finance/usage",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "finance.usage.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4427,8 +4469,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "finance_reports_map_the_window"
+    ]
   },
   {
     "id": "finance.estimated-charges.report",
@@ -4437,7 +4481,7 @@
     "method": "GET",
     "bridge_endpoint": "/finance/estimated-charges",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "finance.estimated-charges.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4446,8 +4490,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "finance_estimated_charges_use_the_market_partner_book"
+    ]
   },
   {
     "id": "finance.plan-spread.report",
@@ -4456,7 +4502,7 @@
     "method": "GET",
     "bridge_endpoint": "/finance/plan-spread",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "finance.plan-spread.read",
     "risk": "R1",
     "privacy": "FINANCIAL_SENSITIVE",
@@ -4465,8 +4511,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_FINANCE",
-    "blocker": "Phase A6: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "finance_reports_map_the_window"
+    ]
   },
   {
     "id": "notifications.deliveries.list",

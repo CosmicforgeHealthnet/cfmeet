@@ -1,0 +1,60 @@
+{
+  "description": "What a usage vector (PARTNER_PLATFORM: usage) or a plan (CONSUMER: plan_code, cycle) would cost under a version (default: the lineage's effective one). A read: nothing is charged and nothing changes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "price_book_id"
+  ],
+  "properties": {
+    "price_book_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "usage": {
+      "type": "object",
+      "maxProperties": 7,
+      "propertyNames": {
+        "enum": [
+          "MONTHLY_ACTIVE_USERS",
+          "MEETING_MINUTES",
+          "IN_APP_CALL_MINUTES",
+          "MESSAGES",
+          "RECORDING_MINUTES",
+          "STORAGE",
+          "API_CALLS"
+        ]
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 1000000000000000
+      }
+    },
+    "plan_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z_]{1,23}$"
+    },
+    "cycle": {
+      "enum": [
+        "MONTHLY",
+        "YEARLY"
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "usage"
+      ]
+    },
+    {
+      "required": [
+        "plan_code"
+      ]
+    }
+  ]
+}
