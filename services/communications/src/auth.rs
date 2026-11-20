@@ -88,13 +88,13 @@ pub async fn middleware(
         "/internal/v1/communications/restrictions/check" => {
             InternalPermission::CommunicationsRestrictionsRead
         }
-        // ADR 0067: the admin bridge's operator reads (bridge only).
+        // ADR 0068: the admin bridge's operator reads (bridge only).
         p if p.starts_with("/internal/v1/communications/operator/") => {
             InternalPermission::CommunicationsAdminister
         }
         _ => return Error::NotFound.into_response(),
     };
-    // ADR 0067: operator attribution (X-CF-Operator / -Approver / -Approval-Ref /
+    // ADR 0068: operator attribution (X-CF-Operator / -Approver / -Approval-Ref /
     // -Intent-Digest) is accepted only from the admin bridge and refused on every route
     // from any other caller, malformed, incomplete or self-approved.
     let attribution =

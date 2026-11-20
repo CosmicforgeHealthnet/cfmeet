@@ -1,4 +1,4 @@
-//! ADR 0067: the admin bridge's operator reads of the Communications Hub.
+//! ADR 0068: the admin bridge's operator reads of the Communications Hub.
 //!
 //! * `GET /internal/v1/communications/operator/profiles/{cfMeetId}`
 //! * `GET /internal/v1/communications/operator/reports`

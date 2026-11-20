@@ -640,7 +640,7 @@ pub struct Harness {
     /// The Notification Service: `communications-restrictions.read` (X4) and
     /// `communications-preferences.export` (N10 copy + catch-up).
     pub notifications: Arc<ServiceTokenSigner>,
-    /// The admin bridge: `communications.administer` (ADR 0067 operator reads).
+    /// The admin bridge: `communications.administer` (ADR 0068 operator reads).
     pub bridge: Arc<ServiceTokenSigner>,
     /// The Hub's own signing key (what a receiver's trust bundle grants).
     pub hub_key: PublicJwk,
@@ -830,7 +830,7 @@ impl Harness {
                         "communications-preferences.export",
                     ],
                 ),
-                // ADR 0067: the admin bridge's operator reads.
+                // ADR 0068: the admin bridge's operator reads.
                 (
                     ServiceId::admin_bridge(),
                     bridge.public_jwk(),
