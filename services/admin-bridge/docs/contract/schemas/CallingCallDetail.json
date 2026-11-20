@@ -1,0 +1,110 @@
+{
+  "description": "One call with its participants (at most 500).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "call_id",
+    "application_id",
+    "environment_id",
+    "call_kind",
+    "state",
+    "origin",
+    "participant_count",
+    "terminal_reason",
+    "failure_category",
+    "requested_at",
+    "answered_at",
+    "connected_at",
+    "ended_at",
+    "created_at",
+    "version",
+    "participants"
+  ],
+  "properties": {
+    "call_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "call_kind": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "origin": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "participant_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "terminal_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "failure_category": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "requested_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "answered_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "connected_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "participants": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/components/schemas/CallingCallParticipant"
+      }
+    }
+  }
+}

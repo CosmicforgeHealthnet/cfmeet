@@ -30,6 +30,8 @@ pub const HMAC_KID: &str = "hq-hmac-1";
 pub const HMAC_KEY: &[u8] = b"test-hmac-key-material-at-least-32-bytes-long";
 pub const STAFF_KID: &str = "hq-staff-1";
 pub const TENANT: &str = "cfmeet-first-party";
+/// A Platform Access tenant id (owners that key data by tenant, e.g. Calling, need a UUID).
+pub const TENANT_ID: &str = "4d1f9a2e-7b3c-4e5d-8f6a-9b0c1d2e3f4a";
 
 pub struct Pki {
     pub dir: tempfile::TempDir,
@@ -179,7 +181,7 @@ pub async fn start(opts: Options) -> Harness {
         strong_acr: HashSet::from(["urn:cosmicforge:acr:mfa".to_string()]),
         workload_acr: "urn:cosmicforge:acr:workload".into(),
         enrolled_markets: HashSet::from(["GLOBAL".to_string()]),
-        enrolled_tenants: HashSet::from([TENANT.to_string()]),
+        enrolled_tenants: HashSet::from([TENANT.to_string(), TENANT_ID.to_string()]),
         rate_limit_per_minute: 5,
     };
     let switches = Switches {

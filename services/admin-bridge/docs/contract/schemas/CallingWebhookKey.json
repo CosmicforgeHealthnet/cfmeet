@@ -1,0 +1,35 @@
+{
+  "description": "Webhook subscriptions per signing-secret sealing key id (counts only, never a secret or sealed value).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "key_id",
+    "subscriptions",
+    "active_subscriptions",
+    "last_updated_at"
+  ],
+  "properties": {
+    "key_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 32
+    },
+    "subscriptions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "active_subscriptions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "last_updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}
