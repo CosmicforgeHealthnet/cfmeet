@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Admin Bridge (HQ interface v1)",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "description": "Private HQ -> CF Meet admin bridge. Transport, signing, staff assertion and authorization rules: signing-profile.md. Artifact state never authorizes anything at runtime."
   },
   "servers": [
@@ -24945,7 +24945,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CommunicationProfile"
                     },
                     "error": {
                       "type": "null"
@@ -25071,7 +25071,7 @@
         "x-cfmeet-permission": "communications.profiles.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "communications"
       }
     },
@@ -25721,7 +25721,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CommunicationReportPage"
                     },
                     "error": {
                       "type": "null"
@@ -25847,7 +25847,7 @@
         "x-cfmeet-permission": "communications.reports.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "communications"
       }
     },
@@ -26235,7 +26235,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CommunicationHoldPage"
                     },
                     "error": {
                       "type": "null"
@@ -26361,7 +26361,7 @@
         "x-cfmeet-permission": "communications.holds.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "communications"
       }
     },
@@ -26505,7 +26505,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/CommunicationAuditPage"
                     },
                     "error": {
                       "type": "null"
@@ -26631,7 +26631,7 @@
         "x-cfmeet-permission": "communications.audit.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "communications"
       }
     },
@@ -26738,7 +26738,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/Summary"
                     },
                     "error": {
                       "type": "null"
@@ -26864,7 +26864,7 @@
         "x-cfmeet-permission": "communications.metrics.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "communications"
       }
     },
@@ -67122,6 +67122,482 @@
             "maxItems": 100,
             "items": {
               "$ref": "#/components/schemas/IdentityAuditEntry"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "Summary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "contract_version",
+          "scope",
+          "as_of",
+          "coverage",
+          "window",
+          "cells"
+        ],
+        "properties": {
+          "contract_version": {
+            "const": "cfmeet.admin-summary.v1"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/Scope"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "coverage": {
+            "enum": [
+              "COMPLETE",
+              "PARTIAL"
+            ]
+          },
+          "window": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "start",
+                  "end"
+                ],
+                "properties": {
+                  "start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "end": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          },
+          "cells": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "key",
+                "value",
+                "unit",
+                "currency",
+                "suppression"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+                  "maxLength": 128
+                },
+                "value": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "unit": {
+                  "enum": [
+                    "count",
+                    "minor_currency",
+                    "seconds"
+                  ]
+                },
+                "currency": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[A-Z]{3}$"
+                },
+                "suppression": {
+                  "enum": [
+                    "NONE",
+                    "SMALL_CELL",
+                    "PARTIAL_COVERAGE"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Scope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "product",
+          "market",
+          "organization",
+          "zone",
+          "tenant"
+        ],
+        "properties": {
+          "product": {
+            "const": "cfmeet"
+          },
+          "market": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            "maxLength": 128
+          },
+          "organization": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            "maxLength": 128
+          },
+          "zone": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            "maxLength": 128
+          },
+          "tenant": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            "maxLength": 128
+          }
+        }
+      },
+      "CommunicationProfile": {
+        "description": "One Communications profile by CF Meet ID: display name (R1 detail read), activation state, operator hold and times. Never a phone number, email address or account reference.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cfmeet_id",
+          "display_name",
+          "activation_state",
+          "hold",
+          "created_at",
+          "updated_at",
+          "suspended_at",
+          "deactivated_at",
+          "version"
+        ],
+        "properties": {
+          "cfmeet_id": {
+            "type": "string",
+            "pattern": "^CF-[A-Z2-7]{6,26}$"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "activation_state": {
+            "enum": [
+              "ACCOUNT_CREATED",
+              "ACTIVE",
+              "SUSPENDED",
+              "DEACTIVATED"
+            ]
+          },
+          "hold": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reason",
+                  "active",
+                  "updated_at"
+                ],
+                "properties": {
+                  "reason": {
+                    "enum": [
+                      "ABUSE",
+                      "SECURITY",
+                      "LEGAL",
+                      "OTHER"
+                    ]
+                  },
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "suspended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deactivated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "CommunicationReport": {
+        "description": "One profile report (safety evidence): reason, both parties' current CF Meet IDs, the target's report count and the review. Reports carry no free text.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "report_id",
+          "reason",
+          "reporter_cfmeet_id",
+          "target_cfmeet_id",
+          "target_report_count",
+          "review",
+          "created_at"
+        ],
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "enum": [
+              "SPAM",
+              "HARASSMENT",
+              "IMPERSONATION",
+              "OTHER"
+            ]
+          },
+          "reporter_cfmeet_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^CF-[A-Z2-7]{6,26}$"
+          },
+          "target_cfmeet_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^CF-[A-Z2-7]{6,26}$"
+          },
+          "target_report_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "review": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "decision",
+                  "reason",
+                  "held",
+                  "reviewed_at"
+                ],
+                "properties": {
+                  "decision": {
+                    "enum": [
+                      "DISMISSED",
+                      "ACTIONED"
+                    ]
+                  },
+                  "reason": {
+                    "enum": [
+                      "NO_VIOLATION",
+                      "ABUSE",
+                      "SECURITY",
+                      "LEGAL",
+                      "OTHER"
+                    ]
+                  },
+                  "held": {
+                    "type": "boolean"
+                  },
+                  "reviewed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CommunicationReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CommunicationReport"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CommunicationHold": {
+        "description": "One operator hold on a profile.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cfmeet_id",
+          "reason",
+          "active",
+          "version",
+          "updated_at"
+        ],
+        "properties": {
+          "cfmeet_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^CF-[A-Z2-7]{6,26}$"
+          },
+          "reason": {
+            "enum": [
+              "ABUSE",
+              "SECURITY",
+              "LEGAL",
+              "OTHER"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CommunicationHoldPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CommunicationHold"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "CommunicationAuditEvent": {
+        "description": "One Communications Hub audit event: operation, actor and resource ids, time. The free-form details are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "operation",
+          "actor_profile_id",
+          "resource_id",
+          "occurred_at"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "operation": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,79}$"
+          },
+          "actor_profile_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "resource_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CommunicationAuditPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/CommunicationAuditEvent"
             }
           },
           "next_cursor": {

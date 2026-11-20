@@ -1,0 +1,104 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "scope",
+    "as_of",
+    "coverage",
+    "window",
+    "cells"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "cfmeet.admin-summary.v1"
+    },
+    "scope": {
+      "$ref": "#/components/schemas/Scope"
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "coverage": {
+      "enum": [
+        "COMPLETE",
+        "PARTIAL"
+      ]
+    },
+    "window": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "end"
+          ],
+          "properties": {
+            "start": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "end": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      ]
+    },
+    "cells": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "value",
+          "unit",
+          "currency",
+          "suppression"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+            "maxLength": 128
+          },
+          "value": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "unit": {
+            "enum": [
+              "count",
+              "minor_currency",
+              "seconds"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z]{3}$"
+          },
+          "suppression": {
+            "enum": [
+              "NONE",
+              "SMALL_CELL",
+              "PARTIAL_COVERAGE"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

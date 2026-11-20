@@ -1,0 +1,40 @@
+{
+  "description": "One Communications Hub audit event: operation, actor and resource ids, time. The free-form details are not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sequence",
+    "operation",
+    "actor_profile_id",
+    "resource_id",
+    "occurred_at"
+  ],
+  "properties": {
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,79}$"
+    },
+    "actor_profile_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "resource_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

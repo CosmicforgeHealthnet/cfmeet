@@ -1,0 +1,40 @@
+{
+  "description": "One operator hold on a profile.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cfmeet_id",
+    "reason",
+    "active",
+    "version",
+    "updated_at"
+  ],
+  "properties": {
+    "cfmeet_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^CF-[A-Z2-7]{6,26}$"
+    },
+    "reason": {
+      "enum": [
+        "ABUSE",
+        "SECURITY",
+        "LEGAL",
+        "OTHER"
+      ]
+    },
+    "active": {
+      "type": "boolean"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
