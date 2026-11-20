@@ -5,7 +5,7 @@
 
 use serde_json::{json, Map, Value};
 
-use super::owner_commands::{In, Out, OutField, COMMANDS};
+use super::owner_commands::{In, Out, OutField, Place, COMMANDS};
 
 fn in_schema(kind: In) -> Value {
     match kind {
@@ -23,6 +23,9 @@ fn in_schema(kind: In) -> Value {
             json!({"type": "array", "maxItems": max, "uniqueItems": true, "items": {"type": "string", "format": "uuid"}})
         }
         In::Object => json!({"type": "object", "description": "Validated by the owning service."}),
+        In::EnumList(values, max) => {
+            json!({"type": "array", "maxItems": max, "uniqueItems": true, "items": {"enum": values}})
+        }
     }
 }
 
@@ -71,7 +74,11 @@ pub fn insert(m: &mut Map<String, Value>) {
             props["expected_version"] = json!({"type": "integer", "minimum": min, "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."});
             required.push("expected_version");
         }
-        for f in c.body {
+        for f in c
+            .body
+            .iter()
+            .filter(|f| !matches!(f.place, Place::Fixed(_)))
+        {
             props[f.hq] = in_schema(f.kind);
             if f.required {
                 required.push(f.hq);

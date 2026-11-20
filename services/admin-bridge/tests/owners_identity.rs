@@ -100,7 +100,7 @@ impl OwnerPort for FakePlatformAccess {
                     json!({"id": ID, "publicId": "k_0123456789abcdef", "lastFour": "a1b2", "applicationId": ID,
                     "environmentId": ID, "serviceAccountId": ID, "status": "ACTIVE", "scopes": ["calls.read"],
                     "notBefore": T0, "expiresAt": T0, "revokedAt": null, "supersededAt": null, "suspendedAt": null,
-                    "suspensionReason": null, "lastUsedAt": T0, "revision": 1, "createdAt": T0,
+                    "suspensionReason": null, "lastUsedAt": T0, "revision": 1, "version": 1, "createdAt": T0,
                     "verifier": "deadbeef", "label": "prod key for Ada"}),
                 ],
                 Value::Null,

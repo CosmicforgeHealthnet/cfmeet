@@ -52,6 +52,12 @@ fn valid(kind: In, v: &Value) -> bool {
                 && a.iter().collect::<std::collections::HashSet<_>>().len() == a.len()
         }),
         In::Object => v.is_object(),
+        In::EnumList(values, max) => v.as_array().is_some_and(|a| {
+            a.len() <= max
+                && a.iter()
+                    .all(|x| x.as_str().is_some_and(|s| values.contains(&s)))
+                && a.iter().collect::<std::collections::HashSet<_>>().len() == a.len()
+        }),
     }
 }
 
@@ -86,6 +92,13 @@ pub fn owner_body(spec: &OwnerCommand, body: &Value) -> Result<Mapped, ErrorCode
     };
     let (mut path, mut target) = (Vec::new(), Vec::new());
     for f in spec.body {
+        if let Place::Fixed(value) = f.place {
+            if body.get(f.hq).is_some() {
+                return Err(bad);
+            }
+            out.insert(f.owner.into(), Value::from(value));
+            continue;
+        }
         match body.get(f.hq) {
             None if f.required => return Err(bad),
             None => {}
@@ -106,6 +119,7 @@ pub fn owner_body(spec: &OwnerCommand, body: &Value) -> Result<Mapped, ErrorCode
                             .unwrap_or_else(|| v.to_string()),
                     );
                 }
+                Place::Fixed(_) => unreachable!("fixed values are handled above"),
             },
             Some(_) => return Err(bad),
         }
@@ -206,7 +220,12 @@ async fn run(
     auth: &Authorized,
     spec: &'static OwnerCommand,
 ) -> Result<Answer, ErrorCode> {
-    let extra: Vec<&str> = spec.body.iter().map(|f| f.hq).collect();
+    let extra: Vec<&str> = spec
+        .body
+        .iter()
+        .filter(|f| !matches!(f.place, Place::Fixed(_)))
+        .map(|f| f.hq)
+        .collect();
     let (base, body) = commands::parse_command_body(&auth.body, &extra, spec.version.is_some())?;
     let mapped = owner_body(spec, &body)?;
     let mut path = spec.owner_path().to_string();

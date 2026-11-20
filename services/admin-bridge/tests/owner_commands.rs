@@ -56,6 +56,7 @@ fn sample_in(kind: In) -> Value {
         In::Str(min, _) | In::NullableStr(min, _) => json!("x".repeat(min.max(3))),
         In::UuidList(_) => json!([ID]),
         In::Object => json!({"section": {"enabled": true}}),
+        In::EnumList(values, _) => json!([values[0]]),
     }
 }
 
@@ -116,6 +117,10 @@ fn hq_call(row: &OwnerCommand, sub: &str) -> (Call, Value, String) {
         owner.insert("expectedVersion".into(), json!(min.max(1)));
     }
     for f in row.body {
+        if let Place::Fixed(value) = f.place {
+            owner.insert(f.owner.into(), json!(value));
+            continue;
+        }
         let v = sample_in(f.kind);
         body[f.hq] = v.clone();
         match f.place {
