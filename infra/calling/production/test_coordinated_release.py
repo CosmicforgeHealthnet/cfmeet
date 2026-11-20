@@ -758,6 +758,10 @@ class AdminBridge(unittest.TestCase):
                 if table in line:
                     self.assertTrue(line.startswith('GRANT SELECT, INSERT ON'), line)
         self.assertFalse(any('TRUNCATE' in l for l in grants))
+        # The A3.0 ledger, granted only once its migration exists, and never deletable.
+        self.assertIn("IF to_regclass('public.admin_operations') IS NOT NULL THEN", sql)
+        self.assertIn("EXECUTE 'GRANT SELECT, INSERT, UPDATE ON admin_operations TO admin_bridge'", sql)
+        self.assertIn("OR (privilege_type = 'DELETE' AND table_name = 'admin_operations')", sql)
         self.assertTrue(sql.strip().startswith('BEGIN;') and sql.strip().endswith('COMMIT;'))
         calls = []
         with patch.object(cr, 'migrator_target', lambda name: ('postgres://m@db/x', 'net')), \
@@ -1032,6 +1036,79 @@ class AdminBridgeHq(unittest.TestCase):
         workflow = (REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
         self.assertIn('activate-admin-bridge-hq,', workflow)
         self.assertIn('activate-admin-bridge-hq: hq-enrolled-read-only', workflow)
+
+
+class AdminBridgeHqCommands(unittest.TestCase):
+    """HQ stage S6: commands on at a newer signed policy revision."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        (self.root / 'enable.json').write_text(json.dumps(enable_record(policy_revision=2)))
+        self.env = {'CF_RUNTIME_ENVIRONMENT': 'production', 'CF_SERVICE_AUTH_KEY_ID': 'k',
+                    'CF_SERVICE_AUTH_PRIVATE_KEY_FILE': '/f', 'ADMIN_BRIDGE_ENABLED': 'true',
+                    'ADMIN_BRIDGE_POLICY_REVISION': '1', 'ADMIN_BRIDGE_POLICY_KEY_ID': 'cfmeet-policy-1',
+                    'ADMIN_BRIDGE_POLICY_PUBLIC_KEY_HEX': POLICY_KEY}
+        digest = hashlib.sha256(bytes(range(32))).hexdigest()
+        self.digest = digest
+        self.state = {'certs': 1, 'staffKeys': 1, 'hmac': {'hq-hmac-1': digest},
+                      'policies': {'1': 'cfmeet-policy-1', '2': 'cfmeet-policy-1'}}
+        self.ledger = 't'
+
+    def run_it(self, confirm=None, ready=None):
+        applied = []
+
+        def apply(op, sha, run, changes, post=None, **kw):
+            applied.append((op, changes))
+            post()
+
+        def sql(db, text):
+            return self.ledger if 'to_regclass' in text else json.dumps(self.state)
+
+        with patch.object(cr, 'env_of', lambda name: self.env), patch.object(cr, 'ADMIN_BRIDGE_ROOT', self.root), \
+                patch.object(cr, 'admin_bridge_material', lambda: {'hq-hmac-1': self.digest}), \
+                patch.object(cr.release, 'db_sql', sql), patch.object(cr, 'emit', lambda *a: None), \
+                patch.object(cr, 'apply_activation', apply), \
+                patch.object(cr, 'admin_bridge_ready_document',
+                             lambda: ready or {'enabled': True, 'policy_revision': 2}):
+            cr.activate_admin_bridge_hq_commands('a' * 40, '1', confirm or cr.ADMIN_BRIDGE_COMMANDS_CONFIRM)
+        return applied
+
+    def test_it_turns_writes_on_at_the_newer_revision_only(self):
+        applied = self.run_it()
+        self.assertEqual(applied, [('activate-admin-bridge-hq-commands', [(
+            'admin-bridge', {'ADMIN_BRIDGE_WRITES_ENABLED': 'true', 'ADMIN_BRIDGE_POLICY_REVISION': '2'})])])
+        self.assertEqual(cr.ACTIVATIONS['activate-admin-bridge-hq-commands'][0], ('activate-admin-bridge-hq',))
+        on = dict(cr.SERVICES['admin-bridge']['env'], ADMIN_BRIDGE_ENABLED='true', ADMIN_BRIDGE_WRITES_ENABLED='true')
+        with patch.object(cr, 'done', lambda op: op in ('activate-admin-bridge-hq', 'activate-admin-bridge-hq-commands')):
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': on}), [])
+        workflow = (REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        self.assertIn('activate-admin-bridge-hq-commands: hq-commands-two-person', workflow)
+
+    def test_it_refuses_before_changing_anything(self):
+        with self.assertRaisesRegex(RuntimeError, 'confirm=hq-commands-two-person'):
+            self.run_it(confirm='yes')
+        self.env['ADMIN_BRIDGE_POLICY_REVISION'] = '2'
+        with self.assertRaisesRegex(RuntimeError, 'not newer'):
+            self.run_it()
+        self.env['ADMIN_BRIDGE_POLICY_REVISION'] = '1'
+        self.ledger = 'f'
+        with self.assertRaisesRegex(RuntimeError, 'operations ledger'):
+            self.run_it()
+        self.ledger = 't'
+        self.state['policies'] = {'1': 'cfmeet-policy-1'}
+        with self.assertRaisesRegex(RuntimeError, 'policy-put'):
+            self.run_it()
+        self.state['policies'] = {'1': 'cfmeet-policy-1', '2': 'cfmeet-policy-1'}
+        self.env['ADMIN_BRIDGE_ENABLED'] = 'false'
+        with self.assertRaisesRegex(RuntimeError, 'activate-admin-bridge-hq first'):
+            self.run_it()
+        self.env['ADMIN_BRIDGE_ENABLED'] = 'true'
+        self.env['ADMIN_BRIDGE_POLICY_KEY_ID'] = 'other'
+        with self.assertRaisesRegex(RuntimeError, 'signing key differs'):
+            self.run_it()
+        self.env['ADMIN_BRIDGE_POLICY_KEY_ID'] = 'cfmeet-policy-1'
+        with self.assertRaisesRegex(RuntimeError, 'policy revision 2'):
+            self.run_it(ready={'enabled': True, 'policy_revision': 1})
 
 
 ORIGINAL_SEALED = cr._sealed

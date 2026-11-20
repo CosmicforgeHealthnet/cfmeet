@@ -108,6 +108,23 @@ Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`)
    - HQ's `bridge.capabilities.read` returns the same `openapi_sha256` as HQ's pin.
    - `admin-bridge-admin verify-audit-chain` exits 0.
 
+## 3.1 Commands for HQ (HQ stage S6)
+
+Do this only with the owner's go-ahead and an agreed release window; owner gate G1 already allows HQ to modify. Each command family additionally needs its module switch (§2.1) and its permissions in the policy.
+
+1. Create the new access policy. Run `policy-ceiling --revision N+1 > policy.json`, then cut it down to the reads plus the command permissions of the families being switched on.
+2. Sign it and store it: `policy-sign` (**offline**), then `policy-put --revision N+1 …`. The bridge refuses any policy outside the ceiling.
+3. Set `policy_revision` to N+1 in `/opt/cfmeet-core/admin-bridge/enable.json`.
+4. Run `activate-admin-bridge-hq-commands` (`confirm=hq-commands-two-person`). It refuses, changing nothing, unless all of these hold:
+   - the bridge is enabled for HQ;
+   - the operations ledger exists;
+   - N+1 is newer than the running revision, stored, signed by the running key and the newest;
+   - HQ is still fully enrolled.
+   It then sets `ADMIN_BRIDGE_WRITES_ENABLED=true` and `ADMIN_BRIDGE_POLICY_REVISION=N+1`, and checks `/ready`.
+5. HQ re-pins and lists the families in `CFMEET_ADMIN_ENABLED_COMMANDS`.
+
+Rollback: run `rollback` on that operation. It restores writes off and the previous revision; revisions are append-only.
+
 ## 4. Rollback
 
 - Run `rollback` right after `activate-admin-bridge-hq`. It removes the relay first, so HQ's way in closes, then restores the dark bridge. HQ then gets no answer on 8460, and any request that still reaches the bridge gets `503 BRIDGE_DISABLED`.
