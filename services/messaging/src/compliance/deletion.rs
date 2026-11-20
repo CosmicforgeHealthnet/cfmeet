@@ -89,6 +89,18 @@ pub async fn create(
     request: DeletionRequest,
 ) -> Result<Value> {
     let now = state.now();
+    check(&state.db, ctx, &request).await?;
+    let id = Uuid::new_v4();
+    create_in(&state.db, ctx, id, &request, now).await?;
+    get(state, ctx, id).await
+}
+
+/// Validates a deletion request (no change).
+pub(crate) async fn check<C: sea_orm::ConnectionTrait>(
+    db: &C,
+    ctx: &TrustedContext,
+    request: &DeletionRequest,
+) -> Result<()> {
     match (
         request.kind.as_str(),
         request.principal_id,
@@ -96,7 +108,7 @@ pub async fn create(
     ) {
         ("PRINCIPAL_ERASURE", Some(_), None) => {}
         ("CONVERSATION_PURGE", None, Some(c)) => {
-            service::load(&state.db, ctx, c, false)
+            service::load(db, ctx, c, false)
                 .await?
                 .ok_or(Error::code(ErrorCode::NotFound))?;
         }
@@ -106,9 +118,21 @@ pub async fn create(
             ))
         }
     }
-    let id = Uuid::new_v4();
+    Ok(())
+}
+
+/// Registers a [`check`]ed request (PENDING; the leased worker executes it, legal holds
+/// win) and its audit entry, on `txn`. Also used by the admin bridge
+/// ([`crate::operator_commands`]).
+pub(crate) async fn create_in<C: sea_orm::ConnectionTrait>(
+    txn: &C,
+    ctx: &TrustedContext,
+    id: Uuid,
+    request: &DeletionRequest,
+    now: DateTime<Utc>,
+) -> Result<()> {
     db::exec(
-        &state.db,
+        txn,
         "INSERT INTO messaging_deletion_requests (id, tenant_id, application_id, environment_id, kind, principal_id, conversation_id, \
            requested_by_credential_id, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         vec![
@@ -125,7 +149,7 @@ pub async fn create(
     )
     .await?;
     audit::record(
-        &state.db,
+        txn,
         AuditEntry {
             ctx,
             principal_id: None,
@@ -138,7 +162,7 @@ pub async fn create(
         now,
     )
     .await?;
-    get(state, ctx, id).await
+    Ok(())
 }
 
 pub async fn get(state: &AppState, ctx: &TrustedContext, id: Uuid) -> Result<Value> {

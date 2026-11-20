@@ -540,8 +540,8 @@ pub async fn resolve<C: sea_orm::ConnectionTrait>(
 ) -> Result<()> {
     let n = db::exec(
         db,
-        "UPDATE messaging_reports SET status = $2, resolution = $3, resolved_at = $4, resolved_by_credential_id = $5 \
-         WHERE id = $1 AND status = 'OPEN' AND environment_id = $6",
+        "UPDATE messaging_reports SET status = $2, resolution = $3, resolved_at = $4, resolved_by_credential_id = $5, \
+           version = version + 1 WHERE id = $1 AND status = 'OPEN' AND environment_id = $6",
         vec![
             report.into(),
             status.into(),
