@@ -16,7 +16,7 @@ The service is never in a synchronous business path: sign-in, code verification,
 
 ## 2. Dark state and routing
 
-Every `(category, channel)` row of `notif_routing` starts `OFF`. While a category is `OFF` its events are **HELD** (stored, never sent, counted by `notif_held_events`). Modes are changed only by coordinated-release operations; each change bumps `version` and records the run id in `changed_by_run`.
+Every `(category, channel)` row of `notif_routing` starts `OFF`. While a category is `OFF` its events are **HELD** (stored, never sent, counted by `notif_held_events`). Modes are changed by coordinated-release operations and, one row at a time, by the HQ admin bridge (ADR 0068 A4, `POST /internal/v1/operator/routing/{category}/{channel}/mode`: two-person approval, `expectedVersion`, the same gates as far as the service can verify them — CRITICAL categories and `MEETING_NOTIFICATION` EMAIL never become `ACTIVE` there; HELD events are not released). Each change bumps `version` and records the run id (`admin-bridge:<operation id>` for the bridge, whose operation and approver are in `notif_admin_operations`) in `changed_by_run`. A coordinated-release `rollback` of an earlier routing run restores its recorded mode without a version check, so it overrides a later bridge change of that row.
 
 | Mode | Effect |
 |---|---|

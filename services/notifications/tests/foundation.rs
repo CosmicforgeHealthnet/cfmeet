@@ -14,9 +14,9 @@ async fn the_migration_creates_18_prefixed_tables_with_every_route_off() {
     let tables = h
         .count("SELECT count(*)::bigint FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'notif\\_%'")
         .await;
-    // The 17 service tables (N2), the N10 preference-copy job row and (ADR 0063, additive)
-    // the partner push provider vault.
-    assert_eq!(tables, 19);
+    // The 17 service tables (N2), the N10 preference-copy job row, (ADR 0063, additive)
+    // the partner push provider vault and (ADR 0068 A4) the admin bridge command ledger.
+    assert_eq!(tables, 20);
     assert_eq!(
         h.count("SELECT count(*)::bigint FROM notif_preference_copy WHERE mode = 'OFF'")
             .await,
