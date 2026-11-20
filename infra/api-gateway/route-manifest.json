@@ -6,7 +6,7 @@
     "INTERNAL_SERVICE": 40,
     "OPERATOR_ADMIN": 48,
     "PROVIDER_CALLBACK": 4,
-    "PUBLIC_CUSTOMER": 563,
+    "PUBLIC_CUSTOMER": 564,
     "PUBLIC_INFRASTRUCTURE": 17
   },
   "routes": [
@@ -3246,6 +3246,24 @@
       "protocol": "REST",
       "upstream": "cfmeet.messaging",
       "upstreamPath": "/v1/conversations/{conversationId}/events",
+      "auth": [
+        "PLATFORM_CREDENTIAL",
+        "CLIENT_TOKEN",
+        "OAUTH_ACCESS_TOKEN"
+      ],
+      "forwardHeaders": [
+        "cf-acting-principal"
+      ],
+      "requiredScope": "messages.read"
+    },
+    {
+      "id": "messaging.setConversationInboxSettings",
+      "domain": "messaging",
+      "method": "PUT",
+      "pattern": "/v1/conversations/{conversationId}/inbox-settings",
+      "protocol": "REST",
+      "upstream": "cfmeet.messaging",
+      "upstreamPath": "/v1/conversations/{conversationId}/inbox-settings",
       "auth": [
         "PLATFORM_CREDENTIAL",
         "CLIENT_TOKEN",
@@ -14718,6 +14736,14 @@
       "operationId": "replayConversationEvents",
       "method": "GET",
       "path": "/v1/conversations/{conversationId}/events",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "contract": "cfmeet.messaging.http-api",
+      "operationId": "setConversationInboxSettings",
+      "method": "PUT",
+      "path": "/v1/conversations/{conversationId}/inbox-settings",
       "class": "PUBLIC_CUSTOMER"
     },
     {

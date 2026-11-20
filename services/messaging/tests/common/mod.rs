@@ -142,6 +142,9 @@ async fn template(admin: &str) -> String {
             messaging_migration::MlsJoinMigrator::up(&tmpl, None)
                 .await
                 .expect("MLS self-join migrations apply");
+            messaging_migration::ChatControlsMigrator::up(&tmpl, None)
+                .await
+                .expect("chat-controls migrations apply");
             tmpl.close().await.ok();
             name
         })

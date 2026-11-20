@@ -193,9 +193,9 @@ pub async fn disable_device<C: sea_orm::ConnectionTrait>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntitledRecipient {
     pub principal_id: Uuid,
-    /// MANAGED only: the event's message mentions this principal
-    /// (`messaging_message_mentions`). Always `false` for PRIVATE_E2EE (mentions stay
-    /// inside the ciphertext).
+    /// The event's message mentions this principal (`messaging_message_mentions`: the
+    /// sender's declared mention ids, for both profiles; a PRIVATE_E2EE mention's text
+    /// stays inside the ciphertext, B3).
     pub mentions_recipient: bool,
 }
 
@@ -347,7 +347,7 @@ pub async fn authorize_wakeups<C: sea_orm::ConnectionTrait>(
         return Ok(Some(decision));
     };
     let mentioned: Vec<Uuid> = match uuid_of("message_id") {
-        Some(message) if decision.security_profile == "MANAGED" => db::all::<MentionRow, _>(
+        Some(message) => db::all::<MentionRow, _>(
             db,
             "SELECT principal_id FROM messaging_message_mentions WHERE message_id = $1",
             vec![message.into()],
@@ -356,7 +356,7 @@ pub async fn authorize_wakeups<C: sea_orm::ConnectionTrait>(
         .into_iter()
         .map(|m| m.principal_id)
         .collect(),
-        _ => Vec::new(),
+        None => Vec::new(),
     };
     for candidate in candidates.into_iter().filter(|c| c.in_window) {
         if decision.context_class == "DIRECT"
@@ -602,8 +602,8 @@ async fn authorized(state: &AppState, job: &Job) -> Result<bool> {
     } else {
         cf_communications_policy::Action::GroupNotification
     };
-    // Gap audit S10: a recipient mentioned in a MANAGED message passes a "mentions only"
-    // preference (mentions are recorded only for MANAGED text, never inferred).
+    // Gap audit S10 / B3: a mentioned recipient passes a "mentions only" preference
+    // (mentions are the sender's declared ids, never inferred from content).
     let mentioned = match job.event_payload["message_id"]
         .as_str()
         .and_then(|s| Uuid::parse_str(s).ok())

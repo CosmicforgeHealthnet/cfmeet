@@ -694,7 +694,7 @@ async fn create_in(
         }
     }
     if let Some(seconds) = request.retention_seconds {
-        check_retention(&snapshot.policy, request.context_class, seconds, None)?;
+        check_retention(&snapshot.policy, request.context_class, Some(seconds))?;
     }
     let (title, avatar_ref) = display_metadata(
         profile,
@@ -1078,15 +1078,20 @@ async fn inbox_summary(
             })
         }
     };
-    Ok((
-        json!({
-            "lastActivityAt": rfc3339(activity),
-            "lastMessage": last_message,
-            "unreadCount": counts.unread,
-            "mentionCount": counts.mentions,
-        }),
-        activity,
-    ))
+    let mut summary = json!({
+        "lastActivityAt": rfc3339(activity),
+        "lastMessage": last_message,
+        "unreadCount": counts.unread,
+        "mentionCount": counts.mentions,
+    });
+    // F1: the member's own archive / pin of this chat.
+    for (k, v) in super::inbox_settings::load(&state.db, row.id, viewer)
+        .await?
+        .summary_fields()
+    {
+        summary[k] = v;
+    }
+    Ok((summary, activity))
 }
 
 /// The `lastActivity` ordering key of one conversation (same expression as the list).
@@ -1249,9 +1254,11 @@ pub struct PatchRequest {
     pub reason: Option<String>,
     #[serde(default)]
     pub expires_at: Option<DateTime<Utc>>,
-    /// §90: a stricter, conversation-specific retention in seconds (only tightens).
-    #[serde(default)]
-    pub retention_seconds: Option<i64>,
+    /// §90 / disappearing messages: a conversation-specific retention in seconds, never
+    /// looser than the context's policy; `null` turns it off. Applies to messages sent
+    /// after the change (each message keeps the retention it was sent with).
+    #[serde(default, deserialize_with = "present")]
+    pub retention_seconds: Option<Option<i64>>,
     /// Accepted only to be refused explicitly: a profile can never change.
     #[serde(default)]
     pub security_profile: Option<Value>,
@@ -1339,8 +1346,27 @@ pub async fn patch(
                     .await?
                     .ok_or(Error::code(ErrorCode::NotFound))?;
                 if let Some(a) = &acting {
-                    // A principal administering a conversation must be its owner.
-                    if row.owner_principal_id != a.principal_id {
+                    // A principal administering a conversation must be its owner. B4:
+                    // disappearing messages alone are a chat admin's setting (OWNER /
+                    // ADMIN of a group, either member of a one-to-one chat).
+                    let retention_only = request.retention_seconds.is_some()
+                        && request.lifecycle_state.is_none()
+                        && request.expires_at.is_none()
+                        && request.title.is_none()
+                        && request.avatar_ref.is_none()
+                        && request.announcement_only.is_none();
+                    if retention_only && row.owner_principal_id != a.principal_id {
+                        let member = super::access::membership(txn, id, a.principal_id, false)
+                            .await?
+                            .filter(|m| m.is_active())
+                            .ok_or(Error::code(ErrorCode::NotFound))?;
+                        if !(member.is_admin() || row.context_class == "DIRECT") {
+                            return Err(Error::reason(
+                                ErrorCode::PrincipalNotAuthorized,
+                                "NOT_ADMIN",
+                            ));
+                        }
+                    } else if row.owner_principal_id != a.principal_id {
                         return Err(if is_member(txn, id, a.principal_id).await? {
                             Error::reason(ErrorCode::PrincipalNotAuthorized, "NOT_OWNER")
                         } else {
@@ -1410,6 +1436,15 @@ pub async fn patch(
                 }
                 if let Some(seconds) = request.retention_seconds {
                     check_and_audit_retention(txn, &ctx, &row, seconds, now).await?;
+                    if seconds.is_none() && row.retention_seconds.is_some() {
+                        // Turned off: [`transition_with`] keeps a NULL as "unchanged".
+                        db::exec(
+                            txn,
+                            "UPDATE messaging_conversations SET retention_seconds = NULL WHERE id = $1 AND version = $2",
+                            vec![row.id.into(), row.version.into()],
+                        )
+                        .await?;
+                    }
                 }
                 // Display metadata is validated against the PERSISTED profile and applied
                 // in the transition's single version step (`conversation.updated` event).
@@ -1439,7 +1474,7 @@ pub async fn patch(
                     next,
                     request.reason.as_deref(),
                     request.expires_at,
-                    request.retention_seconds,
+                    request.retention_seconds.flatten(),
                     display,
                     now,
                     &request_ctx,
@@ -1577,14 +1612,17 @@ async fn link_successor<C: ConnectionTrait>(
 /// The longest read-only grace a transactional conversation may have (30 days).
 pub const MAX_EXPIRY_GRACE_SECONDS: i64 = 2_592_000;
 
-/// A conversation retention is 60 s .. 100 years, never looser than the context's (or the
-/// environment's) retention policy and never looser than its current setting.
+/// A conversation retention is 60 s .. 100 years and never looser than the context's (or
+/// the environment's) retention policy. B4: it may be shortened, lengthened or turned off
+/// (`None`: the context's policy alone applies) within that limit.
 fn check_retention(
     effective: &policy::EffectivePolicy,
     class: ContextClass,
-    seconds: i64,
-    current: Option<i64>,
+    seconds: Option<i64>,
 ) -> Result<()> {
+    let Some(seconds) = seconds else {
+        return Ok(());
+    };
     if !(60..=3_153_600_000).contains(&seconds) {
         return Err(Error::validation(
             "retentionSeconds must be between 60 and 3153600000",
@@ -1601,29 +1639,22 @@ fn check_retention(
             "RETENTION_LOOSER_THAN_POLICY",
         ));
     }
-    if current.is_some_and(|c| seconds > c) {
-        return Err(Error::reason(
-            ErrorCode::ValidationError,
-            "RETENTION_ONLY_TIGHTENS",
-        ));
-    }
     Ok(())
 }
 
 /// §90: checks a conversation retention change (never looser than its context's policy,
-/// which keeps applying, nor than an earlier setting — the database refuses that too) and
-/// audits it; [`transition`] stores it with the version bump.
+/// which keeps applying) and audits it; [`transition`] stores it with the version bump.
 async fn check_and_audit_retention<C: ConnectionTrait>(
     db: &C,
     ctx: &TrustedContext,
     row: &ConversationRow,
-    seconds: i64,
+    seconds: Option<i64>,
     now: DateTime<Utc>,
 ) -> Result<()> {
     let effective = policy::current(db, ctx.scope.environment_id).await?;
     let class = ContextClass::parse(&row.context_class)
         .ok_or_else(|| Error::validation("unknown context class"))?;
-    check_retention(&effective, class, seconds, row.retention_seconds)?;
+    check_retention(&effective, class, seconds)?;
     crate::audit::record(
         db,
         crate::audit::AuditEntry {
