@@ -6,8 +6,8 @@
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "52fbc37f05c0cf5c9cce23ccc07cdd2c09bc53f31b56db7a619ed77d7a91e592",
-    "capability_matrix_sha256": "488ca2e27c383b70ffd6b2b99d2f22b98b054ec6fce8813f7e88d7243ab732dc"
+    "openapi_sha256": "7c50f191093e09bedaa82d5d0d230d424e74836e7453d150793e7f616e0207c3",
+    "capability_matrix_sha256": "3e7734e0e459a9eb2a17cdaec4e755b24e7df7ea60954db21c93c3f799e4ee63"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 11,
+      "READ_ONLY": 12,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 121
+      "BLOCKED_DEPENDENCY": 120
     }
   },
   "capabilities": [
@@ -6374,9 +6374,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OrganizationPolicies"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "organizations.policies.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -6385,8 +6385,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-      "blocker": "Phase A2: new organizations operator endpoint required",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "organizations_policies_are_relayed_field_by_field"
+      ]
     },
     {
       "id": "organizations.member.change",

@@ -133,7 +133,8 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "organizations.audit.list",
             "organizations.global-audit.list",
             "organizations.members.list",
-            "organizations.teams.list"
+            "organizations.teams.list",
+            "organizations.policies.read"
         ]
     );
     for c in catalog() {

@@ -80,6 +80,19 @@ impl OwnerPort for FakeOrganizations {
                 "joinedVia": "CREATION", "createdBy": USER, "createdAt": "2026-11-01T10:00:00Z",
                 "updatedAt": "2026-11-01T10:00:00Z", "removedAt": null, "version": 1
             }], "nextCursor": null}),
+            p if p.ends_with("/policies") => json!({
+                "schemaVersion": 1, "organizationId": ORG, "revision": 3, "updatedBy": USER, "updatedAt": "2026-11-05T09:00:00Z",
+                "legacyMeetingProfilePolicy": {"anything": true},
+                "policy": {
+                    "memberDirectory": {"visibility": "MANAGERS", "searchable": false},
+                    "guests": {"invitationsAllowed": true},
+                    "meetings": {"hostCreation": "ADMINS"},
+                    "features": {"meetings": true, "messaging": true, "calling": false},
+                    "retention": {"hintDays": null},
+                    "delegatedAdministration": {"managersMayInvite": true, "managersMayCreateTeams": false, "adminsMayManagePolicies": true},
+                    "futureSection": {"secretFlag": true}
+                }
+            }),
             p if p.ends_with("/teams") => json!({"items": [{
                 "id": USER, "organizationId": ORG, "name": "Front desk", "description": "private note: call Ada on 0803",
                 "parentTeamId": null, "status": "ACTIVE", "createdBy": USER, "createdAt": "2026-11-01T10:00:00Z",
@@ -375,4 +388,39 @@ async fn organizations_bindings_treat_absent_as_unbound() {
     assert_eq!(items[0]["service"], "calling");
     let text = v.to_string();
     assert!(!text.contains("sa_123") && !text.contains("cred_456"));
+}
+
+#[tokio::test]
+async fn organizations_policies_are_relayed_field_by_field() {
+    let (h, fake) = harness().await;
+    let c = call(
+        &format!("/organizations/organizations/{ORG}/policies"),
+        &scoped("support-review"),
+        "organizations.policies.read",
+        &["cfmeet.support"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    assert_eq!(
+        last_call(&fake).1,
+        format!("/internal/v1/operator/organizations/{ORG}/policies")
+    );
+    let r = &v["result"];
+    assert_eq!(r["revision"], 3);
+    assert_eq!(r["policy"]["member_directory"]["visibility"], "MANAGERS");
+    assert_eq!(r["policy"]["features"]["calling"], false);
+    assert!(r["policy"]["retention"]["hint_days"].is_null());
+    assert!(
+        r["policy"]["apps"].is_null(),
+        "an absent apps section is null"
+    );
+    let text = v.to_string();
+    assert!(
+        !text.contains("futureSection") && !text.contains("secretFlag"),
+        "unreviewed sections are not relayed"
+    );
+    assert!(
+        !text.contains("legacyMeetingProfilePolicy") && !text.contains(USER),
+        "nor the legacy blob or the editor id"
+    );
 }

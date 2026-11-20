@@ -2945,6 +2945,11 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         &["organizations_members_are_opaque_user_ids"],
     ),
     (
+        "organizations.policies.read",
+        "OrganizationPolicies",
+        &["organizations_policies_are_relayed_field_by_field"],
+    ),
+    (
         "organizations.teams.list",
         "OrganizationTeamPage",
         &["organizations_teams_drop_free_text"],

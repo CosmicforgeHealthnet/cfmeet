@@ -31651,7 +31651,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/OrganizationPolicies"
                     },
                     "error": {
                       "type": "null"
@@ -31777,7 +31777,7 @@
         "x-cfmeet-permission": "organizations.policies.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "organizations"
       },
       "post": {
@@ -64133,6 +64133,193 @@
               "null"
             ],
             "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "OrganizationPolicies": {
+        "description": "The organization's policy document (Organizations PolicyDocument v1, field by field). Sections the bridge has not reviewed are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organization_id",
+          "revision",
+          "updated_at",
+          "policy"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "member_directory",
+              "guests",
+              "meetings",
+              "features",
+              "retention",
+              "delegated_administration",
+              "apps"
+            ],
+            "properties": {
+              "member_directory": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "visibility",
+                  "searchable"
+                ],
+                "properties": {
+                  "visibility": {
+                    "enum": [
+                      "MEMBERS",
+                      "MANAGERS",
+                      "ADMINS"
+                    ]
+                  },
+                  "searchable": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "guests": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "invitations_allowed"
+                ],
+                "properties": {
+                  "invitations_allowed": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "meetings": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "host_creation"
+                ],
+                "properties": {
+                  "host_creation": {
+                    "enum": [
+                      "MEMBERS",
+                      "MANAGERS",
+                      "ADMINS"
+                    ]
+                  }
+                }
+              },
+              "features": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "meetings",
+                  "messaging",
+                  "calling"
+                ],
+                "properties": {
+                  "meetings": {
+                    "type": "boolean"
+                  },
+                  "messaging": {
+                    "type": "boolean"
+                  },
+                  "calling": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "retention": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "hint_days"
+                ],
+                "properties": {
+                  "hint_days": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 3650
+                  }
+                }
+              },
+              "delegated_administration": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "managers_may_invite",
+                  "managers_may_create_teams",
+                  "admins_may_manage_policies"
+                ],
+                "properties": {
+                  "managers_may_invite": {
+                    "type": "boolean"
+                  },
+                  "managers_may_create_teams": {
+                    "type": "boolean"
+                  },
+                  "admins_may_manage_policies": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "apps": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "install_tier",
+                      "allow_list",
+                      "user_installs_allowed"
+                    ],
+                    "properties": {
+                      "install_tier": {
+                        "enum": [
+                          "ADMINS",
+                          "MEMBERS"
+                        ]
+                      },
+                      "allow_list": {
+                        "type": [
+                          "array",
+                          "null"
+                        ],
+                        "maxItems": 200,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "user_installs_allowed": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
           }
         }
       },
