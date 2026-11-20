@@ -223,7 +223,7 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     pub developer: Arc<ServiceTokenSigner>,
     pub operator: Arc<ServiceTokenSigner>,
-    /// ADR 0067: the admin bridge (operator reads only).
+    /// ADR 0068: the admin bridge (operator reads only).
     pub bridge: Arc<ServiceTokenSigner>,
     pub rogue_meeting: Arc<ServiceTokenSigner>,
 }
