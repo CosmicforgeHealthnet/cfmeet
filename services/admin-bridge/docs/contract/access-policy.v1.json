@@ -1,6 +1,6 @@
 {
   "policy": "cfmeet-admin-bridge.access-policy-ceiling.v1",
-  "contract_version": "1.2.0",
+  "contract_version": "1.4.0",
   "rule": "The runtime access policy is signed by CF Meet (Ed25519) and pinned by revision; every grant it makes must be inside this ceiling, or the bridge refuses to load it. A permission is effective only when the staff assertion lists it AND one of the asserted roles is granted it with the request's purpose. A role is never inferred from list order.",
   "roles": {
     "cfmeet.viewer": {

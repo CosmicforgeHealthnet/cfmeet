@@ -4211,7 +4211,7 @@
     "method": "GET",
     "bridge_endpoint": "/notifications/deliveries",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "notifications.deliveries.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -4220,8 +4220,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-    "blocker": "Phase A2: notifications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "notifications_deliveries_map_the_window_and_carry_no_content"
+    ]
   },
   {
     "id": "notifications.failed-deliveries.list",
@@ -4230,7 +4232,7 @@
     "method": "GET",
     "bridge_endpoint": "/notifications/failed-deliveries",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "notifications.failed-deliveries.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -4239,8 +4241,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-    "blocker": "Phase A2: notifications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "notifications_failed_deliveries_use_the_failure_route"
+    ]
   },
   {
     "id": "notifications.delivery.retry",
@@ -4268,7 +4272,7 @@
     "method": "GET",
     "bridge_endpoint": "/notifications/suppressions",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "notifications.suppressions.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -4277,8 +4281,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-    "blocker": "Phase A2: notifications endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "notifications_suppressions_relay_only_the_digest"
+    ]
   },
   {
     "id": "notifications.suppression.remove",
@@ -4306,7 +4312,7 @@
     "method": "GET",
     "bridge_endpoint": "/notifications/routing",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "notifications.routing.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -4315,8 +4321,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-    "blocker": "Phase A2: notifications keeps this in its database only; operator read API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "notifications_routing_drops_the_audit_digest"
+    ]
   },
   {
     "id": "notifications.routing.change",
@@ -4363,7 +4371,7 @@
     "method": "GET",
     "bridge_endpoint": "/notifications/providers",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "notifications.providers.read",
     "risk": "R0",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -4372,8 +4380,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-    "blocker": "Phase A2: new notifications operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "notifications_providers_report_status_only"
+    ]
   },
   {
     "id": "privacy.requests.list",
