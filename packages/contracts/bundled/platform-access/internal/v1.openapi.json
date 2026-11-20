@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform Access internal API",
-    "version": "1.13.0",
-    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED. 1.11.0 (ADR 0062): console test user tokens POST /internal/v1/delegation/environments/{environmentId}/test-user-tokens (platform-identity.delegate + X-CF-Delegated-Actor; ACTIVE SANDBOX environments of EXTERNAL tenants only; no credential: the token's credentialId / serviceAccountId are the environment's synthetic console-test markers; TTL at most 3600 s; grants bounded by the application's current SANDBOX scope grants; audited USER_TOKEN_TEST_ISSUED); POST /internal/v1/user-tokens/verify accepts them. 1.12.0 (ADR 0064, CF Meet Apps / \"Integrate\"; every operation behind PLATFORM_ACCESS_OAUTH_ENABLED, off: 404 NOT_FOUND): OAuth client profiles, client secrets and app grant listing for the Developer Console (platform-oauth.manage) — PUT / GET /internal/v1/oauth/clients/{applicationId}, POST …/secret, GET …/grants; authorization for the Meeting Service (platform-oauth.authorize) — POST /internal/v1/oauth/authorization-requests/validate, POST /internal/v1/oauth/authorizations, GET /internal/v1/oauth/grants, DELETE /internal/v1/oauth/grants/{grantId}; the token endpoint backend for the Developer Console (platform-oauth.token) — POST /internal/v1/oauth/token, /revoke, /introspect. POST /internal/v1/credentials/authenticate (and delegated-authority) also accept cfoa_ / cfob_ app tokens: the authority chain is the grant's target FIRST_PARTY triple and installation service account, scopes are mapped from the grant, the principal restriction is exactly the user / bot principal, and the chain adds credentialKind, appId and grantId. The identity change feed gains APP_GRANT. New error codes INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED, APP_NOT_AVAILABLE and RFC 6749 invalid_grant, invalid_client, unsupported_grant_type, invalid_request. 1.12.0 also: client profiles take optional developerName, logoUrl and meetingSurface {url, origins}; grant items carry app {name, developerName, logoUrl, meetingSurface} and the pairwise sub; authentication / credential status of OAuth tokens add restrictedPrincipal {id, kind, reference} and credentialIssuedAt. 1.13.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) is accepted from cfmeet.admin-bridge (strict hq:<staff>) and, for the legacy named operator only, from the operator console; from any other caller any of them is refused (INTERNAL_PERMISSION_DENIED). The admin bridge's read-only operator views under GET /internal/v1/operator/*: tenants, a tenant's applications, environments, service accounts, scope grants, API keys (public id and last four only), principals (exact-match search, external reference never returned), allowed websites, cross-tenant identity-record search, OAuth apps and their grants, and the audit trail without detail; each requires platform-identity.administer and the bridge's HQ operator."
+    "version": "1.14.0",
+    "description": "Internal HTTP surface of services/platform-access, the shared identity authority (Part IV Workstream B, ADR 0032): GET /health and /ready (public, no data) and the service-authenticated /internal/v1 API. Every /internal/v1 path — including unknown ones — requires a valid service token (cfmeet.platform.internal-http) and the operation's permission from Platform Access's trust bundle; a customer credential is never accepted in its place. Request bodies are limited to 64 KiB. Messages are defined by cfmeet.platform-access.identity. Consumers: Calling (authenticate, resolve / register principals, read identity and the change feed), Meeting Service (first-party principal ensure, Part V H §104), Messaging (authenticate, resolve, read identity), Numbering (authenticate, resolve, read identity), the operator console (administration). 1.4.0: Developer Platform service-account delegation (Part VI §50) — /internal/v1/delegation/environments/{environmentId}/service-accounts[/{serviceAccountId}[/status]] (create, list, read, suspend / resume; non-production environments only; no credential operation). 1.5.0 (Part VI §54 / §55): delegated credential self-service (issue / list / get / rotate / revoke / suspend / resume), reversible credential suspension (credential_suspended), delegated STANDARD scope grants and withdrawals, production-environment activation for approved requests and delegated live telecom of activated PRODUCTION environments. 1.6.0 (Blueprint Section 7, ADR 0058): governed FIRST_PARTY organization scopes for the Organizations Service only (platform-identity.provision-first-party) — PUT / GET /internal/v1/organization-scopes/{organizationRef}/{capability} (idempotent create-or-return and read-back of the organization's dedicated FIRST_PARTY tenant, first-party application and PRODUCTION-kind environment) and POST .../status (tenant suspension / resumption); never credentials, scope grants or EXTERNAL tenants. 1.7.0 (Blueprint Section 15): GET /internal/v1/admin/audit (operator-only, paginated read of the append-only operator audit trail, PLT-009); POST /internal/v1/delegation/tenants/{tenantId}/display-name (organization rename propagation to EXTERNAL tenants, audited TENANT_RENAMED, ORG-013); GET /internal/v1/delegation/tenant-slugs/{slug} (organization-creation reconciliation, ORG-014); credential views add lastAuthenticatedAt (debounced last successful authentication, null when never seen) and expiringSoon (stops authenticating within 14 days, PLT-008). 1.8.0 (Blueprint Section 14, ACC-010): POST /internal/v1/principals/account-status — the first-party account authority (platform-principal.ensure) mirrors an account's current status onto its NATIVE_CF_USER principal (ACTIVE / SUSPENDED / DEACTIVATED; idempotent; never creates or revives a tombstoned principal). 1.9.0 (ADR 0058 Amendment A2): automatic organization service bindings for the Organizations Service (platform-identity.bind-organization-services): PUT / GET / DELETE /internal/v1/organization-scopes/{organizationRef}/{capability}/service-bindings/{service} and POST …/rotate — the organization's Calling / Messaging service account and credential inside its own FIRST_PARTY triple with a closed scope set; the secret is never returned. 1.10.0 (ADR 0062, CF Meet Platform \"Build\"; every operation behind a default-off flag, off: 404 NOT_FOUND): the partner Users API for the Developer Console (platform-end-users.delegate, CF-Forwarded-Credential-Id re-verified live, EXTERNAL environments only) — POST / GET /internal/v1/end-users, GET / PATCH / DELETE /internal/v1/end-users/{userId}, POST …/revoke-sessions, user-token minting POST /internal/v1/end-users/{userId}/tokens and POST /internal/v1/end-users/tokens (scope user_tokens.issue), and the console read GET /internal/v1/delegation/environments/{environmentId}/end-users; user-token verification POST /internal/v1/user-tokens/verify and GET /internal/v1/user-tokens/keys (platform-user-token.verify); allowed websites GET /internal/v1/environment-origins (change feed), GET /internal/v1/environments/{environmentId}/origins (platform-environment-origins.read) and GET / PUT /internal/v1/delegation/environments/{environmentId}/allowed-origins (platform-identity.delegate); partner meeting principals POST /internal/v1/principals/ensure-meeting-platform (platform-principal.ensure-meeting-platform). New error codes SCOPE_REQUIRED, LIMIT_EXCEEDED, RATE_LIMITED, USER_TOKEN_INVALID, USER_TOKEN_EXPIRED, USER_TOKEN_REVOKED. 1.11.0 (ADR 0062): console test user tokens POST /internal/v1/delegation/environments/{environmentId}/test-user-tokens (platform-identity.delegate + X-CF-Delegated-Actor; ACTIVE SANDBOX environments of EXTERNAL tenants only; no credential: the token's credentialId / serviceAccountId are the environment's synthetic console-test markers; TTL at most 3600 s; grants bounded by the application's current SANDBOX scope grants; audited USER_TOKEN_TEST_ISSUED); POST /internal/v1/user-tokens/verify accepts them. 1.12.0 (ADR 0064, CF Meet Apps / \"Integrate\"; every operation behind PLATFORM_ACCESS_OAUTH_ENABLED, off: 404 NOT_FOUND): OAuth client profiles, client secrets and app grant listing for the Developer Console (platform-oauth.manage) — PUT / GET /internal/v1/oauth/clients/{applicationId}, POST …/secret, GET …/grants; authorization for the Meeting Service (platform-oauth.authorize) — POST /internal/v1/oauth/authorization-requests/validate, POST /internal/v1/oauth/authorizations, GET /internal/v1/oauth/grants, DELETE /internal/v1/oauth/grants/{grantId}; the token endpoint backend for the Developer Console (platform-oauth.token) — POST /internal/v1/oauth/token, /revoke, /introspect. POST /internal/v1/credentials/authenticate (and delegated-authority) also accept cfoa_ / cfob_ app tokens: the authority chain is the grant's target FIRST_PARTY triple and installation service account, scopes are mapped from the grant, the principal restriction is exactly the user / bot principal, and the chain adds credentialKind, appId and grantId. The identity change feed gains APP_GRANT. New error codes INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED, APP_NOT_AVAILABLE and RFC 6749 invalid_grant, invalid_client, unsupported_grant_type, invalid_request. 1.12.0 also: client profiles take optional developerName, logoUrl and meetingSurface {url, origins}; grant items carry app {name, developerName, logoUrl, meetingSurface} and the pairwise sub; authentication / credential status of OAuth tokens add restrictedPrincipal {id, kind, reference} and credentialIssuedAt. 1.13.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) is accepted from cfmeet.admin-bridge (strict hq:<staff>) and, for the legacy named operator only, from the operator console; from any other caller any of them is refused (INTERNAL_PERMISSION_DENIED). The admin bridge's read-only operator views under GET /internal/v1/operator/*: tenants, a tenant's applications, environments, service accounts, scope grants, API keys (public id and last four only), principals (exact-match search, external reference never returned), allowed websites, cross-tenant identity-record search, OAuth apps and their grants, and the audit trail without detail; each requires platform-identity.administer and the bridge's HQ operator. 1.14.0 (ADR 0068 A4, admin bridge commands): POST /internal/v1/operator/tenants/{tenantId}/status, applications/{applicationId}/status, environments/{environmentId}/status, service-accounts/{serviceAccountId}/status, applications/{applicationId}/scope-grants and privileged-scope-grants, credentials/{credentialId}/revoke | suspend | resume, environments/{environmentId}/principals, principals/{principalId}/status | remove | sign-out, app-grants/{grantId}/revoke and environments/{environmentId}/origins/remove, and GET /internal/v1/operator/operations/{idempotencyKey}; each command requires platform-identity.administer, the bridge's hq: operator, Idempotency-Key and the two-person approval headers, takes expectedVersion for versioned subjects (409 VERSION_CONFLICT), is recorded in platform_access_admin_operations in the same transaction and answers {status, version, resource}. API keys are never issued or rotated through the bridge. Bridge API key reads add `version` (revision + suspension changes); the audit targetKind gains APP_GRANT (action APP_GRANT_REVOKED); new error code VERSION_CONFLICT (409)."
   },
   "components": {
     "securitySchemes": {
@@ -69,9 +69,123 @@
           "type": "string",
           "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
         }
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "HQ's operation id (one UUID per HQ command; ADR 0068 §17.6). A repeated key for the same command and subject answers again without applying; the same key for anything else is 409 CONFLICT. Missing or malformed: 400 VALIDATION_ERROR.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "BridgeApprover": {
+        "name": "X-CF-Approver",
+        "in": "header",
+        "required": true,
+        "description": "The second person of the two-person approval (`hq:<staff>`, different from X-CF-Operator). Every identity command is R3 / R4: missing approval headers are 422 POLICY_VIOLATION (nothing done).",
+        "schema": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        }
+      },
+      "BridgeApprovalRef": {
+        "name": "X-CF-Approval-Ref",
+        "in": "header",
+        "required": true,
+        "description": "HQ's approval reference (recorded with the command).",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        }
+      },
+      "BridgeIntentDigest": {
+        "name": "X-CF-Intent-Digest",
+        "in": "header",
+        "required": true,
+        "description": "The approved intent digest (64 lower-case hex characters), checked by the bridge.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
       }
     },
     "schemas": {
+      "BridgeAppGrantResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "appId",
+          "target",
+          "tenantId",
+          "environmentId",
+          "principalId",
+          "status",
+          "revokedAt",
+          "revokeReason",
+          "revision",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "appId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "REVOKED"
+            ]
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revokeReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 32
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "BridgeApplication": {
         "type": "object",
         "additionalProperties": false,
@@ -114,6 +228,40 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BridgeApplicationResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "status",
+          "revision",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
           },
           "updatedAt": {
             "type": "string",
@@ -222,6 +370,7 @@
           "suspensionReason",
           "lastUsedAt",
           "revision",
+          "version",
           "createdAt"
         ],
         "properties": {
@@ -324,6 +473,100 @@
             "minimum": 1
           },
           "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The bridge commands' expected version of this key: revision + the number of suspensions / resumptions (a suspension does not change the revision)."
+          }
+        }
+      },
+      "BridgeCredentialResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "publicId",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "serviceAccountId",
+          "status",
+          "suspendedAt",
+          "suspensionReason",
+          "revokedAt",
+          "revision",
+          "version",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "publicId": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "serviceAccountId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "REVOKED"
+            ]
+          },
+          "suspendedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "suspensionReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "revision + suspension changes: the next command's expectedVersion."
+          },
+          "updatedAt": {
             "type": "string",
             "format": "date-time"
           }
@@ -432,6 +675,53 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      "BridgeEnvironmentResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "kind",
+          "status",
+          "revision",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "SANDBOX",
+              "TEST",
+              "PRODUCTION"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -608,6 +898,84 @@
           }
         }
       },
+      "BridgeOperationRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "outcome",
+          "source_status",
+          "source_version"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "APPLIED"
+            ]
+          },
+          "source_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,31}$"
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[1-9][0-9]*$"
+          }
+        }
+      },
+      "BridgeOriginsResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environmentId",
+          "tenantId",
+          "applicationId",
+          "environmentKind",
+          "originCount",
+          "revision",
+          "updatedAt"
+        ],
+        "properties": {
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentKind": {
+            "type": "string",
+            "enum": [
+              "SANDBOX",
+              "TEST",
+              "PRODUCTION"
+            ]
+          },
+          "originCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "BridgePrincipal": {
         "type": "object",
         "additionalProperties": false,
@@ -692,6 +1060,66 @@
           }
         }
       },
+      "BridgePrincipalResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "kind",
+          "status",
+          "tombstonedAt",
+          "revision",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "DEACTIVATED"
+            ]
+          },
+          "tombstonedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "BridgeScopeGrant": {
         "type": "object",
         "additionalProperties": false,
@@ -731,6 +1159,77 @@
           "grantedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "BridgeScopeGrantResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "applicationId",
+          "tenantId",
+          "scope",
+          "granted",
+          "allowedEnvironmentKinds",
+          "grantBasis",
+          "grantedAt"
+        ],
+        "properties": {
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "scope": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "allowedEnvironmentKinds": {
+            "oneOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "SANDBOX",
+                    "TEST",
+                    "PRODUCTION"
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grantBasis": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "STANDARD",
+                  "PRIVILEGED_OPERATOR"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grantedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -795,6 +1294,102 @@
           }
         }
       },
+      "BridgeServiceAccountResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "status",
+          "revokedAt",
+          "revision",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED",
+              "REVOKED"
+            ]
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BridgeSessionsResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "principalId",
+          "tenantId",
+          "applicationId",
+          "environmentId",
+          "kind",
+          "tokensNotBefore"
+        ],
+        "properties": {
+          "principalId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "tenantId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "applicationId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "environmentId": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "tokensNotBefore": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "BridgeTenant": {
         "type": "object",
         "additionalProperties": false,
@@ -846,6 +1441,44 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BridgeTenantResource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "classification",
+          "status",
+          "revision",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/platform.common.v1.Uuid"
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "FIRST_PARTY",
+              "EXTERNAL"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SUSPENDED"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
           },
           "updatedAt": {
             "type": "string",
@@ -3829,7 +4462,7 @@
         }
       },
       "platform-access.identity.v1.ErrorCode": {
-        "description": "Stable error codes of the Platform Access envelope. ADR 0062 (CF Meet Platform \"Build\") adds SCOPE_REQUIRED (403: the forwarded credential lacks a required scope), LIMIT_EXCEEDED (409: an environment partner-user cap is reached), RATE_LIMITED (429: more than 120 user-token mints per user per hour) and USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED (401: user-token verification). ADR 0064 (CF Meet Apps) adds INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED and APP_NOT_AVAILABLE (400: OAuth authorization-request validation) and the RFC 6749 token-endpoint codes invalid_grant (400), invalid_client (401), unsupported_grant_type (400) and invalid_request (400), lower snake case as the RFC writes them.",
+        "description": "Stable error codes of the Platform Access envelope. ADR 0062 (CF Meet Platform \"Build\") adds SCOPE_REQUIRED (403: the forwarded credential lacks a required scope), LIMIT_EXCEEDED (409: an environment partner-user cap is reached), RATE_LIMITED (429: more than 120 user-token mints per user per hour) and USER_TOKEN_INVALID / USER_TOKEN_EXPIRED / USER_TOKEN_REVOKED (401: user-token verification). ADR 0064 (CF Meet Apps) adds INVALID_CLIENT, INVALID_REDIRECT_URI, INVALID_SCOPE, PKCE_REQUIRED and APP_NOT_AVAILABLE (400: OAuth authorization-request validation) and the RFC 6749 token-endpoint codes invalid_grant (400), invalid_client (401), unsupported_grant_type (400) and invalid_request (400), lower snake case as the RFC writes them. ADR 0068 (admin bridge) adds VERSION_CONFLICT (409: a bridge command's expectedVersion is not the resource's current version; nothing was changed).",
         "type": "string",
         "enum": [
           "VALIDATION_ERROR",
@@ -3860,7 +4493,8 @@
           "invalid_grant",
           "invalid_client",
           "unsupported_grant_type",
-          "invalid_request"
+          "invalid_request",
+          "VERSION_CONFLICT"
         ]
       },
       "platform-access.identity.v1.EvaluateRequest": {
@@ -4885,6 +5519,10 @@
     {
       "name": "Internal Admin — Bridge Reads",
       "description": "The admin bridge's read-only operator views of the identity hierarchy (ADR 0068). platform-identity.administer plus the bridge's HQ operator; never a secret, verifier or external reference."
+    },
+    {
+      "name": "Internal Admin — Bridge Commands",
+      "description": "The admin bridge's identity commands (ADR 0068 A4): status changes, scope grants, API key revoke / suspend / resume, identity records, app grants, allowed websites and partner-user sign-out, plus the settlement read. platform-identity.administer, the bridge's HQ operator, Idempotency-Key and the two-person approval; recorded in platform_access_admin_operations. API keys are never issued or rotated here (a new secret is only ever in the response)."
     }
   ],
   "paths": {
@@ -9597,7 +10235,8 @@
                 "SERVICE_ACCOUNT",
                 "CREDENTIAL",
                 "PRINCIPAL",
-                "IDENTITY_IMPORT"
+                "IDENTITY_IMPORT",
+                "APP_GRANT"
               ]
             },
             "description": "Only rows about this kind of target."
@@ -13175,6 +13814,1943 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/tenants/{tenantId}/status": {
+      "post": {
+        "operationId": "bridgeSetTenantStatus",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Set a tenant's status (admin bridge)",
+        "description": "identity.status.change (R3): ACTIVE / SUSPENDED. The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "tenantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "status"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "SUSPENDED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ACTIVE",
+                        "SUSPENDED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeTenantResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/applications/{applicationId}/status": {
+      "post": {
+        "operationId": "bridgeSetApplicationStatus",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Set an application's status (admin bridge)",
+        "description": "identity.status.change (R3): ACTIVE / SUSPENDED. The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "status"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "SUSPENDED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ACTIVE",
+                        "SUSPENDED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeApplicationResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/environments/{environmentId}/status": {
+      "post": {
+        "operationId": "bridgeSetEnvironmentStatus",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Set an environment's status (admin bridge)",
+        "description": "identity.status.change (R3): ACTIVE / SUSPENDED. The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "status"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "SUSPENDED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ACTIVE",
+                        "SUSPENDED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeEnvironmentResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/service-accounts/{serviceAccountId}/status": {
+      "post": {
+        "operationId": "bridgeSetServiceAccountStatus",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Set a service account's status (admin bridge)",
+        "description": "identity.status.change (R3) and partners.service-account.suspend (R3, status SUSPENDED): ACTIVE / SUSPENDED / REVOKED (terminal). The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "status"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "SUSPENDED",
+                      "REVOKED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "REVOKED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeServiceAccountResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/applications/{applicationId}/scope-grants": {
+      "post": {
+        "operationId": "bridgeChangeScopeGrant",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Grant or revoke a scope (admin bridge)",
+        "description": "identity.scope-grant.change (R3): GRANT / REVOKE a STANDARD scope of an application (a privileged operator scope: 422 POLICY_VIOLATION, use privileged-scope-grants). Unversioned (no expectedVersion; version null): GRANT sets the grant, REVOKE removes it. Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "scope"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "GRANT",
+                      "REVOKE"
+                    ]
+                  },
+                  "scope": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "description": "A registered scope name (VALIDATION_ERROR otherwise)."
+                  },
+                  "environmentKinds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "SANDBOX",
+                        "TEST",
+                        "PRODUCTION"
+                      ]
+                    },
+                    "description": "GRANT only; omitted: every environment kind."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "GRANTED",
+                        "REVOKED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "null",
+                      "description": "Unversioned."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeScopeGrantResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/applications/{applicationId}/privileged-scope-grants": {
+      "post": {
+        "operationId": "bridgeChangePrivilegedScopeGrant",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Grant or revoke a privileged operator scope (admin bridge)",
+        "description": "identity.privileged-scope-grant.change (R4): GRANT / REVOKE a privileged operator scope (numbers.admin; FIRST_PARTY tenants only, PRIVILEGED_OPERATOR basis); any other scope: 422 POLICY_VIOLATION. Unversioned (no expectedVersion; version null). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "applicationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "scope"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "GRANT",
+                      "REVOKE"
+                    ]
+                  },
+                  "scope": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "description": "A registered scope name (VALIDATION_ERROR otherwise)."
+                  },
+                  "environmentKinds": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "SANDBOX",
+                        "TEST",
+                        "PRODUCTION"
+                      ]
+                    },
+                    "description": "GRANT only; omitted: every environment kind."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "GRANTED",
+                        "REVOKED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "null",
+                      "description": "Unversioned."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeScopeGrantResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/credentials/{credentialId}/revoke": {
+      "post": {
+        "operationId": "bridgeRevokeCredential",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Revoke an API key (admin bridge)",
+        "description": "identity.key.revoke (R4) and partners.key.revoke (R3): revokes the key (terminal; an already revoked key is answered unchanged). `expectedVersion` is the key's `version` (revision + suspension changes) from GET /internal/v1/operator/tenants/{tenantId}/credentials. The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "REVOKED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeCredentialResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/credentials/{credentialId}/suspend": {
+      "post": {
+        "operationId": "bridgeSuspendCredential",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Suspend an API key (admin bridge)",
+        "description": "identity.key.suspend (R4): reversible suspension with an UPPER_SNAKE `reasonCode` (only a key that still authenticates; an already suspended key is answered unchanged). `expectedVersion` is the key's `version` (revision + suspension changes) from GET /internal/v1/operator/tenants/{tenantId}/credentials. The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "reasonCode"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "reasonCode": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "REVOKED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeCredentialResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/credentials/{credentialId}/resume": {
+      "post": {
+        "operationId": "bridgeResumeCredential",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Resume a suspended API key (admin bridge)",
+        "description": "identity.key.resume (R4): lifts a suspension (a key that is not suspended is answered unchanged). `expectedVersion` is the key's `version` (revision + suspension changes) from GET /internal/v1/operator/tenants/{tenantId}/credentials. The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "credentialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "REVOKED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeCredentialResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/environments/{environmentId}/principals": {
+      "post": {
+        "operationId": "bridgeRegisterPrincipal",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Register an identity record (admin bridge)",
+        "description": "identity.record.register (R4): either `kind` + `externalReference` or `serviceAccountId` (VALIDATION_ERROR otherwise); idempotent on the environment and the reference. Unversioned (no expectedVersion); answers REGISTERED with the principal and its version. The external reference is never echoed or recorded. Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "NATIVE_CF_USER",
+                      "EXTERNAL_APPLICATION_PRINCIPAL",
+                      "ENTERPRISE_MEMBER",
+                      "TELEPHONE_ENDPOINT",
+                      "TEMPORARY_EXTERNAL_PARTICIPANT",
+                      "BOT_OR_SERVICE"
+                    ]
+                  },
+                  "externalReference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "serviceAccountId": {
+                    "$ref": "#/components/schemas/platform.common.v1.Uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "REGISTERED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgePrincipalResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/principals/{principalId}/status": {
+      "post": {
+        "operationId": "bridgeSetPrincipalStatus",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Set an identity record's status (admin bridge)",
+        "description": "identity.record.status.change (R4): ACTIVE / SUSPENDED / DEACTIVATED. The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "status"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "SUSPENDED",
+                      "DEACTIVATED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "DEACTIVATED",
+                        "TOMBSTONED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgePrincipalResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/principals/{principalId}/remove": {
+      "post": {
+        "operationId": "bridgeRemovePrincipal",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Remove (tombstone) an identity record (admin bridge)",
+        "description": "identity.record.remove (R4): the existing tombstone — DEACTIVATED, the external reference replaced by an opaque tombstone reference; irreversible (SERVICE_ACCOUNT principals: 422 POLICY_VIOLATION). Answers TOMBSTONED. The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "TOMBSTONED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgePrincipalResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/principals/{principalId}/sign-out": {
+      "post": {
+        "operationId": "bridgeSignOutPartnerUser",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Sign a partner user out everywhere (admin bridge)",
+        "description": "partners.user.sign-out (R3): advances the partner user's session epoch, so every user token issued so far stops verifying. Only an EXTERNAL_APPLICATION_PRINCIPAL that is not tombstoned (else 404). Unversioned (body `{}`; version null); answers SIGNED_OUT. Behind PLATFORM_ACCESS_END_USERS_ENABLED (off: 404 NOT_FOUND). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "principalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [],
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "SIGNED_OUT"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "null",
+                      "description": "Unversioned."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeSessionsResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/app-grants/{grantId}/revoke": {
+      "post": {
+        "operationId": "bridgeRevokeAppGrant",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Revoke a CF Meet Apps grant (admin bridge)",
+        "description": "identity.app-grant.revoke (R3): revokes an OAuth grant (revokeReason OPERATOR_REVOKED; its tokens, refresh tokens and pending codes die with it; the bot of an ORGANIZATION grant is DEACTIVATED; audited APP_GRANT_REVOKED). An already revoked grant is answered unchanged. Behind PLATFORM_ACCESS_OAUTH_ENABLED (off: 404 NOT_FOUND). The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "REVOKED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeAppGrantResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/environments/{environmentId}/origins/remove": {
+      "post": {
+        "operationId": "bridgeRemoveAllowedWebsite",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "Remove an allowed website (admin bridge)",
+        "description": "partners.website.remove (R3): removes one exact origin from the environment's allowed websites (an origin it does not list, or an environment without allowed websites: 404). `expectedVersion` is the allowed-websites `revision` from GET /internal/v1/operator/tenants/{tenantId}/origins. Answers REMOVED. Behind PLATFORM_ACCESS_ENVIRONMENT_ORIGINS_ENABLED (off: 404 NOT_FOUND). The change happens only at `expectedVersion` (the subject row is locked); another version is 409 VERSION_CONFLICT (nothing done). Admin bridge only: permission platform-identity.administer AND the bridge's HQ operator (X-CF-Operator: hq:<staff>; the operator console and every other caller are refused: OPERATOR_REQUIRED / INTERNAL_PERMISSION_DENIED). Requires Idempotency-Key and the two-person approval headers (R3 / R4; missing: 422 POLICY_VIOLATION). Runs the same audited operation as the operator console and records the command in platform_access_admin_operations in the same transaction (settlement: GET /internal/v1/operator/operations/{idempotencyKey}). Answers {status, version, resource}: never a secret, verifier, external reference, display name or free text.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprover"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeApprovalRef"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeIntentDigest"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expectedVersion",
+                  "origin"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The subject's current version (409 VERSION_CONFLICT otherwise)."
+                  },
+                  "origin": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 270
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (or replayed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "status",
+                    "version",
+                    "resource"
+                  ],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "REMOVED"
+                      ],
+                      "description": "The resulting state (UPPER_SNAKE)."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^[1-9][0-9]*$",
+                      "description": "The resulting version (integer as a string): the next command's expectedVersion."
+                    },
+                    "resource": {
+                      "$ref": "#/components/schemas/BridgeOriginsResource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/operations/{idempotencyKey}": {
+      "get": {
+        "operationId": "bridgeGetAdminOperation",
+        "tags": [
+          "Internal Admin — Bridge Commands"
+        ],
+        "summary": "The record of an applied admin bridge command",
+        "description": "ADR 0068 §17.6: the admin bridge settles an unknown command outcome from this record, written in the same transaction as the change and keyed by the command's Idempotency-Key, with the same status and version the command answered. 404: never applied (also a malformed key, and for every caller other than the admin bridge with platform-identity.administer and its HQ operator).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CfRequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CfCorrelationId"
+          },
+          {
+            "$ref": "#/components/parameters/BridgeOperator"
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BridgeOperationRecord"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           },
           "503": {

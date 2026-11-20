@@ -226,47 +226,95 @@ impl PlatformService {
             txn.commit().await?;
             return Ok(origins);
         }
-        txn.execute(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "INSERT INTO platform_environment_origins (environment_id, origins, created_at, updated_at) \
-             VALUES ($1, $2, $3, $3) \
-             ON CONFLICT (environment_id) DO UPDATE \
-               SET origins = EXCLUDED.origins, updated_at = EXCLUDED.updated_at",
-            [id.into(), origins.clone().into(), now.into()],
-        ))
-        .await?;
-        txn.execute(Statement::from_string(
-            DbBackend::Postgres,
-            "SELECT pg_advisory_xact_lock(7239062)",
-        ))
-        .await?;
-        txn.execute(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "INSERT INTO platform_environment_origin_changes (environment_id) VALUES ($1)",
-            [id.into()],
-        ))
-        .await?;
-        operator::record(
-            &txn,
-            op,
-            &AuditEntry::new(
-                OperatorAction::EnvironmentOriginsSet,
-                AuditTargetKind::Environment,
-                id,
-            )
-            .scope(
-                Some(environment.tenant_id.as_uuid()),
-                Some(environment.application_id.as_uuid()),
-                Some(id),
-            )
-            .detail(json!({ "count": origins.len() })),
-            now,
-        )
-        .await?;
+        write_origins(&txn, op, environment, &origins, now).await?;
         txn.commit().await?;
         crate::metrics::inc("platform_access_environment_origins_set_total", &[]);
         Ok(origins)
     }
+
+    /// ADR 0068 (admin bridge `partners.website.remove`): removes ONE allowed website of an
+    /// environment. A bridge command in `op` changes it only at its expected version of
+    /// the environment's origins (none set: NOT_FOUND) and is recorded `REMOVED` in the
+    /// same transaction; an origin the environment does not list is NOT_FOUND (nothing
+    /// done). Writes the row, one feed row and one audit row.
+    pub async fn remove_environment_origin(
+        &self,
+        op: &OperatorContext,
+        environment: &EnvironmentView,
+        origin: &str,
+    ) -> PlatformResult<Vec<String>> {
+        let now: DateTime<Utc> = self.clock.now();
+        let txn = self.db.begin().await?;
+        let id = environment.id.as_uuid();
+        txn.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT 1 FROM platform_environments WHERE id = $1 FOR UPDATE",
+            [id.into()],
+        ))
+        .await?;
+        if let Some(command) = op.bridge() {
+            super::bridge::lock(&txn, command).await?;
+        }
+        let current = origins_of(&txn, id).await?;
+        if !current.iter().any(|o| o == origin) {
+            return Err(PlatformError::NotFound("allowed website"));
+        }
+        let remaining: Vec<String> = current.into_iter().filter(|o| o != origin).collect();
+        write_origins(&txn, op, environment, &remaining, now).await?;
+        if let Some(command) = op.bridge() {
+            super::bridge::record(&txn, command, None, Some("REMOVED"), now).await?;
+        }
+        txn.commit().await?;
+        crate::metrics::inc("platform_access_environment_origins_set_total", &[]);
+        Ok(remaining)
+    }
+}
+
+/// Writes the origins row of `environment`, one feed row and one audit row (in `txn`,
+/// which holds the environment row lock).
+async fn write_origins<C: ConnectionTrait>(
+    txn: &C,
+    op: &OperatorContext,
+    environment: &EnvironmentView,
+    origins: &[String],
+    now: DateTime<Utc>,
+) -> PlatformResult<()> {
+    let id = environment.id.as_uuid();
+    txn.execute(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "INSERT INTO platform_environment_origins (environment_id, origins, created_at, updated_at)          VALUES ($1, $2, $3, $3)          ON CONFLICT (environment_id) DO UPDATE            SET origins = EXCLUDED.origins, updated_at = EXCLUDED.updated_at",
+        [id.into(), origins.to_vec().into(), now.into()],
+    ))
+    .await?;
+    txn.execute(Statement::from_string(
+        DbBackend::Postgres,
+        "SELECT pg_advisory_xact_lock(7239062)",
+    ))
+    .await?;
+    txn.execute(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "INSERT INTO platform_environment_origin_changes (environment_id) VALUES ($1)",
+        [id.into()],
+    ))
+    .await?;
+    operator::record(
+        txn,
+        op,
+        &AuditEntry::new(
+            OperatorAction::EnvironmentOriginsSet,
+            AuditTargetKind::Environment,
+            id,
+        )
+        .scope(
+            Some(environment.tenant_id.as_uuid()),
+            Some(environment.application_id.as_uuid()),
+            Some(id),
+        )
+        .detail(json!({ "count": origins.len() })),
+        now,
+    )
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]

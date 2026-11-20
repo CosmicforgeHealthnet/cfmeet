@@ -673,6 +673,11 @@ impl PlatformService {
             now,
         )
         .await?;
+        // ADR 0068: the admin bridge's sign-out (`partners.user.sign-out`, unversioned) is
+        // recorded in the same transaction.
+        if let Some(command) = op.bridge() {
+            super::bridge::record(&txn, command, None, Some("SIGNED_OUT"), now).await?;
+        }
         txn.commit().await?;
         Ok(stored)
     }

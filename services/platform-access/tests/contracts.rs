@@ -88,6 +88,7 @@ fn implemented_routes() -> BTreeSet<(String, String)> {
         ("meeting_platform.rs", "/internal/v1"),
         ("oauth.rs", "/internal/v1"),
         ("operator_reads.rs", "/internal/v1"),
+        ("operator_commands.rs", "/internal/v1"),
     ] {
         let code = std::fs::read_to_string(src.join(file)).unwrap();
         let code: String = code.split_whitespace().collect::<Vec<_>>().join(" ");
