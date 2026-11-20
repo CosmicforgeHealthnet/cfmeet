@@ -19,6 +19,7 @@
     "suspension_reason",
     "last_used_at",
     "revision",
+    "version",
     "created_at"
   ],
   "properties": {
@@ -105,6 +106,11 @@
     "revision": {
       "type": "integer",
       "minimum": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "revision plus suspend/resume changes: the key commands' expected_version."
     },
     "created_at": {
       "type": "string",

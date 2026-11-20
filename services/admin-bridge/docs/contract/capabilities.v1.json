@@ -6,8 +6,8 @@
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "18911a1823251f5bf9b44f9c1560eb1f4fef11727960e2832faa8deb15f5979b",
-    "capability_matrix_sha256": "f1da6d7d5f319fc93fa9f9210b6f76d670f68f156035be382f480b42f962201e"
+    "openapi_sha256": "d4e73131c41785207f27f34725353ca99a7d41d804e1c336e2a04ddecfd39e02",
+    "capability_matrix_sha256": "33fc32c80ae2a0d8a1fb14d95b0ed8805b1e60c1ae8f686a10b39738804bae65"
   },
   "query_shapes": {
     "SCOPED": [
@@ -52,8 +52,8 @@
     "capabilities": 247,
     "by_state": {
       "READ_ONLY": 96,
-      "AVAILABLE": 29,
-      "DISABLED": 85,
+      "AVAILABLE": 43,
+      "DISABLED": 71,
       "BLOCKED_DEPENDENCY": 37
     }
   },
@@ -7424,12 +7424,12 @@
       "version": "1.0",
       "module": "partners",
       "kind": "COMMAND",
-      "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner": "platform-access",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/partners/workspaces/{workspace_id}/keys/{key_id}/revoke",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/credentials/{key_id}/revoke",
       "path_params": [
         {
           "name": "workspace_id",
@@ -7459,14 +7459,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerKeyRevokeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeyCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.key.revoke",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -7475,8 +7475,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -7540,12 +7542,12 @@
       "version": "1.0",
       "module": "partners",
       "kind": "COMMAND",
-      "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner": "platform-access",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/partners/workspaces/{workspace_id}/service-accounts/{account_id}/suspend",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/service-accounts/{account_id}/status",
       "path_params": [
         {
           "name": "workspace_id",
@@ -7575,14 +7577,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerServiceAccountSuspendRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityStatusChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.service-account.suspend",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -7591,8 +7593,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -7656,12 +7660,12 @@
       "version": "1.0",
       "module": "partners",
       "kind": "COMMAND",
-      "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner": "platform-access",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/partners/workspaces/{workspace_id}/websites/{website_id}/remove",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/environments/{environment_id}/origins/remove",
       "path_params": [
         {
           "name": "workspace_id",
@@ -7691,14 +7695,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWebsiteRemoveRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerWebsiteRemoveResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.website.remove",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -7707,8 +7711,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -7889,12 +7895,12 @@
       "version": "1.0",
       "module": "partners",
       "kind": "COMMAND",
-      "owner": "developer-platform",
-      "owner_status": "NEW",
+      "owner": "platform-access",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/partners/workspaces/{workspace_id}/users/{user_id}/sign-out",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/principals/{user_id}/sign-out",
       "path_params": [
         {
           "name": "workspace_id",
@@ -7924,14 +7930,14 @@
         "cfmeet.partner_ops"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerUserSignOutRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PartnerUserSignOutResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "partners.user.sign-out",
       "risk": "R3",
       "privacy": "PERSONAL",
@@ -7940,8 +7946,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -8603,7 +8611,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/identity/{resource_type}/{resource_id}/status",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/{resource_type}/{resource_id}/status",
       "path_params": [
         {
           "name": "resource_type",
@@ -8633,14 +8641,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityStatusChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityStatusChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.status.change",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -8649,8 +8657,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -8719,7 +8729,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/identity/tenants/{tenant_id}/scope-grants",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/applications/{application_id}/scope-grants",
       "path_params": [
         {
           "name": "tenant_id",
@@ -8744,14 +8754,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityScopeGrantChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityScopeGrantChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.scope-grant.change",
       "risk": "R3",
       "privacy": "INTERNAL",
@@ -8760,8 +8770,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -8770,11 +8782,11 @@
       "module": "identity",
       "kind": "COMMAND",
       "owner": "platform-access",
-      "owner_status": "CLI_TO_API",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/identity/tenants/{tenant_id}/privileged-scope-grants",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/applications/{application_id}/privileged-scope-grants",
       "path_params": [
         {
           "name": "tenant_id",
@@ -8799,14 +8811,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityPrivilegedScopeGrantChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityScopeGrantChangeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.privileged-scope-grant.change",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -8815,8 +8827,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access has a server command-line tool only; operator API required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9000,7 +9014,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/identity/tenants/{tenant_id}/keys/{key_id}/revoke",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/credentials/{key_id}/revoke",
       "path_params": [
         {
           "name": "tenant_id",
@@ -9030,14 +9044,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeyRevokeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeyCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.key.revoke",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -9046,8 +9060,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9060,7 +9076,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/identity/tenants/{tenant_id}/keys/{key_id}/suspend",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/credentials/{key_id}/suspend",
       "path_params": [
         {
           "name": "tenant_id",
@@ -9090,14 +9106,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeySuspendRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeyCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.key.suspend",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -9106,8 +9122,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9120,7 +9138,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/identity/tenants/{tenant_id}/keys/{key_id}/resume",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/credentials/{key_id}/resume",
       "path_params": [
         {
           "name": "tenant_id",
@@ -9150,14 +9168,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeyResumeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityKeyCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.key.resume",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -9166,8 +9184,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9231,7 +9251,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/identity/records",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/environments/{environment_id}/principals",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -9250,14 +9270,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityRecordRegisterRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityRecordCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.record.register",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -9266,8 +9286,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9280,7 +9302,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/identity/records/{record_id}/status",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/principals/{record_id}/status",
       "path_params": [
         {
           "name": "record_id",
@@ -9305,14 +9327,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityRecordStatusChangeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityRecordCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.record.status.change",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -9321,8 +9343,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9335,7 +9359,7 @@
       "phase": "A4",
       "method": "POST",
       "path": "/identity/records/{record_id}/remove",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/principals/{record_id}/remove",
       "path_params": [
         {
           "name": "record_id",
@@ -9360,14 +9384,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityRecordRemoveRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityRecordCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.record.remove",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -9376,8 +9400,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {
@@ -9493,11 +9519,11 @@
       "module": "identity",
       "kind": "COMMAND",
       "owner": "platform-access",
-      "owner_status": "NEW",
+      "owner_status": "EXISTS",
       "phase": "A4",
       "method": "POST",
       "path": "/identity/oauth-apps/{app_id}/grants/{grant_id}/revoke",
-      "source_endpoint": null,
+      "source_endpoint": "POST /internal/v1/operator/app-grants/{grant_id}/revoke",
       "path_params": [
         {
           "name": "app_id",
@@ -9527,14 +9553,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityAppGrantRevokeRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/IdentityAppGrantRevokeResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "identity.app-grant.revoke",
       "risk": "R3",
       "privacy": "PERSONAL",
@@ -9543,8 +9569,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A4: new platform-access operator endpoint required; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_commands_follow_their_rows"
+      ],
       "contact_search": false
     },
     {

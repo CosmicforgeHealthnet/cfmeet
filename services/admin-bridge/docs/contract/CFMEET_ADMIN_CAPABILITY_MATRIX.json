@@ -2784,11 +2784,11 @@
   {
     "id": "partners.key.revoke",
     "version": "1.0",
-    "owner": "developer-platform",
+    "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/keys/{key_id}/revoke",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/credentials/{key_id}/revoke",
+    "state": "AVAILABLE",
     "permission": "partners.key.revoke",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -2797,8 +2797,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "partners.service-accounts.list",
@@ -2824,11 +2826,11 @@
   {
     "id": "partners.service-account.suspend",
     "version": "1.0",
-    "owner": "developer-platform",
+    "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/service-accounts/{account_id}/suspend",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/service-accounts/{account_id}/status",
+    "state": "AVAILABLE",
     "permission": "partners.service-account.suspend",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -2837,8 +2839,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "partners.websites.list",
@@ -2864,11 +2868,11 @@
   {
     "id": "partners.website.remove",
     "version": "1.0",
-    "owner": "developer-platform",
+    "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/websites/{website_id}/remove",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/environments/{environment_id}/origins/remove",
+    "state": "AVAILABLE",
     "permission": "partners.website.remove",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -2877,8 +2881,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "partners.push-keys.list",
@@ -2944,11 +2950,11 @@
   {
     "id": "partners.user.sign-out",
     "version": "1.0",
-    "owner": "developer-platform",
+    "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/partners/workspaces/{workspace_id}/users/{user_id}/sign-out",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/principals/{user_id}/sign-out",
+    "state": "AVAILABLE",
     "permission": "partners.user.sign-out",
     "risk": "R3",
     "privacy": "PERSONAL",
@@ -2957,8 +2963,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PARTNERS+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new developer-platform operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "partners.webhooks.list",
@@ -3206,8 +3214,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/{resource_type}/{resource_id}/status",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/{resource_type}/{resource_id}/status",
+    "state": "AVAILABLE",
     "permission": "identity.status.change",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -3216,8 +3224,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.scope-grants.list",
@@ -3246,8 +3256,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/scope-grants",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/applications/{application_id}/scope-grants",
+    "state": "AVAILABLE",
     "permission": "identity.scope-grant.change",
     "risk": "R3",
     "privacy": "INTERNAL",
@@ -3256,8 +3266,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.privileged-scope-grant.change",
@@ -3265,8 +3277,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/privileged-scope-grants",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/applications/{application_id}/privileged-scope-grants",
+    "state": "AVAILABLE",
     "permission": "identity.privileged-scope-grant.change",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3275,8 +3287,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access has a server command-line tool only; operator API required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.keys.list",
@@ -3343,8 +3357,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/keys/{key_id}/revoke",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/credentials/{key_id}/revoke",
+    "state": "AVAILABLE",
     "permission": "identity.key.revoke",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3353,8 +3367,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.key.suspend",
@@ -3362,8 +3378,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/keys/{key_id}/suspend",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/credentials/{key_id}/suspend",
+    "state": "AVAILABLE",
     "permission": "identity.key.suspend",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3372,8 +3388,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.key.resume",
@@ -3381,8 +3399,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/tenants/{tenant_id}/keys/{key_id}/resume",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/credentials/{key_id}/resume",
+    "state": "AVAILABLE",
     "permission": "identity.key.resume",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3391,8 +3409,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.records.list",
@@ -3421,8 +3441,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/records",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/environments/{environment_id}/principals",
+    "state": "AVAILABLE",
     "permission": "identity.record.register",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3431,8 +3451,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.record.status.change",
@@ -3440,8 +3462,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/records/{record_id}/status",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/principals/{record_id}/status",
+    "state": "AVAILABLE",
     "permission": "identity.record.status.change",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3450,8 +3472,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.record.remove",
@@ -3459,8 +3483,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/records/{record_id}/remove",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/principals/{record_id}/remove",
+    "state": "AVAILABLE",
     "permission": "identity.record.remove",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3469,8 +3493,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: platform-access endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.oauth-apps.list",
@@ -3520,8 +3546,8 @@
     "owner": "platform-access",
     "method": "POST",
     "bridge_endpoint": "/identity/oauth-apps/{app_id}/grants/{grant_id}/revoke",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/app-grants/{grant_id}/revoke",
+    "state": "AVAILABLE",
     "permission": "identity.app-grant.revoke",
     "risk": "R3",
     "privacy": "PERSONAL",
@@ -3530,8 +3556,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_IDENTITY+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A4: new platform-access operator endpoint required; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_commands_follow_their_rows"
+    ]
   },
   {
     "id": "identity.partner-users.list",
