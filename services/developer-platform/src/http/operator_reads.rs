@@ -64,6 +64,84 @@ pub fn routes() -> Router<AppState> {
             "/operator/apps/:app_id/installations",
             get(app_installations),
         )
+        // ADR 0068 A3: the verification queue (HQ's case shape) and the bridge's settlement
+        // read of an applied command.
+        .route("/operator/verification/cases", get(verification_cases))
+        .route(
+            "/operator/verification/cases/:case_id",
+            get(verification_case),
+        )
+        .route(
+            "/operator/verification/cases/:case_id/history",
+            get(verification_history),
+        )
+        .route(
+            "/operator/operations/:idempotency_key",
+            get(operation_record),
+        )
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CasePage {
+    #[serde(default)]
+    limit: Option<u64>,
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+async fn verification_cases(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Query(q): Query<CasePage>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    Ok(Json(
+        crate::control::verification::list(&s.db, q.limit, q.cursor.as_deref()).await?,
+    ))
+}
+
+async fn verification_case(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(case_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    Ok(Json(
+        crate::control::verification::read(&s.db, &case_id).await?,
+    ))
+}
+
+async fn verification_history(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(case_id): Path<String>,
+    Query(q): Query<CasePage>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    Ok(Json(
+        crate::control::verification::history(&s.db, &case_id, q.limit, q.cursor.as_deref())
+            .await?,
+    ))
+}
+
+async fn operation_record(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    headers: HeaderMap,
+    Path(key): Path<Uuid>,
+) -> Result<Json<Value>, ApiError> {
+    operator_of(&caller, &headers)?;
+    // Only the bridge's own commands are recorded; the console has nothing to settle.
+    if caller.bridge_operator().is_none() {
+        return Err(ApiError(ErrorCode::NotFound));
+    }
+    Ok(Json(
+        crate::control::bridge_command::operation_record(&s.db, key).await?,
+    ))
 }
 
 fn stmt(sql: &str, values: Vec<DbValue>) -> Statement {

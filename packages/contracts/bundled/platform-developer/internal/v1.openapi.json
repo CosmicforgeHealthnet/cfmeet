@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.12.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read."
+    "version": "1.13.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read. 1.13.0 (ADR 0068 A3): the verification queue in HQ's case shape (GET /internal/v1/operator/verification/cases, /{caseId}, /{caseId}/history), production-access and app decisions from the admin bridge (Idempotency-Key, expectedVersion, HQ two-person approval instead of the named reviewers, recorded in the same transaction) and GET /internal/v1/operator/operations/{idempotencyKey}."
   },
   "tags": [
     {
@@ -3617,7 +3617,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 55: review | approve (subset of the requested capabilities, regulated ones only after review) | reject (safe reason code) | suspend | reinstate. Approve / reject need `x-cf-operator-user-id`: a member of the requesting organization can never decide its request (SELF_APPROVAL_FORBIDDEN). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`.",
+        "description": "Section 55: review | approve (subset of the requested capabilities, regulated ones only after review) | reject (safe reason code) | suspend | reinstate. Approve / reject need `x-cf-operator-user-id`: a member of the requesting organization can never decide its request (SELF_APPROVAL_FORBIDDEN). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A3, from cfmeet.admin-bridge: `Idempotency-Key` and `expectedVersion` are required and the change happens only at that version (VERSION_CONFLICT otherwise); every decision but `review` needs the HQ approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`, POLICY_VIOLATION without), which replaces the named-reviewer list; `x-cf-operator-user-id` is optional (a linked member of the partner's workspace is refused, SELF_APPROVAL_FORBIDDEN; unlinked is recorded); a repeated key returns the resource without applying twice, the same key for another command is VERSION_CONFLICT.",
         "parameters": [
           {
             "name": "requestId",
@@ -3655,7 +3655,17 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -3683,6 +3693,12 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -4911,7 +4927,7 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0065: review (SUBMITTED → IN_REVIEW) | approve (IN_REVIEW → APPROVED) | reject (safe reason code) | publish (APPROVED → PUBLISHED) | suspend (any → SUSPENDED; Platform Access revokes every grant). Every command but suspend needs a reviewer named in DEVELOPER_PLATFORM_APP_REVIEWERS (POLICY_VIOLATION otherwise) and `x-cf-operator-user-id`; a member of the app's workspace never decides it (SELF_APPROVAL_FORBIDDEN). Every transition syncs the Platform Access client status and is audited. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. Flag DEVELOPER_PLATFORM_APPS_ENABLED.",
+        "description": "ADR 0065: review (SUBMITTED → IN_REVIEW) | approve (IN_REVIEW → APPROVED) | reject (safe reason code) | publish (APPROVED → PUBLISHED) | suspend (any → SUSPENDED; Platform Access revokes every grant). Every command but suspend needs a reviewer named in DEVELOPER_PLATFORM_APP_REVIEWERS (POLICY_VIOLATION otherwise) and `x-cf-operator-user-id`; a member of the app's workspace never decides it (SELF_APPROVAL_FORBIDDEN). Every transition syncs the Platform Access client status and is audited. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. Flag DEVELOPER_PLATFORM_APPS_ENABLED. ADR 0068 A3, from cfmeet.admin-bridge: `Idempotency-Key` and `expectedVersion` are required and the change happens only at that version (VERSION_CONFLICT otherwise); every decision but `review` needs the HQ approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`, POLICY_VIOLATION without), which replaces the named-reviewer list; `x-cf-operator-user-id` is optional (a linked member of the partner's workspace is refused, SELF_APPROVAL_FORBIDDEN; unlinked is recorded); a repeated key returns the resource without applying twice, the same key for another command is VERSION_CONFLICT.",
         "parameters": [
           {
             "name": "appId",
@@ -4949,7 +4965,17 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -4990,6 +5016,295 @@
             "$ref": "#/components/responses/Error"
           },
           "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/verification/cases": {
+      "get": {
+        "tags": [
+          "Operator: verification"
+        ],
+        "summary": "List the verification queue",
+        "operationId": "operatorListVerificationCases",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A3: production-access requests (PARTNER_GO_LIVE) and app reviews (APP_REVIEW) in HQ's shared case shape (snake_case), most recently changed first, keyset-paginated. CANCELLED requests and DRAFT apps are not listed. Evidence is hashes only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`next_cursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.VerificationCaseList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/verification/cases/{caseId}": {
+      "get": {
+        "tags": [
+          "Operator: verification"
+        ],
+        "summary": "Read one verification case",
+        "operationId": "operatorGetVerificationCase",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A3: one case (CANCELLED included) with its decision details (requested / approved capabilities, or the app version under review and the published version). Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "description": "`cfmeet:<PARTNER_GO_LIVE|APP_REVIEW>:<uuid>` (lowercase uuid).",
+            "schema": {
+              "type": "string",
+              "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.VerificationCaseDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/verification/cases/{caseId}/history": {
+      "get": {
+        "tags": [
+          "Operator: verification"
+        ],
+        "summary": "A verification case's transitions",
+        "operationId": "operatorListVerificationCaseHistory",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A3: oldest first, keyset-paginated (cursor = the last sequence). Staff actions name the staff member; a partner's own actions carry no account id. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "caseId",
+            "in": "path",
+            "required": true,
+            "description": "`cfmeet:<PARTNER_GO_LIVE|APP_REVIEW>:<uuid>` (lowercase uuid).",
+            "schema": {
+              "type": "string",
+              "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`next_cursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.VerificationCaseHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/operations/{idempotencyKey}": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "The record of an applied admin bridge command",
+        "operationId": "operatorGetAdminOperation",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A3: the admin bridge settles an unknown command outcome from this record, written in the same transaction as the change and keyed by the command's Idempotency-Key. 404: never applied. Only the admin bridge's commands are recorded (the operator console gets 404). Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AdminOperationRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -5311,6 +5626,34 @@
         "type": "string",
         "maxLength": 32
       },
+      "platform-developer.control.v1.AdminOperationRecord": {
+        "description": "ADR 0068 A3: an applied admin bridge command (outcome is always APPLIED; a key never applied is 404).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "outcome",
+          "source_status",
+          "source_version"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "const": "APPLIED"
+          },
+          "source_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,23}$"
+          },
+          "source_version": {
+            "type": "string",
+            "pattern": "^[0-9]{1,19}$"
+          }
+        }
+      },
       "platform-developer.control.v1.App": {
         "description": "ADR 0064 / 0065: the app registered on a project (clientId = projectId = the Platform Access application id). The live version is what Platform Access serves: the published version, else the approved one, else the current draft.",
         "type": "object",
@@ -5481,6 +5824,11 @@
           "reasonCode": {
             "type": "string",
             "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "ADR 0068 A3: admin bridge decisions only, the row version the decision applies to."
           }
         }
       },
@@ -8340,6 +8688,11 @@
           "reasonCode": {
             "type": "string",
             "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "ADR 0068 A3: admin bridge decisions only, the row version the decision applies to."
           }
         }
       },
@@ -8758,6 +9111,424 @@
           "SEGMENT",
           "BYTE_SECOND"
         ]
+      },
+      "platform-developer.control.v1.VerificationCase": {
+        "description": "ADR 0068 A3: one case in HQ's shared verification shape (cfmeet-admin-parallel-workplan §3.6, snake_case) plus approvals_required and partner_tenant_id.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "product",
+          "kind",
+          "subject_ref",
+          "state",
+          "version",
+          "assignee_ref",
+          "submitted_at",
+          "updated_at",
+          "evidence",
+          "approvals_required",
+          "partner_tenant_id"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "product": {
+            "const": "cfmeet"
+          },
+          "kind": {
+            "enum": [
+              "PARTNER_GO_LIVE",
+              "APP_REVIEW"
+            ]
+          },
+          "subject_ref": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "CLAIMED",
+              "APPROVED",
+              "REJECTED",
+              "PUBLISHED",
+              "SUSPENDED",
+              "CANCELLED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "assignee_ref": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "ref",
+                "sha256"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "USE_CASE_SUMMARY",
+                    "APP_MANIFEST"
+                  ]
+                },
+                "ref": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          },
+          "approvals_required": {
+            "const": 2
+          },
+          "partner_tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "platform-developer.control.v1.VerificationCaseDetail": {
+        "description": "VerificationCase plus its decision details (PARTNER_GO_LIVE: requested / approved capabilities; APP_REVIEW: the version under review and the published version).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "product",
+          "kind",
+          "subject_ref",
+          "state",
+          "version",
+          "assignee_ref",
+          "submitted_at",
+          "updated_at",
+          "evidence",
+          "approvals_required",
+          "partner_tenant_id",
+          "details"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "product": {
+            "const": "cfmeet"
+          },
+          "kind": {
+            "enum": [
+              "PARTNER_GO_LIVE",
+              "APP_REVIEW"
+            ]
+          },
+          "subject_ref": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "CLAIMED",
+              "APPROVED",
+              "REJECTED",
+              "PUBLISHED",
+              "SUSPENDED",
+              "CANCELLED"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "assignee_ref": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "ref",
+                "sha256"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "USE_CASE_SUMMARY",
+                    "APP_MANIFEST"
+                  ]
+                },
+                "ref": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          },
+          "approvals_required": {
+            "const": 2
+          },
+          "partner_tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "details": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "requested_capabilities",
+                  "approved_capabilities"
+                ],
+                "properties": {
+                  "requested_capabilities": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                    }
+                  },
+                  "approved_capabilities": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "app_version",
+                  "published_version"
+                ],
+                "properties": {
+                  "app_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "published_version": {
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.VerificationCaseHistory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sequence",
+                "from_state",
+                "to_state",
+                "actor_kind",
+                "actor_ref",
+                "reason_code",
+                "occurred_at"
+              ],
+              "properties": {
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "from_state": {
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "OPEN",
+                        "CLAIMED",
+                        "APPROVED",
+                        "REJECTED",
+                        "PUBLISHED",
+                        "SUSPENDED",
+                        "CANCELLED"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "to_state": {
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "OPEN",
+                        "CLAIMED",
+                        "APPROVED",
+                        "REJECTED",
+                        "PUBLISHED",
+                        "SUSPENDED",
+                        "CANCELLED"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "actor_kind": {
+                  "enum": [
+                    "STAFF",
+                    "PARTNER",
+                    "SYSTEM"
+                  ]
+                },
+                "actor_ref": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reason_code": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "occurred_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.VerificationCaseList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.VerificationCase"
+            }
+          },
+          "next_cursor": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
       },
       "platform-developer.webhooks.v1.CreateWebhookRequest": {
         "type": "object",

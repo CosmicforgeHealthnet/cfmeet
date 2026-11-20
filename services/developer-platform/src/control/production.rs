@@ -42,7 +42,9 @@ use uuid::Uuid;
 
 use super::{
     activity::{self, Event},
-    authorize, delegate, delegate_with, membership, stmt, Caller,
+    authorize,
+    bridge_command::{self, BridgeCommand, Subject},
+    delegate, delegate_with, membership, stmt, Caller,
 };
 use crate::{
     domain::{rbac::Action, RequestContext},
@@ -923,6 +925,9 @@ pub struct Decision {
     /// reject / suspend: safe reason code.
     #[serde(default)]
     pub reason_code: Option<String>,
+    /// Admin bridge decisions: the request version the decision applies to.
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 /// The decision kinds.
@@ -933,6 +938,24 @@ pub enum OperatorCommand {
     Reject,
     Suspend,
     Reinstate,
+}
+
+impl OperatorCommand {
+    /// The command's name in the bridge's operation record.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            OperatorCommand::Review => "production-access.review",
+            OperatorCommand::Approve => "production-access.approve",
+            OperatorCommand::Reject => "production-access.reject",
+            OperatorCommand::Suspend => "production-access.suspend",
+            OperatorCommand::Reinstate => "production-access.reinstate",
+        }
+    }
+
+    /// Decisions HQ takes with two people.
+    pub const fn two_person(self) -> bool {
+        !matches!(self, OperatorCommand::Review)
+    }
 }
 
 fn reason(d: &Decision, default: &str) -> Result<String, ApiError> {
@@ -975,6 +998,11 @@ async fn publish_decision<C: ConnectionTrait>(
 
 /// Runs an operator command. `operator_user` is the reviewing operator's CF Meet user id
 /// (`x-cf-operator-user-id`): a member of the requesting organization can never decide.
+///
+/// `bridge`: a decision relayed by the HQ admin bridge ([`bridge_command`]): HQ's
+/// two-person approval replaces the named-reviewer list, the change happens only at the
+/// expected version, and the applied command is recorded in the same transaction.
+#[allow(clippy::too_many_arguments)]
 pub async fn operator_decide(
     state: &AppState,
     operator: &str,
@@ -983,23 +1011,45 @@ pub async fn operator_decide(
     id: Uuid,
     command: OperatorCommand,
     d: Decision,
+    bridge: Option<&BridgeCommand>,
 ) -> Result<Value, ApiError> {
     let r = load(&state.db, id).await?;
-    // Explicit reviewer roles: only a named reviewer decides production access.
-    if !state.production_reviewers.is_empty()
-        && !state.production_reviewers.iter().any(|n| n == operator)
-    {
-        // POLICY_VIOLATION: deciding production access is reserved to named reviewers.
-        return Err(ApiError(ErrorCode::PolicyViolation));
-    }
-    if matches!(command, OperatorCommand::Approve | OperatorCommand::Reject) {
-        let Some(user) = operator_user else {
-            return Err(ApiError(ErrorCode::OperatorRequired));
-        };
-        if membership(&state.db, r.tenant_id, user).await?.is_some() {
-            return Err(ApiError(ErrorCode::SelfApprovalForbidden));
+    let name = command.as_str();
+    if let Some(b) = bridge {
+        if command == OperatorCommand::Reinstate {
+            // Not an HQ capability.
+            return Err(ApiError(ErrorCode::PolicyViolation));
+        }
+        if bridge_command::replayed(&state.db, b, name, Subject::ProductionAccess, id).await? {
+            return view(&state.db, id, true).await;
+        }
+        // No self-review when the staff member's CF Meet account is linked.
+        if let Some(user) = b.linked_user {
+            if command != OperatorCommand::Review
+                && membership(&state.db, r.tenant_id, user).await?.is_some()
+            {
+                return Err(ApiError(ErrorCode::SelfApprovalForbidden));
+            }
+        }
+        bridge_command::lock_version(&state.db, b, Subject::ProductionAccess, id).await?;
+    } else {
+        // Explicit reviewer roles: only a named reviewer decides production access.
+        if !state.production_reviewers.is_empty()
+            && !state.production_reviewers.iter().any(|n| n == operator)
+        {
+            // POLICY_VIOLATION: deciding production access is reserved to named reviewers.
+            return Err(ApiError(ErrorCode::PolicyViolation));
+        }
+        if matches!(command, OperatorCommand::Approve | OperatorCommand::Reject) {
+            let Some(user) = operator_user else {
+                return Err(ApiError(ErrorCode::OperatorRequired));
+            };
+            if membership(&state.db, r.tenant_id, user).await?.is_some() {
+                return Err(ApiError(ErrorCode::SelfApprovalForbidden));
+            }
         }
     }
+
     let actor = Actor::Operator {
         name: operator,
         request,
@@ -1008,6 +1058,9 @@ pub async fn operator_decide(
     match command {
         OperatorCommand::Review => {
             let txn = state.db.begin().await?;
+            if let Some(b) = bridge {
+                bridge_command::lock_version(&txn, b, Subject::ProductionAccess, id).await?;
+            }
             transition(
                 &txn,
                 id,
@@ -1029,6 +1082,10 @@ pub async fn operator_decide(
                 json!({}),
             )
             .await?;
+            if let Some(b) = bridge {
+                bridge_command::record(&txn, b, name, Subject::ProductionAccess, id, r.tenant_id)
+                    .await?;
+            }
             txn.commit().await?;
         }
         OperatorCommand::Approve => {
@@ -1044,6 +1101,9 @@ pub async fn operator_decide(
                 return Err(ApiError(ErrorCode::ValidationError));
             }
             let txn = state.db.begin().await?;
+            if let Some(b) = bridge {
+                bridge_command::lock_version(&txn, b, Subject::ProductionAccess, id).await?;
+            }
             // Regulated capabilities are only approved after an explicit review.
             let from: &[&str] = if regulated(&caps) {
                 &["UNDER_REVIEW"]
@@ -1078,11 +1138,18 @@ pub async fn operator_decide(
             )
             .await?;
             publish_decision(state, &txn, id, &r, "APPROVED", request).await?;
+            if let Some(b) = bridge {
+                bridge_command::record(&txn, b, name, Subject::ProductionAccess, id, r.tenant_id)
+                    .await?;
+            }
             txn.commit().await?;
         }
         OperatorCommand::Reject => {
             let code = reason(&d, "NOT_ELIGIBLE")?;
             let txn = state.db.begin().await?;
+            if let Some(b) = bridge {
+                bridge_command::lock_version(&txn, b, Subject::ProductionAccess, id).await?;
+            }
             transition(
                 &txn,
                 id,
@@ -1105,6 +1172,10 @@ pub async fn operator_decide(
             )
             .await?;
             publish_decision(state, &txn, id, &r, "REJECTED", request).await?;
+            if let Some(b) = bridge {
+                bridge_command::record(&txn, b, name, Subject::ProductionAccess, id, r.tenant_id)
+                    .await?;
+            }
             txn.commit().await?;
         }
         OperatorCommand::Suspend | OperatorCommand::Reinstate => {
@@ -1165,6 +1236,9 @@ pub async fn operator_decide(
                 .await?;
             }
             let txn = state.db.begin().await?;
+            if let Some(b) = bridge {
+                bridge_command::lock_version(&txn, b, Subject::ProductionAccess, id).await?;
+            }
             transition(
                 &txn,
                 id,
@@ -1201,6 +1275,10 @@ pub async fn operator_decide(
                 json!({ "reasonCode": code, "environmentId": env }),
             )
             .await?;
+            if let Some(b) = bridge {
+                bridge_command::record(&txn, b, name, Subject::ProductionAccess, id, r.tenant_id)
+                    .await?;
+            }
             txn.commit().await?;
         }
     }

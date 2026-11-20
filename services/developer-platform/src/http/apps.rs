@@ -219,13 +219,18 @@ async fn operator_decide(
     body: Option<Json<review::Decision>>,
 ) -> ApiResult<Json<Value>> {
     caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
-    let operator = headers
-        .get("x-cf-operator")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| crate::control::operator::valid_operator(v))
-        .ok_or(ApiError(ErrorCode::OperatorRequired))?
-        .to_string();
+    // The admin bridge names an HQ staff member (`hq:<staff>`, verified by the middleware);
+    // the operator console names a human operator.
+    let operator = match caller.bridge_operator() {
+        Some(a) => a.operator.as_str().to_string(),
+        None => headers
+            .get("x-cf-operator")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|v| crate::control::operator::valid_operator(v))
+            .ok_or(ApiError(ErrorCode::OperatorRequired))?
+            .to_string(),
+    };
     let ctx = current_context().ok_or(ApiError(ErrorCode::InternalError))?;
     let command = review::Command::parse(&command).ok_or(ApiError(ErrorCode::NotFound))?;
     let user = headers
@@ -233,6 +238,13 @@ async fn operator_decide(
         .and_then(|v| v.to_str().ok())
         .map(|v| Uuid::parse_str(v.trim()).map_err(|_| ApiError(ErrorCode::OperatorRequired)))
         .transpose()?;
+    let decision = body.map(|Json(b)| b).unwrap_or_default();
+    let bridge = crate::control::bridge_command::BridgeCommand::of(
+        &caller,
+        &headers,
+        decision.expected_version,
+        command.two_person(),
+    )?;
     Ok(Json(
         review::operator_decide(
             &s,
@@ -241,7 +253,8 @@ async fn operator_decide(
             &ctx,
             id,
             command,
-            body.map(|Json(b)| b).unwrap_or_default(),
+            decision,
+            bridge.as_ref(),
         )
         .await?,
     ))
