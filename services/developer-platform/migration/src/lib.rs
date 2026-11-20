@@ -74,6 +74,7 @@ impl MigratorTrait for GapClosureMigrator {
             Box::new(gap::m20261208_000003_apps::Migration),
             Box::new(gap::m20261209_000004_admin_operations::Migration),
             Box::new(gap::m20261210_000005_admin_bridge_partners::Migration),
+            Box::new(gap::m20261211_000006_pricing::Migration),
         ]
     }
 

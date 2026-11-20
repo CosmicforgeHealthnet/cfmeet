@@ -201,8 +201,8 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// A key nobody trusts, claiming to be the gateway.
     pub rogue_gateway: Arc<ServiceTokenSigner>,
-    /// The admin bridge (ADR 0068); granted `developer-platform.administer` only in the
-    /// [`Control`] harness bundle.
+    /// The admin bridge (ADR 0068); granted `developer-platform.administer` and
+    /// `pricing.administer` only in the [`Control`] harness bundle.
     pub bridge: Arc<ServiceTokenSigner>,
 }
 
@@ -2058,7 +2058,7 @@ pub fn service_auth_with_producers() -> (
         issuer(
             svc::ADMIN_BRIDGE,
             &bridge,
-            &["developer-platform.administer"],
+            &["developer-platform.administer", "pricing.administer"],
         ),
     ];
     for (s, k) in &producer_keys {

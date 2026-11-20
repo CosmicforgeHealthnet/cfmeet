@@ -7959,6 +7959,1474 @@
           "description": "Last UTC day of the window."
         }
       }
+    },
+    "PriceBook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "productLine",
+        "currency",
+        "marketCode",
+        "effectiveVersionId",
+        "frozen",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "productLine": {
+          "enum": [
+            "PARTNER_PLATFORM",
+            "CONSUMER"
+          ]
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        "marketCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,15}$"
+        },
+        "effectiveVersionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "frozen": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a price book lineage (product line, currency, market); its effective version is its latest activation already effective."
+    },
+    "PriceBookList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceBook"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PriceVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionId",
+        "priceBookId",
+        "seq",
+        "state",
+        "ratesDigest",
+        "submittedAt",
+        "approvedAt",
+        "approvalExpiresAt",
+        "rejectedReason",
+        "decidedAt",
+        "createdAt",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "ratesDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvalExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "rejectedReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a price version (no rates). DRAFT → SUBMITTED → APPROVED | REJECTED → SUPERSEDED; an approval expires after 12 hours."
+    },
+    "PriceVersionList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceVersion"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PriceVersionDetail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionId",
+        "priceBookId",
+        "seq",
+        "state",
+        "ratesDigest",
+        "submittedAt",
+        "approvedAt",
+        "approvalExpiresAt",
+        "rejectedReason",
+        "decidedAt",
+        "createdAt",
+        "updatedAt",
+        "version",
+        "productLine",
+        "marketCode",
+        "rates",
+        "submittedDigest",
+        "draftedBy",
+        "submittedBy",
+        "approvedBy",
+        "approverRef",
+        "effective"
+      ],
+      "properties": {
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "ratesDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "submittedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "approvalExpiresAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "rejectedReason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "productLine": {
+          "enum": [
+            "PARTNER_PLATFORM",
+            "CONSUMER"
+          ]
+        },
+        "marketCode": {
+          "type": "string"
+        },
+        "rates": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PartnerRateCard"
+            },
+            {
+              "$ref": "#/$defs/ConsumerPlanSet"
+            }
+          ]
+        },
+        "submittedDigest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "draftedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "submittedBy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approvedBy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approverRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "effective": {
+          "type": "boolean"
+        }
+      },
+      "description": "ADR 0068 A6: a price version with its rates and the HQ staff who drafted, submitted and approved it."
+    },
+    "PartnerRateCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rates"
+      ],
+      "properties": {
+        "rates": {
+          "type": "array",
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "usageType",
+              "unitAmountMinor"
+            ],
+            "properties": {
+              "usageType": {
+                "enum": [
+                  "MONTHLY_ACTIVE_USERS",
+                  "MEETING_MINUTES",
+                  "IN_APP_CALL_MINUTES",
+                  "MESSAGES",
+                  "RECORDING_MINUTES",
+                  "STORAGE",
+                  "API_CALLS"
+                ]
+              },
+              "unitAmountMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "includedQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minimumMonthlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "tiers": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "unitAmountMinor"
+                  ],
+                  "properties": {
+                    "upTo": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 1
+                    },
+                    "unitAmountMinor": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "description": "One usage type's rate (minor units): graduated tiers over the quantity beyond the included amount, at least the minimum monthly charge."
+          }
+        }
+      },
+      "description": "ADR 0068 A6: PARTNER_PLATFORM content (one rate per usage type)."
+    },
+    "ConsumerPlanSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plans"
+      ],
+      "properties": {
+        "plans": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "label",
+              "monthlyMinor",
+              "yearlyMinor",
+              "limits"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z_]{1,23}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              },
+              "monthlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "yearlyMinor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "limits": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "meetingMinutes",
+                  "participants",
+                  "recording",
+                  "storageBytes",
+                  "attachmentBytes",
+                  "webinars"
+                ],
+                "properties": {
+                  "meetingMinutes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "participants": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "recording": {
+                    "type": "boolean"
+                  },
+                  "storageBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "attachmentBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "webinars": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "ADR 0068 A6: CONSUMER content: CF Meet user plans (FREE required at 0 when submitted)."
+    },
+    "PriceActivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "activationId",
+        "priceBookId",
+        "versionId",
+        "kind",
+        "effectiveFrom",
+        "operatorRef",
+        "approverRef",
+        "recordedAt"
+      ],
+      "properties": {
+        "activationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "kind": {
+          "enum": [
+            "SCHEDULED",
+            "ACTIVATED",
+            "ROLLED_BACK"
+          ]
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "operatorRef": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "approverRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: one entry of the append-only activation history."
+    },
+    "PriceActivationList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PriceActivation"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MarketFreeze": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "marketCode",
+        "state",
+        "reasonCode",
+        "changedBy",
+        "frozenAt",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "marketCode": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "FROZEN",
+            "UNFROZEN"
+          ]
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "changedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "frozenAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a market's freeze (a frozen market refuses submit, approve, schedule, activate and rollback)."
+    },
+    "MarketFreezeList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/MarketFreeze"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PricingPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "currency",
+        "marketCode",
+        "versionId",
+        "planCode",
+        "label",
+        "monthlyMinor",
+        "yearlyMinor",
+        "limits"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "marketCode": {
+          "type": "string"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "monthlyMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "yearlyMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limits": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "meetingMinutes",
+                "participants",
+                "recording",
+                "storageBytes",
+                "attachmentBytes",
+                "webinars"
+              ],
+              "properties": {
+                "meetingMinutes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "participants": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "recording": {
+                  "type": "boolean"
+                },
+                "storageBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "attachmentBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "webinars": {
+                  "type": "boolean"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "ADR 0068 A6: a CF Meet user plan of a CONSUMER lineage's effective version (FREE always listed; limits null when no version is effective)."
+    },
+    "PricingPlanList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PricingPlan"
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        }
+      }
+    },
+    "ConsumerPlanAssignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assignmentId",
+        "holderKind",
+        "holderId",
+        "planCode",
+        "priceBookId",
+        "reasonCode",
+        "assignedBy",
+        "effectiveFrom",
+        "current"
+      ],
+      "properties": {
+        "assignmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "assignedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "current": {
+          "type": "boolean"
+        }
+      },
+      "description": "ADR 0068 A6: one CF Meet user plan assignment (append-only history; a holder never assigned is on FREE)."
+    },
+    "ConsumerPlanAssignmentList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/ConsumerPlanAssignment"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PlanOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overrideId",
+        "holderKind",
+        "holderId",
+        "state",
+        "limits",
+        "reasonCode",
+        "changedBy",
+        "updatedAt",
+        "version"
+      ],
+      "properties": {
+        "overrideId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "REVOKED"
+          ]
+        },
+        "limits": {
+          "type": "object"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "changedBy": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "ADR 0068 A6: a holder's limit override."
+    },
+    "PlanOverrideList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/PlanOverride"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ChargeSimulation": {
+      "description": "ADR 0068 A6: an estimate (minor units of the lineage's currency; nothing is charged). Partner: lines per rate and totalMinor; CF Meet user plan: planCode, cycle and totalMinor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "versionId",
+        "versionState",
+        "currency",
+        "estimate",
+        "totalMinor"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionState": {
+          "enum": [
+            "DRAFT",
+            "SUBMITTED",
+            "APPROVED",
+            "REJECTED",
+            "SUPERSEDED"
+          ]
+        },
+        "currency": {
+          "type": "string"
+        },
+        "estimate": {
+          "const": true
+        },
+        "totalMinor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "usageType",
+              "quantity",
+              "includedQuantity",
+              "billableQuantity",
+              "amountMinor"
+            ],
+            "properties": {
+              "usageType": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "includedQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "billableQuantity": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "amountMinor": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "cycle": {
+          "enum": [
+            "MONTHLY",
+            "YEARLY"
+          ]
+        }
+      }
+    },
+    "FinanceUsageReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "planCode",
+              "usageType",
+              "unit",
+              "quantity",
+              "factCount"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "planCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "usageType": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": "integer"
+              },
+              "factCount": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date"
+        },
+        "to": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "description": "ADR 0068 A6: metered usage per partner workspace and usage type over the window's UTC days, with the workspace's commercial plan code."
+    },
+    "EstimatedChargesReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId",
+        "versionId",
+        "currency",
+        "estimate",
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "estimate": {
+          "const": true
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "organizationId",
+              "lines",
+              "totalMinor"
+            ],
+            "properties": {
+              "organizationId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "lines": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "usageType",
+                    "quantity",
+                    "includedQuantity",
+                    "billableQuantity",
+                    "amountMinor"
+                  ],
+                  "properties": {
+                    "usageType": {
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "includedQuantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "billableQuantity": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "amountMinor": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "totalMinor": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date"
+        },
+        "to": {
+          "type": "string",
+          "format": "date"
+        }
+      },
+      "description": "ADR 0068 A6: estimated charges per partner workspace under a PARTNER_PLATFORM lineage's effective version (one currency, minor units; an estimate, never revenue, nothing charged)."
+    },
+    "PlanSpreadReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "asOf"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "planCode",
+              "holderKind",
+              "holders",
+              "assignedInWindow"
+            ],
+            "properties": {
+              "planCode": {
+                "type": "string"
+              },
+              "holderKind": {
+                "enum": [
+                  "USER",
+                  "ORGANIZATION"
+                ]
+              },
+              "holders": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "assignedInWindow": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "nextCursor": {
+          "type": "null"
+        },
+        "asOf": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: holders per CF Meet user plan as of `asOf` (never-assigned users and organizations are on FREE and not counted) and the assignments made in the window."
+    },
+    "PriceVersionDraftRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rates": {
+          "type": "object"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the price book's version; rates omitted: a copy of the effective (else latest) version."
+    },
+    "PriceVersionCommandRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rates": {
+          "type": "object"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "effectiveFrom": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "ADR 0068 A6: edit (rates, DRAFT only), submit / approve / activate (expectedVersion only), reject (reasonCode, default NOT_APPROVED), schedule (effectiveFrom, more than 1 minute and at most 366 days ahead). expectedVersion is the version's row version."
+    },
+    "PriceBookRollbackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "versionId"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the price book's version; versionId a SUPERSEDED version of the book that was activated before."
+    },
+    "MarketFreezeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "reasonCode"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the market freeze's version (0: never frozen)."
+    },
+    "ConsumerPlanAssignRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "holderKind",
+        "holderId",
+        "planCode",
+        "priceBookId"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "planCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "billingAccountRef": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the holder's version (0: never assigned, on FREE). The plan must exist in the CONSUMER lineage's effective version (FREE always)."
+    },
+    "PlanOverrideChangeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion",
+        "holderKind",
+        "holderId",
+        "limits",
+        "reasonCode"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 when the row was never created."
+        },
+        "holderKind": {
+          "enum": [
+            "USER",
+            "ORGANIZATION"
+          ]
+        },
+        "holderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "limits": {
+          "oneOf": [
+            {
+              "type": "object",
+              "minProperties": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        }
+      },
+      "description": "ADR 0068 A6: expectedVersion is the override's version (0: none yet); limits null revokes."
+    },
+    "ChargeSimulationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "priceBookId"
+      ],
+      "properties": {
+        "priceBookId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "versionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "planCode": {
+          "type": "string"
+        },
+        "cycle": {
+          "enum": [
+            "MONTHLY",
+            "YEARLY"
+          ]
+        }
+      },
+      "description": "ADR 0068 A6: a usage vector (PARTNER_PLATFORM) or a plan and cycle (CONSUMER); versionId omitted: the effective version."
     }
   }
 }

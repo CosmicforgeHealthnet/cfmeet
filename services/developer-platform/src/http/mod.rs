@@ -14,6 +14,7 @@ pub mod internal;
 pub mod middleware;
 pub mod operator;
 pub mod operator_reads;
+pub mod pricing;
 pub mod public;
 
 use axum::{
@@ -66,6 +67,7 @@ pub fn app(state: AppState) -> Router {
             internal::routes()
                 .merge(operator::routes())
                 .merge(operator_reads::routes())
+                .merge(pricing::routes())
                 .merge(crate::webhooks::migration::http::routes())
                 .merge(apps::operator_routes(state.build))
                 .fallback(not_found)
