@@ -480,6 +480,9 @@ class Journey:
             denied=self.request('messaging','/v1/conversations/'+conversation+'/messages','POST',
                 {'clientMessageId':str(uuid.uuid4()),'text':'must be refused'},self.c['scope']['token'],a['principalId'],(403,404,409))
             assert denied.get('error',{}).get('code')=='DELIVERY_REFUSED'
+        # Contacts audit K5: unblocking restores a contact that was connected before the
+        # block unless someone removed it meanwhile; A removes it, so nothing reconnects.
+        self.hub(a,'/contacts/'+cid,'DELETE')
         self.hub(b,'/profiles/'+a['cfMeetId']+'/block','DELETE')
         assert self.dial(a,b,expected=(403,404,409)).get('error',{}).get('code')=='TARGET_UNAVAILABLE'
         self.hub_launch_denied(a,cid)

@@ -166,6 +166,16 @@ impl Store {
             .await?
             .ok_or(Error::Unavailable)
     }
+    /// `requester` holds a claim on an unrevoked, unexpired invite (link or QR) of `owner`.
+    pub async fn invite_claim<C: ConnectionTrait>(
+        &self,
+        db: &C,
+        requester: Uuid,
+        owner: Uuid,
+    ) -> Result<bool> {
+        let v:Json=one(db,"SELECT jsonb_build_object('valid',EXISTS(SELECT 1 FROM communication_invite_claims c JOIN communication_invites i ON i.id=c.invite_id WHERE c.requester_profile_id=$1 AND i.owner_profile_id=$2 AND i.revoked_at IS NULL AND i.expires_at>now())) doc",vec![requester.into(),owner.into()]).await?.ok_or(Error::Unavailable)?;
+        Ok(v["valid"] == true)
+    }
     pub async fn blocked<C: ConnectionTrait>(&self, db: &C, a: Uuid, b: Uuid) -> Result<bool> {
         let v:Json=one(db,"SELECT jsonb_build_object('blocked',EXISTS(SELECT 1 FROM communication_block_bridge WHERE active AND ((blocker_profile_id=$1 AND blocked_profile_id=$2) OR (blocker_profile_id=$2 AND blocked_profile_id=$1)))) doc",vec![a.into(),b.into()]).await?.ok_or(Error::Unavailable)?;
         Ok(v["blocked"] == true)
@@ -307,7 +317,9 @@ impl Store {
         Ok(())
     }
     /// Append one entry to the owner's monotonic change feed (same transaction as the
-    /// change itself, so a committed change always has a feed entry).
+    /// change itself, so a committed change always has a feed entry). Its feed position
+    /// is assigned at commit from the owner's own counter (K8, migration 010), so a
+    /// person's positions become visible in increasing order.
     pub async fn change<C: ConnectionTrait>(
         &self,
         db: &C,
@@ -327,8 +339,13 @@ impl Store {
         connection: Uuid,
         version: i64,
     ) -> Result<()> {
+        // K8: feed positions are numbered under each person's counter row lock at commit,
+        // in insertion order; a stable order keeps two transactions from waiting on each
+        // other's counters.
+        let mut profiles = profiles.to_vec();
+        profiles.sort();
         for profile in profiles {
-            self.change(db, *profile, "CONTACT", Some(connection), Some(version))
+            self.change(db, profile, "CONTACT", Some(connection), Some(version))
                 .await?;
         }
         Ok(())

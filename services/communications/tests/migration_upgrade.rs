@@ -2,8 +2,8 @@
 //! Production 2026-11-18: the S9 history's backfill updated existing `communication_privacy`
 //! rows without advancing their version and the version guard aborted the migration.
 use communications_migration::{
-    DeviceSessionMigrator, GroupInvitationPolicyMigrator, Migrator, MigratorTrait,
-    NotificationPublicationsMigrator, PreferenceAuthorityMigrator, ShortIdsMigrator,
+    ContactsAuditMigrator, DeviceSessionMigrator, GroupInvitationPolicyMigrator, Migrator,
+    MigratorTrait, NotificationPublicationsMigrator, PreferenceAuthorityMigrator, ShortIdsMigrator,
     TimelineRealtimeMigrator, UnifiedMigrator,
 };
 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
@@ -141,5 +141,92 @@ async fn the_group_invitation_history_upgrades_existing_privacy_rows_without_tou
         );
         assert_eq!(r.try_get::<i64>("", "version").unwrap(), 3);
     }
+    // What the previous image (short IDs) checks is complete; this image also needs the
+    // contacts-audit history.
+    assert!(communications_migration::short_ids_ready(&db)
+        .await
+        .unwrap());
+    assert!(!communications_migration::ready(&db).await.unwrap());
+
+    // Feed entries written before the contacts-audit history keep their seq numbers.
+    let profile: Uuid = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT id FROM communication_profiles ORDER BY account_reference LIMIT 1".to_owned(),
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get("", "id")
+        .unwrap();
+    let insert = format!(
+        "INSERT INTO communication_changes (profile_id, domain) VALUES ('{profile}', 'CONTACT')"
+    );
+    db.execute_unprepared(&insert).await.unwrap();
+    ContactsAuditMigrator::up(&db, None).await.unwrap();
     assert!(communications_migration::ready(&db).await.unwrap());
+    let feed = |db: sea_orm::DatabaseConnection| async move {
+        db.query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT seq, position FROM communication_changes ORDER BY seq".to_owned(),
+        ))
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| {
+            (
+                r.try_get::<i64>("", "seq").unwrap(),
+                r.try_get::<Option<i64>>("", "position").unwrap(),
+            )
+        })
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(feed(db.clone()).await.len(), 1);
+    assert_eq!(
+        feed(db.clone()).await[0].1,
+        None,
+        "old rows are not rewritten"
+    );
+    // An insert that names no position (what the previous image writes after a rollback)
+    // is numbered by the database at commit: never below its seq.
+    db.execute_unprepared(&insert).await.unwrap();
+    let rows = feed(db.clone()).await;
+    let (seq, position) = rows[1];
+    assert!(position.is_some_and(|p| p >= seq), "{rows:?}");
+    // Privacy rows: email discovery is off, versions untouched; no About line yet.
+    let privacy = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT email_discoverable, version FROM communication_privacy".to_owned(),
+        ))
+        .await
+        .unwrap();
+    for r in privacy {
+        assert!(!r.try_get::<bool>("", "email_discoverable").unwrap());
+        assert_eq!(r.try_get::<i64>("", "version").unwrap(), 3);
+    }
+
+    // K8: two overlapping transactions for the same person. The first takes the lower seq
+    // but commits last; its position is still the higher one, so a device that read the
+    // second entry's position can never skip the first.
+    use sea_orm::TransactionTrait;
+    let slow = db.begin().await.unwrap();
+    slow.execute_unprepared(&insert).await.unwrap();
+    let fast = db.begin().await.unwrap();
+    fast.execute_unprepared(&insert).await.unwrap();
+    fast.commit().await.unwrap();
+    slow.commit().await.unwrap();
+    let rows = feed(db.clone()).await;
+    let (slow_seq, slow_position) = rows[2];
+    let (fast_seq, fast_position) = rows[3];
+    assert!(slow_seq < fast_seq);
+    assert!(slow_position.unwrap() > fast_position.unwrap(), "{rows:?}");
+    // A rolled-back transaction leaves the counter untouched.
+    let aborted = db.begin().await.unwrap();
+    aborted.execute_unprepared(&insert).await.unwrap();
+    aborted.rollback().await.unwrap();
+    db.execute_unprepared(&insert).await.unwrap();
+    let rows = feed(db.clone()).await;
+    assert_eq!(rows.len(), 5);
+    assert!(rows[4].1.unwrap() > slow_position.unwrap(), "{rows:?}");
 }

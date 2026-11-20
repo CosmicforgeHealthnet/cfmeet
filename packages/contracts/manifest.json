@@ -766,7 +766,7 @@
     },
     {
       "id": "cfmeet.meeting-service.communications-internal-bundled",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "bundled/meeting-service/communications-internal/v1.openapi.json",
       "owner": "meeting-service",
@@ -778,7 +778,7 @@
     },
     {
       "id": "cfmeet.messaging.communications-internal-bundled",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "openapi",
       "path": "bundled/messaging/communications-internal/v1.openapi.json",
       "owner": "messaging",
@@ -1034,18 +1034,18 @@
     },
     {
       "id": "cfmeet.communications.http-api",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "kind": "openapi",
       "path": "communications/http/v1.openapi.json",
       "owner": "communications",
       "visibility": "public",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy. Sections 9-23: unified Chats/Calls/Contacts/Meetings/Settings facades, timeline cards, chat controls, collections, devices and change feed. 1.4.0 (CF Meet chat remediation): capabilities messaging.attachments (effective attachment availability, maxBytes, allowedKinds, per-context switch); CommonGroup carries securityProfile, title / avatarRef (MANAGED only) and memberCount for groups both people currently belong to; MediaItem carries securityProfile, kind / fileName / mediaType (MANAGED only), metadataLocation and download / thumbnail grant references (relative relay paths, never URLs). 1.5.0 POST /api/v2/communications/calls/{callId}/participants adds connected personal contacts to a running call by contact id (resolved server-side; no principal id is exposed). 1.6.0 (gap audit S9): privacy groupInvitationPolicy. 1.7.0: Contact.principalId (the calling principal of a CONNECTED contact) so clients can tell which contacts are already in a call. 1.8.0: short CF Meet IDs (CF- plus 6 characters) and direct contact (privacy contactApproval, AUTOMATIC by default)."
+      "description": "Authenticated native personal Communications identity, CF Meet IDs, QR invitations, private discovery, contacts, requests, blocking and versioned privacy. Sections 9-23: unified Chats/Calls/Contacts/Meetings/Settings facades, timeline cards, chat controls, collections, devices and change feed. 1.4.0 (CF Meet chat remediation): capabilities messaging.attachments (effective attachment availability, maxBytes, allowedKinds, per-context switch); CommonGroup carries securityProfile, title / avatarRef (MANAGED only) and memberCount for groups both people currently belong to; MediaItem carries securityProfile, kind / fileName / mediaType (MANAGED only), metadataLocation and download / thumbnail grant references (relative relay paths, never URLs). 1.5.0 POST /api/v2/communications/calls/{callId}/participants adds connected personal contacts to a running call by contact id (resolved server-side; no principal id is exposed). 1.6.0 (gap audit S9): privacy groupInvitationPolicy. 1.7.0: Contact.principalId (the calling principal of a CONNECTED contact) so clients can tell which contacts are already in a call. 1.8.0: short CF Meet IDs (CF- plus 6 characters) and direct contact (privacy contactApproval, AUTOMATIC by default). 1.9.0 (contacts audit): find people by verified email (opt-in privacy emailDiscoverable), the About line (PATCH /me, Profile.about, Contact.about), ConversationPreferences.mentionsAvailable, saved-message reason TEMPORARILY_UNAVAILABLE."
     },
     {
       "id": "cfmeet.communications.public-api",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "kind": "openapi",
       "path": "bundled/public/communications/v1.openapi.json",
       "owner": "communications",
@@ -1079,29 +1079,29 @@
     },
     {
       "id": "cfmeet.messaging.communications-internal",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "kind": "openapi",
       "path": "messaging/communications-internal/v1.openapi.json",
       "owner": "messaging",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by messaging; no consumer credential or copied data authority. 1.1.0: Sections 9–23 owner interfaces MS-1 … MS-7 (conversation access, member-visible attachment metadata, storage summary, device verify / revoke, device push registration, push status) for the delegated NATIVE_CF_USER only. 1.3.0 (audit MSG-009): events route accepts communications.timeline.changed {conversationId, timelineVersion, reason} and records messaging.timeline.changed once per higher version. 1.4.0 (CF Meet chat remediation): capabilities.attachments (effective attachment availability, limits and kinds for the client attach control); common-groups items carry securityProfile, title / avatarRef (MANAGED only, null for PRIVATE_E2EE) and memberCount, for current members only; conversation attachment items carry securityProfile, metadataLocation, kind / fileName / mediaType (MANAGED only) and download / thumbnail grant references (relative paths of the access-checked grant operations, never URLs)."
+      "description": "Private signed Communications integration owned by messaging; no consumer credential or copied data authority. 1.1.0: Sections 9–23 owner interfaces MS-1 … MS-7 (conversation access, member-visible attachment metadata, storage summary, device verify / revoke, device push registration, push status) for the delegated NATIVE_CF_USER only. 1.3.0 (audit MSG-009): events route accepts communications.timeline.changed {conversationId, timelineVersion, reason} and records messaging.timeline.changed once per higher version. 1.4.0 (CF Meet chat remediation): capabilities.attachments (effective attachment availability, limits and kinds for the client attach control); common-groups items carry securityProfile, title / avatarRef (MANAGED only, null for PRIVATE_E2EE) and memberCount, for current members only; conversation attachment items carry securityProfile, metadataLocation, kind / fileName / mediaType (MANAGED only) and download / thumbnail grant references (relative paths of the access-checked grant operations, never URLs). 1.5.0: conversations/messages/access checks up to 50 saved messages in one call (contacts audit K9)."
     },
     {
       "id": "cfmeet.meeting-service.communications-internal",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "kind": "openapi",
       "path": "meeting-service/communications-internal/v1.openapi.json",
       "owner": "meeting-service",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Private signed Communications integration owned by meeting-service; no consumer credential or copied data authority. 1.1.0: Sections 9–23 meeting facade — POST /internal/v1/communications/meetings/instant (meeting-communications.create; canonical instant meeting owned by the delegated user, idempotent per account and key) and /resolve (meeting-communications.read; public references, shareable only for owner / host)."
+      "description": "Private signed Communications integration owned by meeting-service; no consumer credential or copied data authority. 1.1.0: Sections 9–23 meeting facade — POST /internal/v1/communications/meetings/instant (meeting-communications.create; canonical instant meeting owned by the delegated user, idempotent per account and key) and /resolve (meeting-communications.read; public references, shareable only for owner / host). 1.2.0: accounts/communications/email-lookup finds the account with a verified email address (contacts audit KF1)."
     },
     {
       "id": "cfmeet.communications.swagger-api",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "kind": "openapi",
       "path": "bundled/communications/http/v1.openapi.json",
       "owner": "communications",

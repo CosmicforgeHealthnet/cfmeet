@@ -268,6 +268,77 @@ pub async fn conversation_access(
     Ok(Json(v))
 }
 
+/// At most this many saved-message references per batched access check (MS-1b).
+pub const MESSAGE_ACCESS_BATCH: usize = 50;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessageRef {
+    conversation_id: Uuid,
+    message_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessagesAccessRequest {
+    principal_id: Uuid,
+    items: Vec<MessageRef>,
+}
+
+/// MS-1b (contacts audit K9): the access view of many messages at once for the Hub's
+/// saved-messages list, one entry per reference in request order: `member` (an ACTIVE
+/// member of the conversation right now) and, for members, the message `state` exactly
+/// as MS-1 reports it. Each conversation is loaded once. Metadata only, as MS-1.
+pub async fn conversation_messages_access(
+    State(s): State<AppState>,
+    caller: InternalCaller,
+    Json(p): Json<MessagesAccessRequest>,
+) -> Reply {
+    let ctx = own_for(
+        &s,
+        &caller,
+        InternalPermission::MessagingCommunicationsRead,
+        p.principal_id,
+    )
+    .await?;
+    if p.items.len() > MESSAGE_ACCESS_BATCH {
+        return Err(Error::validation("at most 50 items"));
+    }
+    let mut conversations = std::collections::HashMap::new();
+    let mut items = Vec::with_capacity(p.items.len());
+    for item in &p.items {
+        if let std::collections::hash_map::Entry::Vacant(slot) =
+            conversations.entry(item.conversation_id)
+        {
+            let loaded =
+                match crate::conversations::service::load(&s.db, &ctx, item.conversation_id, false)
+                    .await?
+                {
+                    None => None,
+                    Some(c) => {
+                        match access::membership(&s.db, c.id, p.principal_id, false).await? {
+                            Some(m) if m.is_active() => Some((c, m)),
+                            _ => None,
+                        }
+                    }
+                };
+            slot.insert(loaded);
+        }
+        let entry = match &conversations[&item.conversation_id] {
+            None => {
+                json!({"conversationId": item.conversation_id, "messageId": item.message_id, "member": false})
+            }
+            Some((c, m)) => {
+                let message = message_view(&s.db, c, m, p.principal_id, item.message_id).await?;
+                json!({"conversationId": item.conversation_id, "messageId": item.message_id, "member": true,
+                    "state": message["state"], "sequence": message["sequence"]})
+            }
+        };
+        items.push(entry);
+    }
+    Ok(Json(json!({"schemaVersion": 1, "items": items})))
+}
+
 // ---------------------------------------------------------------------------------------
 // MS-2 conversation attachments
 // ---------------------------------------------------------------------------------------

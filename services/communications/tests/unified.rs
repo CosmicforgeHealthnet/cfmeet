@@ -1256,6 +1256,8 @@ async fn private_owner_and_operator_routes_are_scoped_deduplicated_and_audited()
     );
     // Gap audit S10: "mentions only" suppresses ordinary messages but lets a mention through.
     let mentions_chat = conversation(&h, "DIRECT", &[&a, &b], 1);
+    // Messaging signals mentions for MANAGED messages only (K11).
+    h.world.write().unwrap().managed.insert(mentions_chat);
     h.state.put_conversation_preferences(&h.delegated(&b.account), &b.profile, mentions_chat, json!({"expectedVersion":0,"notifications":"MENTIONS","mutedUntil":null,"mediaAutoDownload":"WIFI"}), Uuid::new_v4()).await.unwrap();
     let mut mention = check(Action::MessageNotification, &a.profile, &b.profile);
     mention.conversation_id = Some(mentions_chat);
@@ -1413,7 +1415,8 @@ async fn privacy_block_and_identity_changes_invalidate_through_the_feed() {
         .unwrap();
     assert_eq!(
         domains(a.profile.id, heads.0).await,
-        json!(["PRIVACY", "BLOCK", "BLOCK", "PROFILE"])
+        // K5: the unblock restores the contact, so a's contact list refreshes too.
+        json!(["PRIVACY", "BLOCK", "BLOCK", "CONTACT", "PROFILE"])
     );
     assert_eq!(
         domains(b.profile.id, heads.1).await,
@@ -1638,7 +1641,7 @@ async fn every_published_communications_operation_is_routed() {
             );
         }
     }
-    assert_eq!(operations, 74, "published Communications operations");
+    assert_eq!(operations, 76, "published Communications operations");
     let body = serde_json::to_value(route("GET", "phone/verification".into())).unwrap();
     let (status, headers) = h
         .http_full(

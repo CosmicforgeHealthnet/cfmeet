@@ -555,6 +555,10 @@ pub fn internal_routes() -> Router<AppState> {
             "/internal/v1/accounts/communications/backfill",
             post(backfill),
         )
+        .route(
+            "/internal/v1/accounts/communications/email-lookup",
+            post(email_lookup),
+        )
         .route(INSTANT_MEETING_PATH, post(instant_meeting))
         .route(RESOLVE_MEETING_PATH, post(resolve_meeting))
 }
@@ -838,6 +842,57 @@ async fn resolve_meeting(
     Ok(Json(
         json!({"schemaVersion":1,"meetingSpaceId":response.id,"meetingCode":response.meeting_code,"title":response.title,"shareable":matches!(role,"OWNER"|"HOST"),"role":role,"latestConference":latest}),
     ))
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmailLookup {
+    email: String,
+}
+/// Contacts audit KF1: the account whose VERIFIED email address is exactly `email`
+/// (case-insensitive), for the Hub's "find people by email". Only active, non-guest
+/// accounts with a verified address match; anything else is `found: false`, the same as
+/// no account at all. The Hub applies the person's own discoverability setting, the
+/// discovery rate limit and the block / visibility rules before it shows anything, and
+/// never relays the account reference to clients. The address is never logged.
+async fn email_lookup(
+    State(state): State<AppState>,
+    method: Method,
+    uri: OriginalUri,
+    headers: HeaderMap,
+    Json(body): Json<EmailLookup>,
+) -> ApiResult<Json<Value>> {
+    internal_scope(&state, &Hop::of(method, &uri), &headers).await?;
+    let email = body.email.trim().to_lowercase();
+    if email.is_empty() || email.len() > 254 || !email.contains('@') {
+        return Err(ApiError::domain(
+            ErrorCode::ValidationError,
+            "Invalid email",
+        ));
+    }
+    let row = state
+        .db
+        .query_one(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id FROM users WHERE LOWER(email)=$1 LIMIT 2",
+            [email.into()],
+        ))
+        .await?;
+    let id: Option<Uuid> = row.map(|r| r.try_get("", "id")).transpose()?;
+    let user = match id {
+        Some(id) => users::Entity::find_by_id(id).one(&state.db).await?,
+        None => None,
+    };
+    let found = user.filter(|u| {
+        u.role != users::UserRole::Guest
+            && u.status == users::UserStatus::Active
+            && u.email_verified(state.require_email_verification)
+    });
+    Ok(Json(match found {
+        Some(u) => {
+            json!({"schemaVersion":1,"found":true,"accountReference":format!("cfmeet-user:{}",u.id)})
+        }
+        None => json!({"schemaVersion":1,"found":false}),
+    }))
 }
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -15,11 +15,11 @@ Swagger/OpenAPI entry (`<file>#<operationId>`).
 | Surface | Contract | Version | Frontend operations |
 |---|---|---|---:|
 | Meetings, accounts, organizations, workspaces (Meeting Service) | `openapi/meeting-service.json` | 1.8.0 | 307 |
-| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.8.0 | 74 |
+| Communications Hub (contacts, CF Meet ID / QR, timeline, activity) | `communications/http/v1.openapi.json` | 1.9.0 | 76 |
 | Calling (personal and enterprise) | `calling/http/v1.openapi.json` | 1.31.0 | 146 |
 | Messaging (MANAGED and PRIVATE_E2EE) | `messaging/http/v1.openapi.json` | 1.22.0 | 108 |
 | Developer Portal (Developer Platform) | `platform-developer/http/v1.openapi.json` | 1.8.0 | 101 |
-| **Total** | | | **736** |
+| **Total** | | | **738** |
 
 ## Meetings, accounts, organizations, workspaces (Meeting Service)
 
@@ -544,7 +544,7 @@ Contract `packages/contracts/openapi/meeting-service.json` version **1.8.0**; ba
 
 ## Communications Hub (contacts, CF Meet ID / QR, timeline, activity)
 
-Contract `packages/contracts/communications/http/v1.openapi.json` version **1.8.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
+Contract `packages/contracts/communications/http/v1.openapi.json` version **1.9.0**; base URL env `NEXT_PUBLIC_API_URL`. Served by the Meeting Service host under `/api/v2/communications/*` with the account session.
 
 ### Calls
 
@@ -621,6 +621,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.8.
 
 | Method | Path | Auth | Summary | Status | Error codes | Contract |
 |---|---|---|---|---|---|---|
+| POST | `/api/v2/communications/discovery/email/resolve` | account session | Find a person by their verified email address | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsEmail` |
 | POST | `/api/v2/communications/discovery/invites/resolve` | account session | Resolve an invitation without granting a connection | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsInvitation` |
 | POST | `/api/v2/communications/discovery/public-id/resolve` | account session | Resolve an exact permitted public ID | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#resolveCommunicationsPublicId` |
 | GET | `/api/v2/communications/profiles/{cfMeetId}` | account session | Read a permitted exact public profile | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsPublicProfile` |
@@ -631,6 +632,7 @@ Contract `packages/contracts/communications/http/v1.openapi.json` version **1.8.
 |---|---|---|---|---|---|---|
 | GET | `/api/v2/communications/activation` | account session | Read server-controlled activation state | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsActivation` |
 | GET | `/api/v2/communications/me` | account session | Get or lazily activate a stable Communications profile | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsProfile` |
+| PATCH | `/api/v2/communications/me` | account session | Edit the About line contacts see | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#updateCommunicationsProfile` |
 | GET | `/api/v2/communications/me/capabilities` | account session | Read actual backend and device-security readiness | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsCapabilities` |
 | GET | `/api/v2/communications/me/public-id` | account session | Read the current public CF Meet ID | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#getCommunicationsPublicId` |
 | POST | `/api/v2/communications/me/public-id/rotate` | account session | Rotate a public ID with recent authentication | 200, 400, 401, 403, 404, 409, 429, 503 | AUTHENTICATION_REQUIRED, COMMUNICATIONS_UNAVAILABLE, NOT_FOUND, PERMISSION_DENIED, RATE_LIMITED, VALIDATION_ERROR, VERSION_CONFLICT | `communications/http/v1.openapi.json#rotateCommunicationsPublicId` |
