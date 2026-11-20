@@ -1,0 +1,72 @@
+{
+  "description": "One participant. No guest identity, external reference, credential or denial note.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "participant_id",
+    "identity_type",
+    "user_id",
+    "display_name",
+    "role",
+    "admission_state",
+    "requested_at",
+    "admitted_at",
+    "removed_at",
+    "banned_at"
+  ],
+  "properties": {
+    "participant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "identity_type": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "role": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "admission_state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "requested_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "admitted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "removed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "banned_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "description": "One CF Meet account. Search matches on the email address but never returns it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "user_id",
+    "username",
+    "display_name",
+    "role",
+    "status",
+    "created_at",
+    "last_login_at"
+  ],
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "username": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50
+    },
+    "display_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "role": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_login_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

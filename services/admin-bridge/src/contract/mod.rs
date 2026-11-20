@@ -10,4 +10,5 @@ pub mod render;
 pub mod schemas;
 pub mod schemas_communications;
 pub mod schemas_identity;
+pub mod schemas_meetings;
 pub mod schemas_partners;

@@ -1,0 +1,82 @@
+{
+  "description": "One account in detail (R1, every read audited). The email address only masked.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "user_id",
+    "username",
+    "display_name",
+    "role",
+    "status",
+    "created_at",
+    "last_login_at",
+    "email_masked",
+    "email_verified",
+    "auth_type",
+    "locale",
+    "timezone"
+  ],
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "username": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50
+    },
+    "display_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "role": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_login_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "email_masked": {
+      "type": "string",
+      "maxLength": 120,
+      "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com). Never the address."
+    },
+    "email_verified": {
+      "type": "boolean"
+    },
+    "auth_type": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "locale": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 35
+    },
+    "timezone": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64
+    }
+  }
+}

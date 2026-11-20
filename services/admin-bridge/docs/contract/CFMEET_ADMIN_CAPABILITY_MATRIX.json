@@ -129,7 +129,7 @@
     "method": "GET",
     "bridge_endpoint": "/accounts/users",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "accounts.users.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -138,8 +138,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_user_search_never_returns_an_address"
+    ]
   },
   {
     "id": "accounts.users.read",
@@ -148,7 +150,7 @@
     "method": "GET",
     "bridge_endpoint": "/accounts/users/{user_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "accounts.users.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -157,8 +159,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_user_detail_masks_the_address"
+    ]
   },
   {
     "id": "accounts.user.status.change",
@@ -224,7 +228,7 @@
     "method": "GET",
     "bridge_endpoint": "/accounts/users/{user_id}/sessions",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "accounts.sessions.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -233,8 +237,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_account_lists_translate_strictly"
+    ]
   },
   {
     "id": "accounts.sessions.revoke-all",
@@ -262,7 +268,7 @@
     "method": "GET",
     "bridge_endpoint": "/accounts/users/{user_id}/devices",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "accounts.devices.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -271,8 +277,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_account_lists_translate_strictly"
+    ]
   },
   {
     "id": "accounts.device.revoke",
@@ -300,7 +308,7 @@
     "method": "GET",
     "bridge_endpoint": "/accounts/users/{user_id}/mfa",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "accounts.mfa.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -309,8 +317,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_mfa_reports_state_only"
+    ]
   },
   {
     "id": "accounts.mfa.reset",
@@ -338,7 +348,7 @@
     "method": "GET",
     "bridge_endpoint": "/accounts/users/{user_id}/security-history",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "accounts.security-history.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -347,8 +357,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ACCOUNTS",
-    "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_security_history_maps_window_and_sequence_cursor"
+    ]
   },
   {
     "id": "accounts.duplicates.list",
@@ -452,7 +464,7 @@
     "method": "GET",
     "bridge_endpoint": "/meetings/spaces",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "meetings.spaces.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -461,8 +473,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_space_and_meeting_search"
+    ]
   },
   {
     "id": "meetings.meetings.search",
@@ -471,7 +485,7 @@
     "method": "GET",
     "bridge_endpoint": "/meetings/meetings",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "meetings.meetings.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -480,8 +494,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_space_and_meeting_search"
+    ]
   },
   {
     "id": "meetings.meetings.read",
@@ -490,7 +506,7 @@
     "method": "GET",
     "bridge_endpoint": "/meetings/meetings/{meeting_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "meetings.meetings.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -499,8 +515,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_detail_and_participants"
+    ]
   },
   {
     "id": "meetings.live.list",
@@ -509,7 +527,7 @@
     "method": "GET",
     "bridge_endpoint": "/meetings/live",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "meetings.live.read",
     "risk": "R0",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -518,8 +536,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-    "blocker": "Phase A2: meeting-service endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_live_list"
+    ]
   },
   {
     "id": "meetings.live-health.read",
@@ -547,7 +567,7 @@
     "method": "GET",
     "bridge_endpoint": "/meetings/meetings/{meeting_id}/participants",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "meetings.participants.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -556,8 +576,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-    "blocker": "Phase A2: new meeting-service operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_detail_and_participants"
+    ]
   },
   {
     "id": "meetings.meeting.end",
@@ -737,7 +759,7 @@
     "method": "GET",
     "bridge_endpoint": "/meetings/audit",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "meetings.audit.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -746,8 +768,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MEETINGS",
-    "blocker": "Phase A2: meeting-service keeps this in its database only; operator read API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "meetings_audit_maps_window_and_time_cursor"
+    ]
   },
   {
     "id": "meetings.reports.list",
