@@ -38,44 +38,50 @@ async fn fake_github() -> (Shared, String) {
     let s = state.clone();
     tokio::spawn(async move {
         loop {
-            let Ok((tcp, _)) = l.accept().await else { continue };
+            let Ok((tcp, _)) = l.accept().await else {
+                continue;
+            };
             let s = s.clone();
             tokio::spawn(async move {
-                let svc = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                    let s = s.clone();
-                    async move {
-                        let (parts, body) = req.into_parts();
-                        let body = body.collect().await.unwrap().to_bytes();
-                        let auth = parts
-                            .headers
-                            .get("authorization")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or_default()
-                            .to_string();
-                        let path = parts.uri.path().to_string();
-                        let mut g = s.lock().unwrap();
-                        let (status, out) = if path.ends_with("/dispatches") {
-                            g.dispatches.push((
-                                path,
-                                auth,
-                                serde_json::from_slice(&body).unwrap_or(Value::Null),
-                            ));
-                            (g.dispatch_status, Vec::new())
-                        } else if path.ends_with("/runs") {
-                            g.run_queries.push(parts.uri.query().unwrap_or_default().to_string());
-                            let v = json!({"total_count": g.runs.len(), "workflow_runs": g.runs});
-                            (200, serde_json::to_vec(&v).unwrap())
-                        } else {
-                            (404, Vec::new())
-                        };
-                        Ok::<_, std::convert::Infallible>(
-                            hyper::Response::builder()
-                                .status(status)
-                                .body(Full::new(bytes::Bytes::from(out)))
-                                .unwrap(),
-                        )
-                    }
-                });
+                let svc = hyper::service::service_fn(
+                    move |req: hyper::Request<hyper::body::Incoming>| {
+                        let s = s.clone();
+                        async move {
+                            let (parts, body) = req.into_parts();
+                            let body = body.collect().await.unwrap().to_bytes();
+                            let auth = parts
+                                .headers
+                                .get("authorization")
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or_default()
+                                .to_string();
+                            let path = parts.uri.path().to_string();
+                            let mut g = s.lock().unwrap();
+                            let (status, out) = if path.ends_with("/dispatches") {
+                                g.dispatches.push((
+                                    path,
+                                    auth,
+                                    serde_json::from_slice(&body).unwrap_or(Value::Null),
+                                ));
+                                (g.dispatch_status, Vec::new())
+                            } else if path.ends_with("/runs") {
+                                g.run_queries
+                                    .push(parts.uri.query().unwrap_or_default().to_string());
+                                let v =
+                                    json!({"total_count": g.runs.len(), "workflow_runs": g.runs});
+                                (200, serde_json::to_vec(&v).unwrap())
+                            } else {
+                                (404, Vec::new())
+                            };
+                            Ok::<_, std::convert::Infallible>(
+                                hyper::Response::builder()
+                                    .status(status)
+                                    .body(Full::new(bytes::Bytes::from(out)))
+                                    .unwrap(),
+                            )
+                        }
+                    },
+                );
                 let _ = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(tcp), svc)
                     .await;
@@ -155,7 +161,10 @@ fn windowed(path: &str, permission: &str, sub: &str, cursor: &str) -> Call {
     let end = (Utc::now() + Duration::seconds(30)).format("%Y-%m-%dT%H:%M:%SZ");
     let mut c = call(
         path,
-        &format!("{}&limit=10{cursor}&start={start}&end={end}", scoped("release-request")),
+        &format!(
+            "{}&limit=10{cursor}&start={start}&end={end}",
+            scoped("release-request")
+        ),
         permission,
         &["cfmeet.release_manager"],
     );
@@ -180,13 +189,22 @@ async fn activation_requests_dispatch_once_and_list_their_runs() {
     assert_eq!(v["result"]["operation"]["status"], "SUCCEEDED");
     assert_eq!(v["result"]["operation"]["source_status"], "DISPATCHED");
     let r = &v["result"]["resource"];
-    assert_eq!((r["request_id"].as_str(), r["state"].as_str()), (Some(id.as_str()), Some("DISPATCHED")));
-    assert_eq!((r["requested_by"].as_str(), r["approver"].as_str()), (Some("hq:rm-0001"), Some("hq:release-approver")));
+    assert_eq!(
+        (r["request_id"].as_str(), r["state"].as_str()),
+        (Some(id.as_str()), Some("DISPATCHED"))
+    );
+    assert_eq!(
+        (r["requested_by"].as_str(), r["approver"].as_str()),
+        (Some("hq:rm-0001"), Some("hq:release-approver"))
+    );
     {
         let g = gh.lock().unwrap();
         assert_eq!(g.dispatches.len(), 1);
         let (path, auth, sent) = &g.dispatches[0];
-        assert_eq!(path, "/repos/cosmicforge/cfmeet/actions/workflows/cfmeet-coordinated-release.yml/dispatches");
+        assert_eq!(
+            path,
+            "/repos/cosmicforge/cfmeet/actions/workflows/cfmeet-coordinated-release.yml/dispatches"
+        );
         assert_eq!(auth, &format!("Bearer {TOKEN}"));
         assert_eq!(
             sent,
@@ -201,10 +219,16 @@ async fn activation_requests_dispatch_once_and_list_their_runs() {
     assert_eq!(gh.lock().unwrap().dispatches.len(), 1);
     // Not one of the workflow's options; a short sha: refused before anything is sent.
     let (_, mut bad) = activation_body("deploy-everything");
-    assert_eq!(code(&send(&h, &activation("rm-0002", bad.clone())).await.1), "COMMAND_BODY_INVALID");
+    assert_eq!(
+        code(&send(&h, &activation("rm-0002", bad.clone())).await.1),
+        "COMMAND_BODY_INVALID"
+    );
     bad["operation"] = json!("inspect");
     bad["release_sha"] = json!("abc123");
-    assert_eq!(code(&send(&h, &activation("rm-0003", bad)).await.1), "COMMAND_BODY_INVALID");
+    assert_eq!(
+        code(&send(&h, &activation("rm-0003", bad)).await.1),
+        "COMMAND_BODY_INVALID"
+    );
     // GitHub refuses: FAILED, nothing ran.
     gh.lock().unwrap().dispatch_status = 422;
     let (refused_id, body) = activation_body("verify");
@@ -235,25 +259,44 @@ async fn activation_requests_dispatch_once_and_list_their_runs() {
     assert_eq!(v["freshness"], "LIVE");
     let items = v["result"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
-    let dispatched = items.iter().find(|i| i["request_id"] == id.as_str()).unwrap();
+    let dispatched = items
+        .iter()
+        .find(|i| i["request_id"] == id.as_str())
+        .unwrap();
     assert_eq!(dispatched["run_id"], 77);
     assert_eq!(dispatched["run_status"], "COMPLETED");
     assert_eq!(dispatched["run_conclusion"], "SUCCESS");
-    let refused = items.iter().find(|i| i["request_id"] == refused_id.as_str()).unwrap();
+    let refused = items
+        .iter()
+        .find(|i| i["request_id"] == refused_id.as_str())
+        .unwrap();
     assert!(refused["run_id"].is_null() && refused["run_status"].is_null());
 
     // Release history: the runs, with the operation the bridge requested; nothing else.
     let (status, v) = send(
         &h,
-        &windowed("/operations/releases", "operations.releases.read", "rm-0005", ""),
+        &windowed(
+            "/operations/releases",
+            "operations.releases.read",
+            "rm-0005",
+            "",
+        ),
     )
     .await;
     assert_eq!(status, 200, "{v}");
     let r = &v["result"]["items"][0];
-    assert_eq!((r["run_id"].as_i64(), r["operation"].as_str()), (Some(77), Some("activate-oauth")));
+    assert_eq!(
+        (r["run_id"].as_i64(), r["operation"].as_str()),
+        (Some(77), Some("activate-oauth"))
+    );
     assert!(r.get("logs_url").is_none() && r.get("actor").is_none());
     assert!(v["result"]["next_cursor"].is_null());
-    assert!(gh.lock().unwrap().run_queries.iter().any(|q| q.contains("branch=main")));
+    assert!(gh
+        .lock()
+        .unwrap()
+        .run_queries
+        .iter()
+        .any(|q| q.contains("branch=main")));
 }
 
 #[tokio::test]
@@ -292,9 +335,22 @@ async fn an_unknown_dispatch_settles_from_the_runs_list_and_is_never_resent() {
     let key = uuid::Uuid::parse_str(&lost).unwrap();
     h.store.backdate_operation(key, 700);
     commands::sweep(&h.bridge).await;
-    let op = h.store.operations().into_iter().find(|o| o.idempotency_key == key).unwrap();
-    assert_eq!((op.status, op.source_status.as_deref()), (OpStatus::Failed, Some("NOT_RECEIVED")));
-    let rec = h.store.activations().into_iter().find(|a| a.request_id == key).unwrap();
+    let op = h
+        .store
+        .operations()
+        .into_iter()
+        .find(|o| o.idempotency_key == key)
+        .unwrap();
+    assert_eq!(
+        (op.status, op.source_status.as_deref()),
+        (OpStatus::Failed, Some("NOT_RECEIVED"))
+    );
+    let rec = h
+        .store
+        .activations()
+        .into_iter()
+        .find(|a| a.request_id == key)
+        .unwrap();
     assert_eq!(rec.state, "FAILED");
     assert_eq!(gh.lock().unwrap().dispatches.len(), 2);
 }
@@ -312,7 +368,12 @@ async fn activation_requests_are_disabled_without_github() {
     assert!(h.store.operations().is_empty() && h.store.activations().is_empty());
     let (status, v) = send(
         &h,
-        &windowed("/operations/releases", "operations.releases.read", "rm-0202", ""),
+        &windowed(
+            "/operations/releases",
+            "operations.releases.read",
+            "rm-0202",
+            "",
+        ),
     )
     .await;
     assert_eq!(status, 200, "{v}");
@@ -337,7 +398,12 @@ async fn release_history_is_the_workflow_runs_without_logs() {
     gh.lock().unwrap().runs = vec![queued, run(4, SHA, Utc::now() - Duration::days(3))];
     let (status, v) = send(
         &h,
-        &windowed("/operations/releases", "operations.releases.read", "rm-0301", ""),
+        &windowed(
+            "/operations/releases",
+            "operations.releases.read",
+            "rm-0301",
+            "",
+        ),
     )
     .await;
     assert_eq!(status, 200, "{v}");
@@ -352,11 +418,19 @@ async fn release_history_is_the_workflow_runs_without_logs() {
         })
     );
     let q = gh.lock().unwrap().run_queries[0].clone();
-    assert!(q.contains("created=") && q.contains("per_page=10") && q.contains("page=1"), "{q}");
+    assert!(
+        q.contains("created=") && q.contains("per_page=10") && q.contains("page=1"),
+        "{q}"
+    );
     // A bad cursor is refused.
     let (_, v) = send(
         &h,
-        &windowed("/operations/releases", "operations.releases.read", "rm-0302", "&cursor=x"),
+        &windowed(
+            "/operations/releases",
+            "operations.releases.read",
+            "rm-0302",
+            "&cursor=x",
+        ),
     )
     .await;
     assert_eq!(code(&v), "QUERY_INVALID");

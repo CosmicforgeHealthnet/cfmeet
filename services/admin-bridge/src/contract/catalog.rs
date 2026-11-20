@@ -3031,7 +3031,9 @@ pub fn catalog() -> Vec<Capability> {
         .risk(R::R4, V::Internal)
         .roles(&[L::ReleaseManager])
         .purposes(&[U::ReleaseRequest])
-        .source("POST /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/dispatches")
+        .source(
+            "POST /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/dispatches",
+        )
         .body("OperationsActivationRequest")
         .result("OperationsActivationCommandResult")
         .served(&[

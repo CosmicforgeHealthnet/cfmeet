@@ -8,9 +8,8 @@ use std::sync::Arc;
 use admin_bridge::events::{run_events, EventIngress, EVENTS_PATH};
 use admin_bridge::store::{OwnerEvent, Store};
 use cf_service_auth::{
-    services as s, KeyId, OutboundServiceRequest, RuntimeEnvironment, ServiceId,
-    ServiceSigningKey, ServiceTokenSigner, ServiceTokenVerifier, SystemClock, TokenTtl,
-    TrustPolicy,
+    services as s, KeyId, OutboundServiceRequest, RuntimeEnvironment, ServiceId, ServiceSigningKey,
+    ServiceTokenSigner, ServiceTokenVerifier, SystemClock, TokenTtl, TrustPolicy,
 };
 use chrono::{Duration, Utc};
 use common::*;
@@ -37,9 +36,7 @@ fn signer(id: ServiceId, k: ServiceSigningKey) -> ServiceTokenSigner {
 /// Organizations signs with a key the bundle does not trust.
 async fn listener(h: &Harness) -> Producers {
     let (dev, call, org) = (key("dev-test-1"), key("calling-test-1"), key("org-test-1"));
-    let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| {
-        json!({"issuer": id, "audience": s::ADMIN_BRIDGE, "runtime_environment": ENV, "keys": [k.public_jwk()], "permissions": perms})
-    };
+    let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| json!({"issuer": id, "audience": s::ADMIN_BRIDGE, "runtime_environment": ENV, "keys": [k.public_jwk()], "permissions": perms});
     let bundle = json!({
         "bundle_version": 1,
         "receiver": s::ADMIN_BRIDGE,
@@ -87,7 +84,10 @@ async fn post(p: &Producers, headers: reqwest::header::HeaderMap, body: &Value) 
         .await
         .unwrap();
     let status = r.status().as_u16();
-    (status, serde_json::from_slice(&r.bytes().await.unwrap()).unwrap())
+    (
+        status,
+        serde_json::from_slice(&r.bytes().await.unwrap()).unwrap(),
+    )
 }
 
 fn event(id: uuid::Uuid, kind: &str, subject: &str, state: &str, version: i64) -> Value {
@@ -105,11 +105,25 @@ async fn owner_events_are_deduplicated_versioned_and_quarantined() {
     let p = listener(&h).await;
     const CASE: &str = "verification.case.changed.v1";
     let first = uuid::Uuid::new_v4();
-    let (status, v) = post(&p, signed(&p.developer), &event(first, CASE, "case-1", "OPEN", 2)).await;
-    assert_eq!((status, v["status"].as_str()), (202, Some("APPENDED")), "{v}");
+    let (status, v) = post(
+        &p,
+        signed(&p.developer),
+        &event(first, CASE, "case-1", "OPEN", 2),
+    )
+    .await;
+    assert_eq!(
+        (status, v["status"].as_str()),
+        (202, Some("APPENDED")),
+        "{v}"
+    );
     assert_eq!(v["sequence"], 1);
     // The same event again (a new token): a duplicate, nothing changes.
-    let (_, v) = post(&p, signed(&p.developer), &event(first, CASE, "case-1", "OPEN", 2)).await;
+    let (_, v) = post(
+        &p,
+        signed(&p.developer),
+        &event(first, CASE, "case-1", "OPEN", 2),
+    )
+    .await;
     assert_eq!(v["status"], "DUPLICATE");
     // Not newer for the same subject: accepted, not appended. Newer: appended.
     let (_, v) = post(
@@ -125,7 +139,10 @@ async fn owner_events_are_deduplicated_versioned_and_quarantined() {
         &event(uuid::Uuid::new_v4(), CASE, "case-1", "APPROVED", 3),
     )
     .await;
-    assert_eq!((v["status"].as_str(), v["sequence"].as_i64()), (Some("APPENDED"), Some(2)));
+    assert_eq!(
+        (v["status"].as_str(), v["sequence"].as_i64()),
+        (Some("APPENDED"), Some(2))
+    );
     // Calling does not publish verification cases; nobody publishes an unknown type.
     let (_, v) = post(
         &p,
@@ -137,20 +154,29 @@ async fn owner_events_are_deduplicated_versioned_and_quarantined() {
     let (_, v) = post(
         &p,
         signed(&p.developer),
-        &event(uuid::Uuid::new_v4(), "workspace.renamed.v1", "w-1", "OPEN", 1),
+        &event(
+            uuid::Uuid::new_v4(),
+            "workspace.renamed.v1",
+            "w-1",
+            "OPEN",
+            1,
+        ),
     )
     .await;
     assert_eq!(v["status"], "QUARANTINED");
     // A token is single use.
     let once = signed(&p.calling);
-    let body = event(uuid::Uuid::new_v4(), "abuse.report.changed.v1", "r-1", "OPEN", 1);
+    let body = event(
+        uuid::Uuid::new_v4(),
+        "abuse.report.changed.v1",
+        "r-1",
+        "OPEN",
+        1,
+    );
     assert_eq!(post(&p, once.clone(), &body).await.1["status"], "APPENDED");
     assert_eq!(post(&p, once, &body).await.0, 401);
     // Not trusted; no token; an open body (personal data is never accepted).
-    assert_eq!(
-        post(&p, signed(&p.organizations), &body).await.0,
-        401
-    );
+    assert_eq!(post(&p, signed(&p.organizations), &body).await.0, 401);
     assert_eq!(
         post(&p, reqwest::header::HeaderMap::new(), &body).await.0,
         401
@@ -161,12 +187,27 @@ async fn owner_events_are_deduplicated_versioned_and_quarantined() {
 
     let feed = h
         .store
-        .event_feed(Utc::now() - Duration::hours(1), Utc::now() + Duration::minutes(1), None, 10)
+        .event_feed(
+            Utc::now() - Duration::hours(1),
+            Utc::now() + Duration::minutes(1),
+            None,
+            10,
+        )
         .await
         .unwrap();
     assert_eq!(
-        feed.iter().map(|f| (f.sequence, f.event.state.as_str(), f.event.producer.as_str())).collect::<Vec<_>>(),
-        [(1, "OPEN", "developer-platform"), (2, "APPROVED", "developer-platform"), (3, "OPEN", "calling")]
+        feed.iter()
+            .map(|f| (
+                f.sequence,
+                f.event.state.as_str(),
+                f.event.producer.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (1, "OPEN", "developer-platform"),
+            (2, "APPROVED", "developer-platform"),
+            (3, "OPEN", "calling")
+        ]
     );
     let inbox = h
         .store
@@ -208,7 +249,10 @@ async fn the_feed_pages_in_sequence_and_acknowledgements_never_move_back() {
     let feed = |cursor: &str| {
         worker(
             "/hq/events",
-            &format!("{}&limit=2{cursor}&start={start_t}&end={end_t}", scoped("event-sync")),
+            &format!(
+                "{}&limit=2{cursor}&start={start_t}&end={end_t}",
+                scoped("event-sync")
+            ),
             "hq.events.read",
             "hq-worker",
         )
@@ -219,7 +263,10 @@ async fn the_feed_pages_in_sequence_and_acknowledgements_never_move_back() {
     let items = v["result"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0]["sequence"], 1);
-    assert_eq!(items[0]["subject"], json!({"kind": "verification_case", "id": "case-1"}));
+    assert_eq!(
+        items[0]["subject"],
+        json!({"kind": "verification_case", "id": "case-1"})
+    );
     assert_eq!(items[1]["state"], "CLAIMED");
     assert_eq!(v["result"]["next_cursor"], "2");
     let (_, v) = send(&h, &feed("&cursor=2")).await;
@@ -251,6 +298,9 @@ async fn the_feed_pages_in_sequence_and_acknowledgements_never_move_back() {
         json!({"consumer": "hq-cfmeet-admin", "acknowledged_sequence": 2})
     );
     // Lower: the stored one. Beyond the head: refused, nothing changed.
-    assert_eq!(send(&h, &ack(1)).await.1["result"]["acknowledged_sequence"], 2);
+    assert_eq!(
+        send(&h, &ack(1)).await.1["result"]["acknowledged_sequence"],
+        2
+    );
     assert_eq!(code(&send(&h, &ack(9)).await.1), "COMMAND_BODY_INVALID");
 }

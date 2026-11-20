@@ -454,14 +454,20 @@ mod tests {
             "updated_at": "2026-11-20T10:01:00Z", "display_title": "x", "actor": {"login": "someone"}
         }))
         .unwrap();
-        assert_eq!((run.id, run.status.as_str(), run.conclusion), (42, "IN_PROGRESS", None));
+        assert_eq!(
+            (run.id, run.status.as_str(), run.conclusion),
+            (42, "IN_PROGRESS", None)
+        );
         let odd = parse_run(&json!({
             "id": 43, "event": "workflow_dispatch", "head_sha": "b".repeat(40),
             "status": "brand_new", "conclusion": "weird", "created_at": "2026-11-20T10:00:00Z",
             "updated_at": "2026-11-20T10:01:00Z"
         }))
         .unwrap();
-        assert_eq!((odd.status.as_str(), odd.conclusion.as_deref()), ("UNKNOWN", Some("UNKNOWN")));
+        assert_eq!(
+            (odd.status.as_str(), odd.conclusion.as_deref()),
+            ("UNKNOWN", Some("UNKNOWN"))
+        );
         assert!(parse_run(&json!({"id": 1, "event": "x", "head_sha": "zz"})).is_none());
     }
 }

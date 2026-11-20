@@ -546,7 +546,12 @@ impl Store for MemoryStore {
             });
         match outcome {
             IngestOutcome::Quarantined => row.quarantined += 1,
-            _ => row.last_event_at = Some(row.last_event_at.map_or(received_at, |t| t.max(received_at))),
+            _ => {
+                row.last_event_at = Some(
+                    row.last_event_at
+                        .map_or(received_at, |t| t.max(received_at)),
+                )
+            }
         }
         row.updated_at = received_at;
         g.projections.retain(|p| p.name != name);
@@ -683,9 +688,11 @@ impl Store for MemoryStore {
         if inner.activations.iter().any(|a| a.run_id == Some(run_id)) {
             return Ok(false);
         }
-        match inner.activations.iter_mut().find(|a| {
-            a.request_id == request_id && a.state == "DISPATCHED" && a.run_id.is_none()
-        }) {
+        match inner
+            .activations
+            .iter_mut()
+            .find(|a| a.request_id == request_id && a.state == "DISPATCHED" && a.run_id.is_none())
+        {
             Some(a) => {
                 a.run_id = Some(run_id);
                 Ok(true)

@@ -129,7 +129,11 @@ pub fn parse_event(producer: &str, body: &[u8], now: DateTime<Utc>) -> Option<Ow
         .as_str()
         .filter(|i| opaque_ok(i))?
         .to_string();
-    let state = o.get("state")?.as_str().filter(|s| state_ok(s))?.to_string();
+    let state = o
+        .get("state")?
+        .as_str()
+        .filter(|s| state_ok(s))?
+        .to_string();
     let version = o.get("version")?.as_i64().filter(|v| *v >= 1)?;
     let occurred_at = DateTime::parse_from_rfc3339(o.get("occurred_at")?.as_str()?)
         .ok()?
@@ -241,7 +245,10 @@ pub async fn ingest(
                 IngestOutcome::Appended(s) => json!(s),
                 _ => Value::Null,
             };
-            answer(202, json!({"status": outcome.as_str(), "sequence": sequence}))
+            answer(
+                202,
+                json!({"status": outcome.as_str(), "sequence": sequence}),
+            )
         }
         Err(_) => refused(503, "UNAVAILABLE"),
     }
@@ -298,9 +305,8 @@ pub async fn run_events(bridge: Arc<Bridge>, listener: TcpListener, ingress: Arc
         };
         let (bridge, ingress) = (bridge.clone(), ingress.clone());
         tokio::spawn(async move {
-            let service = hyper::service::service_fn(move |req| {
-                serve(bridge.clone(), ingress.clone(), req)
-            });
+            let service =
+                hyper::service::service_fn(move |req| serve(bridge.clone(), ingress.clone(), req));
             let _ = hyper::server::conn::http1::Builder::new()
                 .max_buf_size(MAX_EVENT_BYTES as usize + 16 * 1024)
                 .serve_connection(TokioIo::new(tcp), service)
@@ -342,7 +348,10 @@ mod tests {
         ] {
             let mut b = good();
             b[k] = v;
-            assert!(parse_event("developer-platform", &body(b), now).is_none(), "{k}");
+            assert!(
+                parse_event("developer-platform", &body(b), now).is_none(),
+                "{k}"
+            );
         }
     }
 
