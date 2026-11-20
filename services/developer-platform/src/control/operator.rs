@@ -124,6 +124,9 @@ pub async fn register_first_party(
 pub struct SetState {
     pub state: String,
     pub reason: String,
+    /// Admin bridge: the workspace version the change applies to.
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 pub fn valid_reason(reason: &str) -> bool {

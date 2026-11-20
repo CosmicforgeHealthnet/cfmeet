@@ -31,11 +31,12 @@ use uuid::Uuid;
 use super::{
     activity::{self, Event},
     authorize,
+    bridge_command::{self, BridgeCommand, Subject},
     service_accounts::{environment, EnvironmentRef},
     stmt, Caller,
 };
 use crate::{
-    domain::rbac::Action,
+    domain::{rbac::Action, RequestContext},
     http::error::{ApiError, ErrorCode},
     push_providers::{seal_secret, PushProviders, PushReply, PushScope},
     state::AppState,
@@ -603,6 +604,135 @@ pub async fn verify(
         .ok_or(ApiError(ErrorCode::NotFound))?;
     txn.commit().await?;
     Ok(v)
+}
+
+/// Admin bridge command name.
+pub const DISABLE_COMMAND: &str = "partners.push-key.disable";
+
+/// A push credential as the admin bridge's command answer shows it (ids, state,
+/// timestamps; never key material, identifiers of the key or its fingerprint).
+async fn bridge_resource<C: ConnectionTrait>(db: &C, id: Uuid) -> Result<Value, ApiError> {
+    let row = db
+        .query_one(stmt(
+            "SELECT jsonb_build_object('pushKeyId', id, 'organizationId', tenant_id,                     'projectId', application_id, 'environmentId', environment_id, 'provider', provider,                     'state', state, 'disabledAt', disabled_at, 'disabledReason', disabled_reason,                     'updatedAt', updated_at) AS v              FROM devplat_push_providers WHERE id = $1",
+            vec![id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::NotFound))?;
+    Ok(row.try_get("", "v")?)
+}
+
+/// `POST /internal/v1/operator/organizations/{id}/push-providers/{pushProviderId}/disable`
+/// (admin bridge only, R3): deletes the credential from the Notification Service vault —
+/// nothing more can be sent with it — and keeps its metadata `DISABLED` (the partner's
+/// console shows it `FAILED` with `DISABLED_BY_OPERATOR`; uploading again re-enables push
+/// with a new credential). The row stays locked at the expected version while the vault
+/// is asked, so a concurrent change is a VERSION_CONFLICT with nothing done.
+pub async fn operator_disable(
+    state: &AppState,
+    operator: &str,
+    request: &RequestContext,
+    tenant_id: Uuid,
+    id: Uuid,
+    reason_code: Option<String>,
+    bridge: &BridgeCommand,
+) -> Result<Value, ApiError> {
+    enabled(state)?;
+    let reason = reason_code.unwrap_or_else(|| "OPERATOR_DISABLED".to_string());
+    if !super::operator::valid_reason(&reason) {
+        return Err(ApiError(ErrorCode::ValidationError));
+    }
+    let row = state
+        .db
+        .query_one(stmt(
+            "SELECT environment_id, provider FROM devplat_push_providers WHERE id = $1 AND tenant_id = $2",
+            vec![id.into(), tenant_id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::NotFound))?;
+    let environment_id: Uuid = row.try_get("", "environment_id")?;
+    let provider: String = row.try_get("", "provider")?;
+    if let Some((st, v)) =
+        bridge_command::prior(&state.db, bridge, DISABLE_COMMAND, Subject::PushKey, id).await?
+    {
+        return Ok(bridge_command::answer(
+            &st,
+            v,
+            bridge_resource(&state.db, id).await?,
+        ));
+    }
+    let push = configured(state)?;
+    let env = environment(&state.db, environment_id).await?;
+    let txn = state.db.begin().await?;
+    bridge_command::lock_version(&txn, bridge, Subject::PushKey, id).await?;
+    let current: String = txn
+        .query_one(stmt(
+            "SELECT state FROM devplat_push_providers WHERE id = $1",
+            vec![id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::NotFound))?
+        .try_get("", "state")?;
+    if current != "ACTIVE" {
+        return Err(ApiError(ErrorCode::InvalidState));
+    }
+    match push
+        .port
+        .delete(
+            &scope(&env, environment_id),
+            &provider,
+            &request.correlation_id,
+        )
+        .await
+        .map_err(unavailable)?
+    {
+        // Already gone at the vault: the metadata is disabled all the same.
+        PushReply::Ok(_) | PushReply::Refused { status: 404, .. } => {}
+        PushReply::Refused { status, code } => return Err(vault_refusal(status, &code)),
+    }
+    let now = Utc::now();
+    txn.execute(stmt(
+        "UPDATE devplat_push_providers SET state = 'DISABLED', disabled_at = $2, disabled_reason = $3,              verification = 'FAILED', last_error_code = 'DISABLED_BY_OPERATOR', updated_at = $2,              version = version + 1 WHERE id = $1",
+        vec![id.into(), now.into(), reason.clone().into()],
+    ))
+    .await?;
+    activity::record_operator(
+        &txn,
+        operator,
+        request.request_id.as_str(),
+        request.correlation_id.as_str(),
+        Event {
+            tenant_id,
+            action: "push_credential.disabled",
+            target_type: "PUSH_CREDENTIAL",
+            target_id: id.to_string(),
+            summary: json!({
+                "projectId": env.project_id, "environmentId": environment_id,
+                "provider": provider, "reasonCode": reason,
+            }),
+        },
+    )
+    .await?;
+    bridge_command::record(
+        &txn,
+        bridge,
+        DISABLE_COMMAND,
+        Subject::PushKey,
+        id,
+        tenant_id,
+    )
+    .await?;
+    let resource = bridge_resource(&txn, id).await?;
+    let version: i64 = txn
+        .query_one(stmt(
+            "SELECT version FROM devplat_push_providers WHERE id = $1",
+            vec![id.into()],
+        ))
+        .await?
+        .ok_or(ApiError(ErrorCode::InternalError))?
+        .try_get("", "version")?;
+    txn.commit().await?;
+    Ok(bridge_command::answer("DISABLED", Some(version), resource))
 }
 
 #[cfg(test)]

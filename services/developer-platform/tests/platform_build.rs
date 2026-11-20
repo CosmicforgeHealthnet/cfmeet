@@ -1402,3 +1402,161 @@ async fn message_sent_usage_is_accepted_from_messaging_only_and_shown_everywhere
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// ADR 0068 A4: HQ disables a partner's push key through the admin bridge
+// ---------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn hq_disables_a_push_key_without_ever_seeing_key_material() {
+    let vault = Arc::new(FakeVault::default());
+    let Some(c) = harness(all_on(), Some(vault.clone())).await else {
+        return;
+    };
+    let (owner, _) = c.sessions.sign_in("owner@push-hq.example");
+    let (org, _, env) = workspace(&c, &owner).await;
+    let r = c
+        .req(
+            As::User(&owner),
+            Method::POST,
+            &format!("/v1/environments/{env}/push-credentials"),
+            Some(
+                json!({ "provider": "APNS", "teamId": "ABCDE12345", "keyId": "KEY1234567",
+                "bundleId": "com.rider.app", "voip": false, "apnsHost": "SANDBOX", "p8": p8() }),
+            ),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    let credential = r.json["credentialRef"].as_str().unwrap().to_string();
+    let hq = ("x-cf-operator", "hq:staff-0001");
+    // The operator read shows the key's state and version (never the key).
+    let list = c
+        .bridge(
+            &format!("/internal/v1/operator/organizations/{org}/push-providers"),
+            &[hq],
+        )
+        .await;
+    assert_eq!(list.status, StatusCode::OK, "{}", list.json);
+    conforms(&format!("{CTRL}OperatorPushProviderList"), &list.json);
+    assert_eq!(list.json["items"][0]["state"], "ACTIVE");
+    let v = list.json["items"][0]["version"].as_i64().unwrap();
+    let path =
+        format!("/internal/v1/operator/organizations/{org}/push-providers/{credential}/disable");
+    let key = Uuid::new_v4().to_string();
+    let two = [
+        hq,
+        ("x-cf-approver", "hq:staff-0002"),
+        ("x-cf-approval-ref", "appr-3"),
+        (
+            "x-cf-intent-digest",
+            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        ),
+        ("idempotency-key", key.as_str()),
+    ];
+    // R3: no second person → refused; stale version → conflict; the vault is untouched.
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &path,
+            &[hq, ("idempotency-key", &key)],
+            Some(json!({ "expectedVersion": v })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.json);
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &path,
+            &two,
+            Some(json!({ "expectedVersion": v + 1 })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.json);
+    assert_eq!(vault.calls.lock().unwrap().len(), 1, "only the upload");
+    // Another workspace's key: 404.
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &format!(
+                "/internal/v1/operator/organizations/{}/push-providers/{credential}/disable",
+                Uuid::new_v4()
+            ),
+            &two,
+            Some(json!({ "expectedVersion": v })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND, "{}", r.json);
+    // Disabled: deleted from the vault, metadata kept DISABLED.
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &path,
+            &two,
+            Some(json!({ "expectedVersion": v, "reasonCode": "KEY_COMPROMISED" })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    conforms(&format!("{CTRL}AdminCommandResult"), &r.json);
+    assert_eq!(r.json["status"], "DISABLED");
+    assert_eq!(r.json["version"], (v + 1).to_string());
+    assert_eq!(r.json["resource"]["state"], "DISABLED");
+    let text = r.json.to_string();
+    assert!(
+        !text.contains(SECRET_MARKER)
+            && !text.contains("fingerprint")
+            && !text.contains("KEY1234567")
+    );
+    {
+        let calls = vault.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(
+            (calls[1].0.as_str(), calls[1].2.as_str()),
+            ("DELETE", "APNS")
+        );
+    }
+    // A replay is answered, the vault is not asked again.
+    let again = c
+        .bridge_send(
+            Method::POST,
+            &path,
+            &two,
+            Some(json!({ "expectedVersion": v, "reasonCode": "KEY_COMPROMISED" })),
+        )
+        .await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.json);
+    assert_eq!(again.json["status"], "DISABLED");
+    assert_eq!(vault.calls.lock().unwrap().len(), 2);
+    let rec = c
+        .bridge(&format!("/internal/v1/operator/operations/{key}"), &[hq])
+        .await;
+    assert_eq!(rec.json["source_status"], "DISABLED");
+    assert_eq!(rec.json["source_version"], (v + 1).to_string());
+    // The partner sees it failed, with the reason code only.
+    let mine = c
+        .req(
+            As::User(&owner),
+            Method::GET,
+            &format!("/v1/environments/{env}/push-credentials"),
+            None,
+        )
+        .await;
+    conforms(&format!("{CTRL}PushCredentialList"), &mine.json);
+    assert_eq!(mine.json["items"][0]["status"], "FAILED");
+    assert_eq!(mine.json["items"][0]["lastError"], "DISABLED_BY_OPERATOR");
+    // Disabling again: a definite refusal.
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &path,
+            &[
+                two[0],
+                two[1],
+                two[2],
+                two[3],
+                ("idempotency-key", &Uuid::new_v4().to_string()),
+            ],
+            Some(json!({ "expectedVersion": v + 1 })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.json);
+}

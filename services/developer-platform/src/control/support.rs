@@ -17,7 +17,9 @@ use uuid::Uuid;
 
 use super::{
     activity::{self, Event},
-    authorize, production, stmt, Caller,
+    authorize,
+    bridge_command::{self, BridgeCommand, Subject},
+    production, stmt, Caller,
 };
 use crate::{
     domain::{rbac::Action, RequestContext},
@@ -170,6 +172,9 @@ pub struct OperatorProfile {
     pub support_tier: String,
     #[serde(default)]
     pub support_reference: Option<String>,
+    /// Admin bridge: the support profile version the change applies to (0: none yet).
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 /// `PUT /internal/v1/operator/organizations/{id}/support-profile`.
@@ -179,6 +184,7 @@ pub async fn operator_put(
     request: &RequestContext,
     tenant_id: Uuid,
     body: OperatorProfile,
+    bridge: Option<&BridgeCommand>,
 ) -> Result<Value, ApiError> {
     if !TIERS.contains(&body.support_tier.as_str())
         || body
@@ -194,7 +200,11 @@ pub async fn operator_put(
     {
         return Err(ApiError(ErrorCode::NotFound));
     }
+    if let Some(v) = bridge_replay(state, bridge, TIER_COMMAND, tenant_id).await? {
+        return Ok(v);
+    }
     let txn = state.db.begin().await?;
+    bridge_lock(&txn, bridge, tenant_id, operator).await?;
     txn.execute(stmt(
         "INSERT INTO devplat_support_profiles (tenant_id, support_tier, support_reference, updated_by, updated_at) \
          VALUES ($1, $2, $3, $4, $5) ON CONFLICT (tenant_id) DO UPDATE SET support_tier = EXCLUDED.support_tier, \
@@ -224,6 +234,23 @@ pub async fn operator_put(
     )
     .await?;
     let v = view(&txn, tenant_id).await?;
+    if let Some(b) = bridge {
+        bridge_command::record(
+            &txn,
+            b,
+            TIER_COMMAND,
+            Subject::SupportProfile,
+            tenant_id,
+            tenant_id,
+        )
+        .await?;
+        txn.commit().await?;
+        return Ok(bridge_command::answer(
+            &body.support_tier,
+            v["version"].as_i64(),
+            bridge_resource(&state.db, tenant_id).await?,
+        ));
+    }
     txn.commit().await?;
     Ok(v)
 }
@@ -233,6 +260,74 @@ pub async fn operator_put(
 pub struct Incident {
     pub incident_ref: String,
     pub occurred_at: DateTime<Utc>,
+    /// Admin bridge: the support profile version the record applies to (0: none yet).
+    #[serde(default)]
+    pub expected_version: Option<i64>,
+}
+
+/// Admin bridge command names.
+pub const TIER_COMMAND: &str = "partners.support-tier.change";
+pub const INCIDENT_COMMAND: &str = "partners.incident.record";
+
+/// The support profile as the admin bridge's command answer shows it.
+pub async fn bridge_resource<C: ConnectionTrait>(
+    db: &C,
+    tenant_id: Uuid,
+) -> Result<Value, ApiError> {
+    let v = view(db, tenant_id).await?;
+    Ok(json!({
+        "organizationId": tenant_id,
+        "supportTier": v["supportTier"],
+        "lastIncident": v["lastIncident"],
+        "updatedAt": v["updatedAt"],
+    }))
+}
+
+/// The bridge's replay answer, or `None` (the key is new).
+async fn bridge_replay(
+    state: &AppState,
+    bridge: Option<&BridgeCommand>,
+    command: &str,
+    tenant_id: Uuid,
+) -> Result<Option<Value>, ApiError> {
+    let Some(b) = bridge else { return Ok(None) };
+    match bridge_command::prior(&state.db, b, command, Subject::SupportProfile, tenant_id).await? {
+        Some((st, v)) => Ok(Some(bridge_command::answer(
+            &st,
+            v,
+            bridge_resource(&state.db, tenant_id).await?,
+        ))),
+        None => Ok(None),
+    }
+}
+
+/// Under the bridge, locks the profile at the expected version; a profile never set
+/// (expected version 0) is created first, so the change below updates it.
+async fn bridge_lock<C: ConnectionTrait>(
+    txn: &C,
+    bridge: Option<&BridgeCommand>,
+    tenant_id: Uuid,
+    operator: &str,
+) -> Result<(), ApiError> {
+    let Some(b) = bridge else { return Ok(()) };
+    if !bridge_command::lock_version_or_absent(txn, b, Subject::SupportProfile, tenant_id).await? {
+        let inserted = txn
+            .execute(stmt(
+                "INSERT INTO devplat_support_profiles (tenant_id, support_tier, updated_by, updated_at) \
+                 VALUES ($1, 'STANDARD', $2, $3) ON CONFLICT (tenant_id) DO NOTHING",
+                vec![
+                    tenant_id.into(),
+                    format!("operator:{operator}").into(),
+                    Utc::now().into(),
+                ],
+            ))
+            .await?
+            .rows_affected();
+        if inserted != 1 {
+            return Err(ApiError(ErrorCode::VersionConflict));
+        }
+    }
+    Ok(())
 }
 
 /// `POST /internal/v1/operator/organizations/{id}/incidents` — the last known platform
@@ -244,6 +339,7 @@ pub async fn operator_incident(
     request: &RequestContext,
     tenant_id: Uuid,
     body: Incident,
+    bridge: Option<&BridgeCommand>,
 ) -> Result<Value, ApiError> {
     if !reference(&body.incident_ref)
         || body.occurred_at > Utc::now() + chrono::Duration::minutes(5)
@@ -256,7 +352,11 @@ pub async fn operator_incident(
     {
         return Err(ApiError(ErrorCode::NotFound));
     }
+    if let Some(v) = bridge_replay(state, bridge, INCIDENT_COMMAND, tenant_id).await? {
+        return Ok(v);
+    }
     let txn = state.db.begin().await?;
+    bridge_lock(&txn, bridge, tenant_id, operator).await?;
     txn.execute(stmt(
         "INSERT INTO devplat_support_profiles (tenant_id, support_tier, last_incident_ref, last_incident_at, \
            updated_by, updated_at) VALUES ($1, 'STANDARD', $2, $3, $4, $5) \
@@ -287,6 +387,26 @@ pub async fn operator_incident(
     )
     .await?;
     let v = view(&txn, tenant_id).await?;
+    if let Some(b) = bridge {
+        let version = v["version"].as_i64();
+        bridge_command::record_result(
+            &txn,
+            b,
+            INCIDENT_COMMAND,
+            Subject::SupportProfile,
+            tenant_id,
+            tenant_id,
+            "RECORDED",
+            version,
+        )
+        .await?;
+        txn.commit().await?;
+        return Ok(bridge_command::answer(
+            "RECORDED",
+            version,
+            bridge_resource(&state.db, tenant_id).await?,
+        ));
+    }
     txn.commit().await?;
     Ok(v)
 }

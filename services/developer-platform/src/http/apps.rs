@@ -208,9 +208,10 @@ async fn operator_get(
     Ok(Json(review::operator_get(&s.db, id).await?))
 }
 
-/// `POST …/{appId}/{review|approve|reject|publish|suspend}`. Every command but suspend
-/// needs a named reviewer and the reviewing operator's CF Meet user id
-/// (`x-cf-operator-user-id`; a member of the app's workspace never decides it).
+/// `POST …/{appId}/{review|approve|reject|publish|suspend|lift-suspension}`. Every command
+/// but suspend / lift-suspension needs a named reviewer and the reviewing operator's CF
+/// Meet user id (`x-cf-operator-user-id`; a member of the app's workspace never decides
+/// it). lift-suspension is the admin bridge's only (ADR 0068 A4).
 async fn operator_decide(
     State(s): State<AppState>,
     caller: InternalCaller,
@@ -256,8 +257,9 @@ async fn operator_decide(
         bridge.as_ref(),
     )
     .await?;
-    // The admin bridge gets the case as HQ sees it (state and version included).
-    if bridge.is_some() {
+    // The admin bridge gets the case as HQ sees it (state and version included) for the
+    // A3 verification decisions; suspend / lift-suspension answer the A4 standard shape.
+    if bridge.is_some() && !command.standard_answer() {
         use crate::control::verification;
         return Ok(Json(
             verification::read(&s.db, &verification::case_id(verification::APP_REVIEW, id)).await?,
