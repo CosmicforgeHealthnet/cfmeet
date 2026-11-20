@@ -166,6 +166,7 @@ pub fn key(o: &Value) -> T<Value> {
         ("suspension_reason", t::opt_string(o, "suspensionReason")?),
         ("last_used_at", t::opt_time(o, "lastUsedAt")?),
         ("revision", t::int(o, "revision")?),
+        ("version", t::int(o, "version")?),
         ("created_at", t::time(o, "createdAt")?),
     ]))
 }

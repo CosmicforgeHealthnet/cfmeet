@@ -92,7 +92,9 @@ pub fn insert(m: &mut Map<String, Value>) {
             "scopes": scopes, "not_before": ts, "expires_at": ts, "revoked_at": nullable_ts,
             "superseded_at": nullable_ts, "suspended_at": nullable_ts,
             "suspension_reason": {"type": ["string", "null"], "maxLength": 64},
-            "last_used_at": nullable_ts, "revision": revision, "created_at": ts
+            "last_used_at": nullable_ts, "revision": revision,
+            "version": {"type": "integer", "minimum": 1, "description": "revision plus suspend/resume changes: the key commands' expected_version."},
+            "created_at": ts
         }),
     );
     add(

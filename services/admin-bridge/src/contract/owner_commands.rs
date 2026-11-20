@@ -30,6 +30,8 @@ pub enum In {
     UuidList(usize),
     /// A JSON object the owner validates (e.g. a partial policy document).
     Object,
+    /// Distinct values of the list, at most this many.
+    EnumList(&'static [&'static str], usize),
 }
 
 /// Where a body field goes.
@@ -41,6 +43,8 @@ pub enum Place {
     Path,
     /// The owner body and the ledger target (the resource the version belongs to).
     BodyAndTarget,
+    /// Never sent by HQ: the owner body always carries this value.
+    Fixed(&'static str),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +125,17 @@ const fn p(hq: &'static str, kind: In) -> BodyField {
         kind,
         required: true,
         place: Place::Path,
+    }
+}
+
+/// A value the bridge always sends to the owner (HQ cannot send this field).
+const fn fixed(owner: &'static str, value: &'static str) -> BodyField {
+    BodyField {
+        hq: owner,
+        owner,
+        kind: In::Code,
+        required: false,
+        place: Place::Fixed(value),
     }
 }
 
@@ -276,6 +291,125 @@ const fn org_lifecycle(
         resource: ORG,
         body_schema,
         result_schema: "OrganizationCommandResult",
+    }
+}
+
+// ---- Platform Access (A4): identity and partner commands -----------------------------
+
+const PA_STATUS: &[OutField] = &[
+    o("id", "id", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, true),
+    o("application_id", "applicationId", Out::Uuid, true),
+    o("environment_id", "environmentId", Out::Uuid, true),
+    o("classification", "classification", Out::Code, true),
+    o("kind", "kind", Out::Code, true),
+    o("resource_state", "status", Out::Code, false),
+    o("revoked_at", "revokedAt", Out::Time, true),
+    o("revision", "revision", Out::Int, false),
+    o("updated_at", "updatedAt", Out::Time, false),
+];
+const PA_CREDENTIAL: &[OutField] = &[
+    o("id", "id", Out::Uuid, false),
+    o("public_id", "publicId", Out::Str, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, true),
+    o("environment_id", "environmentId", Out::Uuid, true),
+    o("service_account_id", "serviceAccountId", Out::Uuid, true),
+    o("credential_state", "status", Out::Code, false),
+    o("suspended_at", "suspendedAt", Out::Time, true),
+    o("suspension_reason", "suspensionReason", Out::Code, true),
+    o("revoked_at", "revokedAt", Out::Time, true),
+    o("revision", "revision", Out::Int, false),
+    o("version", "version", Out::Int, false),
+    o("updated_at", "updatedAt", Out::Time, false),
+];
+const PA_PRINCIPAL: &[OutField] = &[
+    o("id", "id", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, true),
+    o("environment_id", "environmentId", Out::Uuid, true),
+    o("kind", "kind", Out::Code, false),
+    o("principal_state", "status", Out::Code, false),
+    o("tombstoned_at", "tombstonedAt", Out::Time, true),
+    o("revision", "revision", Out::Int, false),
+    o("updated_at", "updatedAt", Out::Time, false),
+];
+const PA_APP_GRANT: &[OutField] = &[
+    o("id", "id", Out::Uuid, false),
+    o("app_id", "appId", Out::Uuid, false),
+    o("target", "target", Out::Str, true),
+    o("tenant_id", "tenantId", Out::Uuid, true),
+    o("environment_id", "environmentId", Out::Uuid, true),
+    o("principal_id", "principalId", Out::Uuid, true),
+    o("grant_state", "status", Out::Code, false),
+    o("revoked_at", "revokedAt", Out::Time, true),
+    o("revoke_reason", "revokeReason", Out::Code, true),
+    o("revision", "revision", Out::Int, false),
+    o("updated_at", "updatedAt", Out::Time, false),
+];
+const PA_ORIGINS: &[OutField] = &[
+    o("environment_id", "environmentId", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, true),
+    o("environment_kind", "environmentKind", Out::Code, false),
+    o("origin_count", "originCount", Out::Int, false),
+    o("revision", "revision", Out::Int, false),
+    o("updated_at", "updatedAt", Out::Time, true),
+];
+const PA_SCOPE: &[OutField] = &[
+    o("application_id", "applicationId", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("scope", "scope", Out::Str, false),
+    o("granted", "granted", Out::Bool, false),
+    o(
+        "allowed_environment_kinds",
+        "allowedEnvironmentKinds",
+        Out::StrList,
+        true,
+    ),
+    o("grant_basis", "grantBasis", Out::Code, true),
+    o("granted_at", "grantedAt", Out::Time, true),
+];
+const PA_SIGNED_OUT: &[OutField] = &[
+    o("principal_id", "principalId", Out::Uuid, false),
+    o("tenant_id", "tenantId", Out::Uuid, false),
+    o("application_id", "applicationId", Out::Uuid, true),
+    o("environment_id", "environmentId", Out::Uuid, true),
+    o("kind", "kind", Out::Code, false),
+    o("tokens_not_before", "tokensNotBefore", Out::Time, true),
+];
+const SCOPE_BODY: &[BodyField] = &[
+    p("application_id", In::Uuid),
+    b("action", "action", In::Enum(&["GRANT", "REVOKE"]), true),
+    b("scope", "scope", In::Str(1, 128), true),
+    b(
+        "environment_kinds",
+        "environmentKinds",
+        In::EnumList(&["SANDBOX", "TEST", "PRODUCTION"], 3),
+        false,
+    ),
+];
+
+const fn pa(
+    id: &'static str,
+    source: &'static str,
+    version: Option<i64>,
+    body: &'static [BodyField],
+    statuses: &'static [&'static str],
+    resource: &'static [OutField],
+    body_schema: &'static str,
+    result_schema: &'static str,
+) -> OwnerCommand {
+    OwnerCommand {
+        id,
+        owner: Owner::PlatformAccess,
+        source,
+        version,
+        body,
+        statuses,
+        resource,
+        body_schema,
+        result_schema,
     }
 }
 
@@ -548,6 +682,155 @@ pub const COMMANDS: &[OwnerCommand] = &[
         body_schema: "OrganizationEventsReplayRequest",
         result_schema: "OrganizationEventsReplayResult",
     },
+    // Platform Access.
+    pa(
+        "identity.status.change",
+        "POST /internal/v1/operator/{resource_type}/{resource_id}/status",
+        Some(1),
+        &[b("resource_state", "status", In::Enum(&["ACTIVE", "SUSPENDED", "REVOKED"]), true)],
+        &["ACTIVE", "SUSPENDED", "REVOKED"],
+        PA_STATUS,
+        "IdentityStatusChangeRequest",
+        "IdentityStatusChangeResult",
+    ),
+    pa(
+        "identity.scope-grant.change",
+        "POST /internal/v1/operator/applications/{application_id}/scope-grants",
+        None,
+        SCOPE_BODY,
+        &["GRANTED", "REVOKED"],
+        PA_SCOPE,
+        "IdentityScopeGrantChangeRequest",
+        "IdentityScopeGrantChangeResult",
+    ),
+    pa(
+        "identity.privileged-scope-grant.change",
+        "POST /internal/v1/operator/applications/{application_id}/privileged-scope-grants",
+        None,
+        SCOPE_BODY,
+        &["GRANTED", "REVOKED"],
+        PA_SCOPE,
+        "IdentityPrivilegedScopeGrantChangeRequest",
+        "IdentityScopeGrantChangeResult",
+    ),
+    pa(
+        "identity.key.revoke",
+        "POST /internal/v1/operator/credentials/{key_id}/revoke",
+        Some(1),
+        &[],
+        &["REVOKED", "ACTIVE", "SUSPENDED"],
+        PA_CREDENTIAL,
+        "IdentityKeyRevokeRequest",
+        "IdentityKeyCommandResult",
+    ),
+    pa(
+        "identity.key.suspend",
+        "POST /internal/v1/operator/credentials/{key_id}/suspend",
+        Some(1),
+        &[b("reason_code", "reasonCode", In::Code, true)],
+        &["SUSPENDED"],
+        PA_CREDENTIAL,
+        "IdentityKeySuspendRequest",
+        "IdentityKeyCommandResult",
+    ),
+    pa(
+        "identity.key.resume",
+        "POST /internal/v1/operator/credentials/{key_id}/resume",
+        Some(1),
+        &[],
+        &["ACTIVE"],
+        PA_CREDENTIAL,
+        "IdentityKeyResumeRequest",
+        "IdentityKeyCommandResult",
+    ),
+    pa(
+        "identity.record.register",
+        "POST /internal/v1/operator/environments/{environment_id}/principals",
+        None,
+        &[
+            p("environment_id", In::Uuid),
+            b("kind", "kind", In::Code, false),
+            b("external_reference", "externalReference", In::Str(1, 256), false),
+            b("service_account_id", "serviceAccountId", In::Uuid, false),
+        ],
+        &["REGISTERED"],
+        PA_PRINCIPAL,
+        "IdentityRecordRegisterRequest",
+        "IdentityRecordCommandResult",
+    ),
+    pa(
+        "identity.record.status.change",
+        "POST /internal/v1/operator/principals/{record_id}/status",
+        Some(1),
+        &[b("principal_state", "status", In::Enum(&["ACTIVE", "SUSPENDED", "DEACTIVATED"]), true)],
+        &["ACTIVE", "SUSPENDED", "DEACTIVATED"],
+        PA_PRINCIPAL,
+        "IdentityRecordStatusChangeRequest",
+        "IdentityRecordCommandResult",
+    ),
+    pa(
+        "identity.record.remove",
+        "POST /internal/v1/operator/principals/{record_id}/remove",
+        Some(1),
+        &[],
+        &["TOMBSTONED"],
+        PA_PRINCIPAL,
+        "IdentityRecordRemoveRequest",
+        "IdentityRecordCommandResult",
+    ),
+    pa(
+        "identity.app-grant.revoke",
+        "POST /internal/v1/operator/app-grants/{grant_id}/revoke",
+        Some(1),
+        &[],
+        &["REVOKED"],
+        PA_APP_GRANT,
+        "IdentityAppGrantRevokeRequest",
+        "IdentityAppGrantRevokeResult",
+    ),
+    pa(
+        "partners.key.revoke",
+        "POST /internal/v1/operator/credentials/{key_id}/revoke",
+        Some(1),
+        &[],
+        &["REVOKED", "ACTIVE", "SUSPENDED"],
+        PA_CREDENTIAL,
+        "PartnerKeyRevokeRequest",
+        "IdentityKeyCommandResult",
+    ),
+    pa(
+        "partners.service-account.suspend",
+        "POST /internal/v1/operator/service-accounts/{account_id}/status",
+        Some(1),
+        &[fixed("status", "SUSPENDED")],
+        &["SUSPENDED"],
+        PA_STATUS,
+        "PartnerServiceAccountSuspendRequest",
+        "IdentityStatusChangeResult",
+    ),
+    pa(
+        "partners.website.remove",
+        "POST /internal/v1/operator/environments/{environment_id}/origins/remove",
+        Some(1),
+        &[
+            p("environment_id", In::Uuid),
+            b("origin", "origin", In::Str(1, 270), true),
+        ],
+        &["REMOVED"],
+        PA_ORIGINS,
+        "PartnerWebsiteRemoveRequest",
+        "PartnerWebsiteRemoveResult",
+    ),
+    pa(
+        "partners.user.sign-out",
+        "POST /internal/v1/operator/principals/{user_id}/sign-out",
+        None,
+        &[],
+        &["SIGNED_OUT"],
+        PA_SIGNED_OUT,
+        "PartnerUserSignOutRequest",
+        "PartnerUserSignOutResult",
+    ),
 ];
 
 pub fn command(id: &str) -> Option<&'static OwnerCommand> {

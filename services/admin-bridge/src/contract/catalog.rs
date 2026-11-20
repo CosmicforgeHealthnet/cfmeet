@@ -2982,7 +2982,8 @@ pub fn catalog() -> Vec<Capability> {
             .find(|c| c.id == row.id)
             .unwrap_or_else(|| panic!("{}: not in the catalog", row.id));
         assert_eq!(cap.kind, Kind::Command, "{}: commands only", row.id);
-        assert_eq!(cap.owner, row.owner, "{}: owner", row.id);
+        // The row is the authority on the owner (e.g. partner keys live in Platform Access).
+        cap.owner = row.owner;
         cap.served = true;
         cap.source_endpoint = Some(row.source);
         cap.body = Some(row.body_schema);
