@@ -4,7 +4,7 @@
 //! | Variable | Required | Meaning |
 //! |---|---|---|
 //! | `DATABASE_URL` | yes | Messaging's OWN PostgreSQL database (runtime role) |
-//! | `MESSAGING_DATABASE_MAX_CONNECTIONS` | no | pool size (1–500, default 10) |
+//! | `MESSAGING_DATABASE_MAX_CONNECTIONS` | no | pool size (1–500, default 10; production: `activate-database-pools`) |
 //! | `MESSAGING_BIND_ADDRESS` | no | default `127.0.0.1:8097` |
 //! | `MESSAGING_METRICS_ADDRESS` | no | separate `GET /metrics` listener (e.g. `127.0.0.1:9197`) |
 //! | `MESSAGING_E2EE_DEVICES_ENABLED` | no | `true` / `false`: device registration and KeyPackage publication. Default `true` only in `local` / `test` runtimes; staging requires an explicit `true` (owner approval of the cryptographic decisions, ADR 0045); in `production`, `true` needs `MESSAGING_E2EE_PRODUCTION_RELEASE_FILE` (the owner's release decision) and is refused without a valid record |

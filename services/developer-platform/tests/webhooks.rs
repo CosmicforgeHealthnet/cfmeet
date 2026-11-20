@@ -1847,6 +1847,65 @@ async fn console_members_manage_environment_webhooks_by_role() {
         .await;
     conforms(&format!("{WH}ConsoleWebhook"), &got.json);
     assert_eq!(got.json["health"]["consecutiveFailures"], 1);
+    // DF1: a test event — only for members who manage webhooks; signed and delivered
+    // exactly like a real one, marked "test": true; at most 5 per webhook per minute.
+    let test_path = format!("{base}/{id}/test");
+    let r = c
+        .req(As::User(&analyst), Method::POST, &test_path, None)
+        .await;
+    assert_eq!(r.json["error"]["code"], "PERMISSION_DENIED");
+    let r = c
+        .req(As::User(&developer), Method::POST, &test_path, None)
+        .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    conforms(&format!("{WH}WebhookDelivery"), &r.json);
+    assert_eq!(r.json["eventType"], "webhook.test");
+    assert_eq!(r.json["webhookId"], id.as_str());
+    let test_delivery = r.json["deliveryId"].as_str().unwrap().to_string();
+    let test_event = r.json["eventId"].as_str().unwrap().to_string();
+    rx.script(&[]);
+    w.service.deliver_due_once(100).await.unwrap();
+    let sent: Vec<Received> = rx
+        .seen()
+        .into_iter()
+        .filter(|r| header(r, signing::HEADER_EVENT_ID) == test_event)
+        .collect();
+    assert_eq!(sent.len(), 1, "one test request");
+    let body: Value = serde_json::from_slice(&sent[0].body).unwrap();
+    assert_eq!(body["type"], "webhook.test");
+    assert_eq!(body["test"], true);
+    assert_eq!(body["data"]["test"], true);
+    assert_eq!(header(&sent[0], signing::HEADER_DELIVERY_ID), test_delivery);
+    signing::verify(
+        secret.as_bytes(),
+        &header(&sent[0], signing::HEADER_SIGNATURE),
+        &header(&sent[0], signing::HEADER_TIMESTAMP),
+        &test_delivery,
+        &sent[0].body,
+        chrono::Utc::now().timestamp() + w.offset.load(std::sync::atomic::Ordering::SeqCst),
+        signing::DEFAULT_TOLERANCE_SECONDS,
+    )
+    .expect("the test event is signed like a real delivery");
+    for _ in 0..4 {
+        let r = c
+            .req(As::User(&developer), Method::POST, &test_path, None)
+            .await;
+        assert_eq!(r.status, StatusCode::CREATED, "{}", r.json);
+    }
+    let r = c
+        .req(As::User(&developer), Method::POST, &test_path, None)
+        .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{}", r.json);
+    assert_eq!(r.json["error"]["code"], "RATE_LIMITED");
+    let r = c
+        .req(
+            As::User(&developer),
+            Method::POST,
+            &format!("{base}/{}/test", Uuid::new_v4()),
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
     // Rotation and deletion by the owner.
     let rot = c
         .req(

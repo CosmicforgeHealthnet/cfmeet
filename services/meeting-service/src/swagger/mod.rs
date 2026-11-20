@@ -1530,6 +1530,37 @@ fn contract_doc(body: String) -> impl IntoResponse {
     )
 }
 
+/// D1: whether Swagger UI and the served OpenAPI documents are mounted. `API_DOCS_ENABLED`
+/// (`true` / `false`) decides when set; otherwise they are served only where the runtime is
+/// explicitly a development or staging one (`APP_ENV` dev / development / local / test, or
+/// `CF_RUNTIME_ENVIRONMENT` local / test / staging) and never in production, where
+/// customer documentation is published through the developer portal (the API Gateway's
+/// public subset) instead. Unknown or missing values count as production (fail closed).
+pub fn docs_enabled_from(get: impl Fn(&str) -> Option<String>) -> bool {
+    let value = |k: &str| {
+        get(k)
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default()
+    };
+    match value("API_DOCS_ENABLED").as_str() {
+        "true" | "1" | "on" | "yes" => return true,
+        "false" | "0" | "off" | "no" => return false,
+        _ => {}
+    }
+    if value("CF_RUNTIME_ENVIRONMENT") == "production" {
+        return false;
+    }
+    matches!(
+        value("CF_RUNTIME_ENVIRONMENT").as_str(),
+        "local" | "test" | "staging"
+    ) || crate::config::is_development_env(Some(&value("APP_ENV")))
+}
+
+/// [`docs_enabled_from`] over the process environment.
+pub fn docs_enabled() -> bool {
+    docs_enabled_from(|k| std::env::var(k).ok())
+}
+
 /// Creates the CF Meet Swagger UI with a service selector. The Meeting Service remains
 /// the default and keeps its original /api-docs/openapi.json contract unchanged.
 /// Peer service documents come from the bundled renderings of the checked-in contracts.
@@ -1631,6 +1662,49 @@ mod tests {
             .find(|(n, _, _)| *n == name)
             .map(|(_, _, raw)| *raw)
             .unwrap_or_else(|| panic!("no peer document {name}"))
+    }
+
+    #[test]
+    fn docs_are_off_in_production_and_on_for_development_and_staging() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        // Production (explicit, or nothing said at all) never serves them.
+        assert!(!docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "production"
+        )])));
+        assert!(!docs_enabled_from(env(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("APP_ENV", "dev")
+        ])));
+        assert!(!docs_enabled_from(env(&[])));
+        assert!(!docs_enabled_from(env(&[("APP_ENV", "production")])));
+        // Local and staging keep them.
+        assert!(docs_enabled_from(env(&[("APP_ENV", "dev")])));
+        assert!(docs_enabled_from(env(&[("APP_ENV", "test")])));
+        assert!(docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "staging"
+        )])));
+        assert!(docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "local"
+        )])));
+        // The explicit switch wins either way.
+        assert!(!docs_enabled_from(env(&[
+            ("APP_ENV", "dev"),
+            ("API_DOCS_ENABLED", "false")
+        ])));
+        assert!(docs_enabled_from(env(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("API_DOCS_ENABLED", "true")
+        ])));
     }
 
     #[test]

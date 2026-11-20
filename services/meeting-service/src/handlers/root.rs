@@ -76,6 +76,20 @@ pub async fn get_app_info() -> impl IntoResponse {
         "timestamp": Utc::now().to_rfc3339()
     });
 
+    // D1: documentation links only where the documentation is served.
+    let mut info = info;
+    if !crate::swagger::docs_enabled() {
+        for (section, keys) in [
+            ("endpoints", &["api_docs", "swagger_ui"][..]),
+            ("links", &["swagger"][..]),
+        ] {
+            if let Some(map) = info[section].as_object_mut() {
+                for key in keys {
+                    map.remove(*key);
+                }
+            }
+        }
+    }
     (StatusCode::OK, Json(info))
 }
 

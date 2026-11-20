@@ -892,7 +892,117 @@ impl WebhookService {
         txn.commit().await?;
         Ok(row)
     }
+
+    /// DF1: a TEST event to one ACTIVE subscription — a new `webhook.test` event
+    /// (producer `cfmeet.developer-platform`, `"test": true` at the top level and in
+    /// `data`) and one delivery to that subscription only, delivered, signed and retried by
+    /// the worker exactly like every other delivery. At most [`TEST_EVENTS_PER_MINUTE`] per
+    /// subscription per minute (429 RATE_LIMITED). In shadow mode it is recorded SHADOW.
+    pub async fn send_test(
+        &self,
+        caller: &Caller,
+        scope: &Scope,
+        subscription: Uuid,
+    ) -> Result<DeliveryRow, ApiError> {
+        let now = self.now();
+        let txn = self.db.begin().await?;
+        let row = self.row(&txn, scope, subscription, true).await?;
+        if row.status != "ACTIVE" {
+            return Err(ApiError(ErrorCode::InvalidState));
+        }
+        let recent: i64 = txn
+            .query_one(stmt(
+                "SELECT count(*) FROM devplat_webhook_deliveries d \
+                   JOIN devplat_webhook_events e ON e.event_id = d.event_id \
+                  WHERE d.subscription_id = $1 AND d.created_at > $2 AND e.event_type = $3",
+                vec![
+                    subscription.into(),
+                    (now - chrono::Duration::minutes(1)).into(),
+                    TEST_EVENT_TYPE.into(),
+                ],
+            ))
+            .await?
+            .and_then(|r| r.try_get_by_index::<i64>(0).ok())
+            .unwrap_or(0);
+        if recent >= TEST_EVENTS_PER_MINUTE {
+            return Err(ApiError(ErrorCode::RateLimited));
+        }
+        let key = Uuid::new_v4().simple().to_string();
+        let event_id = format!("whe_{key}");
+        let body = json!({
+            "id": event_id,
+            "type": TEST_EVENT_TYPE,
+            "apiVersion": "v1",
+            "occurredAt": now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "test": true,
+            "data": {
+                "test": true,
+                "webhookId": subscription,
+                "environmentId": scope.environment_id,
+                "message": "Test event sent from the CF Meet developer portal. No real activity happened.",
+            },
+        });
+        txn.execute(stmt(
+            "INSERT INTO devplat_webhook_events (event_id, producer, source_event_id, event_type, \
+               tenant_id, application_id, environment_id, occurred_at, payload, received_at) \
+             VALUES ($1, 'cfmeet.developer-platform', $2, $3, $4, $5, $6, $7, $8, $7)",
+            vec![
+                event_id.clone().into(),
+                format!("test_{key}").into(),
+                TEST_EVENT_TYPE.into(),
+                scope.tenant_id.into(),
+                scope.application_id.into(),
+                scope.environment_id.into(),
+                now.into(),
+                body.into(),
+            ],
+        ))
+        .await?;
+        let id = Uuid::new_v4();
+        let shadow = self.settings.mode == DeliveryMode::Shadow;
+        txn.execute(stmt(
+            "INSERT INTO devplat_webhook_deliveries (id, subscription_id, event_id, tenant_id, \
+               application_id, environment_id, status, attempt_count, next_attempt_at, \
+               created_at, updated_at, completed_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $8 THEN 'SHADOW' ELSE 'PENDING' END, 0, \
+                     $7, $7, $7, CASE WHEN $8 THEN $7 END)",
+            vec![
+                id.into(),
+                subscription.into(),
+                event_id.clone().into(),
+                scope.tenant_id.into(),
+                scope.application_id.into(),
+                scope.environment_id.into(),
+                now.into(),
+                shadow.into(),
+            ],
+        ))
+        .await?;
+        let delivery = self.delivery_in_scope(&txn, scope, id).await?;
+        activity::record(
+            &txn,
+            caller,
+            activity::Event {
+                tenant_id: scope.tenant_id,
+                action: "webhook.test_sent",
+                target_type: "WEBHOOK_DELIVERY",
+                target_id: id.to_string(),
+                summary: json!({
+                    "environmentId": scope.environment_id,
+                    "webhookId": subscription,
+                }),
+            },
+        )
+        .await?;
+        txn.commit().await?;
+        Ok(delivery)
+    }
 }
+
+/// DF1: the event type of a test event (never produced by a real activity).
+pub const TEST_EVENT_TYPE: &str = "webhook.test";
+/// DF1: test events per subscription per minute.
+pub const TEST_EVENTS_PER_MINUTE: i64 = 5;
 
 fn cursor_of(page: &Page) -> Result<(Option<DateTime<Utc>>, Option<Uuid>), ApiError> {
     match page.cursor_key() {

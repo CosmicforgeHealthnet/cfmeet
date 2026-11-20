@@ -72,6 +72,7 @@ pub fn internal_api() -> Router<AppState> {
         .merge(crate::webhooks::ownership_migration::internal_routes())
         .merge(crate::calls::app::abuse_review::internal_routes())
         .merge(crate::organization_members::internal_routes())
+        .merge(crate::account_privacy::internal_routes())
 }
 
 fn cors_layer() -> CorsLayer {

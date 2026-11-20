@@ -3501,7 +3501,7 @@ export namespace DeveloperPlatform {
     deliveryId: string;
     webhookId: string;
     eventId: string;
-    eventType: WebhookEventType;
+    eventType: WebhookEventType | "webhook.test";
     replayOf: string | null;
     status: DeliveryStatus;
     attemptCount: number;
@@ -3968,6 +3968,11 @@ export namespace DeveloperPlatform {
     rotateProjectAppSecret: {
       params: { path: { projectId: Uuid }; idempotencyKey?: string };
       response: AppClientSecret;
+    };
+    /** POST /v1/environments/{environmentId}/webhooks/{webhookId}/test; auth DEVELOPER_SESSION; retry NO_RETRY */
+    sendEnvironmentWebhookTest: {
+      params: { path: { environmentId: Uuid; webhookId: Uuid } };
+      response: WebhookDelivery;
     };
     /** POST /v1/projects/{projectId}/production-access-requests — scope production_access.request; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     submitProductionAccessRequest: {

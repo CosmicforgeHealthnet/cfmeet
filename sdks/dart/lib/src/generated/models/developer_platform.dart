@@ -3433,7 +3433,7 @@ class WebhookDelivery {
   const WebhookDelivery.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory WebhookDelivery.create({required int attemptCount, required String? completedAt, required String createdAt, required String deliveryId, required String eventId, required WebhookEventType eventType, required String? failureCategory, required int? lastHttpStatus, required String? nextAttemptAt, required String? replayOf, required DeliveryStatus status, required String webhookId}) =>
+  factory WebhookDelivery.create({required int attemptCount, required String? completedAt, required String createdAt, required String deliveryId, required String eventId, required Object? eventType, required String? failureCategory, required int? lastHttpStatus, required String? nextAttemptAt, required String? replayOf, required DeliveryStatus status, required String webhookId}) =>
       WebhookDelivery.fromJson(<String, Object?>{
         'attemptCount': attemptCount,
         'completedAt': completedAt,
@@ -3462,7 +3462,7 @@ class WebhookDelivery {
 
   String get eventId => json['eventId']! as String;
 
-  WebhookEventType get eventType => json['eventType']! as String;
+  Object? get eventType => json['eventType'];
 
   String? get failureCategory => json['failureCategory'] as String?;
 

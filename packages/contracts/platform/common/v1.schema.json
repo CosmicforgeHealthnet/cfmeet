@@ -161,6 +161,7 @@
         "calling-request.act-for-organization",
         "calling-organization-member.act",
         "calling-organization-member.offboard",
+        "calling-account.privacy",
         "meeting-organization-events.apply",
         "notifications-event.publish",
         "notifications-user.forward",

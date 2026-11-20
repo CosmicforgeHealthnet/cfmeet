@@ -60,6 +60,15 @@ pub fn app(state: State) -> Router {
             "/internal/v1/communications/account-events",
             post(crate::events::account_event),
         )
+        // S2: account deletion and the account's data download (Meeting Service only).
+        .route(
+            "/internal/v1/communications/account-erasure",
+            post(crate::privacy::erase),
+        )
+        .route(
+            "/internal/v1/communications/account-export",
+            post(crate::privacy::export),
+        )
         .route(
             "/internal/v1/communications/block-events",
             post(crate::events::block_event),

@@ -184,6 +184,10 @@ async fn template(admin: &str) -> String {
             migration::MeetingAuditMigrator::up(&tmpl, None)
                 .await
                 .expect("meeting-audit migrations apply");
+            // S2: durable erasure jobs of deleted accounts.
+            migration::AccountPrivacyMigrator::up(&tmpl, None)
+                .await
+                .expect("account-privacy migrations apply");
             tmpl.close().await.ok();
             name
         })
