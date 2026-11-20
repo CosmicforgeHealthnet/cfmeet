@@ -598,6 +598,65 @@ pub(crate) async fn recording_row<C: ConnectionTrait>(
     .ok_or(EnterpriseError::NotFound)
 }
 
+/// ADR 0068 A4: an HQ operator's deletion of a recording, relayed by the admin bridge, in
+/// the caller's transaction — by the SAME safe path as an administrator's
+/// [`delete_call_recording`](EnterpriseService::delete_call_recording): READY / FAILED →
+/// DELETING (reason ADMIN), the object removed by the recording worker, never here. A
+/// retention hold on the recording or its Call refuses it (nothing changes), and so does
+/// a recording still being captured or already deleted. Access-audited as SYSTEM with
+/// the reason OPERATOR_REQUEST (the HQ staff member is in `calling_admin_operations`).
+pub(crate) async fn operator_delete_in<C: ConnectionTrait>(
+    txn: &C,
+    scope: CallScope,
+    id: Uuid,
+    correlation_id: &str,
+    now: DateTime<Utc>,
+) -> EnterpriseResult<()> {
+    let row = recording_row(txn, scope, id, true).await?;
+    let mut values = vec![row.id.into(), row.call_id.into()];
+    values.extend(scope_values(scope));
+    let held: bool = txn
+        .query_one(stmt(
+            "SELECT calling_retention_held('RECORDING_ARTIFACT', $1, $3, $4, $5) \
+                 OR calling_retention_held('RECORDING_ARTIFACT', $2, $3, $4, $5)",
+            values,
+        ))
+        .await?
+        .map(|r| r.try_get_by_index(0))
+        .transpose()?
+        .unwrap_or(true);
+    if held {
+        return Err(EnterpriseError::Conflict(
+            "the recording is under a retention hold",
+        ));
+    }
+    if !matches!(row.state.as_str(), "READY" | "FAILED") {
+        return Err(EnterpriseError::Conflict(
+            "the recording is still being captured or is already deleted",
+        ));
+    }
+    exec(
+        txn,
+        "UPDATE call_recordings SET state = 'DELETING', deleting_at = $2, delete_reason = 'ADMIN', \
+         next_attempt_at = $2, version = version + 1, updated_at = GREATEST(updated_at, $2) \
+         WHERE id = $1",
+        vec![id.into(), now.into()],
+    )
+    .await?;
+    access_audit(
+        txn,
+        &AdminActor::system(scope, correlation_id),
+        row.id,
+        row.call_id,
+        None,
+        AccessOperation::Delete,
+        true,
+        Some("OPERATOR_REQUEST"),
+        now,
+    )
+    .await
+}
+
 /// Whether `principal` is (or was) a participant of `call`.
 pub(crate) async fn was_participant<C: ConnectionTrait>(
     db: &C,

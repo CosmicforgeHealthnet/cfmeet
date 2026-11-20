@@ -502,50 +502,58 @@ pub async fn operator_release(
     id: Uuid,
     now: DateTime<Utc>,
 ) -> crate::platform::PlatformResult<BlockRuleView> {
-    use crate::platform::{
-        operator::{self, AuditEntry, AuditTargetKind, OperatorAction},
-        PlatformError,
-    };
-    operator::audited(db, operator, now, move |txn| {
-        Box::pin(async move {
-            let scope = txn
-                .query_one(stmt(
-                    "SELECT tenant_id, application_id, environment_id, status \
-                     FROM calling_block_rules WHERE id = $1 FOR UPDATE",
-                    vec![id.into()],
-                ))
-                .await?
-                .ok_or(PlatformError::NotFound("block rule"))?;
-            let ids: (Uuid, Uuid, Uuid) = (
-                scope.try_get_by_index(0)?,
-                scope.try_get_by_index(1)?,
-                scope.try_get_by_index(2)?,
-            );
-            let was: String = scope.try_get_by_index(3)?;
-            let sql = if was == BlockStatus::Active.as_str() {
-                format!(
-                    "UPDATE calling_block_rules SET status = 'RELEASED', released_at = $2, \
-                     version = version + 1 WHERE id = $1 RETURNING {VIEW_COLUMNS}"
-                )
-            } else {
-                // Already released: idempotent, the row is not touched.
-                format!("SELECT {VIEW_COLUMNS} FROM calling_block_rules WHERE id = $1 AND $2::timestamptz IS NOT NULL")
-            };
-            let view = BlockRuleView::find_by_statement(stmt(&sql, vec![id.into(), now.into()]))
-                .one(txn)
-                .await?
-                .ok_or(PlatformError::NotFound("block rule"))?;
-            let entry = AuditEntry::new(
-                OperatorAction::BlockRuleReleased,
-                AuditTargetKind::BlockRule,
-                id,
-            )
-            .scope(Some(ids.0), Some(ids.1), Some(ids.2))
-            .detail(serde_json::json!({ "previousStatus": was, "blockedKind": view.blocked_kind }));
-            Ok((view, entry))
-        })
+    crate::platform::operator::audited(db, operator, now, move |txn| {
+        Box::pin(operator_release_in(txn, id, now))
     })
     .await
+}
+
+/// The release of [`operator_release`] in the caller's transaction, with the audit entry
+/// the caller records in that same transaction (the admin bridge, ADR 0068 A4).
+pub(crate) async fn operator_release_in<C: ConnectionTrait>(
+    txn: &C,
+    id: Uuid,
+    now: DateTime<Utc>,
+) -> crate::platform::PlatformResult<(BlockRuleView, crate::platform::operator::AuditEntry)> {
+    use crate::platform::{
+        operator::{AuditEntry, AuditTargetKind, OperatorAction},
+        PlatformError,
+    };
+    let scope = txn
+        .query_one(stmt(
+            "SELECT tenant_id, application_id, environment_id, status \
+             FROM calling_block_rules WHERE id = $1 FOR UPDATE",
+            vec![id.into()],
+        ))
+        .await?
+        .ok_or(PlatformError::NotFound("block rule"))?;
+    let ids: (Uuid, Uuid, Uuid) = (
+        scope.try_get_by_index(0)?,
+        scope.try_get_by_index(1)?,
+        scope.try_get_by_index(2)?,
+    );
+    let was: String = scope.try_get_by_index(3)?;
+    let sql = if was == BlockStatus::Active.as_str() {
+        format!(
+            "UPDATE calling_block_rules SET status = 'RELEASED', released_at = $2, \
+             version = version + 1 WHERE id = $1 RETURNING {VIEW_COLUMNS}"
+        )
+    } else {
+        // Already released: idempotent, the row is not touched.
+        format!("SELECT {VIEW_COLUMNS} FROM calling_block_rules WHERE id = $1 AND $2::timestamptz IS NOT NULL")
+    };
+    let view = BlockRuleView::find_by_statement(stmt(&sql, vec![id.into(), now.into()]))
+        .one(txn)
+        .await?
+        .ok_or(PlatformError::NotFound("block rule"))?;
+    let entry = AuditEntry::new(
+        OperatorAction::BlockRuleReleased,
+        AuditTargetKind::BlockRule,
+        id,
+    )
+    .scope(Some(ids.0), Some(ids.1), Some(ids.2))
+    .detail(serde_json::json!({ "previousStatus": was, "blockedKind": view.blocked_kind }));
+    Ok((view, entry))
 }
 
 /// `platform_admin block show`.

@@ -437,6 +437,7 @@ impl PlatformService {
                    max_concurrent_communications = EXCLUDED.max_concurrent_communications, \
                    telecom_spend_daily_limit_minor = EXCLUDED.telecom_spend_daily_limit_minor, \
                    telecom_spend_monthly_limit_minor = EXCLUDED.telecom_spend_monthly_limit_minor, \
+                   version = platform_tenant_limits.version + 1, \
                    updated_at = EXCLUDED.updated_at",
             [
                 tenant.id.as_uuid().into(),
@@ -584,28 +585,31 @@ impl PlatformService {
         values.validate()?;
         let application = self.application(application_id).await?;
         let now = self.clock.now();
-        application_limits::Entity::insert(application_limits::ActiveModel {
-            application_id: Set(application.id.as_uuid()),
-            tenant_id: Set(application.tenant_id.as_uuid()),
-            requests_per_minute: Set(values.requests_per_minute),
-            max_concurrent_communications: Set(values.max_concurrent_communications),
-            telecom_spend_daily_limit_minor: Set(values.telecom_spend_daily_limit_minor),
-            telecom_spend_monthly_limit_minor: Set(values.telecom_spend_monthly_limit_minor),
-            created_at: Set(now),
-            updated_at: Set(now),
-        })
-        .on_conflict(
-            sea_orm::sea_query::OnConflict::column(application_limits::Column::ApplicationId)
-                .update_columns([
-                    application_limits::Column::RequestsPerMinute,
-                    application_limits::Column::MaxConcurrentCommunications,
-                    application_limits::Column::TelecomSpendDailyLimitMinor,
-                    application_limits::Column::TelecomSpendMonthlyLimitMinor,
-                    application_limits::Column::UpdatedAt,
-                ])
-                .to_owned(),
-        )
-        .exec_without_returning(db)
+        // The row version (ADR 0068 A4) moves with every change: an admin-bridge change
+        // is locked to it.
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO platform_application_limits (application_id, tenant_id, requests_per_minute, \
+                   max_concurrent_communications, telecom_spend_daily_limit_minor, \
+                   telecom_spend_monthly_limit_minor, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $7) \
+                 ON CONFLICT (application_id) DO UPDATE SET \
+                   requests_per_minute = EXCLUDED.requests_per_minute, \
+                   max_concurrent_communications = EXCLUDED.max_concurrent_communications, \
+                   telecom_spend_daily_limit_minor = EXCLUDED.telecom_spend_daily_limit_minor, \
+                   telecom_spend_monthly_limit_minor = EXCLUDED.telecom_spend_monthly_limit_minor, \
+                   version = platform_application_limits.version + 1, \
+                   updated_at = EXCLUDED.updated_at",
+            [
+                application.id.as_uuid().into(),
+                application.tenant_id.as_uuid().into(),
+                values.requests_per_minute.into(),
+                values.max_concurrent_communications.into(),
+                values.telecom_spend_daily_limit_minor.into(),
+                values.telecom_spend_monthly_limit_minor.into(),
+                now.into(),
+            ],
+        ))
         .await?;
         tracing::info!(application_id = %application_id, "application limit policy set");
         Ok(values)

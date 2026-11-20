@@ -40,8 +40,11 @@ async fn main() {
         let db = sea_orm_migration::sea_orm::Database::connect(url)
             .await
             .expect("Calling migration database connection failed");
-        // The call-kind-offer and gap-closure histories depend on the main one too:
-        // rolled back first.
+        // The admin-operations, call-kind-offer and gap-closure histories depend on the
+        // main one too: rolled back first.
+        calling_migration::AdminOperationsMigrator::reset(&db)
+            .await
+            .expect("Calling admin-operations rollback failed");
         calling_migration::CallKindOfferMigrator::reset(&db)
             .await
             .expect("Calling call-kind-offer rollback failed");
