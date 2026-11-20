@@ -6,7 +6,7 @@
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "3d67872658bf124423672b00fd5782a3b12d2ba2d1c03368e760291bb7d376a8",
+    "openapi_sha256": "eec45d223d980d8348f15dc3f4408e5984e7b51f0cf2bdc41cb6e2d2d4f36bb3",
     "capability_matrix_sha256": "c0c145d4ca7fce3a8dded329ac5e2bb6a347632ee31ac71b2d3983a12898483e"
   },
   "query_shapes": {

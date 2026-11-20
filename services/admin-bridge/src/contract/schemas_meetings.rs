@@ -52,7 +52,7 @@ pub fn insert(m: &mut Map<String, Value>) {
     for (k, v) in [
         (
             "email_masked",
-            json!({"type": "string", "maxLength": 120, "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com). Never the address."}),
+            json!({"type": "string", "maxLength": 120, "pattern": r"^(\*\*\*|[^@\s*]\*\*\*@[^@\s*.]\*\*\*(\.[^@\s*.]{1,63})?)$", "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com), or *** when unusual. Only a masked value can match; never the address."}),
         ),
         ("email_verified", json!({"type": "boolean"})),
         ("auth_type", code.clone()),
