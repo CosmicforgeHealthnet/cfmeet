@@ -1,4 +1,4 @@
-//! ADR 0067 / design §7: the admin bridge's operator reads under `/internal/v1/operator/*`
+//! ADR 0068 / design §7: the admin bridge's operator reads under `/internal/v1/operator/*`
 //! (members, teams, policies, cross-organization audit) and operator attribution
 //! (`X-CF-Operator` …) accepted only from `cfmeet.admin-bridge`, on every route.
 

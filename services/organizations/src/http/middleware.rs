@@ -9,7 +9,7 @@
 //! 3. may name the acting user (`X-CF-Acting-User`, `X-CF-Acting-User-Verified-Email`) only
 //!    if the caller holds `organization.act-for-user` (else 403 `ACTOR_NOT_ALLOWED`);
 //! 4. may carry operator attribution (`X-CF-Operator`, `X-CF-Approver`,
-//!    `X-CF-Approval-Ref`, `X-CF-Intent-Digest`, ADR 0067) only from the admin bridge
+//!    `X-CF-Approval-Ref`, `X-CF-Intent-Digest`, ADR 0068) only from the admin bridge
 //!    (`cfmeet.admin-bridge`), well-formed, approver different from the operator (else 403
 //!    `ACTOR_NOT_ALLOWED`) — on every route, so no other caller can claim an HQ operator.
 //!
@@ -57,7 +57,7 @@ pub struct Caller {
     /// `X-CF-Acting-User-Verified-Email`, normalized (same rule).
     pub verified_email: Option<String>,
     /// The HQ staff member (and approver) the admin bridge acts for; only ever set for
-    /// `cfmeet.admin-bridge` (ADR 0067).
+    /// `cfmeet.admin-bridge` (ADR 0068).
     pub operator: Option<OperatorAttribution>,
 }
 
