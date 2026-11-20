@@ -132,34 +132,50 @@ ADMIN_BRIDGE_DARK_ENV = dict({
     'ADMIN_BRIDGE_DATABASE_MAX_CONNECTIONS': '5',
 }, **{'ADMIN_BRIDGE_MODULE_' + m: 'false' for m in ADMIN_BRIDGE_MODULES})
 
-# The HQ port (design §14): a dedicated private port on the CF Meet host whose TLS is passed
-# straight through to the bridge (the bridge terminates mutual TLS itself and checks HQ's
-# client certificate on every request). It is NEVER routed by api.cfmeet.com or any public
-# ingress and is never part of the private TLS proxy (which terminates TLS). Only the HQ
-# staging egress address may connect: ADMIN_BRIDGE_HQ_ALLOWED_SOURCE (one IPv4 address or
-# CIDR, set on the VPS; production HQ later). Declared here; the relay is installed by the
-# HQ enablement step of the runbook, never by `release`.
+# The HQ port (design §14; owner decision 2026-11-20: private tunnel). HQ staging reaches the
+# bridge over a private tunnel (e.g. WireGuard) between the HQ staging host and the CF Meet
+# host, never over a public address: HQ only connects to a pinned private IP. The relay
+# listens ONLY on the CF Meet host's tunnel address (ADMIN_BRIDGE_HQ_LISTEN_ADDRESS) and admits
+# ONLY HQ's tunnel address (ADMIN_BRIDGE_HQ_ALLOWED_SOURCE); both must be private IPv4 (RFC 1918
+# or 100.64/10). TLS is passed straight through (the bridge terminates mutual TLS and checks
+# HQ's client certificate on every request). It is NEVER routed by api.cfmeet.com or any
+# public ingress and is never part of the private TLS proxy (which terminates TLS). Declared
+# here; the tunnel and relay are installed by the HQ enablement step of the runbook (a
+# privileged operator step), never by `release`.
 ADMIN_BRIDGE_HQ_PORT = 8460
 ADMIN_BRIDGE_HQ_RELAY = 'cfmeet-admin-bridge-hq-relay'
 ADMIN_BRIDGE_HQ_SOURCE_ENV = 'ADMIN_BRIDGE_HQ_ALLOWED_SOURCE'
+ADMIN_BRIDGE_HQ_LISTEN_ENV = 'ADMIN_BRIDGE_HQ_LISTEN_ADDRESS'
+ADMIN_BRIDGE_SERVER_NAME = 'admin-bridge.cfmeet.internal'
 
 
-def admin_bridge_hq_relay_config(allowed_source):
-    """nginx stream relay (TCP passthrough, no TLS termination) that admits only HQ's
-    egress address. Refuses an absent, wildcard or malformed source."""
-    source = (allowed_source or '').strip()
-    m = re.fullmatch(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(/(\d{1,2}))?', source)
-    if not m or any(int(o) > 255 for o in m.groups()[:4]) or (m.group(6) and not 8 <= int(m.group(6)) <= 32):
-        raise RuntimeError('%s must be HQ\'s egress IPv4 address or a CIDR of /8 or narrower' % ADMIN_BRIDGE_HQ_SOURCE_ENV)
-    if source.startswith('0.') or source.endswith('/0'):
-        raise RuntimeError('%s must not admit everyone' % ADMIN_BRIDGE_HQ_SOURCE_ENV)
+def _private_ipv4(value, var, allow_prefix):
+    """A private IPv4 address (RFC 1918 or 100.64/10), optionally a CIDR of /24 or narrower."""
+    v = (value or '').strip()
+    m = re.fullmatch(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(/(\d{1,2}))?', v)
+    if not m or any(int(o) > 255 for o in m.groups()[:4]):
+        raise RuntimeError('%s must be a private IPv4 address' % var)
+    if m.group(5) and (not allow_prefix or not 24 <= int(m.group(6)) <= 32):
+        raise RuntimeError('%s must be one private address%s' % (var, ' or a CIDR of /24 or narrower' if allow_prefix else ''))
+    a, b = int(m.group(1)), int(m.group(2))
+    private = a == 10 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168) or (a == 100 and 64 <= b <= 127)
+    if not private:
+        raise RuntimeError('%s must be a private (tunnel) address, never public' % var)
+    return v
+
+
+def admin_bridge_hq_relay_config(listen_address, allowed_source):
+    """nginx stream relay (TCP passthrough, no TLS termination) bound to the CF Meet host's
+    private tunnel address and admitting only HQ's tunnel address. Refuses public, wildcard
+    or malformed addresses."""
+    listen = _private_ipv4(listen_address, ADMIN_BRIDGE_HQ_LISTEN_ENV, allow_prefix=False)
+    source = _private_ipv4(allowed_source, ADMIN_BRIDGE_HQ_SOURCE_ENV, allow_prefix=True)
     return ('daemon off;\nworker_processes 1;\npid /tmp/nginx.pid;\nerror_log stderr warn;\n'
             'events { worker_connections 256; }\nstream {\n    resolver 127.0.0.11 valid=10s ipv6=off;\n'
-            '    server {\n        listen %d;\n        allow %s;\n        deny all;\n'
+            '    server {\n        listen %s:%d;\n        allow %s;\n        deny all;\n'
             '        set $peer %s:8443;\n        proxy_pass $peer;\n'
             '        proxy_connect_timeout 5s;\n        proxy_timeout 60s;\n    }\n}\n'
-            % (ADMIN_BRIDGE_HQ_PORT, source, SERVICES['admin-bridge']['container']))
-
+            % (listen, ADMIN_BRIDGE_HQ_PORT, source, SERVICES['admin-bridge']['container']))
 
 SERVICES = {
     'platform-access': _service('cfmeet-platform-access', 8094, '/ready', tls=8443,
