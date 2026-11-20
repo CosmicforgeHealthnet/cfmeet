@@ -1,0 +1,93 @@
+{
+  "description": "One Communications profile by CF Meet ID: display name (R1 detail read), activation state, operator hold and times. Never a phone number, email address or account reference.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cfmeet_id",
+    "display_name",
+    "activation_state",
+    "hold",
+    "created_at",
+    "updated_at",
+    "suspended_at",
+    "deactivated_at",
+    "version"
+  ],
+  "properties": {
+    "cfmeet_id": {
+      "type": "string",
+      "pattern": "^CF-[A-Z2-7]{6,26}$"
+    },
+    "display_name": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "activation_state": {
+      "enum": [
+        "ACCOUNT_CREATED",
+        "ACTIVE",
+        "SUSPENDED",
+        "DEACTIVATED"
+      ]
+    },
+    "hold": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reason",
+            "active",
+            "updated_at"
+          ],
+          "properties": {
+            "reason": {
+              "enum": [
+                "ABUSE",
+                "SECURITY",
+                "LEGAL",
+                "OTHER"
+              ]
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "updated_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "suspended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "deactivated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

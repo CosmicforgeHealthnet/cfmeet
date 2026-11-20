@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "product",
+    "market",
+    "organization",
+    "zone",
+    "tenant"
+  ],
+  "properties": {
+    "product": {
+      "const": "cfmeet"
+    },
+    "market": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+      "maxLength": 128
+    },
+    "organization": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+      "maxLength": 128
+    },
+    "zone": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+      "maxLength": 128
+    },
+    "tenant": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$",
+      "maxLength": 128
+    }
+  }
+}

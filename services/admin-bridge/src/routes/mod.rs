@@ -1,6 +1,7 @@
 //! Routes: discovery, aggregate health, datasets and projection status (A1), and the
 //! owner reads by module (`organizations`, A2). Every other capability is refused before it gets here (`served == false`).
 
+pub mod communications;
 pub mod identity;
 pub mod notifications;
 pub mod organizations;
@@ -28,6 +29,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
         return answer;
     }
     if let Some(answer) = identity::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = communications::dispatch(bridge, auth).await {
         return answer;
     }
     match auth.capability.id {

@@ -3138,4 +3138,30 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "IdentityPrincipalPage",
         &["partners_identity_reads_use_the_workspace_tenant"],
     ),
+    // A2.4 Communications.
+    (
+        "communications.profiles.read",
+        "CommunicationProfile",
+        &["communications_profile_never_relays_contact_fields"],
+    ),
+    (
+        "communications.reports.list",
+        "CommunicationReportPage",
+        &["communications_reports_and_holds_page_by_time_cursor"],
+    ),
+    (
+        "communications.holds.list",
+        "CommunicationHoldPage",
+        &["communications_reports_and_holds_page_by_time_cursor"],
+    ),
+    (
+        "communications.audit.list",
+        "CommunicationAuditPage",
+        &["communications_audit_maps_the_window_and_drops_details"],
+    ),
+    (
+        "communications.metrics.read",
+        "Summary",
+        &["communications_metrics_are_an_hq_summary"],
+    ),
 ];

@@ -8,8 +8,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cf_service_auth::{
-    DelegatedPlatformContext, InternalPermission, InternalServiceContext, OutboundServiceRequest,
-    ServiceId,
+    DelegatedPlatformContext, InternalPermission, InternalServiceContext, OperatorAttribution,
+    OutboundServiceRequest, ServiceId,
 };
 use serde_json::{json, Value};
 
@@ -88,8 +88,20 @@ pub async fn middleware(
         "/internal/v1/communications/restrictions/check" => {
             InternalPermission::CommunicationsRestrictionsRead
         }
+        // ADR 0068: the admin bridge's operator reads (bridge only).
+        p if p.starts_with("/internal/v1/communications/operator/") => {
+            InternalPermission::CommunicationsAdminister
+        }
         _ => return Error::NotFound.into_response(),
     };
+    // ADR 0068: operator attribution (X-CF-Operator / -Approver / -Approval-Ref /
+    // -Intent-Digest) is accepted only from the admin bridge and refused on every route
+    // from any other caller, malformed, incomplete or self-approved.
+    let attribution =
+        match OperatorAttribution::from_headers(ctx.authenticated_service(), request.headers()) {
+            Ok(a) => a,
+            Err(_) => return Error::Forbidden.into_response(),
+        };
     if ctx.require_permission(permission).is_err() {
         return Error::Forbidden.into_response();
     }
@@ -107,6 +119,9 @@ pub async fn middleware(
     let route = request.uri().path().to_owned();
     let started = std::time::Instant::now();
     request.extensions_mut().insert(ctx);
+    request
+        .extensions_mut()
+        .insert(crate::operator::Operator(attribution));
     let response = next.run(request).await;
     tracing::info!(
         service = "communications",

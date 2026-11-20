@@ -1,0 +1,91 @@
+{
+  "description": "One profile report (safety evidence): reason, both parties' current CF Meet IDs, the target's report count and the review. Reports carry no free text.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_id",
+    "reason",
+    "reporter_cfmeet_id",
+    "target_cfmeet_id",
+    "target_report_count",
+    "review",
+    "created_at"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason": {
+      "enum": [
+        "SPAM",
+        "HARASSMENT",
+        "IMPERSONATION",
+        "OTHER"
+      ]
+    },
+    "reporter_cfmeet_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^CF-[A-Z2-7]{6,26}$"
+    },
+    "target_cfmeet_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^CF-[A-Z2-7]{6,26}$"
+    },
+    "target_report_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "review": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision",
+            "reason",
+            "held",
+            "reviewed_at"
+          ],
+          "properties": {
+            "decision": {
+              "enum": [
+                "DISMISSED",
+                "ACTIONED"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "NO_VIOLATION",
+                "ABUSE",
+                "SECURITY",
+                "LEGAL",
+                "OTHER"
+              ]
+            },
+            "held": {
+              "type": "boolean"
+            },
+            "reviewed_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

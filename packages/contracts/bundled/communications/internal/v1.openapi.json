@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet communications private Communications integration",
-    "version": "1.8.0",
-    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals. 1.7.0: short CF Meet IDs (CF- plus 6 characters). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back."
+    "version": "1.9.0",
+    "description": "Private backend interfaces for Sections 4–7. Never routed by public ingress or advertised by public Swagger. The owner retains canonical data. Scope, permissions and identities come from signed service authentication; request bodies cannot impersonate principals. 1.7.0: short CF Meet IDs (CF- plus 6 characters). 1.8.0 (S2): account-erasure and account-export for the account authority (communications-account.apply): a deleted account's Hub data is erased; the account's data download reads it back. 1.9.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller; the admin bridge's operator reads GET /internal/v1/communications/operator/profiles/{cfMeetId}, /reports, /holds, /audit and /metrics, each requiring communications.administer and X-CF-Operator."
   },
   "tags": [
     {
@@ -1496,6 +1496,661 @@
           }
         }
       }
+    },
+    "/internal/v1/communications/operator/profiles/{cfMeetId}": {
+      "get": {
+        "operationId": "operatorGetProfile",
+        "summary": "Get a profile (admin bridge)",
+        "description": "One profile by its current CF Meet ID (case-insensitive, hyphen optional): display name, activation state, operator hold and times. Never a phone number, email address or account reference. Requires communications.administer (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "cfMeetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorProfile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, or operator attribution not from cfmeet.admin-bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/operator/reports": {
+      "get": {
+        "operationId": "operatorListReports",
+        "summary": "List profile reports (admin bridge)",
+        "description": "Profile reports across scopes, oldest first: reason, both parties' current CF Meet IDs, the target's report count and the review. Reports carry no free text. Requires communications.administer (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Default OPEN.",
+            "schema": {
+              "enum": [
+                "OPEN",
+                "DISMISSED",
+                "ACTIONED",
+                "ALL"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque keyset cursor from the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorReportPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, or operator attribution not from cfmeet.admin-bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/operator/holds": {
+      "get": {
+        "operationId": "operatorListHolds",
+        "summary": "List operator holds (admin bridge)",
+        "description": "Operator holds, most recently changed first (active by default). Requires communications.administer (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "description": "Default true.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque keyset cursor from the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorHoldPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, or operator attribution not from cfmeet.admin-bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/operator/audit": {
+      "get": {
+        "operationId": "operatorListAudit",
+        "summary": "List the Hub audit (admin bridge)",
+        "description": "The Hub's audit, newest first by sequence: operation, actor and resource ids, time. Free-form details are not exposed. since / until are RFC 3339; the window is at most 31 days. Requires communications.administer (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive lower bound.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive upper bound.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (default 50).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Continue below this sequence.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorAuditPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, or operator attribution not from cfmeet.admin-bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/communications/operator/metrics": {
+      "get": {
+        "operationId": "operatorReadMetrics",
+        "summary": "Read Hub counters (admin bridge)",
+        "description": "Hub counters (counts only): profiles, connections, active devices, dead outbox rows, active operator holds, open reports. Requires communications.administer (cfmeet.admin-bridge only) and X-CF-Operator.",
+        "tags": [
+          "Communications integration"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "communications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^req_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Correlation-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^corr_[0-9a-f]{32}$"
+            }
+          },
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every route (403 PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Typed private result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorMetrics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid typed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or replayed service authentication.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED: no communications.administer, X-CF-Operator missing or malformed, or operator attribution not from cfmeet.admin-bridge.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unavailable scoped resource.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Required authority or persistence unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2040,6 +2695,381 @@
           "category",
           "optedOut"
         ]
+      },
+      "OperatorAuditEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "seq",
+          "operation",
+          "actorProfileId",
+          "resourceId",
+          "createdAt"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "operation": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "actorProfileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "resourceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorAuditPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorAuditEvent"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        }
+      },
+      "OperatorHold": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cfMeetId",
+          "reason",
+          "active",
+          "version",
+          "updatedAt"
+        ],
+        "properties": {
+          "cfMeetId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^CF-[A-Z2-7]{6,26}$"
+          },
+          "reason": {
+            "enum": [
+              "ABUSE",
+              "SECURITY",
+              "LEGAL",
+              "OTHER"
+            ]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorHoldPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorHold"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]+\\.[0-9a-f-]{36}$"
+          }
+        }
+      },
+      "OperatorMetrics": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "asOf",
+          "profiles",
+          "connections",
+          "devicesActive",
+          "outboxDead",
+          "operatorHolds",
+          "reportsOpen"
+        ],
+        "properties": {
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "profiles": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "connections": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "devicesActive": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "outboxDead": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "operatorHolds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reportsOpen": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OperatorProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cfMeetId",
+          "displayName",
+          "activationState",
+          "createdAt",
+          "updatedAt",
+          "suspendedAt",
+          "deactivatedAt",
+          "version",
+          "hold"
+        ],
+        "properties": {
+          "cfMeetId": {
+            "type": "string",
+            "pattern": "^CF-[A-Z2-7]{6,26}$"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "activationState": {
+            "enum": [
+              "ACCOUNT_CREATED",
+              "ACTIVE",
+              "SUSPENDED",
+              "DEACTIVATED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "suspendedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deactivatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "hold": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reason",
+                  "active",
+                  "updatedAt"
+                ],
+                "properties": {
+                  "reason": {
+                    "enum": [
+                      "ABUSE",
+                      "SECURITY",
+                      "LEGAL",
+                      "OTHER"
+                    ]
+                  },
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "OperatorReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reportId",
+          "reason",
+          "createdAt",
+          "reporterCfMeetId",
+          "targetCfMeetId",
+          "targetReportCount",
+          "review"
+        ],
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "enum": [
+              "SPAM",
+              "HARASSMENT",
+              "IMPERSONATION",
+              "OTHER"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reporterCfMeetId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^CF-[A-Z2-7]{6,26}$"
+          },
+          "targetCfMeetId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^CF-[A-Z2-7]{6,26}$"
+          },
+          "targetReportCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "review": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "decision",
+                  "reason",
+                  "held",
+                  "reviewedAt"
+                ],
+                "properties": {
+                  "decision": {
+                    "enum": [
+                      "DISMISSED",
+                      "ACTIONED"
+                    ]
+                  },
+                  "reason": {
+                    "enum": [
+                      "NO_VIOLATION",
+                      "ABUSE",
+                      "SECURITY",
+                      "LEGAL",
+                      "OTHER"
+                    ]
+                  },
+                  "held": {
+                    "type": "boolean"
+                  },
+                  "reviewedAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "OperatorReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorReport"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]+\\.[0-9a-f-]{36}$"
+          }
+        }
       },
       "OrganizationInviteeResolve": {
         "type": "object",
