@@ -16,10 +16,11 @@
 // the recipient is offline, read when the recipient opens it with nobody else online;
 // encrypted send / receive; XSS payloads rendered as text; reload (encrypted local
 // state); offline delivery; network loss and reconnect; an encrypted attachment;
-// new chats are private-only (the new-chat dialog offers no MANAGED choice); a second browser linked by a
-// trusted browser (comparison code, ADR 0060) that joins the chat BY ITSELF while every
-// other device is offline (MLS external commit), its history recovered device-to-device
-// with comparison codes; device removal
+// new chats are private-only (the new-chat dialog offers no MANAGED choice); a second browser
+// trusted by its own sign-in (no verification step, ADR 0067) that joins the chat BY ITSELF
+// while every other device is offline (MLS external commit), older messages labelled "Sent
+// before this browser joined", its history recovered device-to-device with comparison
+// codes; device removal
 // erasing local state; CSP / Trusted Types / worker integrity; expired session.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -353,28 +354,23 @@ async function journey() {
   //          is recovered device-to-device after both devices show the same code.
   const bob2 = await open("bob");
   pages.bob2 = bob2.page;
-  // Multi-device policy (ADR 0060): a second browser is untrusted until one of Bob's trusted
-  // devices approves it by typing the code the new browser shows; then setup completes.
-  // The link request starts on its own; the new browser only shows the code to compare.
-  await bob2.page.locator("[data-testid=device-setup][data-linking=true]").first().waitFor({ timeout: T });
-  const linkCode = (await bob2.page.locator("[data-testid=account-link-code]:visible").first().textContent({ timeout: T })).trim();
-  assert.match(linkCode, /^\d{6}$/, "the new browser shows a 6-digit linking code");
-  await bob.page.locator("[data-testid=incoming-link]").waitFor({ timeout: 2 * T });
-  await bob.page.fill("[data-testid=incoming-link-code]", linkCode);
-  await bob.page.click("[data-testid=approve-link]");
-  await bob.page.locator("[data-testid=incoming-link]").waitFor({ state: "detached", timeout: T });
+  // ADR 0067: signing in is enough. The second browser is never asked to verify itself and
+  // Bob's other browser is never asked to approve it; setup is silent.
   // Every other device goes offline before the new browser even has its messaging device:
   // nobody can add it, so it must not wait for anyone.
   await alice.page.close();
   await bob.page.close();
   await phase(bob2.page, "ready");
-  step("second browser linked by a trusted browser (comparison code)", { linkCode: "######" });
+  assert.equal(await bob2.page.locator("[data-testid=account-link-code], [data-testid=link-email-code], [data-testid=incoming-link]").count(), 0, "no verification step");
+  assert.equal(await bob2.page.getByText(/Verify this browser|Securing this chat|Waiting for secure setup|can't send messages from this browser/).count(), 0, "no setup write-up");
+  step("second browser trusted by its own sign-in (no verification step)", {});
   await previewIsText(bob2.page);
   await openConversation(bob2.page, "PRIVATE_E2EE");
-  // It joins the chat's encryption group by itself (MLS external commit from the GroupInfo).
-  await bob2.page.locator("[data-testid=e2ee-unavailable]").waitFor({ state: "detached", timeout: T });
-  // Older messages show a clear placeholder (history can be transferred from Bob's other browser).
-  await bob2.page.locator("[data-testid=message][data-state=before-join] [data-testid=message-note]").first().waitFor({ timeout: T });
+  // Older messages show a calm, accurate label (they can never arrive on this browser; history
+  // can be transferred from Bob's other browser), never "Waiting for this message".
+  const older = bob2.page.locator("[data-testid=message][data-state=before-join] [data-testid=message-note]").first();
+  await older.waitFor({ timeout: T });
+  assert.match(await older.textContent(), /^Sent before this browser joined/);
   // The new device writes first: once Alice reads it, both are in the epoch that
   // contains it (a message encrypted in an earlier epoch is, correctly, unreadable to it).
   const fromNew = `${SECRET} from bob's new device`;

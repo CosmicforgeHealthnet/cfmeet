@@ -174,8 +174,13 @@ where
         .iter()
         .map(|m| m.name().to_string())
         .collect();
+    let kind_offer: Vec<String> = CallKindOfferMigrator::migrations()
+        .iter()
+        .map(|m| m.name().to_string())
+        .collect();
     let mut pending = pending_in(db, MIGRATION_TABLE, main).await?;
     pending.extend(pending_in(db, GAP_CLOSURE_MIGRATION_TABLE, gap).await?);
+    pending.extend(pending_in(db, CALL_KIND_OFFER_MIGRATION_TABLE, kind_offer).await?);
     Ok(pending)
 }
 
@@ -334,12 +339,38 @@ pub async fn notification_publications_ready<C: sea_orm_migration::sea_orm::Conn
     Ok(known == actual)
 }
 
-/// `calling-migration up`: the main history, then the notification-publications and the
-/// gap-closure ones (the Communications history keeps its own binary). All additive.
+mod kind_offer;
+
+/// Where [`CallKindOfferMigrator`] records its migrations.
+pub const CALL_KIND_OFFER_MIGRATION_TABLE: &str = "calling_call_kind_offer_seaql_migrations";
+
+/// CF2 (a voice call switched to video while it still rings): its OWN history, for the
+/// same rollback-safety reason as [`NotificationPublicationsMigrator`]. The previous image
+/// fails closed on a migration of [`MIGRATION_TABLE`] or [`GAP_CLOSURE_MIGRATION_TABLE`] it
+/// does not know, and never reads this table, so it keeps starting (and reporting ready)
+/// after a rollback; this image requires it ([`pending_migrations`]). Never merge it.
+pub struct CallKindOfferMigrator;
+
+#[async_trait::async_trait]
+impl MigratorTrait for CallKindOfferMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(
+            kind_offer::m20261207_000057_call_kind_offer::Migration,
+        )]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new(CALL_KIND_OFFER_MIGRATION_TABLE).into_iden()
+    }
+}
+
+/// `calling-migration up`: the main history, then the notification-publications, the
+/// gap-closure and the call-kind-offer ones (the Communications history keeps its own
+/// binary). All additive.
 pub async fn up_all(
     db: &sea_orm_migration::sea_orm::DatabaseConnection,
 ) -> Result<(), sea_orm_migration::sea_orm::DbErr> {
     Migrator::up(db, None).await?;
     NotificationPublicationsMigrator::up(db, None).await?;
-    GapClosureMigrator::up(db, None).await
+    GapClosureMigrator::up(db, None).await?;
+    CallKindOfferMigrator::up(db, None).await
 }

@@ -151,15 +151,11 @@ def infrastructure():
     checks = {}
     status, _, body = request('/health')
     checks['health'] = dict(status=status, result='PASS' if status == 200 and '"healthy"' in body else 'FAIL')
-    status, _, body = request('/api-docs/swagger-config.json', limit=65536)
-    checks['swagger_config'] = dict(status=status, result='PASS' if status == 200 else 'FAIL')
-    try:
-        urls = [u['url'] for u in json.loads(body).get('urls', []) if u.get('url', '').startswith('/')]
-    except ValueError:
-        urls = []
-    for url in urls:
+    # D1: the Meeting Service's Swagger UI and OpenAPI documents are not public in
+    # production (the developer portal publishes the customer documentation).
+    for url in ('/api-docs/swagger-config.json', '/api-docs/openapi.json', '/swagger-ui/'):
         status, _, _ = request(url)
-        checks['openapi ' + url] = dict(status=status, result='PASS' if status == 200 else 'FAIL')
+        checks['docs_not_public ' + url] = dict(status=status, result='PASS' if status == 404 else 'FAIL')
     status, headers, _ = request('/api/v2/me/profile', 'OPTIONS', {
         'Origin': WEB_ORIGIN, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'})
     allowed = headers.get('access-control-allow-origin')

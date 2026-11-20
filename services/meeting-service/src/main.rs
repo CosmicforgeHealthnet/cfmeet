@@ -16,6 +16,15 @@ use backend::{
     },
 };
 
+/// `DATABASE_MAX_CONNECTIONS` (2-200, default 10).
+fn database_max_connections() -> u32 {
+    std::env::var("DATABASE_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(10)
+        .clamp(2, 200)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load environment variables
@@ -31,7 +40,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Connecting to database...");
     let mut db_opts = ConnectOptions::new(&app_config.database_url);
     db_opts
-        .max_connections(10)
+        // B6: `DATABASE_MAX_CONNECTIONS` (2-200, default 10) sizes the pool per deployment;
+        // production raises it only through the release operation `activate-database-pools`,
+        // which checks the database's connection budget first.
+        .max_connections(database_max_connections())
         .min_connections(2)
         .connect_timeout(std::time::Duration::from_secs(30))
         .acquire_timeout(std::time::Duration::from_secs(30))
@@ -229,6 +241,16 @@ async fn main() -> anyhow::Result<()> {
     {
         panic!("Gap-closure migration is required (gap-closure-migration up)");
     }
+
+    // S2: account deletion queues durable erasure jobs for Messaging, the Hub and Calling
+    // (`account-privacy-migration up`); the privacy worker delivers and retries them.
+    if !migration::account_privacy_ready(&state.db)
+        .await
+        .expect("Account-privacy migration readiness")
+    {
+        panic!("Account-privacy migration is required (account-privacy-migration up)");
+    }
+    backend::services::account_privacy::spawn(state.db.clone(), std::time::Duration::from_secs(60));
 
     // Blueprint Section 4: which store answers organization questions (the client
     // configuration was validated when the meeting domain was built; misconfiguration
@@ -623,9 +645,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build application with routes
-    let mut app = Router::new()
-        .merge(routes::create_routes(state))
-        .merge(swagger::swagger_router(&addr))
+    // D1: Swagger UI and the served OpenAPI documents only outside production
+    // (`API_DOCS_ENABLED`, see `swagger::docs_enabled`).
+    let docs = swagger::docs_enabled();
+    let mut app = Router::new().merge(routes::create_routes(state));
+    if docs {
+        app = app.merge(swagger::swagger_router(&addr));
+    }
+    let mut app = app
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());
     if let Some(bridge) = bridge_router {
@@ -643,8 +670,12 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
     tracing::info!("🚀 Server running on http://{}", addr);
-    tracing::info!("📚 Swagger UI: http://{}/swagger-ui", addr);
-    tracing::info!("📖 API Docs: http://{}/api-docs/openapi.json", addr);
+    if docs {
+        tracing::info!("📚 Swagger UI: http://{}/swagger-ui", addr);
+        tracing::info!("📖 API Docs: http://{}/api-docs/openapi.json", addr);
+    } else {
+        tracing::info!("API documentation is not served (production; see API_DOCS_ENABLED)");
+    }
 
     axum::serve(listener, app).await?;
 

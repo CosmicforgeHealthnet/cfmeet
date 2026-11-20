@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 import { conferenceKeys, useConference, usePreJoin, useJoinConference } from "@/hooks/v2/useConferences";
 import { useResolveSpace } from "@/hooks/v2/useSpaces";
 import { conferencesService } from "@/services/v2/conferences.service";
+import { participantsService } from "@/services/v2/participants.service";
+import { useRealtime } from "@/hooks/v2/useRealtime";
 import { conferencePermission } from "@/lib/meeting-scheduling";
 import { CONSENT_TEXT, consentGrants, joinBlocker, joinErrorMessage, preJoinRequirements, roomJoinData, roomPhase, type RoomJoinData } from "@/lib/prejoin";
 import { scheduleWindowLabel, viewerTimeZone } from "@/lib/meeting-time";
@@ -90,6 +92,8 @@ export default function PreJoinScreen({ conferenceId, onJoin, initialInvitationT
   const [invitationToken, setInvitationToken] = useState(initialInvitationToken);
   const [consents, setConsents] = useState<Partial<Record<ConsentKind, boolean>>>({});
   const [isWaiting, setIsWaiting] = useState(false);
+  /** Nobody who can admit is in the meeting (audit M3): told while waiting. */
+  const [unattended, setUnattended] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -178,6 +182,15 @@ export default function PreJoinScreen({ conferenceId, onJoin, initialInvitationT
       if (pollingBusy.current) return;
       pollingBusy.current = true;
       try {
+        // A wait the host (or the waiting-room policy) ended stays ended: never knock again.
+        const mine = await participantsService.me(conferenceId).catch(() => null);
+        if (mine?.admissionState === "DENIED") {
+          if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
+          setIsWaiting(false);
+          setUnattended(false);
+          setError(mine.denialMessage || "The host didn't let you in.");
+          return;
+        }
         const result = await joinMutation.mutateAsync({ id: conferenceId, data: joinRequest() });
         if (epoch !== pollingEpoch.current) {
           if (result.participantToken) storageStore.setParticipantToken(result.participantToken);
@@ -203,6 +216,16 @@ export default function PreJoinScreen({ conferenceId, onJoin, initialInvitationT
       }
     }, 3000);
   }, [conferenceId, joinMutation, joinRequest, toRoom, onJoin, isCameraOn, isMicOn]);
+
+  // Waiting-room notices (audit M3): whether anyone who can admit is in the meeting.
+  useRealtime({
+    conferenceId,
+    enabled: isWaiting,
+    onEvent: (event) => {
+      if (event.eventType === "conference.waiting_room_unattended") setUnattended(true);
+      else if (event.eventType === "conference.waiting_room_attended") setUnattended(false);
+    },
+  });
 
   const handleJoin = async () => {
     setError("");
@@ -347,6 +370,7 @@ export default function PreJoinScreen({ conferenceId, onJoin, initialInvitationT
               </span>
               <h1 className="mt-6 text-xl font-bold tracking-tight text-foreground">Waiting for the host</h1>
               <p className="mt-2 max-w-xs text-sm text-muted-foreground">The host will let you into <span className="font-medium text-foreground">{title}</span> soon. You&apos;ll join automatically.</p>
+              {unattended && <p role="status" className="mt-3 max-w-xs rounded-xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-300">Nobody who can let you in is in the meeting right now. If nobody returns in a few minutes, your request will end and you can try again later.</p>}
               {error && <p role="alert" className="mt-4 w-full rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p>}
               <button type="button" onClick={handleCancel} className="mt-6 inline-flex h-11 items-center rounded-xl border border-border px-5 text-sm font-semibold text-foreground hover:bg-muted">Cancel</button>
             </div>

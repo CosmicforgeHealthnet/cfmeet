@@ -616,39 +616,26 @@ async fn meeting_invitation_inner(
         )
     ));
     let link = format!("{}/invite#{token}", ctx.app_url);
-    // Gap audit M14: a scheduled occurrence comes with its calendar invite. The link opens
-    // CF Meet; the invitation token never goes into the calendar file.
+    // Gap audit M14 / audit M9: a scheduled occurrence comes with its calendar invitation
+    // (METHOD:REQUEST, the invitee as ATTENDEE) so mail clients offer Yes / No; later
+    // reschedules (REQUEST) and cancellations (CANCEL) carry the same UID with a higher
+    // SEQUENCE. The link opens CF Meet; the invitation token never goes into the file.
     let calendar = conference.as_ref().and_then(|c| {
-        let start = c.scheduled_start_at?;
-        let end = c
-            .scheduled_end_at
-            .unwrap_or(start + chrono::Duration::hours(1));
-        let event = crate::services::ics::IcsEvent {
-            uid: format!("conference-{}@cfmeet.com", c.id.simple()),
-            sequence: c.version.saturating_sub(1),
-            summary: title.clone(),
-            description: Some(format!(
+        conference_calendar(
+            c,
+            &space,
+            &title,
+            Some(format!(
                 "{inviter} invited you. Open the invitation email to join."
             )),
-            url: Some(ctx.app_url.clone()),
-            start,
-            end,
-            status: crate::services::ics::IcsStatus::Confirmed,
-            rrule: None,
-            exdates: vec![],
-            recurrence_id: None,
-            created: None,
-            last_modified: chrono::Utc::now(),
-        };
-        Some(crate::services::ics::render(
-            &crate::services::ics::IcsCalendar {
-                timezone: space.timezone.parse().ok(),
-                name: Some(title.clone()),
-                events: vec![event],
-                timezone_until: Some(end),
+            &ctx.app_url,
+            Some(&inviter),
+            crate::services::ics::IcsPerson {
+                email: email.clone(),
+                name: account.as_ref().map(|a| a.name()),
             },
-            chrono::Utc::now(),
-        ))
+            false,
+        )
     });
     let subject = clean(&format!("Invitation: {title}"), 160);
     let template = render(&NotificationBody {
@@ -692,6 +679,135 @@ async fn meeting_invitation_inner(
     } else {
         EmailDelivery::Failed
     })
+}
+
+/// Audit M10: emails a webinar / town-hall registrant their join link
+/// (`{APP_URL}/invite#<token>`, the token only in the URL fragment), with a calendar
+/// invitation when the registration is for a scheduled occurrence. Transactional (the
+/// registrant asked for it), so no preference applies; sent through the same ledger and
+/// routing fence as meeting invitation emails under the registration's invitation key
+/// (`meeting-invitation:<invitation id>`), so it is sent at most once. `None` when the
+/// registration has no email.
+pub async fn send_registration_link(
+    ctx: &NotificationContext,
+    registration_id: Uuid,
+    token: &str,
+) -> Option<EmailDelivery> {
+    let registration = crate::models::webinar_registrations::Entity::find_by_id(registration_id)
+        .one(&ctx.db)
+        .await
+        .ok()
+        .flatten()?;
+    let email = registration.email.clone()?;
+    if !ctx.config.email_enabled {
+        return Some(EmailDelivery::Disabled);
+    }
+    Some(
+        match registration_link_inner(ctx, &registration, &email, token).await {
+            Ok(true) => EmailDelivery::Accepted,
+            _ => EmailDelivery::Failed,
+        },
+    )
+}
+
+async fn registration_link_inner(
+    ctx: &NotificationContext,
+    registration: &crate::models::webinar_registrations::Model,
+    email: &str,
+    token: &str,
+) -> ApiResult<bool> {
+    let Some(space) = meeting_spaces::Entity::find_by_id(registration.meeting_space_id)
+        .one(&ctx.db)
+        .await?
+    else {
+        return Ok(false);
+    };
+    let conference = match registration.conference_id {
+        Some(id) => {
+            conference_sessions::Entity::find_by_id(id)
+                .one(&ctx.db)
+                .await?
+        }
+        None => None,
+    };
+    let invitation = meeting_invitations::Entity::find_by_id(registration.invitation_id)
+        .one(&ctx.db)
+        .await?;
+    let account = account_for_email(&ctx.db, email).await?;
+    let zone = account.as_ref().and_then(|a| a.timezone.as_deref());
+    let title = presented_title(&space);
+    let name = clean(&registration.display_name, 64);
+    let mut paragraphs = vec![format!("You are registered for \"{title}\".")];
+    if let Some(start) = conference.as_ref().and_then(|c| c.scheduled_start_at) {
+        paragraphs.push(format!(
+            "When: {}",
+            format_time(start, zone, &space.timezone)
+        ));
+    }
+    paragraphs.push(
+        "Use the button below to join. The link is personal: do not forward this email."
+            .to_string(),
+    );
+    if let Some(inv) = &invitation {
+        paragraphs.push(format!(
+            "The link works until {}.",
+            format_time(inv.expires_at, zone, &space.timezone)
+        ));
+    }
+    let link = format!("{}/invite#{token}", ctx.app_url);
+    let calendar = conference.as_ref().and_then(|c| {
+        conference_calendar(
+            c,
+            &space,
+            &title,
+            Some("Open the registration email to join.".to_string()),
+            &ctx.app_url,
+            None,
+            crate::services::ics::IcsPerson {
+                email: email.to_string(),
+                name: (!name.is_empty()).then(|| name.clone()),
+            },
+            false,
+        )
+    });
+    let subject = clean(&format!("Registered: {title}"), 160);
+    let template = render(&NotificationBody {
+        subject: &subject,
+        greeting_name: (!name.is_empty()).then_some(name.as_str()),
+        paragraphs,
+        action: Some(("Join", &link)),
+        footnote: Some(
+            "You received this email because this address was used to register for the meeting. If that was not you, you can ignore it."
+                .into(),
+        ),
+    });
+    let key = format!("meeting-invitation:{}", registration.invitation_id);
+    let outgoing = OutgoingEmail {
+        category: crate::services::email_delivery::category::MEETING_INVITATION,
+        idempotency_key: Some(key.clone()),
+        to: email.to_string(),
+        to_name: (!name.is_empty()).then_some(name),
+        subject,
+        html: template.html,
+        text: template.text,
+        calendar,
+    };
+    // Routing fence: LEGACY_ONLY is today's ledger path; otherwise the registration email
+    // has no catalogue event (the invitee need not have an account) and stays OLD.
+    let sent = match fence::current_mode(&ctx.db, MeetingCategory::MeetingInvitation).await? {
+        None | Some(RoutingMode::LegacyOnly) => ctx.notifier.mail.send(outgoing).await,
+        Some(_) => {
+            send_routed(
+                ctx,
+                MeetingCategory::MeetingInvitation,
+                RoutingKey::Fixed(key),
+                outgoing,
+                |_| Err(DecisionReason::Unpublishable),
+            )
+            .await
+        }
+    };
+    Ok(sent.is_ok())
 }
 
 /// Sends the invitation email for an organization invitation the Organizations Service
@@ -958,6 +1074,82 @@ fn organization_invitation_draft(
     })
 }
 
+/// The calendar ORGANIZER of meeting emails: the CF Meet sending address
+/// (`EMAIL_FROM_ADDRESS`), never a participant's own address. Replies to it are not read.
+pub fn calendar_organizer(acting_for: Option<&str>) -> crate::services::ics::IcsPerson {
+    let email = std::env::var("EMAIL_FROM_ADDRESS")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| crate::config::email::DEFAULT_FROM_ADDRESS.to_string());
+    let name = match acting_for.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => format!("{n} via CF Meet"),
+        None => crate::config::email::DEFAULT_FROM_NAME.to_string(),
+    };
+    crate::services::ics::IcsPerson {
+        email,
+        name: Some(name),
+    }
+}
+
+/// Audit M9: the iTIP calendar object of one scheduled conference for one attendee:
+/// `REQUEST` (invitation, reschedule) or `CANCEL` (`cancelled`). UID
+/// `conference-<id>@cfmeet.com` (the same as the calendar feed and downloads), SEQUENCE the
+/// conference version − 1 (every change raises it). `None` for an unscheduled conference.
+#[allow(clippy::too_many_arguments)]
+pub fn conference_calendar(
+    conference: &conference_sessions::Model,
+    space: &meeting_spaces::Model,
+    title: &str,
+    description: Option<String>,
+    url: &str,
+    acting_for: Option<&str>,
+    attendee: crate::services::ics::IcsPerson,
+    cancelled: bool,
+) -> Option<String> {
+    use crate::services::ics::{self, IcsMethod, IcsStatus};
+    let start = conference.scheduled_start_at?;
+    let end = conference
+        .scheduled_end_at
+        .filter(|e| *e > start)
+        .unwrap_or(start + Duration::hours(1));
+    let event = ics::IcsEvent {
+        uid: format!("conference-{}@cfmeet.com", conference.id.simple()),
+        sequence: conference.version.saturating_sub(1),
+        summary: title.to_string(),
+        description,
+        url: Some(url.to_string()),
+        start,
+        end,
+        status: if cancelled {
+            IcsStatus::Cancelled
+        } else {
+            IcsStatus::Confirmed
+        },
+        rrule: None,
+        exdates: vec![],
+        recurrence_id: None,
+        created: None,
+        last_modified: Utc::now(),
+        organizer: Some(calendar_organizer(acting_for)),
+        attendees: vec![attendee],
+    };
+    Some(ics::render(
+        &ics::IcsCalendar {
+            timezone: space.timezone.parse().ok(),
+            name: Some(title.to_string()),
+            events: vec![event],
+            timezone_until: Some(end),
+            method: if cancelled {
+                IcsMethod::Cancel
+            } else {
+                IcsMethod::Request
+            },
+        },
+        Utc::now(),
+    ))
+}
+
 fn rfc3339(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
@@ -977,6 +1169,7 @@ async fn conference_draft<C: ConnectionTrait>(
     actor_user_id: Option<Uuid>,
     starts_at: DateTime<Utc>,
     reminder: bool,
+    accounts_only: bool,
 ) -> ApiResult<Result<EventDraft, DecisionReason>> {
     let (rows, truncated) = conference_recipients(
         conn,
@@ -993,11 +1186,17 @@ async fn conference_draft<C: ConnectionTrait>(
     for r in rows {
         match r.user_id {
             Some(id) => recipients.push(format!("cfmeet-user:{id}")),
+            // The in-app event (audit M4) addresses accounts only: an email-only
+            // recipient has no inbox and keeps getting the legacy email.
+            None if accounts_only => {}
             None => return Ok(Err(DecisionReason::Unpublishable)),
         }
     }
     recipients.sort();
     recipients.dedup();
+    if recipients.is_empty() {
+        return Ok(Err(DecisionReason::Unpublishable));
+    }
     Ok(Ok(EventDraft {
         category: MeetingCategory::MeetingNotification,
         event_type,
@@ -1057,15 +1256,36 @@ async fn record_job<C: ConnectionTrait>(
             actor_user_id,
             starts_at,
             kind == KIND_REMINDER,
+            false,
         )
         .await?
     } else {
         Err(DecisionReason::Unpublishable)
     };
-    let routed = publications::route(
+    // Audit M4: the in-app event of an OLD decision (account recipients only).
+    let in_app = if config.in_app_delivery {
+        Some(
+            conference_draft(
+                conn,
+                config,
+                event_type,
+                conference,
+                dedupe_key,
+                actor_user_id,
+                starts_at,
+                kind == KIND_REMINDER,
+                true,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let routed = publications::route_with_in_app(
         conn,
         dedupe_key,
         draft,
+        in_app,
         MeetingCategory::MeetingNotification,
         None,
         Utc::now(),
@@ -1689,6 +1909,24 @@ async fn deliver(
             .filter(|n| !n.trim().is_empty())
             .or_else(|| r.username.clone());
         let email = compose(job, &conference, &space, &title, &link, &r, name.as_deref());
+        // Audit M9: a reschedule updates, a cancellation removes, the calendar event the
+        // invitation created (same UID, higher SEQUENCE). Reminders carry no calendar.
+        let calendar = match kind {
+            NoticeKind::Rescheduled | NoticeKind::Cancelled => conference_calendar(
+                &conference,
+                &space,
+                &title,
+                None,
+                &link,
+                None,
+                crate::services::ics::IcsPerson {
+                    email: r.email.clone(),
+                    name: name.clone(),
+                },
+                kind == NoticeKind::Cancelled,
+            ),
+            _ => None,
+        };
         let sent = ctx
             .notifier
             .mail
@@ -1700,7 +1938,7 @@ async fn deliver(
                 subject: email.0,
                 html: email.1,
                 text: email.2,
-                calendar: None,
+                calendar,
             })
             .await;
         if let Err(refused @ (MailError::InvalidAddress | MailError::Suppressed)) = sent {

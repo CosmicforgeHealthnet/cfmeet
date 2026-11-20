@@ -87,8 +87,15 @@ pub struct AuthPolicy {
     /// Require the browser-binding cookie set by the OAuth start redirect.
     pub google_browser_binding: bool,
     /// Header set by the trusted reverse proxy with the client address (for example
-    /// `x-real-ip`). Unset: per-address limits are off (the proxy address would be shared).
+    /// `x-real-ip`, which the host nginx overwrites with `$remote_addr`). Unset: per-address
+    /// limits are off (the proxy address would be shared).
     pub client_ip_header: Option<axum::http::HeaderName>,
+    /// S1: how many trusted proxies APPEND to the header (`AUTH_TRUSTED_PROXY_HOPS`, 1-5,
+    /// default 1). The address is the entry that many places from the RIGHT: the one the
+    /// outermost trusted proxy wrote. Entries further left were supplied by the visitor
+    /// (a forged `X-Forwarded-For`) and are never used. With a header the proxy overwrites
+    /// (`X-Real-IP $remote_addr`) there is one entry and the default is right.
+    pub trusted_proxy_hops: usize,
     /// ACC-022: the `status` string of the v1 sign-in responses (register, login, Google
     /// sign-in/exchange, `GET/PATCH /api/v1/users/me`). By default the contract value
     /// (`pending_verification`); `ACCOUNT_STATUS_FORMAT=legacy` keeps the historical
@@ -203,6 +210,10 @@ impl AuthPolicy {
             .map(|h| h.trim().to_ascii_lowercase())
             .filter(|h| !h.is_empty())
             .and_then(|h| axum::http::HeaderName::from_bytes(h.as_bytes()).ok());
+        let trusted_proxy_hops = get("AUTH_TRUSTED_PROXY_HOPS")
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(1)
+            .clamp(1, 5);
         let status_format = match get("ACCOUNT_STATUS_FORMAT")
             .unwrap_or_default()
             .trim()
@@ -255,6 +266,7 @@ impl AuthPolicy {
             google_token_delivery,
             google_browser_binding,
             client_ip_header,
+            trusted_proxy_hops,
             status_format,
             deactivation_requires_reauth,
             reauth_max_age_secs,
@@ -309,13 +321,48 @@ impl AuthPolicy {
         Ok(())
     }
 
-    /// The client address from the trusted proxy header (first entry), if configured.
+    /// S1: the client address from the trusted proxy header, if configured: the entry
+    /// [`Self::trusted_proxy_hops`] places from the right (what the trusted proxy wrote),
+    /// never a visitor-supplied entry further left. Only a well-formed IP address counts
+    /// (normalized, IPv4-mapped IPv6 as IPv4), so a forged value can neither pick another
+    /// limit bucket by spelling nor reach a log as free text.
     pub fn client_ip(&self, headers: &axum::http::HeaderMap) -> Option<String> {
         let name = self.client_ip_header.as_ref()?;
-        let raw = headers.get(name)?.to_str().ok()?;
-        let first = raw.split(',').next()?.trim();
-        (!first.is_empty() && first.len() <= 64).then(|| first.to_string())
+        // Several header lines are one list (RFC 9110 5.3): the proxy's line is the last.
+        let mut entries: Vec<&str> = Vec::new();
+        for value in headers.get_all(name) {
+            entries.extend(value.to_str().ok()?.split(','));
+        }
+        let index = entries.len().checked_sub(self.trusted_proxy_hops)?;
+        parse_client_address(entries[index])
     }
+}
+
+/// One forwarded-header entry as a normalized IP address (`203.0.113.7`, `[2001:db8::1]`,
+/// `203.0.113.7:4711`, `"[2001:db8::1]:4711"` accepted), or `None`.
+fn parse_client_address(entry: &str) -> Option<String> {
+    use std::net::{IpAddr, SocketAddr};
+    let raw = entry.trim().trim_matches('"');
+    if raw.is_empty() || raw.len() > 64 {
+        return None;
+    }
+    let ip = raw
+        .parse::<IpAddr>()
+        .ok()
+        .or_else(|| raw.parse::<SocketAddr>().ok().map(|a| a.ip()))
+        .or_else(|| {
+            raw.strip_prefix('[')
+                .and_then(|r| r.strip_suffix(']'))
+                .and_then(|r| r.parse::<IpAddr>().ok())
+        })?;
+    let ip = match ip {
+        IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map(IpAddr::V4)
+            .unwrap_or(IpAddr::V6(v6)),
+        v4 => v4,
+    };
+    Some(ip.to_string())
 }
 
 /// `403 EMAIL_VERIFICATION_REQUIRED` (ACC-016).
@@ -1553,8 +1600,60 @@ mod tests {
         assert_eq!(p.google_token_delivery, GoogleTokenDelivery::ExchangeCode);
         assert!(!p.google_browser_binding);
         let mut h = axum::http::HeaderMap::new();
-        h.insert("x-real-ip", "203.0.113.7, 10.0.0.1".parse().unwrap());
+        h.insert("x-real-ip", "203.0.113.7".parse().unwrap());
         assert_eq!(p.client_ip(&h).as_deref(), Some("203.0.113.7"));
+    }
+
+    /// S1: a visitor-supplied entry (left of what the trusted proxy appended) is never the
+    /// address; malformed values are refused; the hop count selects from the right.
+    #[test]
+    fn client_address_is_the_entry_the_trusted_proxy_wrote() {
+        let policy = |hops: Option<&str>| {
+            let hops = hops.map(str::to_string);
+            AuthPolicy::from_lookup(move |k| match k {
+                "AUTH_CLIENT_IP_HEADER" => Some("X-Forwarded-For".into()),
+                "AUTH_TRUSTED_PROXY_HOPS" => hops.clone(),
+                _ => None,
+            })
+        };
+        let headers = |values: &[&str]| {
+            let mut h = axum::http::HeaderMap::new();
+            for v in values {
+                h.append("x-forwarded-for", v.parse().unwrap());
+            }
+            h
+        };
+        let one = policy(None);
+        assert_eq!(one.trusted_proxy_hops, 1);
+        // Forged first entry, real address appended by the proxy.
+        let forged = headers(&["198.51.100.1, 203.0.113.7"]);
+        assert_eq!(one.client_ip(&forged).as_deref(), Some("203.0.113.7"));
+        // Two header lines are one list; the proxy's line is last.
+        let lines = headers(&["198.51.100.1", "203.0.113.8"]);
+        assert_eq!(one.client_ip(&lines).as_deref(), Some("203.0.113.8"));
+        // Two trusted hops: the outer proxy's entry, never the visitor's.
+        let two = policy(Some("2"));
+        let chain = headers(&["198.51.100.1, 203.0.113.9, 10.0.0.2"]);
+        assert_eq!(two.client_ip(&chain).as_deref(), Some("203.0.113.9"));
+        // Fewer entries than trusted hops: no address (never a visitor value).
+        assert_eq!(two.client_ip(&headers(&["203.0.113.9"])), None);
+        // Normalization and refusal of non-addresses.
+        assert_eq!(
+            one.client_ip(&headers(&["[2001:db8::1]:4711"])).as_deref(),
+            Some("2001:db8::1")
+        );
+        assert_eq!(
+            one.client_ip(&headers(&["::ffff:203.0.113.7"])).as_deref(),
+            Some("203.0.113.7")
+        );
+        assert_eq!(
+            one.client_ip(&headers(&["203.0.113.7:51000"])).as_deref(),
+            Some("203.0.113.7")
+        );
+        assert_eq!(one.client_ip(&headers(&["unknown"])), None);
+        assert_eq!(one.client_ip(&headers(&["198.51.100.1, not-an-ip"])), None);
+        assert_eq!(policy(Some("99")).trusted_proxy_hops, 5);
+        assert_eq!(AuthPolicy::default().client_ip(&forged), None);
     }
 
     #[test]

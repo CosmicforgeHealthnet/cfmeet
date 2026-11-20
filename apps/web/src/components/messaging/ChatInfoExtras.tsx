@@ -52,7 +52,9 @@ export default function ChatInfoExtras({ conversationId, direct, groupTitle }: {
       {p ? (
         <section>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notifications</p>
-          <NiceSelect value={current === "MUTED" && p.mutedUntil ? "MUTED" : current} onChange={(v) => save.mutate(v)} options={MUTE_OPTIONS} />
+          {/* "Only @mentions" only where the server says mentions can be read (not in end-to-end encrypted chats). */}
+          <NiceSelect value={current === "MUTED" && p.mutedUntil ? "MUTED" : current} onChange={(v) => save.mutate(v)}
+            options={MUTE_OPTIONS.filter((o) => o.value !== "MENTIONS" || p.mentionsAvailable !== false || current === "MENTIONS")} />
           {p.effectiveNotifications === "MUTED" && p.mutedUntil ? (
             <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><BellOff className="size-3.5" />Muted until {new Date(p.mutedUntil).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}</p>
           ) : null}

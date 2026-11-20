@@ -532,7 +532,13 @@ async fn account_routes_require_the_signed_hub_with_the_account_read_permission(
     let backfill = "/internal/v1/accounts/communications/backfill";
     let status_body = json!({ "accountReference": format!("cfmeet-user:{}", alice.id) });
     let backfill_body = json!({ "limit": 1 });
-    for (path, body) in [(status, &status_body), (backfill, &backfill_body)] {
+    let lookup = "/internal/v1/accounts/communications/email-lookup";
+    let lookup_body = json!({ "email": alice.email.to_uppercase() });
+    for (path, body) in [
+        (status, &status_body),
+        (backfill, &backfill_body),
+        (lookup, &lookup_body),
+    ] {
         // Unsigned (a browser / any unauthenticated caller).
         let (s, v) = hub
             .send(&hub.account_reader, path, None, body.clone())
@@ -564,4 +570,58 @@ async fn account_routes_require_the_signed_hub_with_the_account_read_permission(
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["state"], "ACTIVE", "{v}");
     assert_eq!(v["principalId"], json!(principal), "{v}");
+
+    // Contacts audit KF1: the verified address (any case) names the account; an unknown or
+    // suspended one is the same found:false.
+    hub.app
+        .db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE users SET email_verified_at=now() WHERE id=$1",
+            [alice.id.into()],
+        ))
+        .await
+        .unwrap();
+    let (s, v) = hub
+        .send(
+            &hub.account_reader,
+            lookup,
+            Some(hub.scope.clone()),
+            lookup_body.clone(),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(
+        v,
+        json!({"schemaVersion":1,"found":true,"accountReference":format!("cfmeet-user:{}", alice.id)})
+    );
+    let (_, v) = hub
+        .send(
+            &hub.account_reader,
+            lookup,
+            Some(hub.scope.clone()),
+            json!({ "email": "nobody-here@example.com" }),
+        )
+        .await;
+    assert_eq!(v, json!({"schemaVersion":1,"found":false}));
+    hub.app
+        .db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE users SET status='suspended' WHERE id=$1",
+            [alice.id.into()],
+        ))
+        .await
+        .unwrap();
+    let (_, v) = hub
+        .send(
+            &hub.account_reader,
+            lookup,
+            Some(hub.scope.clone()),
+            lookup_body,
+        )
+        .await;
+    assert_eq!(v, json!({"schemaVersion":1,"found":false}));
 }

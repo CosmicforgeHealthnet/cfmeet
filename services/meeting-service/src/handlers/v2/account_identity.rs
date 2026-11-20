@@ -233,9 +233,10 @@ pub async fn confirm_email_change(
 ///
 /// Gap audit A2: one JSON document of everything the Meeting Service holds about the
 /// signed-in account (profile, sign-ins, linked devices, owned meeting spaces, memberships,
-/// webinar registrations, conference participation and its own security events). Chats,
-/// contacts and calls are held by Messaging, the Communications Hub and Calling, which the
-/// document names. Requires a session-bound sign-in.
+/// webinar registrations, conference participation and its own security events) and, under
+/// `elsewhere`, what Messaging (conversations), the Communications Hub (profile, CF Meet ID,
+/// contacts, lists, saved messages, settings) and Calling (call history) hold about it; an
+/// owner that cannot answer is reported as unavailable. Requires a session-bound sign-in.
 #[utoipa::path(
     get, path = "/api/v2/me/data-export", tag = "Account security (v2)", operation_id = "v2_export_my_data",
     responses(
@@ -271,7 +272,9 @@ pub struct DeleteAccountRequest {
 /// password are removed and the account can never sign in again; the Google link is removed,
 /// meeting memberships end, owned meeting spaces are archived and webinar registrations are
 /// cancelled; every sign-in and device ends, and Messaging, the Communications Hub and Calling
-/// credentials end with them. The previous address receives one confirmation email.
+/// credentials end with them. The person's messages, Hub profile, CF Meet ID, contacts,
+/// lists, saved messages and call history are then erased at those services (durable,
+/// retried until each confirms). The previous address receives one confirmation email.
 #[utoipa::path(
     post, path = "/api/v2/me/account/delete", tag = "Account security (v2)", operation_id = "v2_delete_my_account",
     request_body = DeleteAccountRequest,

@@ -8,6 +8,7 @@ import { DEFAULT_RECONNECT_POLICY, INITIAL_MEDIA_STATE, backoffDelay, isRetryabl
 import { CallingConfigurationError, callingBaseUrl, callingRuntimeMode, renewalDelay } from "../src/lib/calling/runtime-guard.ts";
 import { callerLabel, offerHeadline, ringingOffers } from "../src/lib/calling/incoming-call.ts";
 import { signalingSocketUrl } from "../src/lib/calling/origin.mjs";
+import { endedCallText, launchStep } from "../src/lib/calling/launch.ts";
 
 const me = "me";
 const call = (overrides = {}) => ({
@@ -242,4 +243,44 @@ test("only new, actionable PENDING offers are acknowledged", async () => {
     { invitationId: "late", status: "PENDING", actionable: false },
   ];
   assert.deepEqual(offersToAcknowledge(offers, new Set(["done"])), ["new"]);
+});
+
+// ---- Call buttons elsewhere (Contacts / chats) → the Calls page places the call ----
+
+/** Replays the Calls page renders: what it did with the launch. */
+function replayLaunch(renders) {
+  let saw = false;
+  let pending = true;
+  const steps = [];
+  for (const r of renders) {
+    const d = launchStep({ pending, sawPlacing: saw, endpointReady: true, inCall: false, ...r });
+    saw = d.sawPlacing;
+    steps.push(d.step);
+    if (d.step !== "wait") pending = false;
+  }
+  return steps;
+}
+
+test("a call from Contacts is placed once the calling screen is up (owner report: new contact stuck on Calling…)", () => {
+  // Render 1 puts the calling screen up; its own effects still see it down (React state).
+  // That must not read as "cancelled": render 2 sees it up and places the call.
+  assert.deepEqual(replayLaunch([{ placing: false }, { placing: true }]), ["wait", "place"]);
+  // The address bar drops ?contactId= (the launch prop goes away): the remembered launch is still placed.
+  assert.deepEqual(replayLaunch([{ placing: false }, { placing: true, endpointReady: false }, { placing: true }]), ["wait", "wait", "place"]);
+});
+
+test("a call cancelled on the calling screen before this browser connected is never placed", () => {
+  assert.deepEqual(replayLaunch([{ placing: false }, { placing: true, endpointReady: false }, { placing: false }, { placing: false }]),
+    ["wait", "wait", "drop", "wait"]);
+  // Nothing pending: nothing happens.
+  assert.equal(launchStep({ pending: false, placing: true, sawPlacing: true, endpointReady: true, inCall: false }).step, "wait");
+  // Already in a call: wait (the page never places a second one over it).
+  assert.equal(launchStep({ pending: true, placing: true, sawPlacing: true, endpointReady: true, inCall: true }).step, "wait");
+});
+
+test("CF1: a call to someone already on a call says so", () => {
+  assert.equal(endedCallText("BUSY", "Ada"), "Ada is on another call");
+  assert.equal(endedCallText("BUSY", "  "), "They're on another call");
+  assert.equal(endedCallText("BUSY", null), "They're on another call");
+  assert.equal(endedCallText("FAILED", "Ada"), "");
 });

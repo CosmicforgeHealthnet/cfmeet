@@ -205,6 +205,8 @@ pub enum ErrorCode {
     /// starts with its reason (`INVALID_CLIENT`, `INVALID_REDIRECT_URI`, `INVALID_SCOPE`,
     /// `PKCE_REQUIRED` or `APP_NOT_AVAILABLE`).
     OauthRequestInvalid,
+    /// Audit MF2: unknown, replaced or revoked calendar feed token.
+    CalendarFeedNotFound,
     /// Unexpected database failure (details are logged, never returned).
     DatabaseError,
     /// Unexpected internal failure (details are logged, never returned).
@@ -336,6 +338,7 @@ impl ErrorCode {
             ErrorCode::DeviceLinkInvalid => "DEVICE_LINK_INVALID",
             ErrorCode::AppNotFound => "APP_NOT_FOUND",
             ErrorCode::OauthRequestInvalid => "OAUTH_REQUEST_INVALID",
+            ErrorCode::CalendarFeedNotFound => "CALENDAR_FEED_NOT_FOUND",
             ErrorCode::DatabaseError => "DATABASE_ERROR",
             ErrorCode::InternalError => "INTERNAL_ERROR",
         }
@@ -462,6 +465,7 @@ impl ErrorCode {
             ErrorCode::DeviceLinkInvalid => StatusCode::GONE,
             ErrorCode::AppNotFound => StatusCode::NOT_FOUND,
             ErrorCode::OauthRequestInvalid => StatusCode::BAD_REQUEST,
+            ErrorCode::CalendarFeedNotFound => StatusCode::NOT_FOUND,
             ErrorCode::InviteExpired => StatusCode::GONE,
             ErrorCode::DatabaseError | ErrorCode::InternalError => {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -831,6 +835,7 @@ mod tests {
             ErrorCode::DeviceLinkInvalid,
             ErrorCode::AppNotFound,
             ErrorCode::OauthRequestInvalid,
+            ErrorCode::CalendarFeedNotFound,
             ErrorCode::UserNotFound,
             ErrorCode::MfaRequired,
         ];

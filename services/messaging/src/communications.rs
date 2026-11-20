@@ -1,5 +1,6 @@
 //! Personal relationship policy. Messaging remains the conversation and security owner.
 mod owner;
+mod send_cache;
 use crate::{
     conversations::service::ConversationRow,
     error::{Error, ErrorCode, Result},
@@ -139,7 +140,8 @@ pub async fn require_send<C: ConnectionTrait>(
     if c.context_class == "GROUP" {
         // Membership remains Messaging-owned. A suspended personal account cannot
         // bypass its current activation state through a group message or edit.
-        return require(state, ctx, Action::PersonalActivity, actor, actor).await;
+        return send_cache::require_cached(db, state, ctx, Action::PersonalActivity, actor, actor)
+            .await;
     }
     if c.context_class != "DIRECT" {
         return Ok(());
@@ -148,7 +150,10 @@ pub async fn require_send<C: ConnectionTrait>(
     if targets.len() != 1 {
         return Err(Error::code(ErrorCode::DeliveryRefused));
     }
-    require(
+    // B2: an allowed decision is reused briefly; any block / contact / privacy / account
+    // event about either principal invalidates it on every instance (`send_cache`).
+    send_cache::require_cached(
+        db,
         state,
         ctx,
         Action::MessageSend,
@@ -168,6 +173,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/communications/conversations/access",
             post(owner::conversation_access),
+        )
+        .route(
+            "/communications/conversations/messages/access",
+            post(owner::conversation_messages_access),
         )
         .route(
             "/communications/conversations/attachments",
@@ -402,6 +411,10 @@ async fn event(
         }
     }
     let mut announced = None;
+    if n == 1 && e.kind != TIMELINE_CHANGED {
+        // B2: cached send decisions about these principals stop being used.
+        send_cache::invalidate(&txn, d, &send_cache::event_principals(&e.data)).await?;
+    }
     if n == 1 && e.kind == TIMELINE_CHANGED {
         announced = timeline_changed(&txn, &s, d, &e).await?;
     }

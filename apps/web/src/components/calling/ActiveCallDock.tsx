@@ -180,7 +180,7 @@ export default function ActiveCallDock() {
     );
     return (
       <section aria-label="Active call" className="dark fixed inset-0 z-[60] bg-[#202124] text-white">
-        <StageView inRoom={false} video={p.kind === "VIDEO"} group={false} seed={label ?? "call"} counterpart={label ?? "Calling…"} status={label ? "Calling…" : ""} ringing
+        <StageView inRoom={false} video={p.kind === "VIDEO"} group={false} seed={label ?? "call"} counterpart={label ?? "Calling…"} status={p.ended ?? (label ? "Calling…" : "")} ringing={!p.ended}
           connected={false} held={false} failed={false} error={null} onRetry={() => undefined} onMinimise={() => undefined} anyVideo={false} footerLinks={null} controls={placeholders}
           hangup={<CallButton icon={<PhoneOff />} label="Cancel" tone="danger" onClick={calling.cancelPlacing} />} />
       </section>

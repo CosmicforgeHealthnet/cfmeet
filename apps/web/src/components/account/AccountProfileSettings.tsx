@@ -11,6 +11,7 @@ import { TimeZoneField } from "@/components/meetings/ScheduleFields";
 import { viewerTimeZone } from "@/lib/meeting-time";
 import { BadgeCheck, Check, Copy, Hash, Mail } from "lucide-react";
 import { useHubProfile } from "@/hooks/v2/useCommunications";
+import { communicationsService as hub } from "@/services/v2/communications.service";
 import EmailCodeConfirm from "./EmailCodeConfirm";
 import { getErrorMessage } from "@/utils/error";
 import {
@@ -72,7 +73,15 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
   const [saved, setSaved] = useState(false);
   const problems = profileProblems(form);
   const patch = profilePatch(profile, form);
-  const changed = Object.keys(patch).length > 0;
+  // The About line contacts see lives in the Communications Hub (PATCH /api/v2/communications/me).
+  const hubProfile = useHubProfile();
+  const [about, setAbout] = useState<string | null>(null);
+  const [aboutError, setAboutError] = useState<string | null>(null);
+  const savedAbout = hubProfile.data?.about ?? "";
+  const aboutValue = about ?? savedAbout;
+  const aboutChanged = about !== null && about.trim() !== savedAbout;
+  const aboutProblem = [...aboutValue].length > 140 ? "Up to 140 characters." : /\p{Cc}/u.test(aboutValue) ? "Use a single line of text." : null;
+  const changed = Object.keys(patch).length > 0 || aboutChanged;
   const set = (field: keyof ProfileForm) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [field]: e.target.value }));
     setSaved(false);
@@ -81,9 +90,22 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!changed || Object.keys(problems).length) return;
+    if (!changed || Object.keys(problems).length || aboutProblem) return;
     try {
-      await update.mutateAsync(patch);
+      if (Object.keys(patch).length > 0) await update.mutateAsync(patch);
+      if (aboutChanged && hubProfile.data) {
+        setAboutError(null);
+        try {
+          // The Hub profile version also moves when the account name changes: read it fresh.
+          const current = await hub.me();
+          await hub.updateMe(current.version, about!.trim() || null);
+          await hubProfile.refetch();
+          setAbout(null);
+        } catch (e) {
+          setAboutError(getErrorMessage(e, "Your About line couldn't be saved. Try again."));
+          return;
+        }
+      }
       setSaved(true);
     } catch {
       /* shown below */
@@ -134,6 +156,13 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
         <div className="grid gap-5 sm:grid-cols-2">
           {field("displayName", "Display name", "Up to 64 characters.", profile.username)}
           {field("username", "Username", "3–50 letters, numbers or underscores.")}
+          {hubProfile.data ? (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="profile-about">About</Label>
+              <Input id="profile-about" value={aboutValue} onChange={(e) => { setAbout(e.target.value); setSaved(false); setAboutError(null); }} placeholder="Available" aria-invalid={!!aboutProblem} className="h-11 rounded-xl" />
+              {aboutProblem || aboutError ? <p className="text-xs text-destructive">{aboutProblem ?? aboutError}</p> : <p className="text-xs text-muted-foreground">Your contacts see this. Up to 140 characters.</p>}
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -163,8 +192,8 @@ function ProfileEditor({ profile }: { profile: AccountProfile }) {
         <p className="text-sm text-muted-foreground">{saved && !changed ? <span className="flex items-center gap-1.5 font-medium text-emerald-600"><Check className="size-4" />Saved</span> : "You have unsaved changes."}</p>
         {changed && (
           <div className="flex gap-2">
-            <button type="button" onClick={() => setForm(profileForm(profile))} className="h-9 rounded-full px-4 text-sm font-semibold hover:bg-muted">Discard</button>
-            <Button type="submit" className="rounded-full" loading={update.isPending} disabled={update.isPending || Object.keys(problems).length > 0}>Save changes</Button>
+            <button type="button" onClick={() => { setForm(profileForm(profile)); setAbout(null); setAboutError(null); }} className="h-9 rounded-full px-4 text-sm font-semibold hover:bg-muted">Discard</button>
+            <Button type="submit" className="rounded-full" loading={update.isPending} disabled={update.isPending || Object.keys(problems).length > 0 || !!aboutProblem}>Save changes</Button>
           </div>
         )}
       </div>

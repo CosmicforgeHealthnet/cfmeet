@@ -10,6 +10,7 @@
     "CONTACT_VAULT_PRIVATE": "Privacy Relay Contact Vault private-contact operations (separate contact-access authority); never exposed through the public gateway.",
     "NOT_CUSTOMER_NUMBERS_FAMILY": "Not part of the customer /v1/numbers family.",
     "CALENDAR_FILE_DIRECT_INGRESS": "RFC 5545 calendar file download (`calendar.ics`) for signed-in users of the CF Meet apps: the gateway route grammar has no file-extension segments, so it stays on the Meeting Service ingress; the JSON agenda (GET /api/v2/me/conferences) is the routed customer API.",
+    "CALENDAR_FEED_DIRECT_INGRESS": "Private calendar subscription feed of a CF Meet account (audit MF2): managed by the signed-in account in the CF Meet apps and read by calendar clients with the feed token in a `.ics` path; the gateway route grammar has no file-extension segments and it is not a partner API, so it stays on the Meeting Service ingress.",
     "FIRST_PARTY_ORGANIZATIONS": "The CF Meet app's first-party business organizations (Organizations Service relay, ADR 0056): served only to the app's own signed-in users with the verified acting user; never the developer organization authority (/v1/organizations).",
     "FIRST_PARTY_SESSION_DEVICES": "First-party relay only (Blueprint Section 13, ADR 0049 amendment A1): MANAGED-realtime session devices are issued to the CF Meet apps' own signed-in users through the Meeting Service relay, bound to their account session; customer applications register MLS devices and use client tokens.",
     "FIRST_PARTY_APP_NOTIFICATIONS": "The CF Meet app's own notification inbox, preferences and push-endpoint registration (Meeting Service relay U1-U9 to the Notification Service; Account session required, account resolved server-side). Owner-approved 2026-11-16; served on the Meeting Service ingress, not a customer API.",
@@ -1090,6 +1091,12 @@
       "domain": "developer-platform",
       "method": "POST",
       "path": "/v1/environments/{environmentId}/webhooks/{webhookId}/rotate-secret",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "developer-platform",
+      "method": "POST",
+      "path": "/v1/environments/{environmentId}/webhooks/{webhookId}/test",
       "class": "PUBLIC_CUSTOMER"
     },
     {
@@ -2207,6 +2214,12 @@
     {
       "domain": "meetings",
       "method": "POST",
+      "path": "/api/v2/conferences/{id}/extend",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
       "path": "/api/v2/conferences/{id}/screen-share/{participantId}/stop",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -2317,6 +2330,34 @@
       "method": "GET",
       "path": "/api/v2/me/conferences",
       "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/me/calendar-feed",
+      "class": "EXCLUDED",
+      "reason": "CALENDAR_FEED_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "POST",
+      "path": "/api/v2/me/calendar-feed",
+      "class": "EXCLUDED",
+      "reason": "CALENDAR_FEED_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "DELETE",
+      "path": "/api/v2/me/calendar-feed",
+      "class": "EXCLUDED",
+      "reason": "CALENDAR_FEED_DIRECT_INGRESS"
+    },
+    {
+      "domain": "meetings",
+      "method": "GET",
+      "path": "/api/v2/calendar-feeds/{file}",
+      "class": "EXCLUDED",
+      "reason": "CALENDAR_FEED_DIRECT_INGRESS"
     },
     {
       "domain": "meetings",
@@ -3520,6 +3561,12 @@
     {
       "domain": "messaging",
       "method": "PUT",
+      "path": "/v1/conversations/{conversationId}/inbox-settings",
+      "class": "PUBLIC_CUSTOMER"
+    },
+    {
+      "domain": "messaging",
+      "method": "PUT",
       "path": "/v1/conversations/{conversationId}/read-cursor",
       "class": "PUBLIC_CUSTOMER"
     },
@@ -4416,6 +4463,13 @@
     },
     {
       "domain": "communications",
+      "method": "PATCH",
+      "path": "/api/v2/communications/me",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
+    },
+    {
+      "domain": "communications",
       "method": "GET",
       "path": "/api/v2/communications/activation",
       "class": "EXCLUDED",
@@ -4467,6 +4521,13 @@
       "domain": "communications",
       "method": "POST",
       "path": "/api/v2/communications/discovery/public-id/resolve",
+      "class": "EXCLUDED",
+      "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
+    },
+    {
+      "domain": "communications",
+      "method": "POST",
+      "path": "/api/v2/communications/discovery/email/resolve",
       "class": "EXCLUDED",
       "reason": "FIRST_PARTY_COMMUNICATIONS_HUB"
     },

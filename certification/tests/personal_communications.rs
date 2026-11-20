@@ -917,6 +917,14 @@ async fn journey(s: &mut PersonalStack) -> anyhow::Result<()> {
         .code(),
         Some("DELIVERY_REFUSED")
     );
+    // Contacts audit K5: unblocking restores a contact that was connected before the block,
+    // unless someone removed it meanwhile. A removes the contact while blocked, so the
+    // unblock leaves the relationship ended.
+    status(
+        hub(s, &a, Method::DELETE, &format!("/contacts/{contact}"), None).await?,
+        200,
+        "contact removed while blocked",
+    )?;
     status(
         hub(
             s,

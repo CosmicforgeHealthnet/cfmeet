@@ -73,10 +73,13 @@ pub async fn update_profile_policy(
 /// Register for a webinar / town hall (public when the profile enables registration).
 ///
 /// Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,
-/// and returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a
-/// signed-in caller's account is linked to the registration. Which fields (email, organization,
-/// custom fields) are required or accepted is set by the meeting profile. Repeating a request with
-/// the same `idempotencyKey` returns 200 with the existing registration and no token. Returns
+/// and returns an admission token for joining as a viewer. No sign-in is needed; a signed-in caller's
+/// account is linked to the registration. Which fields (email, organization, custom fields) are
+/// required or accepted is set by the meeting profile. When an email is given, the join link
+/// (`{app}/invite#<token>`, with a calendar invitation for a scheduled occurrence) is also emailed
+/// to it once (`emailDelivery`). Repeating a request with the same `idempotencyKey` returns 200 with
+/// the existing registration and the same token (no second seat, no second email); a different
+/// request under the same key is IDEMPOTENCY_CONFLICT. Returns
 /// REGISTRATION_DISABLED (404) when registration is not available for the space and
 /// REGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's
 /// registration deadline has passed, and REGISTRATION_FULL when its capacity is reached;
@@ -90,7 +93,7 @@ pub async fn update_profile_policy(
         (status = 200, description = "Idempotent repeat", body = RegistrationCreated),
         (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
         (status = 404, description = "REGISTRATION_DISABLED", body = ErrorEnvelope),
-        (status = 409, description = "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL", body = ErrorEnvelope),
+        (status = 409, description = "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL / IDEMPOTENCY_CONFLICT", body = ErrorEnvelope),
         (status = 429, description = "RATE_LIMITED", body = ErrorEnvelope),
     ),
     security((), ("bearer_auth" = []))
@@ -101,11 +104,21 @@ pub async fn register(
     V2Path(id): V2Path<Uuid>,
     V2Json(req): V2Json<RegistrationRequest>,
 ) -> ApiResult<(StatusCode, Json<RegistrationCreated>)> {
-    let r = state
+    let mut r = state
         .meeting
         .registrations
         .register(&actor, id, &req)
         .await?;
+    // Audit M10: the join link also goes to the registrant's email (once per registration:
+    // the ledger key is the registration's invitation, so a repeat never sends it twice).
+    if let Some(token) = r.admission_token.as_deref() {
+        r.email_delivery = crate::services::notifications::send_registration_link(
+            &crate::services::notifications::NotificationContext::from_state(&state),
+            r.registration_id,
+            token,
+        )
+        .await;
+    }
     let status = if r.created {
         StatusCode::CREATED
     } else {

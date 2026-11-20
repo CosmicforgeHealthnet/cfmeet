@@ -540,6 +540,18 @@ async fn main() -> anyhow::Result<()> {
             config.workers.interval,
         ));
         tracing::info!("notification publications are relayed to the Notification Service");
+        // "Added to a group" notices (catalogue #14, GROUP_INVITATIONS): written and relayed
+        // only with the service configured (no legacy path, no routing fence).
+        state.member_notices = true;
+        tokio::spawn(messaging::member_notifications::run(
+            state.clone(),
+            Arc::new(
+                messaging::notification_publications::NotificationServiceEvents::new(
+                    state.service_auth.client(),
+                ),
+            ),
+            config.workers.interval,
+        ));
     } else {
         tracing::info!(
             "CF_NOTIFICATIONS_BASE_URL is not set: notification publications are not relayed"

@@ -75,6 +75,10 @@ WEB_ORIGIN = 'https://cfmeet.com'
 # Every browser origin of the production web app: cfmeet.com redirects to www.cfmeet.com
 # (Vercel), so the browser's Origin is normally the www form.
 WEB_ORIGINS = (WEB_ORIGIN, 'https://www.cfmeet.com')
+# M1: production answers browser requests from the production web origins only. Every
+# release of an existing service re-applies these settings (staging and local keep theirs;
+# they never run through this module), and verify checks them.
+RELEASE_PINNED_ENV = {'meeting-service': {'FRONTEND_URLS': ','.join(WEB_ORIGINS)}}
 SHA_RE = re.compile(r'[a-f0-9]{40}')
 RUN_RE = re.compile(r'[0-9]{1,20}(-[0-9]{1,4})?')  # run id, optionally -attempt
 
@@ -102,6 +106,8 @@ NOTIFICATIONS_DARK_ENV = {
     'NOTIFICATIONS_PUSH_PROVIDER': 'none',
     'NOTIFICATIONS_DATA_KEY_ID': 'notifications-data-1',
     'NOTIFICATIONS_DATA_KEY_FILE': NOTIFICATIONS_DATA_KEY_TARGET,
+    # B6 / C5: raised (to DATABASE_POOLS) only by activate-database-pools, after checking the
+    # core database's connection budget.
     'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '8',
 }
 
@@ -156,7 +162,8 @@ SERVICES = {
                     'profile-notifications-migration', 'account-hardening-migration',
                     'organization-integration-migration', 'account-communications-migration',
                     'lifecycle-delivery-migration', 'notification-fence-migration',
-                    'gap-closure-migration', 'platform-build-migration'],
+                    'gap-closure-migration', 'platform-build-migration', 'meeting-audit-migration',
+                    'account-privacy-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
@@ -612,6 +619,8 @@ GRANTS = (
     # Hub before sending a meeting notice. The Hub release (communications_release.HUB_INCOMING)
     # carries the same grant; this operation applies it without a Hub release.
     ('activate-meeting-notice-preferences', 'communications', 'meeting-service', ('communications-preferences.read',)),
+    # S2: account deletion and the data download reach the person's call history.
+    ('activate-account-privacy', 'calling', 'meeting-service', ('calling-account.privacy',)),
 ) + notif_ops.GRANTS + platform_ops.GRANTS + integrate_ops.GRANTS
 
 
@@ -1228,6 +1237,20 @@ def create_args(name, image_id, env_path, sha):
     return args + [image_id] + s['command']
 
 
+# Settings every release makes sure a running service has (added only when absent: an
+# operator's own value is kept). C4: Calling's call counters on its separate metrics
+# listener, on the private network only (no published port); monitoring_stack scrapes it
+# (METRICS_ENV) once it is set, so cfmeet-prometheus has calling_* counters.
+RELEASE_ENV_DEFAULTS = {
+    'calling': {'CALLING_METRICS_ADDRESS': '0.0.0.0:9464'},
+}
+
+
+def release_env_defaults(name, env):
+    """The RELEASE_ENV_DEFAULTS `name`'s current env lacks (what the release adds)."""
+    return {k: v for k, v in RELEASE_ENV_DEFAULTS.get(name, {}).items() if not (env.get(k) or '').strip()}
+
+
 def deploy(name, image_id, sha, run_id, entry):
     s = SERVICES[name]
     notif_ops.rollback_floor(sys.modules[__name__], name, image_id)
@@ -1242,7 +1265,9 @@ def deploy(name, image_id, sha, run_id, entry):
             return
         if not c['State']['Running']:
             raise RuntimeError('Existing service container is not running; refusing to replace it: ' + container)
-        cfg = release.clone(c, container, image_id, {}, False)
+        added = release_env_defaults(name, p.env_of(c)) if name in RELEASE_ENV_DEFAULTS else {}
+        added.update(RELEASE_PINNED_ENV.get(name, {}))
+        cfg = release.clone(c, container, image_id, added, False)
         labels = cfg.setdefault('Labels', {}) or {}
         cfg['Labels'] = labels
         # The cloned container labels would shadow the new image's OCI labels (Docker keeps
@@ -1313,6 +1338,9 @@ def safe_defaults():
     if done('activate-notifications-push'):
         for name in ('notifications', 'notifications-2'):
             rules[name]['NOTIFICATIONS_PUSH_PROVIDER'] = (None, '', 'none', 'live')
+    # Audit M4: the Meeting in-app-only path is on only after its gated activation.
+    rules.setdefault('meeting-service', {})[notif_ops.MEETING_IN_APP_FLAG] = \
+        (None, '', 'false', 'true') if done(notif_ops.MEETING_IN_APP_OPERATION) else (None, '', 'false')
     # CF Meet Platform "Build" flags: off until their activation is recorded (platform_operations).
     for name, flags in platform_ops.safe_default_rules(done).items():
         rules.setdefault(name, {}).update(flags)
@@ -1429,8 +1457,11 @@ def http_status(url, method='GET', headers=None):
 
 def public_smoke():
     checks = {}
-    status, _ = http_status(PUBLIC + '/api-docs/swagger-config.json')
-    checks['public_swagger'] = 'PASS' if status == 200 else 'FAIL'
+    # D1: the Meeting Service's own Swagger UI / OpenAPI are not served in production
+    # (customer documentation is published through the developer portal).
+    for path in ('/api-docs/swagger-config.json', '/api-docs/openapi.json', '/swagger-ui/'):
+        status, _ = http_status(PUBLIC + path)
+        checks['docs_not_public ' + path] = 'PASS' if status == 404 else 'FAIL'
     status, headers = http_status(PUBLIC + '/api/v2/me/profile', 'OPTIONS', {
         'Origin': WEB_ORIGIN, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization'})
     allowed = {k.lower(): v for k, v in headers.items()}.get('access-control-allow-origin')
@@ -1552,6 +1583,7 @@ def verify(sha, run_id):
             checks['routing_protocol ' + name] = 'FAIL'
     violations = safe_default_violations(running_envs())
     checks['provider_features_off'] = 'PASS' if not violations else 'FAIL'
+    checks.update(pinned_env_checks(running_envs()))
     checks.update(public_smoke())
     if SERVICES['organizations']['container'] in container_names():
         delivery = classify_event_delivery(event_delivery(), configured_event_destinations(
@@ -1563,6 +1595,12 @@ def verify(sha, run_id):
     failed = [k for k, v in checks.items() if v != 'PASS']
     if failed:
         raise RuntimeError('Verification failed: ' + ', '.join(failed))
+
+
+def pinned_env_checks(envs):
+    """M1: every RELEASE_PINNED_ENV setting holds on the running container."""
+    return {'pinned %s %s' % (name, key): 'PASS' if (envs.get(name) or {}).get(key) == value else 'FAIL'
+            for name, pins in RELEASE_PINNED_ENV.items() for key, value in pins.items()}
 
 
 # --- rollback --------------------------------------------------------------------------------
@@ -2661,6 +2699,192 @@ def activate_token_ceiling(sha, run_id, confirm):
         ('api-gateway', {'API_GATEWAY_TOKEN_RATE_LIMIT_PER_MINUTE': TOKEN_CEILING_PER_MINUTE})])
 
 
+# --- S1: per-visitor sign-in limits (host nginx X-Real-IP + Meeting Service header) ----------
+
+# The header the host nginx OVERWRITES with the visitor's address on every location it
+# proxies, and the Meeting Service reads for its per-address sign-in limits (S1). Anything a
+# visitor sends in X-Real-IP is replaced; X-Forwarded-For is never used for limits.
+CLIENT_ADDRESS_HEADER = 'X-Real-IP'
+CLIENT_ADDRESS_LINE = 'proxy_set_header X-Real-IP $remote_addr;'
+
+
+def _location_blocks(text):
+    """(start of the `{` after `location ...`, index of its matching `}`) of every location
+    block, outermost first. Braces inside quotes or comments are not expected in the site."""
+    blocks = []
+    for match in re.finditer(r'(?m)^[ \t]*location\b[^{;]*\{', text):
+        depth, i = 0, match.end() - 1
+        while i < len(text):
+            if text[i] == '{':
+                depth += 1
+            elif text[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth:
+            raise RuntimeError('Unbalanced public site location block')
+        blocks.append((match.end() - 1, i))
+    return blocks
+
+
+def client_address_site(text):
+    """The public site with `proxy_set_header X-Real-IP $remote_addr;` in every location
+    that proxies (`proxy_pass`) and does not already overwrite X-Real-IP that way. A location
+    that sets X-Real-IP to anything else is refused (an operator decision, not ours).
+    Returns (new text, number of locations changed)."""
+    inserts = []
+    for open_brace, close in _location_blocks(text):
+        body = text[open_brace + 1:close]
+        # Only this block's own directives (not a nested location's) decide.
+        own = re.sub(r'(?s)location\b[^{;]*\{.*?\}', '', body)
+        if 'proxy_pass' not in own:
+            continue
+        found = re.findall(r'proxy_set_header\s+x-real-ip\s+([^;]+);', own, flags=re.IGNORECASE)
+        if found:
+            if any(v.strip() != '$remote_addr' for v in found):
+                raise RuntimeError('A public location sets X-Real-IP to something other than $remote_addr')
+            continue
+        inserts.append(open_brace + 1)
+    out = text
+    for at in sorted(inserts, reverse=True):
+        out = out[:at] + ' ' + CLIENT_ADDRESS_LINE + out[at:]
+    return out, len(inserts)
+
+
+def activate_client_address_limits(sha, run_id, confirm):
+    """S1: the Meeting Service's per-visitor sign-in limits (20 code requests / 30 code checks
+    per address per 15 minutes) need the visitor's address. Host nginx terminates TLS for
+    api.cfmeet.com (no CDN in front: the edge limits already key on $binary_remote_addr), so
+    $remote_addr IS the visitor. Every proxying location of the public site gets
+    `proxy_set_header X-Real-IP $remote_addr;` (overwriting any visitor-supplied value), then
+    the Meeting Service is recreated with AUTH_CLIENT_IP_HEADER=x-real-ip and
+    AUTH_TRUSTED_PROXY_HOPS=1 (the single entry the proxy wrote). nginx -t, the public smoke
+    and the Meeting Service health must pass, or the site and container are restored.
+    `rollback` restores the Meeting Service (limits off); the header line stays (harmless)."""
+    assert SITE_LINK.resolve() == SITE, 'Unexpected public site topology'
+    previous = SITE.read_text()
+    candidate, changed = client_address_site(previous)
+    if 'proxy_pass' not in previous:
+        raise RuntimeError('The public site proxies nothing itself: refusing (unexpected topology)')
+    p.write_private(WORK / 'client-address' / run_id / 'site.before', previous)
+    emit('clientAddressLocations', {'changed': changed})
+
+    def restore_site():
+        if SITE.read_text() != previous:
+            SITE.write_text(previous)
+            p.reload_host_nginx()
+
+    try:
+        if candidate != previous:
+            SITE.write_text(candidate)
+            p.reload_host_nginx()  # nginx -t first
+
+        def post():
+            checks = public_smoke()
+            emit('clientAddressSmoke', checks)
+            if any(v != 'PASS' for v in checks.values()):
+                raise RuntimeError('Public smoke failed after the client-address header')
+
+        apply_activation('activate-client-address-limits', sha, run_id, [
+            ('meeting-service', {'AUTH_CLIENT_IP_HEADER': CLIENT_ADDRESS_HEADER.lower(),
+                                 'AUTH_TRUSTED_PROXY_HOPS': '1'})], post=post)
+    except Exception:
+        restore_site()
+        raise
+
+
+# --- S2: account deletion reaches Calling (call history) --------------------------------------
+
+def activate_account_privacy(sha, run_id, confirm):
+    """S2: the Meeting Service's account deletion and data download reach Calling: grants
+    `calling-account.privacy` (Calling <- Meeting Service) so the durable erasure job can hide
+    and minimize the person's call history and the download can include it. Messaging
+    (`messaging-application.delegate`, PRINCIPAL_ERASURE deletion requests) and the Hub
+    (`communications-account.apply`) already hold their grants. Until this runs, the Meeting
+    Service keeps the Calling erasure jobs pending and retries them (nothing is lost)."""
+    has_signing_identity('meeting-service')
+    if not env_of('meeting-service').get('CF_CALLING_BASE_URL'):
+        raise RuntimeError('The Meeting Service has no CF_CALLING_BASE_URL (run activate-enterprise-calling first)')
+    apply_activation('activate-account-privacy', sha, run_id, [])
+
+
+# --- B6 / C5: database pool sizes within the server's connection budget ------------------------
+
+# Pool size variable and code default of every service on cfmeet-core-db (the default is what
+# a container without the variable uses). Unlisted services count POOL_UNKNOWN.
+POOL_SETTINGS = {
+    'platform-access': ('PLATFORM_ACCESS_DATABASE_MAX_CONNECTIONS', 10),
+    'organizations': ('ORGANIZATIONS_DATABASE_MAX_CONNECTIONS', 10),
+    'notifications': ('NOTIFICATIONS_DATABASE_MAX_CONNECTIONS', 10),
+    'notifications-2': ('NOTIFICATIONS_DATABASE_MAX_CONNECTIONS', 10),
+    'messaging': ('MESSAGING_DATABASE_MAX_CONNECTIONS', 10),
+    'calling': ('CALLING_DATABASE_MAX_CONNECTIONS', 10),
+    'communications': (None, 12),
+    'numbering': ('NUMBERING_DATABASE_MAX_CONNECTIONS', 10),
+    'privacy-relay': ('PRIVACY_RELAY_DATABASE_MAX_CONNECTIONS', 10),
+    'sms-gateway': ('SMS_GATEWAY_DATABASE_MAX_CONNECTIONS', 10),
+    'telephony': ('TELEPHONY_DATABASE_MAX_CONNECTIONS', 10),
+    'meeting-service': ('DATABASE_MAX_CONNECTIONS', 10),
+    'developer-platform': ('DEVELOPER_PLATFORM_DATABASE_MAX_CONNECTIONS', 10),
+    'developer-platform-worker': ('DEVELOPER_PLATFORM_DATABASE_MAX_CONNECTIONS', 10),
+}
+POOL_UNKNOWN = 10
+# The pools activate-database-pools sets (the only way they rise above the code defaults of 10
+# and the Notification Service template's 8). The Notification Service's code is not changed:
+# only its release configuration (two replicas, 16 each).
+DATABASE_POOLS = {'messaging': '25', 'calling': '20', 'meeting-service': '20',
+                  'notifications': '16', 'notifications-2': '16'}
+# Connections kept free for migrators, backups, monitoring and an operator's psql.
+POOL_HEADROOM = 15
+
+
+def pool_plan(envs, overrides):
+    """{service: pool size} once `overrides` ({service: {var: value}}) apply to `envs`."""
+    plan = {}
+    for name in SERVICES:
+        # The Meeting Service's database is not listed in SERVICES (it predates the
+        # catalogue); counted conservatively, as if it were on cfmeet-core-db too.
+        if name not in envs or not (SERVICES[name]['db'] or name == 'meeting-service'):
+            continue
+        var, default = POOL_SETTINGS.get(name, (None, POOL_UNKNOWN))
+        env = dict(envs[name], **overrides.get(name, {}))
+        try:
+            plan[name] = int(env.get(var) or default) if var else default
+        except ValueError:
+            plan[name] = default
+    return plan
+
+
+def pool_budget_errors(plan, max_connections, reserved):
+    total = sum(plan.values())
+    budget = max_connections - reserved - POOL_HEADROOM
+    if total > budget:
+        return ['pools need %d connections, the server allows %d (max_connections %d - reserved %d - headroom %d): '
+                'raise max_connections on cfmeet-core-db first' % (total, budget, max_connections, reserved, POOL_HEADROOM)]
+    return []
+
+
+def activate_database_pools(sha, run_id, confirm):
+    """B6 / C5: Messaging, Notifications and Calling logged slow pool acquisition. The only way
+    the bigger pools take effect (code defaults stay 10, the Notification template 8): sets
+    DATABASE_POOLS on Messaging, Calling, the Meeting Service and both Notification replicas,
+    and refuses unless every pool together (the planned values plus every other service's
+    current one) fits the core database's max_connections with reserve and headroom.
+    `rollback` restores the previous containers (previous pools)."""
+    overrides = {name: {POOL_SETTINGS[name][0]: size} for name, size in DATABASE_POOLS.items()}
+    envs = running_envs()
+    max_connections = int(release.db_sql('postgres', 'SHOW max_connections;').strip())
+    reserved = int(release.db_sql('postgres', 'SHOW superuser_reserved_connections;').strip())
+    plan = pool_plan(envs, overrides)
+    emit('databasePools', {'plan': plan, 'total': sum(plan.values()), 'maxConnections': max_connections})
+    errors = pool_budget_errors(plan, max_connections, reserved)
+    if errors:
+        raise RuntimeError('; '.join(errors))
+    apply_activation('activate-database-pools', sha, run_id,
+                     [(name, env) for name, env in overrides.items() if name in envs])
+
+
 # --- dispatcher ------------------------------------------------------------------------------
 
 def _platform(step):
@@ -2717,6 +2941,12 @@ ACTIVATIONS = {
     'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),
     # Notification Service N0-6: public host refuses the Meeting Service operator routes.
     'activate-public-internal-denial': ((), activate_public_internal_denial),
+    # S1: per-visitor sign-in limits (host nginx X-Real-IP, Meeting AUTH_CLIENT_IP_HEADER).
+    'activate-client-address-limits': ((), activate_client_address_limits),
+    # S2: account deletion / data download reach Calling (call history).
+    'activate-account-privacy': ((), activate_account_privacy),
+    # B6 / C5: the bigger database pools, only within the core database's connection budget.
+    'activate-database-pools': ((), activate_database_pools),
     # Notification Service N6: owner read APIs (X1-X5) granted to cfmeet.notifications.
     'activate-notifications-owners': ((), lambda sha, run_id, confirm: notif_ops.activate_owners(
         sys.modules[__name__], sha, run_id, confirm)),
@@ -2763,6 +2993,11 @@ ACTIVATIONS = {
     # Document 4 §9.6: one producer fence row per run, LEGACY_ONLY <-> SHADOW only, reversible.
     'activate-notification-fence': ((), lambda sha, run_id, confirm: notif_ops.activate_fence(
         sys.modules[__name__], sha, run_id, confirm)),
+    # Audit M4: meeting notices reach the in-app inbox while their email stays with the Meeting
+    # Service (confirm enable | disable; gated on the service's IN_APP row ACTIVE, EMAIL not).
+    notif_ops.MEETING_IN_APP_OPERATION: (('activate-meeting-publications',), lambda sha, run_id, confirm:
+                                         notif_ops.activate_meeting_in_app(sys.modules[__name__], sha, run_id,
+                                                                           confirm)),
     # CF Meet Platform "Build" B1-B6 (ADR 0062 / 0063): partner users, user tokens and allowed
     # websites, partner chat, calls, push and meetings; the calling edge is a separate owner decision.
     **{op: (platform_ops.REQUIRES[op], _platform(step)) for op, step in platform_ops.ACTIVATIONS.items()},

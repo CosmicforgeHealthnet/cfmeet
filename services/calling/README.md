@@ -689,6 +689,7 @@ consult a switch (`tests/feature_rollback.rs`).
 | `CALLING_NEW_CALLS_ENABLED` | `true` | Master switch: every new call — application, app-to-phone, callback relay, enterprise, inbound public and enterprise SIP offers |
 | `CALLING_APP_CALLING_ENABLED` | `true` | New application (app-to-app RTC) calls |
 | `CALLING_SCREEN_SHARE_ENABLED` | `true` | New screen-share presentations in live application calls (C6; stopping always works) |
+| `CALLING_BUSY_ON_ANOTHER_CALL` | `true` | CF1 "on another call": a target already in a live call is not rung (a missed call for it); a call whose every target is busy ends `BUSY` at once |
 | `CALLING_PUBLIC_OUTBOUND_ENABLED` | `false` | App-to-phone calls (and the outbound legs of every public class) |
 | `CALLING_PUBLIC_INBOUND_ENABLED` | `false` | Phone-to-app / phone-to-phone inbound calls |
 | `CALLING_CALLBACK_RELAY_ENABLED` | `false` | Callback relay (requires public outbound too) |
@@ -795,13 +796,16 @@ curl http://127.0.0.1:8090/health
 
 From the repository root: `make calling-migrate`, `make calling`.
 
-`calling-migration up` applies two histories: the main one (`calling_seaql_migrations`,
-fail-closed on versions it does not know) and then the additive gap-closure history
-(`calling_gap_closure_seaql_migrations`, `migration/src/gap/`). New additive changes go
-to the gap-closure history so the previous image still starts against a database that
-has them; this image refuses to start until both are applied
-(`calling_migration::pending_migrations`). `reset` rolls the gap-closure history back
-first; other subcommands concern the main history.
+`calling-migration up` applies the main history (`calling_seaql_migrations`, fail-closed
+on versions it does not know), the notification-publications history, the additive
+gap-closure history (`calling_gap_closure_seaql_migrations`, `migration/src/gap/`) and the
+call-kind-offer history (`calling_call_kind_offer_seaql_migrations`,
+`migration/src/kind_offer/`: CF2, a voice call switched to video while it rings). The
+gap-closure history is fail-closed too in every image that reads it, so a change that must
+stay rollback-safe gets a history of its own that the previous image never reads; this
+image refuses to start until all of them are applied
+(`calling_migration::pending_migrations`). `reset` rolls the call-kind-offer and
+gap-closure histories back first; other subcommands concern the main history.
 
 ## Administration
 

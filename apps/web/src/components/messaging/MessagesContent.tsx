@@ -12,6 +12,9 @@
 import { ForwardDialog, GroupAdminTools, ReportDialog } from "./ChatActions";
 import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
+import { ArchivedHeader, ArchivedRow, ChatListToggles } from "./ChatListControls";
+import { RichContentView, ShareMenu } from "./RichMessages";
+import { arrangeChats, pinnedCount } from "@/lib/messaging/chat-list";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -84,6 +87,16 @@ function useEngine(): MessagingEngine {
 }
 
 /* ─── Small shared pieces ─────────────────────────────────────────────── */
+
+/** Why private messages can't be sent from this browser right now, in plain words. */
+function composerBlockedReason(s: { phase: string; detail: string | null; identity: unknown }): string {
+  if (!s.identity || s.phase === "loading") return "Loading…";
+  if (s.phase === "locked") return "Messages are open in another tab of this browser";
+  if (s.phase === "unavailable") return "Private messaging isn't turned on for CF Meet yet";
+  if (s.phase === "needs-signin") return "Sign in again to send private messages";
+  if (s.phase === "error") return "Private messaging couldn't start. Reload the page to try again";
+  return s.detail ?? "Private messaging isn't available in this browser";
+}
 
 const AVATAR_COLORS = ["#2563eb", "#059669", "#d97706", "#7c3aed", "#db2777", "#0891b2", "#4f46e5", "#ea580c"];
 const colorFor = (key: string) => AVATAR_COLORS[([...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0) >>> 0) % AVATAR_COLORS.length];
@@ -200,16 +213,16 @@ function IncomingLinks({ engine }: { engine: MessagingEngine }) {
   if (s.phase !== "ready" || s.incomingLinks.length === 0) return null;
   const run = async (action: () => Promise<unknown>) => {
     setError(null);
-    try { await action(); } catch { setError("That code doesn't match the new browser. Check it and try again."); }
+    try { await action(); } catch { setError("That code doesn't match the new device. Check it and try again."); }
   };
   return (
-    <section className="space-y-2 border-b border-border bg-primary/5 px-4 py-3" aria-label="New browsers asking to use your account">
+    <section className="space-y-2 border-b border-border bg-primary/5 px-4 py-3" aria-label="New devices asking to use your account">
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       {s.incomingLinks.map((l) => (
         <div key={l.linkId} className="flex flex-wrap items-center gap-3" data-testid="incoming-link">
           <Shield className="size-5 shrink-0 text-primary" />
-          <p className="min-w-0 flex-1 text-sm">A new browser wants to use private messaging on your account. If it&apos;s yours, enter the code it shows.</p>
-          <input aria-label="Code shown on the new browser" inputMode="numeric" maxLength={6} data-testid="incoming-link-code"
+          <p className="min-w-0 flex-1 text-sm">A new phone wants to use private messaging on your account. If it&apos;s yours, enter the code it shows.</p>
+          <input aria-label="Code shown on the new device" inputMode="numeric" maxLength={6} data-testid="incoming-link-code"
             value={codes[l.linkId] ?? ""} onChange={(e) => setCodes({ ...codes, [l.linkId]: e.target.value.replace(/\D/g, "") })}
             className="h-9 w-28 rounded-full px-3 text-center font-mono tracking-widest ring-1 ring-border" />
           <div className="flex gap-2">
@@ -229,7 +242,6 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
   const devices = useMessagingDevices(recovering ? s.identity?.principalId ?? "" : "");
   const removal = useRemoveCurrentMessagingDevice(engine);
   const busy = removal.isPending;
-  const [emailCode, setEmailCode] = useState("");
   const sources = devices.data?.devices.filter((d) => d.status === "ACTIVE" && d.deviceId !== s.deviceId) ?? [];
   const run = async (action: () => Promise<unknown>) => {
     setError(null);
@@ -238,33 +250,13 @@ function DevicePanel({ engine }: { engine: MessagingEngine }) {
   const [transfer, setTransfer] = useState<{ code: string; state: string } | null>(null);
   if (s.phase === "loading") return null;
   if (s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering" || s.phase === "needs-signin") {
-    // Set up automatically (no activation step). Only a new browser's verification is shown.
+    // Set up automatically: no activation or verification step (signing in is enough).
     return (
-      <div className="flex flex-wrap items-center gap-3" data-testid="device-setup" data-linking={s.accountLink ? "true" : "false"}>
+      <div className="flex flex-wrap items-center gap-3" data-testid="device-setup">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600"><Shield className="size-5" /></span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold">{s.accountLink ? "Verify this browser" : "Setting up private messaging"}</p>
+          <p className="text-sm font-semibold">Setting up private messaging</p>
           <p className="text-xs text-muted-foreground">{s.detail ?? "Your encryption keys are made here and never leave this browser."}</p>
-          {s.accountLink ? (
-            <p className="mt-1 text-sm">Code for your other device: <span className="font-mono font-semibold tracking-widest" data-testid="account-link-code">{s.accountLink.comparisonCode}</span></p>
-          ) : null}
-          {s.accountLink && !s.accountLink.emailCodeSent ? (
-            <button type="button" data-testid="link-email-code" className="mt-1 text-xs font-semibold text-primary underline-offset-2 hover:underline" onClick={() => void run(() => engine.sendLinkEmailCode())}>
-              No other device with you? Email me a code
-            </button>
-          ) : null}
-          {s.accountLink ? (
-            <button type="button" className="ml-3 mt-1 text-xs font-semibold text-muted-foreground underline-offset-2 hover:underline" onClick={() => void run(() => engine.cancelLink())}>
-              Cancel
-            </button>
-          ) : null}
-          {s.accountLink?.emailCodeSent ? (
-            <form className="mt-2 flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); void run(async () => { await engine.completeLinkWithEmailCode(emailCode); setEmailCode(""); }); }}>
-              <input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={emailCode} onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ""))} placeholder="6-digit code" aria-label="Code from the email" data-testid="link-email-code-input"
-                className="h-8 w-28 rounded-lg border border-border bg-background px-2 font-mono text-sm tracking-widest" />
-              <button type="submit" disabled={emailCode.length !== 6} className="inline-flex h-8 items-center rounded-full bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60">Verify</button>
-            </form>
-          ) : null}
         </div>
         {s.phase === "registering" ? <Spinner /> : null}
         {error ? <p role="alert" className="w-full text-sm text-destructive">{error}</p> : null}
@@ -518,7 +510,7 @@ function NewConversation({ engine, onCreated, open, setOpen }: { engine: Messagi
               <Shield className="size-4 shrink-0 text-emerald-600" />
               <p className="min-w-0 flex-1 text-xs text-muted-foreground">{
                 s.phase === "needs-device" || s.phase === "revoked" || s.phase === "registering" || s.phase === "needs-signin"
-                  ? (s.accountLink ? "Verify this browser (code above) to start a chat." : "Setting up private messaging in this browser…")
+                  ? (s.detail ?? "Getting private messaging ready…")
                   : s.phase === "loading" ? "Loading private messaging…"
                   : s.phase === "locked" ? "Messages are open in another tab. Close it, or use them here from the Messages page."
                   : s.phase === "unavailable" ? "New chats can't be started yet: private messaging isn't turned on for CF Meet. Your existing chats still work."
@@ -576,6 +568,8 @@ type BubbleActions = {
   report: () => void;
   retry: () => void;
   discard: () => void;
+  /** F4: vote in a private chat's poll (absent: not a poll). */
+  vote?: (choices: number[]) => void;
 };
 
 function MessageBubble({ m, name, names, onDownload, actions, managed, first, last, group }: {
@@ -587,7 +581,8 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
   // Private chats get the same actions as managed ones (the server holds no content, only ids).
   const live = !!m.messageId && (m.state === "delivered" || m.state === "sent");
   const mine = m.mine;
-  const status = m.state === "queued" ? "Waiting…" : m.state === "pending-setup" ? "Waiting for secure setup" : m.state === "sending" ? "Sending…" : m.state === "failed" ? "Not sent" : clock(m.createdAt);
+  // A message held until the chat's encryption is ready looks like any message being sent.
+  const status = m.state === "queued" ? "Waiting…" : m.state === "sending" || m.state === "pending-setup" ? "Sending…" : m.state === "failed" ? "Not sent" : clock(m.createdAt);
   const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted";
 
   return (
@@ -627,8 +622,9 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
                 </span>
               </form>
             ) : m.text !== null ? (
-              <p className="whitespace-pre-wrap break-words" data-testid="message-text">{m.text}</p>
+              m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text">{m.text}</p>
             ) : null}
+            {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} /> : null}
             {m.file ? (
               <button type="button" className={cn("mt-1 flex w-full min-w-48 items-center gap-3 rounded-xl p-2 text-left", mine ? "bg-white/15 hover:bg-white/20" : "bg-background/70 hover:bg-background")} data-testid="attachment" onClick={onDownload}>
                 <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", mine ? "bg-white/20" : "bg-primary/10 text-primary")}><FileText className="size-4" /></span>
@@ -666,7 +662,7 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
                     {!mine ? <button type="button" className={item} data-testid="report" onClick={() => { actions.report(); setMenu(false); }}><Flag className="size-4 text-muted-foreground" />Report</button> : null}
                     <button type="button" className={item} data-testid="star" onClick={() => { actions.star(); setMenu(false); }}><Star className={cn("size-4", actions.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />{actions.starred ? "Unstar" : "Star"}</button>
                     <button type="button" className={item} data-testid="pin" onClick={() => { actions.pin(!m.pinned); setMenu(false); }}>{m.pinned ? <PinOff className="size-4 text-muted-foreground" /> : <Pin className="size-4 text-muted-foreground" />}{m.pinned ? "Unpin" : "Pin"}</button>
-                    {mine && m.text !== null ? <button type="button" className={item} data-testid="edit" onClick={() => { setEditing(m.text ?? ""); setMenu(false); }}><Pencil className="size-4 text-muted-foreground" />Edit</button> : null}
+                    {mine && m.text !== null && (!m.rich || m.rich.kind === "link") ? <button type="button" className={item} data-testid="edit" onClick={() => { setEditing(m.text ?? ""); setMenu(false); }}><Pencil className="size-4 text-muted-foreground" />Edit</button> : null}
                     <button type="button" className={item} data-testid="hide" onClick={() => { actions.remove("ME"); setMenu(false); }}><EyeOff className="size-4 text-muted-foreground" />Delete for me</button>
                     {mine ? <button type="button" className={cn(item, "text-destructive")} data-testid="delete" onClick={() => { actions.remove("EVERYONE"); setMenu(false); }}><Trash2 className="size-4" />Delete for everyone</button> : null}
                   </Popover.Content>
@@ -768,6 +764,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
         ) : null}
         {shareEnabled ? <ShareMeeting engine={engine} conversation={conversation} /> : null}
         <ChatInfoExtras conversationId={conversation.id} direct={!isGroup} groupTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? null} />
+        <ChatListToggles engine={engine} conversation={conversation} pinnedTotal={pinnedCount(s.conversations)} />
         <section>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{conversation.members.length} {conversation.members.length === 1 ? "member" : "members"}</p>
           <ul className="space-y-1">
@@ -894,7 +891,9 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
   // is ready here, messages wait on this device and go out automatically.
   // S13: in an admins-only group, members read but can't send.
   const adminsOnly = conversation.announcementOnly && conversation.myRole !== "OWNER" && conversation.myRole !== "ADMIN";
-  const canSend = !!s.identity && !adminsOnly && (!e2ee || s.phase === "ready");
+  // While this browser is set up (silently), private messages can already be written: they
+  // are sent automatically once it is ready.
+  const canSend = !!s.identity && !adminsOnly && (!e2ee || s.phase === "ready" || MessagingEngine.settingUp(s));
   // Files follow Messaging's effective attachment policy (Hub capabilities): the attach
   // control is disabled when the server would refuse every file.
   const hubCapabilities = useHubCapabilities();
@@ -977,6 +976,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     },
     retry: () => { if (m.outboxKey) engine.retrySend(m.outboxKey); },
     discard: () => { if (m.outboxKey) engine.discardSend(m.outboxKey); },
+    vote: m.messageId && m.rich?.kind === "poll" ? (choices) => { void engine.sendRich(conversation.id, { t: "vote", poll: m.messageId!, choices }).catch(fail); } : undefined,
   });
   const mentions = (t: string) =>
     conversation.members.filter((p) => p !== s.identity?.principalId && s.names[p] && t.includes(`@${s.names[p]}`));
@@ -988,8 +988,9 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     setReplyTo(null);
     setError(null);
     engine.typing(conversation.id, false);
-    // The server takes @mentions only in managed chats; replies work in both.
-    void engine.send(conversation.id, t, { replyToMessageId: reply, mentionedPrincipalIds: managed ? mentions(t) : [] }).catch((cause) => {
+    // @mentions: only the mentioned members' ids reach the server (for their mention badge and
+    // "only @mentions" notifications); in a private chat the text stays end-to-end encrypted.
+    void engine.send(conversation.id, t, { replyToMessageId: reply, mentionedPrincipalIds: mentions(t) }).catch((cause) => {
       setText((draft) => draft || t);
       setError(messagingErrorMessage(cause));
     });
@@ -1049,12 +1050,6 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
 
         <div className="chat-wallpaper flex min-h-0 flex-1 flex-col">
         <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-6">
-          {e2ee && !conversation.groupReady ? (
-            <p className="mx-auto my-4 flex max-w-md items-start gap-3 rounded-2xl bg-muted/60 p-4 text-sm" data-testid="e2ee-unavailable">
-              <Lock className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-              {s.phase === "ready" ? "Securing this chat on this browser. This only takes a moment. You can already write; your messages are sent automatically." : "Setting up private messaging in this browser…"}
-            </p>
-          ) : null}
           <ol className="mx-auto max-w-3xl pb-2" data-testid="messages">
             {managed && s.hasOlder[conversation.id] ? (
               <li className="py-2 text-center">
@@ -1121,6 +1116,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 }}
               />
               <button type="button" className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={!canAttach} onClick={() => file.current?.click()} aria-label="Attach a file" title={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"}><Paperclip className="size-5" /></button>
+              {e2ee ? <ShareMenu disabled={!canSend} onSend={(payload) => engine.sendRich(conversation.id, payload)} /> : null}
               <textarea
                 ref={composer}
                 rows={1}
@@ -1128,7 +1124,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 value={text}
                 maxLength={16384}
                 disabled={!canSend}
-                placeholder={canSend ? (e2ee ? "Message" : "Message (CF Meet can read this chat)") : adminsOnly ? "Only admins can send messages" : "You can't send messages from this browser"}
+                placeholder={canSend ? (e2ee ? "Message" : "Message (CF Meet can read this chat)") : adminsOnly ? "Only admins can send messages" : composerBlockedReason(s)}
                 onChange={(e) => { setText(e.target.value); engine.typing(conversation.id, e.target.value.length > 0); }}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
                 className="max-h-40 min-h-10 min-w-0 flex-1 resize-none bg-transparent px-1 py-2.5 text-[15px] leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
@@ -1177,6 +1173,7 @@ function PersonalMessages() {
   const [securityOpen, setSecurityOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [starredOpen, setStarredOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const capabilities = useHubCapabilities();
   const areas = communicationsAreas(capabilities.data);
   const inbox = useHubInbox(areas.contacts || areas.managedMessaging);
@@ -1190,7 +1187,8 @@ function PersonalMessages() {
   // Keep the number on the Chats tab in step with this list.
   const tabCounter = useQueryClient();
   useEffect(() => { tabCounter.setQueryData(["messaging", "unread-chats"], unreadTotal); }, [tabCounter, unreadTotal]);
-  const conversations = s.conversations.filter((conversation) => {
+  const archivedChats = s.conversations.filter((c) => c.archived);
+  const conversations = arrangeChats(s.conversations, showArchived && archivedChats.length > 0).filter((conversation) => {
     const matchesSearch = conversation.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
     const matchesFilter = filter === "ALL" || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected : conversation.securityProfile === filter);
     return matchesSearch && matchesFilter;
@@ -1213,7 +1211,7 @@ function PersonalMessages() {
       <ConnectionBanner engine={engine} />
       <IncomingTransfers engine={engine} />
       <IncomingLinks engine={engine} />
-      {s.phase !== "loading" && s.phase !== "ready" ? (
+      {s.phase !== "loading" && s.phase !== "ready" && !MessagingEngine.settingUp(s) ? (
         <section className="border-b border-border px-4 py-3" aria-label="Secure messaging setup">
           <DevicePanel engine={engine} />
         </section>
@@ -1245,14 +1243,16 @@ function PersonalMessages() {
             </div>
           </div>
           <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-2" data-testid="conversation-list">
+            {s.phase === "loading" ? null : showArchived && archivedChats.length ? <ArchivedHeader onBack={() => setShowArchived(false)} />
+              : <ArchivedRow count={archivedChats.length} unread={archivedChats.filter((c) => c.unreadCount > 0 && c.id !== selected).length} onOpen={() => setShowArchived(true)} />}
             {s.phase === "loading" ? (
               [0, 1, 2, 3].map((i) => <li key={i} className="flex items-center gap-3 px-3 py-3"><span className="size-12 animate-pulse rounded-full bg-muted" /><span className="flex-1 space-y-2"><span className="block h-3.5 w-1/2 animate-pulse rounded bg-muted" /><span className="block h-3 w-3/4 animate-pulse rounded bg-muted" /></span></li>)
             ) : conversations.map((c) => {
               const latest = s.messages[c.id]?.at(-1);
               const summary = c.lastMessage;
-              // A private message this browser can't read (yet) reads "Waiting for this message";
-              // the bar only shows while a readable chat is still loading.
-              const preview = chatPreview({ e2ee: c.securityProfile === "PRIVATE_E2EE", groupReady: c.groupReady, loaded: s.messages[c.id] !== undefined, latest, summary });
+              // A private message this browser can still receive reads "Waiting for this message";
+              // one sent before it joined reads so. The bar only shows while a readable chat loads.
+              const preview = chatPreview({ e2ee: c.securityProfile === "PRIVATE_E2EE", groupReady: c.groupReady, loaded: s.messages[c.id] !== undefined, latest, summary, joinedAt: s.deviceRegisteredAt });
               const at = latest?.createdAt ?? summary?.createdAt ?? null;
               const mine = latest ? latest.mine : summary?.senderPrincipalId === s.identity?.principalId;
               const unread = c.id === selected ? 0 : c.unreadCount;
@@ -1277,6 +1277,7 @@ function PersonalMessages() {
                         <span className={cn("flex min-w-0 items-center gap-1.5 text-[15px]", unread ? "font-bold" : "font-semibold")}>
                           <span className="truncate">{c.title}</span>
                           {muted.has(c.id) ? <BellOff className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" /> : null}
+                          {c.pinned ? <Pin className="size-3.5 shrink-0 text-muted-foreground" aria-label="Pinned" /> : null}
                         </span>
                         {at ? <time className={cn("shrink-0 text-xs", unread ? "font-semibold text-primary" : "text-muted-foreground")}>{listTime(at)}</time> : null}
                       </span>

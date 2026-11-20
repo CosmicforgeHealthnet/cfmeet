@@ -1,16 +1,23 @@
 //! Gap audit A2: personal-data export and account deletion (GDPR / NDPA).
 //!
-//! * **Export** ([`export`]): one JSON document of everything the Meeting Service holds
-//!   about the signed-in account: profile, sign-ins, linked devices, meeting spaces it
-//!   owns, memberships, webinar registrations, conference participation and its own
-//!   security events. Messaging, the Communications Hub and Calling keep their own data
-//!   (chats, contacts, calls); the document names them so the person knows where to ask.
+//! * **Export** ([`export`]): one JSON document of everything CF Meet holds about the
+//!   signed-in account: from the Meeting Service its profile, sign-ins, linked devices,
+//!   meeting spaces it owns, memberships, webinar registrations, conference participation
+//!   and its own security events; and (S2) from Messaging (its conversations), the
+//!   Communications Hub (profile, CF Meet ID, contacts, lists, saved messages, settings)
+//!   and Calling (call history), read live through
+//!   [`account_privacy::export_elsewhere`](crate::services::account_privacy::export_elsewhere).
 //! * **Deletion** ([`erase`]): confirmed with a `DELETE_ACCOUNT` step-up. In one
 //!   transaction the account row is anonymized (address, username, name, avatar, time zone,
 //!   locale and password removed; status inactive, so it can never sign in again), the
 //!   Google link is removed, meeting memberships are revoked, owned meeting spaces are
 //!   archived and webinar registrations cancelled. Every sign-in and device ends, and the
-//!   account-wide fan-out ends Hub, Messaging and Calling credentials. The append-only
+//!   account-wide fan-out ends Hub, Messaging and Calling credentials. In the same
+//!   transaction (S2) one durable erasure job per owner is queued
+//!   ([`account_privacy`](crate::services::account_privacy)): Messaging erases the
+//!   person's messages (PRINCIPAL_ERASURE), the Hub their profile, CF Meet ID, contacts,
+//!   lists and saved messages, Calling their call history; delivered and retried until each
+//!   owner confirms. The append-only
 //!   security audit keeps an `ACCOUNT_DELETED` event without personal data. The old
 //!   address gets one confirmation email (queued before it is removed).
 use serde_json::{json, Value};
@@ -69,10 +76,8 @@ pub async fn export(state: &AppState, user_id: Uuid) -> ApiResult<Value> {
                                               WHERE user_id = $1 ORDER BY requested_at DESC LIMIT 1000", user_id).await?,
         "securityEvents": rows(db, "SELECT event_type, outcome, occurred_at FROM account_security_events \
                                      WHERE user_id = $1 ORDER BY seq DESC LIMIT 1000", user_id).await?,
-        "elsewhere": {
-            "messaging": "Chats and attachments are held by CF Meet Messaging.",
-            "communications": "Contacts, contact requests and call history are held by the CF Meet Communications Hub and Calling.",
-        },
+        // S2: the other services' data about the account, in the same document.
+        "elsewhere": crate::services::account_privacy::export_elsewhere(db, user_id).await,
     }))
 }
 
@@ -130,6 +135,8 @@ pub async fn erase(state: &AppState, user_id: Uuid, session: Option<Uuid>) -> Ap
             .await?;
     }
     security::revoke_all(&txn, user_id, RevokeReason::LogoutAll).await?;
+    // S2: the data the other services hold goes too (durable, retried until confirmed).
+    crate::services::account_privacy::queue_erasure(&txn, user_id).await?;
     security::record_event(
         &txn,
         SecurityEvent::new("ACCOUNT_DELETED", Outcome::Success)
@@ -140,5 +147,12 @@ pub async fn erase(state: &AppState, user_id: Uuid, session: Option<Uuid>) -> Ap
     txn.commit().await?;
     // Hub, Messaging, Calling and Platform Access follow (durable, retried).
     crate::services::communications::credentials_ended(state, user_id, "ACCOUNT_DELETED").await;
+    // First delivery attempt now (the privacy worker retries whatever does not finish).
+    let db = state.db.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::services::account_privacy::deliver_due(&db).await {
+            tracing::warn!("account erasure delivery deferred to the privacy worker: {e}");
+        }
+    });
     Ok(())
 }

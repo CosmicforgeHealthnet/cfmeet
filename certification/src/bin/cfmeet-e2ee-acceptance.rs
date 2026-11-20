@@ -1,8 +1,9 @@
 //! Production multi-device personal E2EE acceptance: REAL OpenMLS client devices and real
 //! Ed25519 account-device keys, driven only through the public CF Meet API.
 //!
-//! Account A links a primary mobile and two web browsers (plus one untrusted browser that is
-//! refused E2EE enrollment); account B has one web browser. Every device decrypts locally.
+//! Account A links a primary mobile and two web browsers (each browser is trusted by its own
+//! fresh sign-in, ADR 0067; a third browser signs in and removes itself); account B has one
+//! web browser. Every device decrypts locally.
 //! A's mobile is then replaced by a new phone: the old phone's sign-in, Hub device and
 //! Messaging device are revoked, a web device commits its MLS removal, the old phone cannot
 //! decrypt anything after the rekey, both web devices keep working, and the new phone joins
@@ -664,7 +665,7 @@ impl Journey {
     }
 
     async fn run(&mut self, accounts: &[(String, Credential)]) -> anyhow::Result<()> {
-        // ---- Devices: web-only bootstrap, web linking, first mobile, untrusted browser.
+        // ---- Devices: web-only bootstrap, browsers trusted by sign-in, first mobile.
         let (mut a_web1, mut b_web) = (None, None);
         let a = self
             .account(&accounts[0].0, &accounts[0].1, &mut a_web1)
@@ -678,11 +679,10 @@ impl Journey {
         }
         self.pass("web_only_account_bootstraps_a_trusted_browser_without_phone");
         let mut a_web2 = self.sign_in(&a, "web-2", "WEB", "WEB").await?;
-        if self.declare(&mut a_web2).await?["trust"] != "UNTRUSTED" {
-            bail!("a sign-in code alone produced a trusted browser");
+        if self.declare(&mut a_web2).await?["trust"] != "TRUSTED" {
+            bail!("a freshly signed-in browser was not trusted (ADR 0067: no verification step)");
         }
-        self.link(&a_web2, &a_web1).await?;
-        self.pass("second_browser_linked_by_trusted_device_approval");
+        self.pass("second_browser_trusted_by_its_own_sign_in");
         let mut a_mobile = self.sign_in(&a, "mobile-a", "MOBILE", "ANDROID").await?;
         if self.declare(&mut a_mobile).await?["state"] != "REPLACEMENT_PENDING" {
             bail!("a new mobile was not held for approval");
@@ -707,22 +707,8 @@ impl Journey {
         }
         self.pass("first_mobile_becomes_primary_after_approval_and_web_stays_trusted");
         let mut a_web3 = self.sign_in(&a, "web-3", "WEB", "WEB").await?;
-        self.declare(&mut a_web3).await?;
-        let r = self
-            .api
-            .call(
-                Method::POST,
-                "/api/v2/messaging/devices/registration-challenges",
-                Some(&a_web3.access),
-                Some(json!({})),
-            )
-            .await?;
-        if (r.status, r.code()) != (403, Some("DEVICE_NOT_TRUSTED")) {
-            bail!(
-                "an untrusted browser could enroll an E2EE device: {} {:?}",
-                r.status,
-                r.code()
-            );
+        if self.declare(&mut a_web3).await?["trust"] != "TRUSTED" {
+            bail!("a freshly signed-in browser was not trusted (ADR 0067: no verification step)");
         }
         self.api
             .ok(
@@ -734,7 +720,7 @@ impl Journey {
                 "self revoke",
             )
             .await?;
-        self.pass("untrusted_browser_refused_e2ee_enrollment");
+        self.pass("browser_trusted_by_sign_in_removes_itself");
 
         // ---- E2EE devices, one per sign-in; contacts; a DIRECT PRIVATE_E2EE conversation.
         let mut m_web1 = self.enroll(&a_web1, 0).await?;

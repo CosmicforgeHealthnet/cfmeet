@@ -1,6 +1,7 @@
 pub mod account_avatar;
 pub mod account_devices;
 pub mod account_erasure;
+pub mod account_privacy;
 pub mod account_profile;
 pub mod account_security;
 pub mod auth;
@@ -26,6 +27,7 @@ pub mod appointment_authorization;
 pub mod apps;
 pub mod artifacts;
 pub mod calendar;
+pub mod calendar_feed;
 pub mod collaboration;
 pub mod compat;
 pub mod conference;

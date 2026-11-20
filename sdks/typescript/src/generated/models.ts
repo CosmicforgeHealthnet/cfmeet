@@ -3501,7 +3501,7 @@ export namespace DeveloperPlatform {
     deliveryId: string;
     webhookId: string;
     eventId: string;
-    eventType: WebhookEventType;
+    eventType: WebhookEventType | "webhook.test";
     replayOf: string | null;
     status: DeliveryStatus;
     attemptCount: number;
@@ -3968,6 +3968,11 @@ export namespace DeveloperPlatform {
     rotateProjectAppSecret: {
       params: { path: { projectId: Uuid }; idempotencyKey?: string };
       response: AppClientSecret;
+    };
+    /** POST /v1/environments/{environmentId}/webhooks/{webhookId}/test; auth DEVELOPER_SESSION; retry NO_RETRY */
+    sendEnvironmentWebhookTest: {
+      params: { path: { environmentId: Uuid; webhookId: Uuid } };
+      response: WebhookDelivery;
     };
     /** POST /v1/projects/{projectId}/production-access-requests — scope production_access.request; auth DEVELOPER_SESSION | PLATFORM_CREDENTIAL; retry IDEMPOTENT */
     submitProductionAccessRequest: {
@@ -4620,7 +4625,7 @@ export namespace Meetings {
     retryAfterSeconds?: number | null;
   };
   /** Stable, semantic public error codes for the Phase 2 meeting domain (spec v1.1 §5). */
-  export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_STORAGE_NOT_CONFIGURED" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_FULL" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "MFA_REQUIRED" | "USER_NOT_FOUND" | "AVATAR_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "APP_NOT_FOUND" | "OAUTH_REQUEST_INVALID" | "DATABASE_ERROR" | "INTERNAL_ERROR";
+  export type ErrorCode = "MEETING_NOT_FOUND" | "SESSION_NOT_FOUND" | "MEETING_ACCESS_DENIED" | "MEETING_PASSCODE_REQUIRED" | "MEETING_PASSCODE_INVALID" | "MEETING_VERSION_CONFLICT" | "MEETING_CAPACITY_REACHED" | "INVITATION_INVALID" | "INVITATION_EXPIRED" | "CONFERENCE_NOT_FOUND" | "CONFERENCE_NOT_LIVE" | "CONFERENCE_LOCKED" | "CONFERENCE_STATE_CONFLICT" | "WAITING_ROOM_REQUIRED" | "PARTICIPANT_NOT_FOUND" | "PARTICIPANT_BANNED" | "PARTICIPANT_STATE_CONFLICT" | "PERMISSION_DENIED" | "AUTHENTICATION_REQUIRED" | "VALIDATION_ERROR" | "RATE_LIMITED" | "FEATURE_DISABLED" | "RTC_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_ALLOWED" | "REVOCATION_CHECK_UNAVAILABLE" | "MEDIA_PERMISSION_DENIED" | "MEDIA_LOCKED" | "SCREEN_SHARE_NOT_ALLOWED" | "SCREEN_SHARE_NOT_ACTIVE" | "CHAT_DISABLED" | "PRIVATE_CHAT_DISABLED" | "CHAT_PARTICIPANT_RESTRICTED" | "REACTIONS_DISABLED" | "HAND_RAISE_DISABLED" | "BREAKOUT_NOT_FOUND" | "BREAKOUT_CLOSED" | "BREAKOUT_ASSIGNMENT_CONFLICT" | "POLL_NOT_FOUND" | "POLL_NOT_OPEN" | "POLL_ALREADY_RESPONDED" | "POLL_RESPONSE_INVALID" | "POLL_RESULTS_NOT_VISIBLE" | "QUESTION_NOT_FOUND" | "QNA_DISABLED" | "POLLS_DISABLED" | "MESSAGE_NOT_FOUND" | "CONSENT_REQUIRED" | "RECORDING_DISABLED" | "RECORDING_ALREADY_ACTIVE" | "RECORDING_NOT_ACTIVE" | "RECORDING_STATE_CONFLICT" | "RECORDING_PROVIDER_UNAVAILABLE" | "RECORDING_NOT_FOUND" | "CONSENT_DECLINED" | "CONSENT_POLICY_CONFLICT" | "ARTIFACT_NOT_FOUND" | "ARTIFACT_NOT_READY" | "ARTIFACT_DELETED" | "ARTIFACT_ACCESS_DENIED" | "ARTIFACT_STORAGE_UNAVAILABLE" | "ARTIFACT_STORAGE_NOT_CONFIGURED" | "ARTIFACT_INTEGRITY_FAILED" | "TRANSCRIPTION_DISABLED" | "TRANSCRIPTION_NOT_ALLOWED" | "TRANSCRIPTION_PROVIDER_UNAVAILABLE" | "TRANSCRIPTION_NOT_FOUND" | "INTELLIGENCE_DISABLED" | "INTELLIGENCE_NOT_ALLOWED" | "INTELLIGENCE_PROVIDER_UNAVAILABLE" | "REGISTRATION_DISABLED" | "REGISTRATION_CLOSED" | "REGISTRATION_FULL" | "REGISTRATION_NOT_FOUND" | "ADMISSION_TOKEN_INVALID" | "BACKSTAGE_ACCESS_DENIED" | "PROFILE_POLICY_DENIED" | "STAGE_CAPACITY_REACHED" | "QUALITY_SAMPLE_INVALID" | "QUALITY_RATE_LIMITED" | "OPERATIONS_ACCESS_DENIED" | "REQUEST_TOO_LARGE" | "ENDPOINT_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "LEGACY_WRITE_DISABLED" | "CHAT_UNAVAILABLE" | "CHAT_MIGRATION_REFUSED" | "SERVICE_UNAVAILABLE" | "ORGANIZATION_NOT_FOUND" | "MEMBERSHIP_REQUIRED" | "ORGANIZATION_SUSPENDED" | "ORGANIZATION_ARCHIVED" | "LAST_OWNER" | "VERSION_CONFLICT" | "SLUG_TAKEN" | "INVITE_EXPIRED" | "IDEMPOTENCY_CONFLICT" | "PROVISIONING_PENDING" | "INVITATION_REQUIRED" | "ALREADY_MEMBER" | "INVITEE_NOT_FOUND" | "ORGANIZATION_POLICY_RESTRICTED" | "TEAM_NOT_FOUND" | "TEAM_ARCHIVED" | "TEAM_NAME_TAKEN" | "ORGANIZATION_CALLING_DISABLED" | "USERNAME_TAKEN" | "REAUTHENTICATION_REQUIRED" | "EMAIL_VERIFICATION_REQUIRED" | "DEVICE_PROOF_INVALID" | "WEB_DEVICE_LIMIT_REACHED" | "DEVICE_REPLACEMENT_PENDING" | "DEVICE_NOT_TRUSTED" | "DEVICE_DECLARATION_REFUSED" | "DEVICE_DECLARATION_REQUIRED" | "DEVICE_NOT_FOUND" | "MFA_REQUIRED" | "USER_NOT_FOUND" | "AVATAR_NOT_FOUND" | "DEVICE_KEY_IN_USE" | "DEVICE_LINK_INVALID" | "APP_NOT_FOUND" | "OAUTH_REQUEST_INVALID" | "CALENDAR_FEED_NOT_FOUND" | "DATABASE_ERROR" | "INTERNAL_ERROR";
   /** OpenAPI description of the public error envelope. */
   export type ErrorEnvelope = {
     error: ErrorBody;
@@ -4639,6 +4644,11 @@ export namespace Meetings {
     chatExportAllowed: boolean;
     pollReportAllowed: boolean;
     retentionDays: number;
+  };
+  /** MF1: extend a live conference's scheduled end. */
+  export type ExtendConferenceRequest = {
+    /** Minutes added to the scheduled end (or to now, when the scheduled end has already passed and the meeting is in its grace period): 1 to 240. */
+    minutes: number;
   };
   export type FailureCategoryDto = "PERMISSION_DENIED" | "PROVIDER_UNAVAILABLE" | "TRANSPORT" | "UNKNOWN";
   export type FailureKind = "AUDIO_PUBLISH" | "VIDEO_PUBLISH" | "SCREEN_SHARE_PUBLISH" | "SUBSCRIBE" | "JOIN_MEDIA";
@@ -5315,10 +5325,11 @@ export namespace Meetings {
   };
   export type RecurrenceStatus = "ACTIVE" | "ENDED";
   export type RegistrationCreated = {
-    /** Opaque admission token (shown once; only its hash is stored). Absent for an idempotent repeat. */
+    /** Opaque admission token (only its hash is stored). An idempotent repeat (same `idempotencyKey` and request) returns the same token while the registration is active (audit M10); absent once it was cancelled or revoked. */
     admissionToken?: string | null;
     conferenceId?: string | null;
     created: boolean;
+    emailDelivery?: EmailDelivery | null;
     expiresAt: string;
     meetingSpaceId: string;
     registrationId: string;
@@ -6012,6 +6023,11 @@ export namespace Meetings {
     v2ExportReport: {
       params: { path: { id: string; artifactType: string } };
       response: { [key: string]: unknown };
+    };
+    /** POST /api/v2/conferences/{id}/extend; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
+    v2ExtendConference: {
+      params: { path: { id: string }; body: ExtendConferenceRequest };
+      response: ConferenceActionResponse;
     };
     /** POST /api/v2/conferences/{id}/artifacts/reports; auth MEETING_SESSION | PARTICIPANT_TOKEN; retry NO_RETRY */
     v2GenerateReport: {
@@ -6912,8 +6928,28 @@ export namespace Messaging {
     lastMessage: ConversationLastMessage | null;
     /** Active application messages from others after the member's read cursor, inside its history window, not hidden for it. */
     unreadCount: number;
-    /** Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext). */
+    /** Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext). */
     mentionCount: number;
+    /** F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members. */
+    archived?: boolean;
+    /** F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first). */
+    pinned?: boolean;
+    /** F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned. */
+    pinnedAt?: string | null;
+  };
+  /** F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary). */
+  export type ConversationInboxSettings = {
+    conversationId: Uuid;
+    archived: boolean;
+    pinned: boolean;
+    pinnedAt: string | null;
+  };
+  /** F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true. */
+  export type ConversationInboxSettingsRequest = {
+    /** Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it. */
+    archived?: boolean;
+    /** Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED. */
+    pinned?: boolean;
   };
   /** Preview metadata of the last application message visible to the member (its history window and delete-for-me markers honoured). */
   export type ConversationLastMessage = {
@@ -7736,7 +7772,7 @@ export namespace Messaging {
     /** MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext). */
     managedPresentation?: "STANDARD" | "ANNOUNCEMENT";
     replyToMessageId?: Uuid;
-    /** Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate … */
+    /** Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the "mentions only" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must … */
     mentionedPrincipalIds?: Array<Uuid>;
     /** S2, PRIVATE_E2EE only (optional): hex(HMAC-SHA256(frankingKey, 'cfmeet-messaging-franking:v1' || 0x00 || conversationId || clientMessageId || senderPrincipalId (16 bytes each) || plaintext UTF-8)). The client draws a fresh 32-byte frankingKey per message and carries it INSIDE the MLS plaintext; recipients check the commitment after decryption. MANAGED sends refuse it (FRANKING_E2EE_ONLY). */
     frankingCommitment?: string;
@@ -7869,8 +7905,8 @@ export namespace Messaging {
     lifecycleState?: "ACTIVE" | "LOCKED" | "CLOSED" | "ARCHIVED" | "DELETED";
     reason?: string;
     expiresAt?: string;
-    /** §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS). */
-    retentionSeconds?: number;
+    /** §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that … */
+    retentionSeconds?: number | null;
     /** Section 13: a new display title; null clears it (MANAGED only, owner). */
     title?: string | null;
     /** Section 13: a new avatar reference; null clears it (MANAGED only, owner). */
@@ -8426,6 +8462,11 @@ export namespace Messaging {
     sendMessage: {
       params: { path: { conversationId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: SendMessageRequest };
       response: Message;
+    };
+    /** PUT /v1/conversations/{conversationId}/inbox-settings — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN | OAUTH_ACCESS_TOKEN; retry IDEMPOTENT */
+    setConversationInboxSettings: {
+      params: { path: { conversationId: Uuid }; headers: { "cf-acting-principal": Uuid }; body: ConversationInboxSettingsRequest };
+      response: ConversationInboxSettings;
     };
     /** PUT /v1/conversations/{conversationId}/read-cursor — scope messages.read; auth PLATFORM_CREDENTIAL | CLIENT_TOKEN | OAUTH_ACCESS_TOKEN; retry IDEMPOTENT */
     setReadCursor: {

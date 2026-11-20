@@ -906,7 +906,11 @@ async fn personal_data_is_exported_and_the_account_can_be_deleted() {
     assert_eq!(s, StatusCode::OK, "{export}");
     assert_eq!(export["account"]["email"], "erase-me@example.com");
     assert!(export["signIns"].as_array().unwrap().len() >= 1, "{export}");
-    assert!(export["elsewhere"]["messaging"].is_string());
+    // S2: the other services' data is in the same document (here none is configured, so
+    // each owner is reported as unavailable rather than failing the download).
+    for owner in ["messaging", "communications", "calling"] {
+        assert!(export["elsewhere"][owner].is_object(), "{export}");
+    }
 
     // A token for another purpose does not delete.
     let wrong = app.step_up_token(&access, id, "DEACTIVATE_ACCOUNT").await;
@@ -944,6 +948,15 @@ async fn personal_data_is_exported_and_the_account_can_be_deleted() {
         0
     );
     assert_eq!(events(&app, id, "ACCOUNT_DELETED", "SUCCESS").await, 1);
+    // S2: one durable erasure job per owner service, queued with the deletion.
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_privacy_jobs WHERE user_id = '{id}' AND state = 'PENDING' \
+               AND target IN ('MESSAGING','COMMUNICATIONS','CALLING')"
+        ))
+        .await,
+        3
+    );
     let (s, _) = app
         .get("/api/v2/me/data-export", Auth::Bearer(&access))
         .await;

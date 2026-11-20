@@ -175,8 +175,11 @@ pub async fn expire_due(state: &AppState, batch: i64, report: &mut RetentionRepo
     Ok(())
 }
 
-/// §90: a conversation-specific retention (always stricter than its context's policy,
-/// which the per-class pass above keeps applying) expires its own older messages.
+/// §90: a conversation-specific retention (never looser than its context's policy, which
+/// the per-class pass above keeps applying) expires its own older messages. B4: each
+/// message keeps the retention in force when it was sent (`messaging_messages
+/// .retention_seconds`), so turning disappearing messages off or lengthening them applies
+/// to messages sent afterwards only.
 async fn expire_conversation_overrides(state: &AppState, batch: i64) -> Result<usize> {
     let st = state.clone();
     state
@@ -187,9 +190,9 @@ async fn expire_conversation_overrides(state: &AppState, batch: i64) -> Result<u
                 let due: Vec<MessageRow> = db::all(
                     txn,
                     &format!(
-                        "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m JOIN messaging_conversations c ON c.id = m.conversation_id \
-                          WHERE c.retention_seconds IS NOT NULL AND m.lifecycle = 'ACTIVE' \
-                            AND m.created_at < $1 - make_interval(secs => c.retention_seconds) \
+                        "SELECT {MESSAGE_COLUMNS} FROM messaging_messages m \
+                          WHERE m.retention_seconds IS NOT NULL AND m.lifecycle = 'ACTIVE' \
+                            AND m.created_at < $1 - make_interval(secs => m.retention_seconds) \
                             AND m.message_kind <> 'MLS_COMMIT' \
                           ORDER BY m.created_at LIMIT $2 FOR UPDATE OF m SKIP LOCKED"
                     ),
@@ -198,8 +201,22 @@ async fn expire_conversation_overrides(state: &AppState, batch: i64) -> Result<u
                 .await?;
                 let rctx = request_context();
                 for m in &due {
-                    let scope = EventScope { tenant_id: m.tenant_id, application_id: m.application_id, environment_id: m.environment_id };
-                    messages::tombstone(txn, &scope, m, "EXPIRED", "RETENTION_EXPIRED", now, &rctx, now).await?;
+                    let scope = EventScope {
+                        tenant_id: m.tenant_id,
+                        application_id: m.application_id,
+                        environment_id: m.environment_id,
+                    };
+                    messages::tombstone(
+                        txn,
+                        &scope,
+                        m,
+                        "EXPIRED",
+                        "RETENTION_EXPIRED",
+                        now,
+                        &rctx,
+                        now,
+                    )
+                    .await?;
                 }
                 Ok(due.len())
             })

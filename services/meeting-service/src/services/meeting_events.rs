@@ -42,6 +42,14 @@ pub mod event {
     pub const CONFERENCE_ENDED: &str = "conference.ended";
     pub const CONFERENCE_CANCELLED: &str = "conference.cancelled";
     pub const CONFERENCE_RESCHEDULED: &str = "conference.rescheduled";
+    /// MF1: the conference will be ended automatically soon (`autoEndAt`).
+    pub const CONFERENCE_ENDING_SOON: &str = "conference.ending_soon";
+    /// MF1: a host extended the scheduled end of a live conference.
+    pub const CONFERENCE_EXTENDED: &str = "conference.extended";
+    /// Audit M3: nobody who can admit is in the conference while people wait.
+    pub const CONFERENCE_WAITING_ROOM_UNATTENDED: &str = "conference.waiting_room_unattended";
+    /// Audit M3: someone who can admit is back (or was promoted).
+    pub const CONFERENCE_WAITING_ROOM_ATTENDED: &str = "conference.waiting_room_attended";
     pub const CONFERENCE_FAILED: &str = "conference.failed";
     pub const PARTICIPANT_REQUESTED_JOIN: &str = "participant.requested_join";
     pub const PARTICIPANT_ADMITTED: &str = "participant.admitted";
@@ -181,6 +189,7 @@ pub mod action {
     pub const CONFERENCE_END_REQUEST: &str = "CONFERENCE_END_REQUEST";
     pub const CONFERENCE_CANCEL: &str = "CONFERENCE_CANCEL";
     pub const CONFERENCE_RESCHEDULE: &str = "CONFERENCE_RESCHEDULE";
+    pub const CONFERENCE_EXTEND: &str = "CONFERENCE_EXTEND";
     pub const CONFERENCE_FAIL: &str = "CONFERENCE_FAIL";
     pub const JOIN_REQUEST: &str = "JOIN_REQUEST";
     pub const JOIN_DENIED: &str = "JOIN_DENIED";

@@ -233,10 +233,14 @@ async fn invitation_digest_purpose_expiry_revocation_usage_and_owner_are_enforce
             .await
             .unwrap()
     );
-    not_found(
+    // K7: the same person opening the invite again (a page refresh makes a new key) sees
+    // the profile again; the invite is not used twice.
+    assert_eq!(
+        profile,
         h.state
             .resolve_invite(&h.scope, &b, resolve.clone(), Uuid::new_v4())
-            .await,
+            .await
+            .unwrap()
     );
     not_found(
         h.state
@@ -552,10 +556,61 @@ async fn blocking_and_domain_blocks_are_immediate_and_unblocking_never_reconnect
         );
     }
     not_found(h.state.visible_profile(&h.scope, &a, &b, false).await);
-    h.state
+    // K5 (contacts audit): unblocking keeps the contact, like WhatsApp: the pair was
+    // connected before the block, so it is connected again.
+    let unblocked = h
+        .state
         .set_block(&b, &a, false, Uuid::new_v4())
         .await
         .unwrap();
+    assert_eq!(unblocked["relationship"], "CONNECTED");
+    assert!(
+        h.state
+            .check_policy(&h.scope, &check(Action::DirectCall, &a, &b))
+            .await
+            .unwrap()
+            .allowed
+    );
+    // Both blocking: one unblock is not enough; the contact comes back after the last.
+    h.state
+        .set_block(&b, &a, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    h.state
+        .set_block(&a, &b, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    let one = h
+        .state
+        .set_block(&b, &a, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(one["relationship"], "BLOCKED");
+    let both = h
+        .state
+        .set_block(&a, &b, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(both["relationship"], "CONNECTED");
+    // Removed while blocked (here by the blocked person): unblocking never reconnects.
+    h.state
+        .set_block(&b, &a, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    let a_contact: Value = communications::store::one(&h.state.store.db,
+        "SELECT jsonb_build_object('id',a.id) doc FROM communication_contact_aliases a WHERE a.owner_profile_id=$1",
+        vec![a.id.into()]).await.unwrap().unwrap();
+    let a_contact = Uuid::parse_str(a_contact["id"].as_str().unwrap()).unwrap();
+    h.state
+        .remove_contact(&a, a_contact, Uuid::new_v4())
+        .await
+        .unwrap();
+    let after = h
+        .state
+        .set_block(&b, &a, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(after["relationship"], "REVOKED");
     assert!(
         !h.state
             .check_policy(&h.scope, &check(Action::DirectCall, &a, &b))
@@ -563,6 +618,15 @@ async fn blocking_and_domain_blocks_are_immediate_and_unblocking_never_reconnect
             .unwrap()
             .allowed
     );
+    // Unblocking someone who was never blocked leaves the relationship alone.
+    let c = h.profile(&h.account()).await;
+    h.connected(&a, &c).await;
+    let untouched = h
+        .state
+        .set_block(&a, &c, false, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(untouched["relationship"], "CONNECTED");
     h.close().await;
 }
 #[tokio::test]

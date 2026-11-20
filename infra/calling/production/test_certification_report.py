@@ -48,7 +48,9 @@ class PublicSurface(unittest.TestCase):
         self.assertTrue(all(r['cls'] in pc.INTERNAL_CLASSES for r in internal))
 
     def test_certify_reports_failures(self):
-        answers = {'/health': (200, {}, '{"status":"healthy"}'), '/api-docs/swagger-config.json': (200, {}, '{"urls":[]}'),
+        # D1: the Meeting Service's documentation is not public in production (404).
+        answers = {'/health': (200, {}, '{"status":"healthy"}'), '/api-docs/swagger-config.json': (404, {}, ''),
+                   '/api-docs/openapi.json': (404, {}, ''), '/swagger-ui/': (404, {}, ''),
                    '/api/v2/me/profile': (401, {}, '')}
 
         def fake(path, method='GET', headers=None, attempts=4, limit=400):
@@ -67,8 +69,8 @@ class PublicSurface(unittest.TestCase):
                 # The gateway still allows only the apex origin.
                 return (204, {'access-control-allow-origin': pc.WEB_ORIGIN}, '') if headers['Origin'] == pc.WEB_ORIGIN \
                     else (403, {}, '')
-            if path == '/api-docs/swagger-config.json':
-                return 200, {}, '{"urls":[]}'
+            if path in ('/api-docs/swagger-config.json', '/api-docs/openapi.json', '/swagger-ui/'):
+                return 404, {}, ''
             return (404 if path.startswith('/internal') else 401), {}, ''
 
         with patch.object(pc, 'request', side_effect=fake), patch.object(pc, 'certificate_days', return_value=60):

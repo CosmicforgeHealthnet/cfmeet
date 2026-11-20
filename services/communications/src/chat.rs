@@ -83,14 +83,19 @@ impl State {
         conversation: Uuid,
         strict: bool,
     ) -> Result<Value> {
-        self.conversation(scope, p, conversation, None).await?;
+        let c = self.conversation(scope, p, conversation, None).await?;
+        let mentions = mentions_available(&c);
         let row:Option<Value>=one(&self.store.db,"SELECT to_jsonb(c) doc FROM communication_conversation_preferences c WHERE owner_profile_id=$1 AND conversation_id=$2",vec![p.id.into(),conversation.into()]).await?;
         if self.preference_authority(&self.store.db, false).await? == Authority::Service {
             match self
                 .service_conversation_row(p, conversation, row.clone())
                 .await
             {
-                Ok(merged) => return Ok(preference_view(conversation, Some(&merged))),
+                Ok(merged) => {
+                    let mut view = preference_view(conversation, Some(&merged));
+                    view["mentionsAvailable"] = json!(mentions);
+                    return Ok(view);
+                }
                 Err(e) if strict || !fallback_allowed(&e) => return Err(e),
                 Err(_) => tracing::warn!(
                     service = "communications",
@@ -98,7 +103,9 @@ impl State {
                 ),
             }
         }
-        Ok(preference_view(conversation, row.as_ref()))
+        let mut view = preference_view(conversation, row.as_ref());
+        view["mentionsAvailable"] = json!(mentions);
+        Ok(view)
     }
     pub async fn put_conversation_preferences(
         &self,
@@ -130,7 +137,13 @@ impl State {
         {
             return Err(Error::Validation);
         }
-        self.conversation(scope, p, conversation, None).await?;
+        let c = self.conversation(scope, p, conversation, None).await?;
+        let mentions = mentions_available(&c);
+        // K11: "Mentions only" is refused where mentions cannot be read (private, end-to-end
+        // encrypted chats): it would silently behave like a mute.
+        if input.notifications == "MENTIONS" && !mentions {
+            return Err(Error::Validation);
+        }
         let txn = self.store.begin().await?;
         let authority = self.preference_authority(&txn, true).await?;
         if authority == Authority::Freeze {
@@ -189,7 +202,8 @@ impl State {
                 row["version"].as_i64(),
             )
             .await?;
-        let result = preference_view(conversation, Some(&row));
+        let mut result = preference_view(conversation, Some(&row));
+        result["mentionsAvailable"] = json!(mentions);
         self.store
             .finish_idempotency(&txn, p, op, key, result.clone())
             .await?;
@@ -327,43 +341,81 @@ impl State {
         let limit = limit.min(50);
         let items:Vec<Value>=rows(&self.store.db,"SELECT to_jsonb(s) doc FROM communication_saved_messages s WHERE owner_profile_id=$1 AND ($2='00000000-0000-0000-0000-000000000000'::uuid OR (created_at,id)<(SELECT created_at,id FROM communication_saved_messages WHERE id=$2 AND owner_profile_id=$1)) ORDER BY created_at DESC,id DESC LIMIT $3",vec![p.id.into(),cursor.into(),(limit+1).into()]).await?;
         let more = items.len() > limit as usize;
-        let mut data = Vec::new();
-        let mut last = None;
+        let items: Vec<Value> = items.into_iter().take(limit as usize).collect();
+        let last = match items.last() {
+            Some(i) => Some(uuid_field(i, "id")?),
+            None => None,
+        };
         // Visibility is rechecked live: leaving a group, deletion, expiry or clear-for-me
-        // makes an item unavailable without deleting the user's reference.
-        let mut marks: BTreeMap<Uuid, i64> = BTreeMap::new();
-        for item in items.into_iter().take(limit as usize) {
-            let id = uuid_field(&item, "id")?;
-            last = Some(id);
-            let conversation = uuid_field(&item, "conversation_id")?;
-            let message = uuid_field(&item, "message_id")?;
-            let mark = match marks.get(&conversation) {
-                Some(m) => *m,
-                None => {
-                    let m = self.watermark(p, conversation).await?;
-                    marks.insert(conversation, m);
-                    m
+        // makes an item unavailable without deleting the user's reference. The page's
+        // clear-for-me watermarks come in one read.
+        let marks: Vec<Value> = rows(&self.store.db,"SELECT jsonb_build_object('c',conversation_id,'m',cleared_through_sequence) doc FROM communication_conversation_watermarks WHERE owner_profile_id=$1 AND conversation_id IN (SELECT jsonb_array_elements_text($2::jsonb)::uuid)",
+            vec![p.id.into(),json!(items.iter().map(|i| i["conversation_id"].clone()).collect::<Vec<_>>()).into()]).await?;
+        let marks: BTreeMap<Uuid, i64> = marks
+            .iter()
+            .filter_map(|m| Some((Uuid::parse_str(m["c"].as_str()?).ok()?, m["m"].as_i64()?)))
+            .collect();
+        let mut pending = Vec::new();
+        for item in &items {
+            let conversation = uuid_field(item, "conversation_id")?;
+            let cleared = item["message_sequence"].as_i64().unwrap_or(0)
+                <= marks.get(&conversation).copied().unwrap_or(0);
+            if !cleared {
+                pending.push((conversation, uuid_field(item, "message_id")?));
+            }
+        }
+        // K9: every item is checked with Messaging in ONE batched call. A Messaging
+        // problem marks the affected items unavailable instead of failing the whole list.
+        let checked = if pending.is_empty() {
+            Ok(Default::default())
+        } else {
+            match self.messages_access(scope, p, &pending).await {
+                // An older Messaging image without the batched route: one call per item.
+                Err(Error::NotFound) => {
+                    let mut one_by_one = std::collections::HashMap::new();
+                    for (c, m) in &pending {
+                        match self.conversation(scope, p, *c, Some(*m)).await {
+                            Ok(conv) => {
+                                let state = conv
+                                    .message
+                                    .as_ref()
+                                    .and_then(|v| v["state"].as_str())
+                                    .unwrap_or("NOT_FOUND")
+                                    .to_owned();
+                                one_by_one.insert((*c, *m), Some(state));
+                            }
+                            Err(Error::NotFound) => {
+                                one_by_one.insert((*c, *m), None);
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    Ok(one_by_one)
                 }
-            };
-            let reason = if item["message_sequence"].as_i64().unwrap_or(0) <= mark {
+                other => other,
+            }
+        };
+        let checked = checked.unwrap_or_default();
+        let mut data = Vec::new();
+        for item in &items {
+            let conversation = uuid_field(item, "conversation_id")?;
+            let message = uuid_field(item, "message_id")?;
+            let reason = if !pending.contains(&(conversation, message)) {
                 Some("CLEARED_FOR_ME")
             } else {
-                match self
-                    .conversation(scope, p, conversation, Some(message))
-                    .await
-                {
-                    Ok(c) => match c.message.as_ref().and_then(|m| m["state"].as_str()) {
-                        Some("VISIBLE") => None,
-                        Some("DELETED") => Some("DELETED"),
-                        Some("EXPIRED") => Some("EXPIRED"),
-                        Some("HIDDEN_FOR_ME") => Some("HIDDEN_FOR_ME"),
+                match checked.get(&(conversation, message)) {
+                    None => Some("TEMPORARILY_UNAVAILABLE"),
+                    Some(None) => Some("NOT_A_MEMBER"),
+                    Some(Some(state)) => match state.as_str() {
+                        "VISIBLE" => None,
+                        "DELETED" => Some("DELETED"),
+                        "EXPIRED" => Some("EXPIRED"),
+                        "HIDDEN_FOR_ME" => Some("HIDDEN_FOR_ME"),
                         _ => Some("NOT_FOUND"),
                     },
-                    Err(Error::NotFound) => Some("NOT_A_MEMBER"),
-                    Err(e) => return Err(e),
                 }
             };
-            data.push(saved_view(&item, reason.is_none(), reason));
+            data.push(saved_view(item, reason.is_none(), reason));
         }
         Ok(json!({"schemaVersion":1,"data":data,"nextCursor":if more {last} else {None}}))
     }
@@ -664,6 +716,12 @@ pub fn media_item(conversation: Uuid, a: &Value) -> Value {
         },
         "download":grant("download", "download-grants", false),
         "thumbnail":if managed {grant("thumbnail", "thumbnail-grants", true)} else {Value::Null}})
+}
+/// K11: whether "Mentions only" works in this conversation: Messaging signals mentions
+/// for MANAGED messages only; in end-to-end encrypted (private) chats they cannot be read
+/// until encrypted mentions exist (`crate::policy::MENTIONS_IN_PRIVATE_CHATS`).
+fn mentions_available(c: &crate::owners::Conversation) -> bool {
+    c.security_profile == "MANAGED" || crate::policy::MENTIONS_IN_PRIVATE_CHATS
 }
 fn saved_view(r: &Value, available: bool, reason: Option<&str>) -> Value {
     json!({"schemaVersion":1,"savedId":r["id"],"conversationId":r["conversation_id"],"messageId":r["message_id"],

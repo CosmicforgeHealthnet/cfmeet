@@ -17,8 +17,8 @@ use crate::{
         ids::{CallId, CallLegId, CallRouteId},
         kinds::{
             AttemptOutcome, AuthorizationReason, CallKind, CommandOperation, FailureCategory,
-            InvitationPurpose, LegDirection, LegKind, LegState, MediaSessionStatus,
-            ParticipantRole, RouteClass, RouteState,
+            InvitationPurpose, InvitationStatus, InvitationTerminalReason, LegDirection, LegKind,
+            LegState, MediaSessionStatus, ParticipantRole, RouteClass, RouteState,
         },
         legs::NewLeg,
         participants::DisplayName,
@@ -834,8 +834,11 @@ impl AppCallService {
             self.dispatch_call(call.id).await;
             return Ok(());
         }
-        // Ring every target on its eligible endpoints.
+        // Ring every target on its eligible endpoints, except a target already on another
+        // live call (CF1, "on another call"): its offers are recorded (so its history shows
+        // a missed call) but never delivered, and closed below.
         let mut invitations = Vec::new();
+        let mut busy = Vec::new();
         for participant in call_participants::Entity::find()
             .filter(call_participants::Column::CallId.eq(call.id))
             .filter(call_participants::Column::Role.eq(ParticipantRole::Recipient))
@@ -852,24 +855,44 @@ impl AppCallService {
                     self.config.max_endpoints_per_participant,
                 )
                 .await?;
-            invitations.extend(
-                self.calls
-                    .issue_invitations_in(
-                        &txn,
-                        &cmd,
-                        &call,
-                        &participant,
-                        &endpoints,
-                        InvitationPurpose::Call,
-                        None,
-                        self.config.invitation_ttl,
-                        None,
-                    )
-                    .await?,
-            );
+            let on_another_call = self.config.busy_on_another_call
+                && !endpoints.is_empty()
+                && on_another_call_in(&txn, &call, participant.principal_id).await?;
+            let issued = self
+                .calls
+                .issue_invitations_in(
+                    &txn,
+                    &cmd,
+                    &call,
+                    &participant,
+                    &endpoints,
+                    InvitationPurpose::Call,
+                    None,
+                    self.config.invitation_ttl,
+                    None,
+                )
+                .await?;
+            if on_another_call {
+                busy.push(participant.id);
+            } else {
+                invitations.extend(issued);
+            }
         }
         let mut pending = PendingSignals::default();
-        let call = if invitations.is_empty() {
+        let call = if invitations.is_empty() && !busy.is_empty() {
+            // Everyone called is on another call: the Call ends BUSY at once (its offers
+            // close with it, unanswered: a missed call for each of them), nobody rings.
+            crate::metrics::add(
+                "calling_busy_targets_total",
+                &[("call_kind", call.call_kind.as_str())],
+                busy.len() as u64,
+            );
+            tracing::info!(call_id = %call.id, targets = busy.len(), "every target is on another call; call ends busy");
+            self.calls
+                .transition_in(&txn, &cmd, &call, call.version, CallAction::MarkBusy)
+                .await?
+                .call
+        } else if invitations.is_empty() {
             // Every endpoint disappeared between resolution and ringing.
             self.calls
                 .transition_in(
@@ -888,6 +911,28 @@ impl AppCallService {
             // until a callee device acknowledges receipt over signaling, which moves the
             // Call to RINGING (`acknowledge_invitation`). A callee signed in nowhere never
             // shows as ringing; its offers expire into NO_ANSWER / a missed call.
+            // A group target on another call is not rung: its offers close at once
+            // (cancelled, never delivered), so it has a missed call and nothing rings.
+            for participant in &busy {
+                self.calls
+                    .finish_live_invitations_in(
+                        &txn,
+                        &cmd,
+                        &call,
+                        Some(*participant),
+                        None,
+                        InvitationStatus::Cancelled,
+                        InvitationTerminalReason::CallCancelled,
+                    )
+                    .await?;
+            }
+            if !busy.is_empty() {
+                crate::metrics::add(
+                    "calling_busy_targets_total",
+                    &[("call_kind", call.call_kind.as_str())],
+                    busy.len() as u64,
+                );
+            }
             call
         };
         let body = self.create_response(&txn, &call).await?;
@@ -920,6 +965,11 @@ impl AppCallService {
         txn.commit().await?;
         self.publish(pending).await;
         tracing::info!(call_id = %call.id, invitations = invitations.len(), call_state = %call.current_state, "application call ringing");
+        if call.current_state.is_terminal() {
+            // Busy (or nobody left to ring): the media resource goes (in the background;
+            // reconciliation retries a failed cleanup).
+            self.teardown_media_later(call.id);
+        }
         Ok(())
     }
 
@@ -942,6 +992,41 @@ impl AppCallService {
             .await?;
         Ok(attempt)
     }
+}
+
+/// CF1: whether `principal` is already on another live call of `call`'s scope: it has a
+/// session (not ended or removed) in another Call that was answered and is still going
+/// (ANSWERED, CONNECTED, HELD or TRANSFERRING). The person, not each device, is busy: a
+/// person in a call is "on another call" for a new one whichever of their signed-in
+/// devices would ring (most people keep older browser registrations that are never in a
+/// call, so a per-device rule would almost never apply).
+pub(crate) async fn on_another_call_in<C: ConnectionTrait>(
+    db: &C,
+    call: &calls::Model,
+    principal: Uuid,
+) -> CallResult<bool> {
+    let row = db
+        .query_one(super::enterprise::stmt(
+            "SELECT EXISTS (SELECT 1 FROM call_participants p \
+               JOIN calls c ON c.id = p.call_id \
+               JOIN call_sessions s ON s.participant_id = p.id \
+              WHERE p.tenant_id = $1 AND p.application_id = $2 AND p.environment_id = $3 \
+                AND p.principal_id = $4 AND p.call_id <> $5 AND p.ended_at IS NULL \
+                AND s.ended_at IS NULL AND s.removed_at IS NULL \
+                AND c.current_state IN ('ANSWERED', 'CONNECTED', 'HELD', 'TRANSFERRING')) AS busy",
+            vec![
+                call.tenant_id.into(),
+                call.application_id.into(),
+                call.environment_id.into(),
+                principal.into(),
+                call.id.into(),
+            ],
+        ))
+        .await?;
+    Ok(match row {
+        Some(row) => row.try_get::<bool>("", "busy")?,
+        None => false,
+    })
 }
 
 #[cfg(test)]

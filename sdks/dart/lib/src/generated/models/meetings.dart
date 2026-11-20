@@ -2034,6 +2034,26 @@ class ExportProfile {
   Map<String, Object?> toJson() => json;
 }
 
+/// MF1: extend a live conference's scheduled end.
+class ExtendConferenceRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ExtendConferenceRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ExtendConferenceRequest.create({required int minutes}) =>
+      ExtendConferenceRequest.fromJson(<String, Object?>{
+        'minutes': minutes,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Minutes added to the scheduled end (or to now, when the scheduled end has already passed and the meeting is in its grace period): 1 to 240.
+  int get minutes => (json['minutes']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
 /// One of: PERMISSION_DENIED, PROVIDER_UNAVAILABLE, TRANSPORT, UNKNOWN.
 typedef FailureCategoryDto = String;
 
@@ -4625,11 +4645,12 @@ class RegistrationCreated {
   const RegistrationCreated.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory RegistrationCreated.create({String? admissionToken, String? conferenceId, required bool created, required String expiresAt, required String meetingSpaceId, required String registrationId}) =>
+  factory RegistrationCreated.create({String? admissionToken, String? conferenceId, required bool created, EmailDelivery? emailDelivery, required String expiresAt, required String meetingSpaceId, required String registrationId}) =>
       RegistrationCreated.fromJson(<String, Object?>{
         if (admissionToken != null) 'admissionToken': admissionToken,
         if (conferenceId != null) 'conferenceId': conferenceId,
         'created': created,
+        if (emailDelivery != null) 'emailDelivery': emailDelivery,
         'expiresAt': expiresAt,
         'meetingSpaceId': meetingSpaceId,
         'registrationId': registrationId,
@@ -4638,12 +4659,14 @@ class RegistrationCreated {
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
-  /// Opaque admission token (shown once; only its hash is stored). Absent for an idempotent repeat.
+  /// Opaque admission token (only its hash is stored). An idempotent repeat (same `idempotencyKey` and request) returns the same token while the registration is active (audit M10); absent once it was cancelled or revoked.
   String? get admissionToken => json['admissionToken'] as String?;
 
   String? get conferenceId => json['conferenceId'] as String?;
 
   bool get created => json['created']! as bool;
+
+  EmailDelivery? get emailDelivery => json['emailDelivery'] as String?;
 
   String get expiresAt => json['expiresAt']! as String;
 

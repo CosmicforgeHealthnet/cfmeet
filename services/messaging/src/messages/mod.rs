@@ -298,8 +298,10 @@ pub struct SendRequest {
     /// A reply to this earlier message of the conversation (thread metadata, ids only).
     #[serde(default)]
     pub reply_to_message_id: Option<Uuid>,
-    /// Section 13 (MSG-007), MANAGED only: current members this message mentions (ids
-    /// only; at most [`MAX_MENTIONS`]). PRIVATE_E2EE mentions stay inside the ciphertext.
+    /// Section 13 (MSG-007): current members this message mentions (ids only; at most
+    /// [`MAX_MENTIONS`]). B3: PRIVATE_E2EE too — the ids serve the mention count and the
+    /// "mentions only" notification preference; the mention TEXT stays inside the
+    /// ciphertext.
     #[serde(default)]
     pub mentioned_principal_ids: Vec<Uuid>,
     /// S2, PRIVATE_E2EE only: the sender's franking commitment ([`franking`]).
@@ -327,8 +329,10 @@ impl SendRequest {
 /// Most principals one message may mention.
 pub const MAX_MENTIONS: usize = 50;
 
-/// The distinct principals a MANAGED message mentions: current ACTIVE members other than
-/// the sender (anyone else is refused, so mentions never probe who exists).
+/// The distinct principals a message mentions: current ACTIVE members other than the
+/// sender (anyone else is refused, so mentions never probe who exists), deduplicated and
+/// capped at [`MAX_MENTIONS`]. Both profiles (B3): for PRIVATE_E2EE only these ids reach
+/// the server, the mention text stays inside the ciphertext.
 pub(crate) async fn mentions_of<C: ConnectionTrait>(
     db: &C,
     conversation: &ConversationRow,
@@ -337,12 +341,6 @@ pub(crate) async fn mentions_of<C: ConnectionTrait>(
 ) -> Result<Vec<Uuid>> {
     if requested.is_empty() {
         return Ok(Vec::new());
-    }
-    if conversation.profile() != SecurityProfile::Managed {
-        return Err(Error::reason(
-            ErrorCode::ContentRejected,
-            "MENTIONS_MANAGED_ONLY",
-        ));
     }
     let mut wanted: Vec<Uuid> = requested.iter().copied().filter(|p| *p != sender).collect();
     wanted.sort();
@@ -676,14 +674,6 @@ async fn send_checked(
     }
     let (conversation, _member, effective) =
         send_prelude(state, ctx, acting, conversation_id).await?;
-    if !request.mentioned_principal_ids.is_empty()
-        && conversation.profile() != SecurityProfile::Managed
-    {
-        return Err(Error::reason(
-            ErrorCode::ContentRejected,
-            "MENTIONS_MANAGED_ONLY",
-        ));
-    }
     if !request.attachment_ids.is_empty() {
         crate::attachments::check_message_attachments(
             state,

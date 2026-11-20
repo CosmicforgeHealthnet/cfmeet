@@ -32,6 +32,7 @@ pub mod http;
 pub mod identity;
 pub mod integrations;
 pub mod limits;
+pub mod member_notifications;
 pub mod membership;
 pub mod messages;
 pub mod metrics;

@@ -2,7 +2,8 @@
 //! through the real HTTP router, with real Ed25519 device keys.
 //!
 //! Covers the Account-authority rows of the backend acceptance matrix: web-only accounts,
-//! four web browser profiles (one logical device per profile), the first mobile, mobile
+//! browsers trusted by their own fresh sign-in (ADR 0067), four web browser profiles (one
+//! logical device per profile; a fifth signs out the least recently used), the first mobile, mobile
 //! replacement (device approval and email step-up), web kept signed in, concurrent mobile
 //! replacements (exactly one primary), replayed proofs and old credentials refused, forged
 //! and cross-account links refused, device revocation, removing the primary mobile,
@@ -294,7 +295,7 @@ async fn backend_user(_app: &TestApp, email: &str, token: &str) -> User {
 }
 
 #[tokio::test]
-async fn four_browser_profiles_one_device_each_and_the_fifth_is_refused() {
+async fn four_browser_profiles_are_trusted_by_sign_in_and_the_fifth_signs_out_the_least_recent() {
     let app = app_with_redis!();
     let e = email();
     password_user(&app, &e).await;
@@ -305,30 +306,32 @@ async fn four_browser_profiles_one_device_each_and_the_fifth_is_refused() {
         let mut d = Device::web();
         let (s, v) = sign_in(&app, &e, &mut d).await;
         assert_eq!(s, StatusCode::OK, "{v}");
-        assert_eq!(
-            v["device"]["trust"], "UNTRUSTED",
-            "a sign-in code alone never trusts"
-        );
-        assert_eq!(
-            me(&app, &d).await,
-            StatusCode::OK,
-            "untrusted web still works"
-        );
+        // ADR 0067: the fresh sign-in is the proof; no verification step for a browser.
+        assert_eq!(v["device"]["trust"], "TRUSTED", "{v}");
+        assert_eq!(v["device"]["state"], "ACTIVE", "{v}");
+        assert_eq!(v["device"]["trustedVia"], "BOOTSTRAP", "{v}");
+        assert_eq!(policy(&app, &d).await["currentDeviceStatus"], "TRUSTED");
+        assert_eq!(me(&app, &d).await, StatusCode::OK);
         others.push(d);
     }
     assert_eq!(policy(&app, &first).await["activeWebDevices"], 4);
-    let mut fifth = Device::web();
-    let (s, v) = sign_in(&app, &e, &mut fifth).await;
-    assert_eq!(s, StatusCode::CONFLICT, "{v}");
-    assert_eq!(code(&v), "WEB_DEVICE_LIMIT_REACHED");
+    // The security log says why each browser is trusted.
+    assert!(
+        app.scalar(
+            "SELECT count(*) FROM account_security_events WHERE event_type = 'DEVICE_DECLARED' \
+             AND detail->>'trustedBy' = 'SIGN_IN'"
+        )
+        .await
+            >= 3
+    );
 
     // The same browser profile signing in again (another tab, or after sign-out) is the
     // same logical device: no extra slot, the previous sign-in is superseded.
-    let old_access = first.access.clone();
-    let before = first.id;
-    let (s, v) = sign_in(&app, &e, &mut first).await;
+    let old_access = others[0].access.clone();
+    let before = others[0].id;
+    let (s, v) = sign_in(&app, &e, &mut others[0]).await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(first.id, before);
+    assert_eq!(others[0].id, before);
     assert_eq!(v["endedSessions"], 1);
     assert_eq!(
         app.get("/api/v1/users/me", Auth::Bearer(&old_access))
@@ -338,27 +341,52 @@ async fn four_browser_profiles_one_device_each_and_the_fifth_is_refused() {
     );
     assert_eq!(policy(&app, &first).await["activeWebDevices"], 4);
 
-    // Revoking a web device from a trusted device frees a slot; the others keep working.
-    let victim = others.pop().unwrap();
-    let target = victim.id.unwrap();
-    let (s, v) = app
-        .post(
-            &format!("/api/v2/me/devices/{target}/revoke"),
-            Auth::Bearer(&first.access),
-            json!({ "proof": first.proof(P::Revoke, &target.to_string()) }),
-        )
-        .await;
+    // A fifth browser is never refused: the least recently used browser (`first`) is
+    // signed out and revoked to make room; the others keep working.
+    let mut fifth = Device::web();
+    let (s, v) = sign_in(&app, &e, &mut fifth).await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(v["device"]["state"], "REVOKED");
-    assert_eq!(me(&app, &victim).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(v["device"]["trust"], "TRUSTED");
+    assert_eq!(v["endedSessions"], 1, "{v}");
+    assert_eq!(me(&app, &first).await, StatusCode::UNAUTHORIZED);
     for d in &others {
         assert_eq!(me(&app, d).await, StatusCode::OK);
     }
-    assert_eq!(me(&app, &first).await, StatusCode::OK);
-    let (s, v) = sign_in(&app, &e, &mut fifth).await;
+    assert_eq!(policy(&app, &fifth).await["activeWebDevices"], 4);
+    let first_id = first.id.unwrap();
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_devices WHERE id = '{first_id}' AND state = 'REVOKED'"
+        ))
+        .await,
+        1
+    );
+    assert!(
+        app.scalar(
+            "SELECT count(*) FROM account_security_events WHERE event_type = 'DEVICE_REVOKED' \
+             AND detail->>'reason' = 'WEB_DEVICE_LIMIT_REACHED'"
+        )
+        .await
+            >= 1
+    );
+
+    // Revocation stays terminal: the revoked browser signing in again is a NEW device (the
+    // old row stays revoked), and it makes room the same way.
+    let (s, v) = sign_in(&app, &e, &mut first).await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    // An untrusted device cannot revoke another device.
-    let target = first.id.unwrap();
+    assert_ne!(first.id.unwrap(), first_id);
+    assert_eq!(
+        app.scalar(&format!(
+            "SELECT count(*) FROM account_devices WHERE id = '{first_id}' AND state = 'REVOKED'"
+        ))
+        .await,
+        1
+    );
+    assert_eq!(policy(&app, &first).await["activeWebDevices"], 4);
+
+    // Revoking a web device from a trusted device still works; the others keep working.
+    let victim = others.pop().unwrap();
+    let target = victim.id.unwrap();
     let (s, v) = app
         .post(
             &format!("/api/v2/me/devices/{target}/revoke"),
@@ -366,8 +394,97 @@ async fn four_browser_profiles_one_device_each_and_the_fifth_is_refused() {
             json!({ "proof": fifth.proof(P::Revoke, &target.to_string()) }),
         )
         .await;
-    assert_eq!(s, StatusCode::FORBIDDEN, "{v}");
-    assert_eq!(code(&v), "DEVICE_NOT_TRUSTED");
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["device"]["state"], "REVOKED");
+    assert_eq!(me(&app, &victim).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(me(&app, &fifth).await, StatusCode::OK);
+    assert_eq!(me(&app, &first).await, StatusCode::OK);
+}
+
+/// ADR 0067: a browser declared as UNTRUSTED before this change (the old policy) becomes
+/// trusted when it declares again with its key, from its bound sign-in or a fresh one; a
+/// revoked one never comes back.
+#[tokio::test]
+async fn an_untrusted_browser_from_before_is_trusted_by_its_sign_in() {
+    let app = app_with_redis!();
+    let e = email();
+    password_user(&app, &e).await;
+    let mut first = Device::web();
+    sign_in(&app, &e, &mut first).await;
+    let mut old = Device::web();
+    let (s, v) = sign_in(&app, &e, &mut old).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let old_id = old.id.unwrap();
+    // Simulate the previous policy's row: an untrusted browser.
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "ALTER TABLE account_devices DISABLE TRIGGER trg_account_devices_guard",
+            [],
+        ))
+        .await
+        .unwrap();
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE account_devices SET trust = 'UNTRUSTED', trusted_via = NULL, trusted_at = NULL WHERE id = $1",
+            [old_id.into()],
+        ))
+        .await
+        .unwrap();
+    app.db
+        .conn
+        .execute(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "ALTER TABLE account_devices ENABLE TRIGGER trg_account_devices_guard",
+            [],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(policy(&app, &old).await["currentDeviceStatus"], "UNTRUSTED");
+    // Its bound sign-in declares again (what the web client does on every start), with a
+    // fresh proof of its key: now trusted, no link.
+    let declare = |d: &Device| {
+        json!({
+            "installationId": d.installation,
+            "deviceClass": d.class,
+            "platform": d.platform,
+            "label": "again",
+            "publicKey": b64(&d.public_key()),
+            "proof": d.proof(P::Declare, &d.session.to_string()),
+        })
+    };
+    // A replayed or wrong-key proof is refused and changes nothing.
+    let mut wrong = declare(&old);
+    wrong["proof"] = first.proof(P::Declare, &old.session.to_string());
+    let (s, v) = app
+        .post(
+            "/api/v2/me/devices/current",
+            Auth::Bearer(&old.access),
+            wrong,
+        )
+        .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "{v}");
+    assert_eq!(policy(&app, &old).await["currentDeviceStatus"], "UNTRUSTED");
+    let (s, v) = app
+        .post(
+            "/api/v2/me/devices/current",
+            Auth::Bearer(&old.access),
+            declare(&old),
+        )
+        .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["device"]["deviceId"], json!(old_id));
+    assert_eq!(v["device"]["trust"], "TRUSTED");
+    assert_eq!(v["device"]["trustedVia"], "BOOTSTRAP");
+    // A mobile is never trusted this way: it still completes a link (replacement).
+    let mut phone = Device::mobile("ANDROID");
+    let (s, v) = sign_in(&app, &e, &mut phone).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["device"]["trust"], "UNTRUSTED");
+    assert_eq!(v["device"]["state"], "REPLACEMENT_PENDING");
 }
 
 #[tokio::test]
@@ -379,7 +496,7 @@ async fn first_mobile_becomes_primary_and_a_new_mobile_replaces_it_without_touch
     sign_in(&app, &e, &mut web_a).await;
     let mut web_b = Device::web();
     sign_in(&app, &e, &mut web_b).await;
-    link_by_approval(&app, &web_a, &web_b).await;
+    // ADR 0067: the second browser is trusted by its own sign-in.
     assert_eq!(policy(&app, &web_b).await["currentDeviceStatus"], "TRUSTED");
 
     // First mobile: pending until approved; its sign-in has no authority meanwhile.
@@ -693,7 +810,9 @@ async fn forged_and_cross_account_links_are_refused() {
     sign_in(&app, &e1, &mut alice).await;
     let mut bob = Device::web();
     sign_in(&app, &e2, &mut bob).await;
-    let mut attacker = Device::web(); // got into Alice's mailbox once
+    // Got into Alice's mailbox once. A browser would be trusted by that sign-in (ADR 0067);
+    // a new phone still waits for a link, which is what this test attacks.
+    let mut attacker = Device::mobile("ANDROID");
     sign_in(&app, &e1, &mut attacker).await;
     let link = request_link(&app, &attacker).await;
     let c = link["comparisonCode"].as_str().unwrap().to_string();
@@ -702,7 +821,7 @@ async fn forged_and_cross_account_links_are_refused() {
     let (s, v) = approve(&app, &bob, &link, &attacker, &c).await;
     assert_eq!((s, code(&v)), (StatusCode::GONE, "DEVICE_LINK_INVALID"));
     // An untrusted device cannot approve, even with the code (a "stolen screenshot").
-    let mut second_attacker = Device::web();
+    let mut second_attacker = Device::mobile("IOS");
     sign_in(&app, &e1, &mut second_attacker).await;
     let (s, v) = approve(&app, &second_attacker, &link, &attacker, &c).await;
     assert_eq!((s, code(&v)), (StatusCode::FORBIDDEN, "DEVICE_NOT_TRUSTED"));
@@ -738,7 +857,8 @@ async fn forged_and_cross_account_links_are_refused() {
     );
     assert_eq!(
         policy(&app, &attacker).await["currentDeviceStatus"],
-        "UNTRUSTED"
+        "REPLACEMENT_PENDING",
+        "the rejected phone stays pending (no authority)"
     );
     // Audit records the refusals.
     assert!(
@@ -775,14 +895,19 @@ async fn sign_out_everywhere_revokes_every_device() {
             .await,
         0
     );
-    // Re-linking afterwards is account recovery: the account had trusted devices, so a new
-    // browser is untrusted until the email step-up (no silent trust restore).
+    // Signing in again afterwards is enough for a browser (ADR 0067: the emailed sign-in
+    // code proves the same mailbox the email step-up did). The revoked devices stay revoked.
     let mut fresh = Device::web();
     let (s, v) = sign_in(&app, &e, &mut fresh).await;
     assert_eq!(s, StatusCode::OK, "{v}");
-    assert_eq!(v["device"]["trust"], "UNTRUSTED");
-    let p = policy(&app, &fresh).await;
-    assert_eq!(p["linkingMethods"], json!(["EMAIL_STEP_UP"]));
+    assert_eq!(v["device"]["trust"], "TRUSTED");
+    assert_ne!(fresh.id, web.id);
+    assert_eq!(me(&app, &web).await, StatusCode::UNAUTHORIZED);
+    // A new phone still needs a link.
+    let mut phone2 = Device::mobile("IOS");
+    let (s, v) = sign_in(&app, &e, &mut phone2).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["device"]["state"], "REPLACEMENT_PENDING");
 }
 
 #[tokio::test]
@@ -894,7 +1019,6 @@ async fn replacement_and_revocation_end_unclassified_sign_ins_but_not_web_device
     sign_in(&app, &e, &mut web).await;
     let mut web2 = Device::web();
     sign_in(&app, &e, &mut web2).await;
-    link_by_approval(&app, &web, &web2).await;
     let mut phone_a = Device::mobile("ANDROID");
     sign_in(&app, &e, &mut phone_a).await;
     link_by_approval(&app, &web, &phone_a).await;
@@ -1128,7 +1252,7 @@ async fn a_new_device_reads_and_cancels_its_own_link_request() {
     password_user(&app, &e).await;
     let mut trusted = Device::web();
     sign_in(&app, &e, &mut trusted).await;
-    let mut new = Device::web();
+    let mut new = Device::mobile("ANDROID");
     sign_in(&app, &e, &mut new).await;
     let link = request_link(&app, &new).await;
     let link_id = link["linkId"].as_str().unwrap().to_string();

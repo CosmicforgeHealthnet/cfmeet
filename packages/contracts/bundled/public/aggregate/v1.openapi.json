@@ -14,11 +14,11 @@
   "tags": [
     {
       "name": "meetings",
-      "description": "cfmeet.meeting-service.http-api 1.7.0"
+      "description": "cfmeet.meeting-service.http-api 1.9.0"
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.30.0"
+      "description": "cfmeet.calling.http-api 1.32.0"
     },
     {
       "name": "privacy-relay",
@@ -26,7 +26,7 @@
     },
     {
       "name": "messaging",
-      "description": "cfmeet.messaging.http-api 1.22.0"
+      "description": "cfmeet.messaging.http-api 1.23.0"
     },
     {
       "name": "numbering",
@@ -38,7 +38,7 @@
     },
     {
       "name": "developer-platform",
-      "description": "cfmeet.developer-platform.http-api 1.8.0"
+      "description": "cfmeet.developer-platform.http-api 1.9.0"
     },
     {
       "name": "gateway",
@@ -46,7 +46,7 @@
     },
     {
       "name": "communications",
-      "description": "cfmeet.communications.http-api 1.8.0"
+      "description": "cfmeet.communications.http-api 1.9.0"
     }
   ],
   "paths": {
@@ -2520,6 +2520,94 @@
         ],
         "x-cfmeet-service": "meetings",
         "x-cfmeet-route-id": "meetings.v2_export_report",
+        "x-cfmeet-auth": [
+          "MEETING_SESSION",
+          "PARTICIPANT_TOKEN"
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/extend": {
+      "post": {
+        "tags": [
+          "meetings"
+        ],
+        "summary": "Extend a live conference (MF1).",
+        "description": "Adds `minutes` (1 to 240) to the scheduled end of a LIVE conference, counted from now when the\nscheduled end has already passed (the grace period before the automatic end). Requires a role\nholding `conference.end` (host or co-host). Everyone in the conference receives\n`conference.extended` with the new `scheduledEndAt` and `autoEndAt`; a new `conference.ending_soon`\nwarning is sent 5 minutes before the new automatic end. A conference that is not live returns\nCONFERENCE_NOT_LIVE; one without a scheduled end (never ended automatically) returns\nCONFERENCE_STATE_CONFLICT; the conference may run at most 24 hours.",
+        "operationId": "v2_extend_conference",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/meetings.ExtendConferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Extended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ConferenceActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_NOT_LIVE / CONFERENCE_STATE_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/meetings.ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "meetings.bearer_auth": []
+          },
+          {
+            "meetings.participant_token": []
+          }
+        ],
+        "x-cfmeet-service": "meetings",
+        "x-cfmeet-route-id": "meetings.v2_extend_conference",
         "x-cfmeet-auth": [
           "MEETING_SESSION",
           "PARTICIPANT_TOKEN"
@@ -10732,7 +10820,7 @@
           "meetings"
         ],
         "summary": "Register for a webinar / town hall (public when the profile enables registration).",
-        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
+        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns an admission token for joining as a viewer. No sign-in is needed; a signed-in caller's\naccount is linked to the registration. Which fields (email, organization, custom fields) are\nrequired or accepted is set by the meeting profile. When an email is given, the join link\n(`{app}/invite#<token>`, with a calendar invitation for a scheduled occurrence) is also emailed\nto it once (`emailDelivery`). Repeating a request with the same `idempotencyKey` returns 200 with\nthe existing registration and the same token (no second seat, no second email); a different\nrequest under the same key is IDEMPOTENCY_CONFLICT. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
         "operationId": "v2_register",
         "parameters": [
           {
@@ -10798,7 +10886,7 @@
             }
           },
           "409": {
-            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL",
+            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL / IDEMPOTENCY_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -12831,7 +12919,7 @@
           "calling"
         ],
         "summary": "Create and ring an application call",
-        "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice. 1.25.0 (direct forwarding): a one-to-one application call (one targetPrincipalIds entry, no privacyRelaySessionId) to a callee with an ACTIVE forwarding rule (/v1/enterprise/forwarding-rules) or an ACTIVE mailbox of its own is routed like an extension call from the callee: ALWAYS forwards before ringing; with no eligible endpoint the UNAVAILABLE rule (else the mailbox) takes it instead of FAILED; BUSY (every offer declined) / NO_ANSWER (offers expired) follow the matching rule, else the callee's mailbox, on the same Call. Loops (including back to the caller) are blocked, the scope's effective enterprise policy applies (forwardingAllowed, voicemailAllowed), ENTERPRISE_CALLING_ENABLED off disables it, and in a scope governed by the Communications personal policy only the voicemail fallback applies. The response of such a call carries no enterprise block; without a rule or mailbox nothing changes.",
+        "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice. 1.25.0 (direct forwarding): a one-to-one application call (one targetPrincipalIds entry, no privacyRelaySessionId) to a callee with an ACTIVE forwarding rule (/v1/enterprise/forwarding-rules) or an ACTIVE mailbox of its own is routed like an extension call from the callee: ALWAYS forwards before ringing; with no eligible endpoint the UNAVAILABLE rule (else the mailbox) takes it instead of FAILED; BUSY (every offer declined) / NO_ANSWER (offers expired) follow the matching rule, else the callee's mailbox, on the same Call. Loops (including back to the caller) are blocked, the scope's effective enterprise policy applies (forwardingAllowed, voicemailAllowed), ENTERPRISE_CALLING_ENABLED off disables it, and in a scope governed by the Communications personal policy only the voicemail fallback applies. The response of such a call carries no enterprise block; without a rule or mailbox nothing changes. 1.31.0 (CF1, \"on another call\"): a target that is already in a live call (a session in another ANSWERED, CONNECTED, HELD or TRANSFERRING Call of the same scope) is not rung: its offers are recorded and closed at once (CANCELLED with CALL_CANCELLED, or with the Call when it ends; never delivered, so no device rings), which makes it a MISSED call in that target's history. When every target is on another call the Call ends BUSY at once (201 with the Call BUSY, terminalReason BUSY; its media resource is released); a group Call with at least one free target rings the free ones. The deployment switch CALLING_BUSY_ON_ANOTHER_CALL=false turns this off.",
         "security": [
           {
             "calling.platformCredential": [
@@ -13356,7 +13444,7 @@
           "calling"
         ],
         "summary": "Cancel a call before it is active",
-        "description": "Requires calls.write. Pre-active termination (REQUESTED ... ANSWERED): cancels live offers and outstanding attempts, closes route, leg and sessions and tears down the media resource. Repeating it on a CANCELLED call is a no-op.",
+        "description": "Requires calls.write. Pre-active termination (REQUESTED ... ANSWERED): cancels live offers and outstanding attempts, closes route, leg and sessions and tears down the media resource. 1.31.0: the answer comes as soon as the cancellation is committed; the media teardown runs after it (a failed teardown is retried by reconciliation). Repeating it on a CANCELLED call is a no-op.",
         "security": [
           {
             "calling.platformCredential": [
@@ -13793,7 +13881,7 @@
           "calling"
         ],
         "summary": "End an active call",
-        "description": "Requires calls.write. Moves the Call to ENDING, removes every media connection and terminates the media resource; the Call becomes ENDED only on cleanup evidence (otherwise it stays ENDING and the reconciler retries). Usage and quality are finalized. 1.21.0 (host): actingParticipantId names the participant acting for everyone; in a group Call (more than two participants, ever) only the host may do this (another participant: 403 CALL_NOT_AUTHORIZED - it leaves by removing its session). Without actingParticipantId the application backend acts on its own authority, as before.",
+        "description": "Requires calls.write. Moves the Call to ENDING, removes every media connection and terminates the media resource; the Call becomes ENDED only on cleanup evidence (otherwise it stays ENDING and the reconciler retries). 1.31.0: the answer comes as soon as ENDING is committed (normally state ENDING); the cleanup runs after it and moves the Call to ENDED (call.ended is signalled then). Usage and quality are finalized. 1.21.0 (host): actingParticipantId names the participant acting for everyone; in a group Call (more than two participants, ever) only the host may do this (another participant: 403 CALL_NOT_AUTHORIZED - it leaves by removing its session). Without actingParticipantId the application backend acts on its own authority, as before.",
         "security": [
           {
             "calling.platformCredential": [
@@ -15643,7 +15731,7 @@
           "calling"
         ],
         "summary": "Upgrade a voice call to video",
-        "description": "Requires calls.write (Idempotency-Key honoured). C5: a VOICE Call that is ANSWERED, CONNECTED or HELD becomes VIDEO, once and for good (never back to VOICE). In one transaction under the Call row lock (expectedVersion checked; state and version unchanged) every active participant's authorized permissions gain video publishing, CALL_KIND_CHANGED is recorded and call.kind_changed is signalled to every endpoint of the Call. The media provider then receives each connected session's re-derived permissions (HOLD still masks them); no camera is ever turned on — a client publishes video only when its user chooses. Upgrading a Call that is already VIDEO answers the current Call (Idempotent-Replayed: true). A pre-answer, TRANSFERRING, ENDING or terminal Call is 409 CALL_STATE_CONFLICT; a protected (Privacy Relay) or public-network Call, or a provider that cannot update permissions, is 422 CAPABILITY_UNAVAILABLE.",
+        "description": "Requires calls.write (Idempotency-Key honoured). C5: a VOICE Call that is DIALING, RINGING, ANSWERED, CONNECTED or HELD becomes VIDEO (1.31.0, CF2: switched while it is still being offered, the callee's offer shows and is answered as a video call), once and for good (never back to VOICE). In one transaction under the Call row lock (expectedVersion checked; state and version unchanged) every active participant's authorized permissions gain video publishing, CALL_KIND_CHANGED is recorded and call.kind_changed is signalled to every endpoint of the Call. The media provider then receives each connected session's re-derived permissions (HOLD still masks them); no camera is ever turned on — a client publishes video only when its user chooses. Upgrading a Call that is already VIDEO answers the current Call (Idempotent-Replayed: true). A Call still being set up (before DIALING), TRANSFERRING, ENDING or terminal is 409 CALL_STATE_CONFLICT; a protected (Privacy Relay) or public-network Call, or a provider that cannot update permissions, is 422 CAPABILITY_UNAVAILABLE.",
         "security": [
           {
             "calling.platformCredential": [
@@ -17007,6 +17095,97 @@
         },
         "x-cfmeet-service": "messaging",
         "x-cfmeet-route-id": "messaging.replayConversationEvents",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
+        ]
+      }
+    },
+    "/v1/conversations/{conversationId}/inbox-settings": {
+      "put": {
+        "operationId": "setConversationInboxSettings",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "set Conversation Inbox Settings",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          },
+          {
+            "messaging.oauthAccessToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. F1: the acting member archives / pins this chat for itself (never visible to other members). At most three pinned chats per principal (409 CONFLICT / PIN_LIMIT_REACHED); pinning un-archives, archiving un-pins; an archived chat stays archived when new messages arrive. GET /v1/conversations returns both in each inbox summary. A non-member is 404.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.ConversationInboxSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.messaging.common.v1.ConversationInboxSettingsRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.setConversationInboxSettings",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN",
@@ -29973,6 +30152,81 @@
         },
         "x-cfmeet-service": "developer-platform",
         "x-cfmeet-route-id": "developer-platform.rotateEnvironmentWebhookSecret",
+        "x-cfmeet-auth": [
+          "DEVELOPER_SESSION"
+        ]
+      }
+    },
+    "/v1/environments/{environmentId}/webhooks/{webhookId}/test": {
+      "post": {
+        "operationId": "sendEnvironmentWebhookTest",
+        "summary": "Send a test event",
+        "description": "DF1: a NEW event of type webhook.test (the body carries \"test\": true at the top level and in data, and a message saying no real activity happened) with one delivery to this ACTIVE subscription only, signed with its current secret and delivered, retried and listed exactly like any other delivery (the same headers and signature scheme). At most 5 per webhook per minute (429 RATE_LIMITED); a paused or deleted webhook answers 409 INVALID_STATE. Roles: OWNER, ADMIN, DEVELOPER (Developer Console session only); refused while the organization is restricted, suspended or closed.",
+        "tags": [
+          "developer-platform"
+        ],
+        "security": [
+          {
+            "developer_platform.userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "description": "Environment id.",
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "description": "Subscription id.",
+            "schema": {
+              "$ref": "#/components/schemas/developer_platform.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The test delivery.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/developer_platform.RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/developer_platform.platform-developer.webhooks.v1.WebhookDelivery"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/developer_platform.Error"
+          }
+        },
+        "x-cfmeet-service": "developer-platform",
+        "x-cfmeet-route-id": "developer-platform.sendEnvironmentWebhookTest",
         "x-cfmeet-auth": [
           "DEVELOPER_SESSION"
         ]
@@ -60748,7 +61002,15 @@
             "pattern": "^whe_[0-9a-f]{32}$"
           },
           "eventType": {
-            "$ref": "#/components/schemas/developer_platform.platform-developer.webhooks.v1.WebhookEventType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/developer_platform.platform-developer.webhooks.v1.WebhookEventType"
+              },
+              {
+                "const": "webhook.test",
+                "description": "DF1: a test event sent on request from the Developer Console (never subscribable)."
+              }
+            ]
           },
           "replayOf": {
             "oneOf": [
@@ -63793,6 +64055,7 @@
           "DEVICE_LINK_INVALID",
           "APP_NOT_FOUND",
           "OAUTH_REQUEST_INVALID",
+          "CALENDAR_FEED_NOT_FOUND",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -63864,6 +64127,23 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "meetings.ExtendConferenceRequest": {
+        "type": "object",
+        "description": "MF1: extend a live conference's scheduled end.",
+        "required": [
+          "minutes"
+        ],
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Minutes added to the scheduled end (or to now, when the scheduled end has already\npassed and the meeting is in its grace period): 1 to 240.",
+            "maximum": 240,
+            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -67065,7 +67345,7 @@
               "string",
               "null"
             ],
-            "description": "Opaque admission token (shown once; only its hash is stored). Absent for an\nidempotent repeat."
+            "description": "Opaque admission token (only its hash is stored). An idempotent repeat (same\n`idempotencyKey` and request) returns the same token while the registration is\nactive (audit M10); absent once it was cancelled or revoked."
           },
           "conferenceId": {
             "type": [
@@ -67076,6 +67356,20 @@
           },
           "created": {
             "type": "boolean"
+          },
+          "emailDelivery": {
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/meetings.EmailDelivery"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "expiresAt": {
             "type": "string",
@@ -70858,9 +71152,78 @@
           "mentionCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext)."
+            "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first)."
+          },
+          "pinnedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned."
           }
         }
+      },
+      "messaging.messaging.common.v1.ConversationInboxSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversationId",
+          "archived",
+          "pinned",
+          "pinnedAt"
+        ],
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "pinnedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary)."
+      },
+      "messaging.messaging.common.v1.ConversationInboxSettingsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "archived": {
+            "type": "boolean",
+            "description": "Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED."
+          }
+        },
+        "description": "F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true."
       },
       "messaging.messaging.common.v1.ConversationLastMessage": {
         "type": "object",
@@ -75202,7 +75565,7 @@
             "items": {
               "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
             },
-            "description": "Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
+            "description": "Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the \"mentions only\" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
           },
           "frankingCommitment": {
             "type": "string",
@@ -75822,10 +76185,17 @@
             "format": "date-time"
           },
           "retentionSeconds": {
-            "type": "integer",
-            "minimum": 60,
-            "maximum": 3153600000,
-            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS)."
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 60,
+                "maximum": 3153600000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that limit — by the owner, a group's ADMIN or either member of a DIRECT conversation (another member: 403 PRINCIPAL_NOT_AUTHORIZED / NOT_ADMIN); each message keeps the retention in force when it was sent, so a change applies to messages sent after it."
           },
           "title": {
             "oneOf": [

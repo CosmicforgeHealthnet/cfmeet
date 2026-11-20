@@ -46,7 +46,9 @@ pub async fn middleware(
         | "/internal/v1/communications/principals/resolve" => {
             InternalPermission::CommunicationsPolicyCheck
         }
-        "/internal/v1/communications/account-events" => {
+        "/internal/v1/communications/account-events"
+        | "/internal/v1/communications/account-erasure"
+        | "/internal/v1/communications/account-export" => {
             InternalPermission::CommunicationsAccountApply
         }
         "/internal/v1/communications/block-events" => InternalPermission::CommunicationsBlockApply,

@@ -94,11 +94,14 @@ export type ChatMediaItem = {
 };
 /** Hub 1.4.0: title / avatarRef for MANAGED groups both people currently belong to (null for end-to-end encrypted groups). */
 export type CommonGroup = { conversationId: string; securityProfile?: "MANAGED" | "PRIVATE_E2EE" | null; title?: string | null; avatarRef?: string | null; memberCount?: number | null };
-export type ChatPreferences = { conversationId: string; notifications: "ALL" | "MENTIONS" | "MUTED"; mutedUntil: string | null; effectiveNotifications: string; mediaAutoDownload: "ALWAYS" | "WIFI" | "NEVER"; version: number };
+/** Hub 1.9.0: `mentionsAvailable` is false where "Only @mentions" can't work (end-to-end encrypted chats); absent from an older Hub. */
+export type ChatPreferences = { conversationId: string; notifications: "ALL" | "MENTIONS" | "MUTED"; mutedUntil: string | null; effectiveNotifications: string; mediaAutoDownload: "ALWAYS" | "WIFI" | "NEVER"; version: number; mentionsAvailable?: boolean };
 
 export const communicationsService = {
   // ---- identity, capabilities, start
   me: () => call<CommunicationsProfile>("GET", "/me"),
+  /** 1.9.0: the About line contacts see (null or "" clears it). */
+  updateMe: (expectedVersion: number, about: string | null) => call<CommunicationsProfile>("PATCH", "/me", { expectedVersion, about }),
   capabilities: () => call<CommunicationsCapabilities>("GET", "/me/capabilities"),
   bootstrap: () => call<Bootstrap>("GET", "/bootstrap"),
   publicId: () => call<PublicId>("GET", "/me/public-id"),
@@ -112,6 +115,8 @@ export const communicationsService = {
 
   // ---- discovery and invites
   resolvePublicId: (cfMeetId: string) => call<PublicProfile>("POST", "/discovery/public-id/resolve", { cfMeetId }),
+  /** 1.9.0: find someone by their verified email (only people who allow it). */
+  resolveEmail: (email: string) => call<PublicProfile>("POST", "/discovery/email/resolve", { email }),
   resolveInvite: (token: string, idempotencyKey?: string) => call<PublicProfile>("POST", "/discovery/invites/resolve", { token, purpose: "CONNECT" }, idempotencyKey),
   createInvite: (expiresInSeconds: number, maxUses: number) => call<Invite>("POST", "/invites", { purpose: "CONNECT", expiresInSeconds, maxUses }),
   invites: (cursor?: string | null) => call<Page<InviteMetadata>>("GET", `/invites${q({ limit: 50, cursor })}`),

@@ -60,6 +60,15 @@ pub fn app(state: State) -> Router {
             "/internal/v1/communications/account-events",
             post(crate::events::account_event),
         )
+        // S2: account deletion and the account's data download (Meeting Service only).
+        .route(
+            "/internal/v1/communications/account-erasure",
+            post(crate::privacy::erase),
+        )
+        .route(
+            "/internal/v1/communications/account-export",
+            post(crate::privacy::export),
+        )
         .route(
             "/internal/v1/communications/block-events",
             post(crate::events::block_event),
@@ -460,6 +469,7 @@ async fn dispatch_inner(
     let method = r.method.as_str();
     match (method, parts.as_slice()) {
         ("GET", ["me"]) => s.me(p).await,
+        ("PATCH", ["me"]) => s.patch_me(p, body(&r), key(&r)?).await,
         ("GET", ["activation"]) => Ok(
             json!({"schemaVersion":1,"state":p.activation_state,"version":p.version,"phoneVerificationRequired":false}),
         ),
@@ -505,6 +515,7 @@ async fn dispatch_inner(
                 .await?;
             s.visible_profile(scope, p, &target, false).await
         }
+        ("POST", ["discovery", "email", "resolve"]) => s.resolve_email(scope, p, body(&r)).await,
         ("GET", ["profiles", public_id]) => {
             s.limit_attempt(p, "discovery.resolve", 120).await?;
             let target = s

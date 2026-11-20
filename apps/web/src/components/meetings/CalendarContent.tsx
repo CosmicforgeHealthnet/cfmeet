@@ -16,6 +16,7 @@ import { NiceSelect } from "@/components/ui/nice-select";
 import { RequestError } from "@/components/meeting-spaces/ManagementUI";
 import { CalendarArt } from "@/components/dashboard/EmptyArt";
 import { useAgendaRange, useCalendarDownload, useMeetingCapabilities } from "@/hooks/v2/useCalendar";
+import { conferencesService } from "@/services/v2/conferences.service";
 import {
   AGENDA_RELATIONS,
   agendaItemKey,
@@ -199,6 +200,7 @@ export default function CalendarContent({ previewItems, previewOpen }: { preview
                 <NiceSelect label="Show" value={status} onChange={setStatus} options={STATUS_FILTERS} />
                 <NiceSelect label="Meetings where" value={relation} onChange={setRelation} options={[{ value: "", label: "Any role" }, ...AGENDA_RELATIONS.filter((v) => v !== "ORGANIZATION" || organizationId).map((v) => ({ value: v, label: RELATION_LABELS[v] }))]} />
                 <p className="text-xs text-muted-foreground">Times shown in {zone.replaceAll("_", " ")}</p>
+                <CalendarFeedControl />
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -480,6 +482,46 @@ function ListView({ byDate, zone, today, loading, onSelect, onDownload, download
           </section>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Audit MF2: a private calendar subscription (Google / Outlook / Apple "subscribe from URL"). */
+function CalendarFeedControl() {
+  const [link, setLink] = useState<string | null>(null);
+  const [state, setState] = useState<"idle" | "busy" | "copied" | "off" | "error">("idle");
+  const apiOrigin = (() => {
+    try { return new URL(process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api/v1").origin; } catch { return ""; }
+  })();
+  const create = async () => {
+    setState("busy");
+    try {
+      const feed = await conferencesService.createCalendarFeed();
+      setLink(feed.path ? `${apiOrigin}${feed.path}` : null);
+      setState("idle");
+    } catch { setState("error"); }
+  };
+  const turnOff = async () => {
+    setState("busy");
+    try { await conferencesService.deleteCalendarFeed(); setLink(null); setState("off"); } catch { setState("error"); }
+  };
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <p className="text-xs font-medium text-foreground">Subscribe in Google or Outlook</p>
+      {link ? (
+        <>
+          <input readOnly aria-label="Calendar feed link" value={link} onFocus={(e) => e.currentTarget.select()} className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs" />
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { void navigator.clipboard.writeText(link).then(() => setState("copied"), () => setState("error")); }} className="h-8 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted">{state === "copied" ? "Copied" : "Copy link"}</button>
+            <button type="button" disabled={state === "busy"} onClick={() => void turnOff()} className="h-8 rounded-lg px-3 text-xs font-medium text-destructive hover:bg-destructive/10">Turn off</button>
+          </div>
+          <p className="text-xs text-muted-foreground">Keep this link private. Getting a new link turns the old one off.</p>
+        </>
+      ) : (
+        <button type="button" disabled={state === "busy"} onClick={() => void create()} className="h-8 rounded-lg border border-border px-3 text-xs font-medium hover:bg-muted">Get calendar link</button>
+      )}
+      {state === "off" && <p role="status" className="text-xs text-muted-foreground">Calendar link turned off.</p>}
+      {state === "error" && <p role="alert" className="text-xs text-destructive">Something went wrong. Please try again.</p>}
     </div>
   );
 }

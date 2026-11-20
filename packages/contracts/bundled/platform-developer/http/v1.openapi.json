@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Platform — Developer Console API",
-    "version": "1.8.0",
-    "description": "The Developer Console of the CF Meet Platform: the control plane where a partner manages its workspaces, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access. (A workspace is called an organization in paths and fields: /v1/organizations, organizationId.) The partner's product traffic (meetings, messaging, calling) goes to the domain APIs of the same gateway, not here. Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests. 1.7.0 (ADR 0062 / 0063, CF Meet Platform Build): the partner Users API for machine credentials (/v1/users*, delegated to Platform Access; principals.read / principals.write / user_tokens.issue; user tokens returned once), the console user list and SANDBOX test token generator, allowed websites (/v1/environments/{environmentId}/allowed-origins) and push credentials (/v1/environments/{environmentId}/push-credentials*, secrets sealed to the Notification Service, metadata only), each behind its own default-off flag; LIMIT_EXCEEDED for the optional workspace / project creation caps. 1.8.0 (ADR 0064 / 0065, CF Meet Apps): app registration on projects (/v1/projects/{projectId}/app*: immutable manifest versions, client secret shown once, review submission, grants, draft test accounts; OWNER / ADMIN; flag DEVELOPER_PLATFORM_APPS_ENABLED), the anonymous OAuth endpoints /v1/oauth/token, /revoke, /userinfo, /metadata (RFC 6749 wire format, relayed to Platform Access; flag DEVELOPER_PLATFORM_OAUTH_ENABLED) and the anonymous app directory /v1/app-directory* (PUBLISHED, PUBLIC apps; flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED)."
+    "version": "1.9.0",
+    "description": "The Developer Console of the CF Meet Platform: the control plane where a partner manages its workspaces, projects, environments, service accounts, API keys, scopes, webhooks, usage, limits and production access. (A workspace is called an organization in paths and fields: /v1/organizations, organizationId.) The partner's product traffic (meetings, messaging, calling) goes to the domain APIs of the same gateway, not here. Section 50 developer / enterprise control plane, served through the public API Gateway. Human console operations use the verified CF Meet session (verified by the Meeting Service through the session bridge); server automation uses scoped Platform Access credentials where noted. Organizations, projects and environments are Developer Platform metadata over canonical Platform Access tenants, applications and environments: Platform Access remains the only identity, credential and scope authority. Non-members get NOT_FOUND for another tenant's resources. Every response carries X-Request-Id. Section 53 central webhooks: the Developer Console manages an environment's webhook subscriptions, delivery and attempt history and replays under /v1/environments/{environmentId}/webhooks* and /webhook-deliveries/*. The machine-credential webhook API keeps Calling's public contract and paths (cfmeet.calling.http-api /v1/webhooks*); the API Gateway re-points it to the Developer Platform at the cut-over (cfmeet.developer-platform.internal-api documents the served routes). Section 50 service accounts: OWNER / ADMIN create, suspend and resume an environment's Platform Access service accounts under /v1/environments/{environmentId}/service-accounts* (delegated to Platform Access, the only store; DEVELOPER reads; machine credentials need `service_accounts.manage`); API credentials stay Section 54. 1.4.0 (Part VI Chapters 10–13): Section 54 credential self-service (create with the secret once, list, read, rotate with bounded overlap, revoke, suspend / resume, quota restrictions), the scope registry and project scope grants, the organization credential policy; Section 55 production-access requests (submit, read, cancel, activate) and status, environment usage (rollups, facts, CSV / JSON export, warnings) and limits; Section 57 support profiles. 1.5.0 (Part VI Chapters 14–18): activity filters (`projectId`, `action`) and cursor pagination of credentials and production-access requests. 1.7.0 (ADR 0062 / 0063, CF Meet Platform Build): the partner Users API for machine credentials (/v1/users*, delegated to Platform Access; principals.read / principals.write / user_tokens.issue; user tokens returned once), the console user list and SANDBOX test token generator, allowed websites (/v1/environments/{environmentId}/allowed-origins) and push credentials (/v1/environments/{environmentId}/push-credentials*, secrets sealed to the Notification Service, metadata only), each behind its own default-off flag; LIMIT_EXCEEDED for the optional workspace / project creation caps. 1.8.0 (ADR 0064 / 0065, CF Meet Apps): app registration on projects (/v1/projects/{projectId}/app*: immutable manifest versions, client secret shown once, review submission, grants, draft test accounts; OWNER / ADMIN; flag DEVELOPER_PLATFORM_APPS_ENABLED), the anonymous OAuth endpoints /v1/oauth/token, /revoke, /userinfo, /metadata (RFC 6749 wire format, relayed to Platform Access; flag DEVELOPER_PLATFORM_OAUTH_ENABLED) and the anonymous app directory /v1/app-directory* (PUBLISHED, PUBLIC apps; flag DEVELOPER_PLATFORM_APP_DIRECTORY_ENABLED). 1.9.0 (DF1): POST /v1/environments/{environmentId}/webhooks/{webhookId}/test sends a test event (webhook.test, \"test\": true) signed and delivered exactly like a real one; at most 5 per webhook per minute."
   },
   "tags": [
     {
@@ -2694,6 +2694,76 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/webhooks/{webhookId}/test": {
+      "post": {
+        "operationId": "sendEnvironmentWebhookTest",
+        "summary": "Send a test event",
+        "description": "DF1: a NEW event of type webhook.test (the body carries \"test\": true at the top level and in data, and a message saying no real activity happened) with one delivery to this ACTIVE subscription only, signed with its current secret and delivered, retried and listed exactly like any other delivery (the same headers and signature scheme). At most 5 per webhook per minute (429 RATE_LIMITED); a paused or deleted webhook answers 409 INVALID_STATE. Roles: OWNER, ADMIN, DEVELOPER (Developer Console session only); refused while the organization is restricted, suspended or closed.",
+        "tags": [
+          "Webhooks"
+        ],
+        "security": [
+          {
+            "userSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "description": "Environment id.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "webhookId",
+            "in": "path",
+            "required": true,
+            "description": "Subscription id.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The test delivery.",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.webhooks.v1.WebhookDelivery"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
             "$ref": "#/components/responses/Error"
           },
           "503": {
@@ -12955,7 +13025,15 @@
             "pattern": "^whe_[0-9a-f]{32}$"
           },
           "eventType": {
-            "$ref": "#/components/schemas/platform-developer.webhooks.v1.WebhookEventType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.webhooks.v1.WebhookEventType"
+              },
+              {
+                "const": "webhook.test",
+                "description": "DF1: a test event sent on request from the Developer Console (never subscribable)."
+              }
+            ]
           },
           "replayOf": {
             "oneOf": [

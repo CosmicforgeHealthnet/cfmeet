@@ -127,6 +127,11 @@ use utoipa::OpenApi;
         crate::handlers::v2::conferences::end_conference,
         crate::handlers::v2::conferences::cancel_conference,
         crate::handlers::v2::conferences::reschedule_conference,
+        crate::handlers::v2::conferences::extend_conference,
+        crate::handlers::v2::calendar::get_calendar_feed,
+        crate::handlers::v2::calendar::create_calendar_feed,
+        crate::handlers::v2::calendar::delete_calendar_feed,
+        crate::handlers::v2::calendar::read_calendar_feed,
         crate::handlers::v2::conferences::join_conference,
         crate::handlers::v2::conferences::leave_conference,
         crate::handlers::v2::participants::get_me,
@@ -467,6 +472,8 @@ use utoipa::OpenApi;
             crate::dto::v2::ResolveInvitationResponse,
             crate::dto::v2::CreateConferenceRequest,
             crate::dto::v2::RescheduleConferenceRequest,
+            crate::dto::v2::ExtendConferenceRequest,
+            crate::dto::v2::CalendarFeedResponse,
             crate::dto::v2::ListConferencesQuery,
             crate::dto::v2::ConferenceSummary,
             crate::dto::v2::ConferenceResponse,
@@ -862,7 +869,7 @@ use utoipa::OpenApi;
     ),
     info(
         title = "CosmicForge RTC API",
-        version = "1.7.0",
+        version = "1.9.0",
         description = "CF Meet Meeting Service. `/api/v1`: legacy meeting API (retained for compatibility). `/api/v2`: Phase 2 meeting domain (MeetingSpace → ConferenceSession → ConferenceParticipant → ParticipantSession). v2 errors use `{ success:false, error:{ code, message, requestId } }` with stable semantic codes.",
         contact(
             name = "CosmicForge Team",
@@ -1523,6 +1530,37 @@ fn contract_doc(body: String) -> impl IntoResponse {
     )
 }
 
+/// D1: whether Swagger UI and the served OpenAPI documents are mounted. `API_DOCS_ENABLED`
+/// (`true` / `false`) decides when set; otherwise they are served only where the runtime is
+/// explicitly a development or staging one (`APP_ENV` dev / development / local / test, or
+/// `CF_RUNTIME_ENVIRONMENT` local / test / staging) and never in production, where
+/// customer documentation is published through the developer portal (the API Gateway's
+/// public subset) instead. Unknown or missing values count as production (fail closed).
+pub fn docs_enabled_from(get: impl Fn(&str) -> Option<String>) -> bool {
+    let value = |k: &str| {
+        get(k)
+            .map(|v| v.trim().to_ascii_lowercase())
+            .unwrap_or_default()
+    };
+    match value("API_DOCS_ENABLED").as_str() {
+        "true" | "1" | "on" | "yes" => return true,
+        "false" | "0" | "off" | "no" => return false,
+        _ => {}
+    }
+    if value("CF_RUNTIME_ENVIRONMENT") == "production" {
+        return false;
+    }
+    matches!(
+        value("CF_RUNTIME_ENVIRONMENT").as_str(),
+        "local" | "test" | "staging"
+    ) || crate::config::is_development_env(Some(&value("APP_ENV")))
+}
+
+/// [`docs_enabled_from`] over the process environment.
+pub fn docs_enabled() -> bool {
+    docs_enabled_from(|k| std::env::var(k).ok())
+}
+
 /// Creates the CF Meet Swagger UI with a service selector. The Meeting Service remains
 /// the default and keeps its original /api-docs/openapi.json contract unchanged.
 /// Peer service documents come from the bundled renderings of the checked-in contracts.
@@ -1615,8 +1653,8 @@ mod tests {
     use super::*;
 
     /// Served `/api-docs/messaging.json` (the public Messaging bundle, PLT-006).
-    const SERVED_MESSAGING_OPERATIONS: usize = 106;
-    const SERVED_MESSAGING_NATIVE: usize = 73;
+    const SERVED_MESSAGING_OPERATIONS: usize = 107;
+    const SERVED_MESSAGING_NATIVE: usize = 74;
 
     fn peer(name: &str) -> &'static str {
         PEER_DOCS
@@ -1624,6 +1662,49 @@ mod tests {
             .find(|(n, _, _)| *n == name)
             .map(|(_, _, raw)| *raw)
             .unwrap_or_else(|| panic!("no peer document {name}"))
+    }
+
+    #[test]
+    fn docs_are_off_in_production_and_on_for_development_and_staging() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        // Production (explicit, or nothing said at all) never serves them.
+        assert!(!docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "production"
+        )])));
+        assert!(!docs_enabled_from(env(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("APP_ENV", "dev")
+        ])));
+        assert!(!docs_enabled_from(env(&[])));
+        assert!(!docs_enabled_from(env(&[("APP_ENV", "production")])));
+        // Local and staging keep them.
+        assert!(docs_enabled_from(env(&[("APP_ENV", "dev")])));
+        assert!(docs_enabled_from(env(&[("APP_ENV", "test")])));
+        assert!(docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "staging"
+        )])));
+        assert!(docs_enabled_from(env(&[(
+            "CF_RUNTIME_ENVIRONMENT",
+            "local"
+        )])));
+        // The explicit switch wins either way.
+        assert!(!docs_enabled_from(env(&[
+            ("APP_ENV", "dev"),
+            ("API_DOCS_ENABLED", "false")
+        ])));
+        assert!(docs_enabled_from(env(&[
+            ("CF_RUNTIME_ENVIRONMENT", "production"),
+            ("API_DOCS_ENABLED", "true")
+        ])));
     }
 
     #[test]

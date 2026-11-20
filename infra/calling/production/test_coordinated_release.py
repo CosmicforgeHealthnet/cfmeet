@@ -286,6 +286,20 @@ class ImageVerification(unittest.TestCase):
                 cr.verify_running('cfmeet-calling', 'sha256:new', SHA)
 
 
+class ProductionBrowserOrigins(unittest.TestCase):
+    def test_meeting_service_release_pins_the_production_web_origins(self):
+        self.assertEqual(cr.RELEASE_PINNED_ENV['meeting-service']['FRONTEND_URLS'],
+                         'https://cfmeet.com,https://www.cfmeet.com')
+        self.assertNotIn('localhost', cr.RELEASE_PINNED_ENV['meeting-service']['FRONTEND_URLS'])
+
+    def test_verify_fails_while_the_audited_list_is_running(self):
+        audited = 'http://localhost:3000,http://localhost:3001,https://17730sdl-3000.uks1.devtunnels.ms'
+        self.assertEqual(cr.pinned_env_checks({'meeting-service': {'FRONTEND_URLS': audited}}),
+                         {'pinned meeting-service FRONTEND_URLS': 'FAIL'})
+        pinned = {'meeting-service': {'FRONTEND_URLS': 'https://cfmeet.com,https://www.cfmeet.com'}}
+        self.assertEqual(cr.pinned_env_checks(pinned), {'pinned meeting-service FRONTEND_URLS': 'PASS'})
+
+
 class RollbackOnFailedHealth(unittest.TestCase):
     def test_existing_service_is_restored_exactly_when_the_new_image_is_unhealthy(self):
         docker = FakeDocker(['cfmeet-numbering', 'cosmicforge-db'])
@@ -444,6 +458,19 @@ class SecretsAreNeverPrinted(unittest.TestCase):
 
 
 class SafeDefaultsAndRouting(unittest.TestCase):
+    def test_a_release_gives_calling_its_private_metrics_listener_once(self):
+        # C4: call counters for cfmeet-prometheus; an operator's own value is kept.
+        self.assertEqual(cr.release_env_defaults('calling', {}), {'CALLING_METRICS_ADDRESS': '0.0.0.0:9464'})
+        self.assertEqual(cr.release_env_defaults('calling', {'CALLING_METRICS_ADDRESS': ' '}),
+                         {'CALLING_METRICS_ADDRESS': '0.0.0.0:9464'})
+        self.assertEqual(cr.release_env_defaults('calling', {'CALLING_METRICS_ADDRESS': '0.0.0.0:9500'}), {})
+        self.assertEqual(cr.release_env_defaults('messaging', {}), {})
+        import monitoring_stack
+        target = monitoring_stack.listener_target(cr.SERVICES['calling']['container'],
+                                                  cr.RELEASE_ENV_DEFAULTS['calling']['CALLING_METRICS_ADDRESS'])
+        self.assertEqual(target, 'cfmeet-calling:9464')
+        self.assertNotEqual(9464, cr.SERVICES['calling']['port'])
+
     def test_provider_dependent_features_must_stay_off(self):
         envs = {name: dict(cr.SERVICES[name]['env']) for name in cr.ORDER if not cr.SERVICES[name]['existing']}
         envs['messaging'] = {'MESSAGING_E2EE_DEVICES_ENABLED': 'false'}

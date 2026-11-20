@@ -7163,7 +7163,15 @@
             "pattern": "^whe_[0-9a-f]{32}$"
           },
           "eventType": {
-            "$ref": "#/components/schemas/platform-developer.webhooks.v1.WebhookEventType"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.webhooks.v1.WebhookEventType"
+              },
+              {
+                "const": "webhook.test",
+                "description": "DF1: a test event sent on request from the Developer Console (never subscribable)."
+              }
+            ]
           },
           "replayOf": {
             "oneOf": [

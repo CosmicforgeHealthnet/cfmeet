@@ -396,6 +396,7 @@ pub fn service_auth_fixture_targeting(
                         "calling-request.act-for-organization",
                         "calling-organization-member.act",
                         "calling-organization-member.offboard",
+                        "calling-account.privacy",
                     ],
                 ),
                 (
@@ -636,7 +637,14 @@ pub fn test_runtime(
         credential_policy: MediaCredentialPolicy::default(),
         bus,
         push: Arc::new(NoPushTransport),
-        app_config: AppCallingConfig::default(),
+        // CF1 ("on another call") is on in the service; the shared harness turns it off
+        // because most suites place calls between the same two parties while an earlier
+        // call of theirs is still live. tests/app_busy.rs turns it
+        // back on with `AppWorld::busy_on_another_call`.
+        app_config: AppCallingConfig {
+            busy_on_another_call: false,
+            ..AppCallingConfig::default()
+        },
         call_config: CallServiceConfig::default(),
         privacy_relay: Arc::new(calling::privacy_relay::UnconfiguredPrivacyRelay),
         numbering: Arc::new(calling::numbering::UnconfiguredNumbering),
@@ -878,6 +886,24 @@ impl Harness {
     }
 
     pub async fn request_with(
+        &self,
+        method: Method,
+        path: &str,
+        token: Option<&str>,
+        body: Option<Value>,
+        headers: &[(&str, &str)],
+    ) -> TestResponse {
+        let response = self
+            .request_unsettled(method, path, token, body, headers)
+            .await;
+        // C1: cancel / end answer before their media clean-up, which runs in the
+        // background; tests observe the settled state (the reply itself is tested apart).
+        self.state.app.settle_background().await;
+        response
+    }
+
+    /// [`Self::request_with`] without waiting for background clean-up (C1 tests).
+    pub async fn request_unsettled(
         &self,
         method: Method,
         path: &str,

@@ -1,6 +1,6 @@
 # ADR 0060 — Account-wide linked devices and the production personal E2EE release
 
-**Status:** Accepted (owner decision, 2026-11-15)
+**Status:** Accepted (owner decision, 2026-11-15). Decision 3 (trust) for browsers and the web-limit refusal superseded by [ADR 0067](0067-signing-in-is-enough-for-a-browser.md) (2026-11-19).
 **Date:** 2026-11-15
 **Extends:** [ADR 0057](0057-account-sessions-typed-tokens-and-revocation-epoch.md) (account sessions, amendment A1 device ↔ session binding), the [device and block authority decision](../architecture/communications-device-and-block-authority.md), [messaging security architecture](../architecture/messaging-security-architecture.md) (AD-05, AD-06, AD-10).
 
