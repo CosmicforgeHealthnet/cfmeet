@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.8.0",
+  "contract_version": "1.9.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "eec45d223d980d8348f15dc3f4408e5984e7b51f0cf2bdc41cb6e2d2d4f36bb3",
-    "capability_matrix_sha256": "c0c145d4ca7fce3a8dded329ac5e2bb6a347632ee31ac71b2d3983a12898483e"
+    "openapi_sha256": "0bd06a4b71d7e9c77166131eae6399cf334b011e73fe14d1fe613517850dc4b3",
+    "capability_matrix_sha256": "f2a587c084493bc5db027551441847e69785678a755b0ed561dfff2015813eb5"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 63,
+      "READ_ONLY": 73,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 69
+      "BLOCKED_DEPENDENCY": 59
     }
   },
   "capabilities": [
@@ -2574,9 +2574,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingReportPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.reports.read",
       "risk": "R1",
       "privacy": "SAFETY_EVIDENCE",
@@ -2585,8 +2585,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_reports_relay_no_evidence"
+      ],
       "contact_search": false
     },
     {
@@ -2628,9 +2630,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingReportDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.reports.read",
       "risk": "R1",
       "privacy": "SAFETY_EVIDENCE",
@@ -2639,8 +2641,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_report_detail_carries_actions_not_evidence"
+      ],
       "contact_search": false
     },
     {
@@ -3058,9 +3062,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingHoldPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.holds.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3069,8 +3073,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -3210,9 +3216,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingExportPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.exports.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3221,8 +3227,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A7: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -3307,9 +3315,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingDeletionRequestPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.deletion-requests.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3318,8 +3326,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A7: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_lists_translate_strictly"
+      ],
       "contact_search": false
     },
     {
@@ -3404,9 +3414,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingAuditPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.audit.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3415,8 +3425,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: new messaging operator endpoint required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_windowed_lists_map_since_and_until"
+      ],
       "contact_search": false
     },
     {
@@ -3452,9 +3464,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingSwitchPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.switches.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -3463,8 +3475,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_switches_are_served"
+      ],
       "contact_search": false
     },
     {
@@ -3555,9 +3569,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingIncidentPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.incidents.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3566,8 +3580,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_windowed_lists_map_since_and_until"
+      ],
       "contact_search": false
     },
     {
@@ -3652,9 +3668,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingFailedMessagePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.failed-messages.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -3663,8 +3679,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_windowed_lists_map_since_and_until"
+      ],
       "contact_search": false
     },
     {
@@ -3753,9 +3771,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/MessagingKeyTransparency"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "messaging.key-transparency.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -3764,8 +3782,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-      "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "messaging_key_transparency_is_hashes_and_sizes_only"
+      ],
       "contact_search": false
     },
     {

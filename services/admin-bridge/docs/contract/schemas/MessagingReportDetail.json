@@ -1,0 +1,188 @@
+{
+  "description": "One chat report and its moderation actions (no evidence).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "conversation_id",
+    "security_profile",
+    "reporter_principal_id",
+    "reported_principal_id",
+    "message_ids",
+    "category",
+    "evidence_kind",
+    "status",
+    "resolution",
+    "resolved_at",
+    "created_at",
+    "actions"
+  ],
+  "properties": {
+    "report_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "security_profile": {
+      "enum": [
+        "PRIVATE_E2EE",
+        "MANAGED"
+      ]
+    },
+    "reporter_principal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reported_principal_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "message_ids": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "category": {
+      "enum": [
+        "SPAM",
+        "HARASSMENT",
+        "HATE",
+        "VIOLENCE",
+        "SEXUAL_CONTENT",
+        "CHILD_SAFETY",
+        "SELF_HARM",
+        "ILLEGAL_CONTENT",
+        "IMPERSONATION",
+        "OTHER"
+      ]
+    },
+    "evidence_kind": {
+      "enum": [
+        "NONE",
+        "MANAGED_REFERENCE",
+        "REPORTER_DISCLOSURE"
+      ]
+    },
+    "status": {
+      "enum": [
+        "OPEN",
+        "ACTIONED",
+        "DISMISSED"
+      ]
+    },
+    "resolution": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "resolved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "description": "One moderation action taken on the report.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action_id",
+          "kind",
+          "reason",
+          "conversation_id",
+          "message_id",
+          "principal_id",
+          "effective_until",
+          "created_at"
+        ],
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "REMOVE_MESSAGE",
+              "MUTE_MEMBER",
+              "UNMUTE_MEMBER",
+              "REMOVE_MEMBER",
+              "RESTRICT_PRINCIPAL",
+              "LIFT_RESTRICTION",
+              "DISMISS_REPORT"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "conversation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "effective_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}
