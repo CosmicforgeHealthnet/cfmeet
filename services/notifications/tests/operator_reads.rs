@@ -38,12 +38,20 @@ fn verification(h: &Harness, recipient: &str, code: &str) -> Value {
     )
 }
 
+/// Ingests one real (sealed) verification notification, then records one delivery for every
+/// notification that has none. The default harness runs with email disabled, so routing
+/// creates no email delivery by itself; the operator reads are about the delivery rows.
 async fn with_deliveries(h: &Harness) {
     let meeting = h.peers.meeting.clone();
     h.ingest(&meeting, vec![verification(h, &alice(), "135790")])
         .await
         .expect(200);
     h.process_all().await;
+    h.exec(
+        "INSERT INTO notif_deliveries (id, notification_id, channel, lane, target_ref, status, routing_version)          SELECT gen_random_uuid(), n.id, 'EMAIL', n.lane, 'operator-read-test', 'SENT', 1            FROM notif_notifications n           WHERE NOT EXISTS (SELECT 1 FROM notif_deliveries d WHERE d.notification_id = n.id)",
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
