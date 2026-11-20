@@ -1,4 +1,4 @@
-//! The admin bridge's operator reads (ADR 0067, design §6.8): `/internal/v1/operator/*`.
+//! The admin bridge's operator reads (ADR 0068, design §6.8): `/internal/v1/operator/*`.
 //!
 //! Reachable only with `platform-identity.administer` AND the admin bridge's strict HQ
 //! operator attribution (`X-CF-Operator: hq:<staff>`, parsed by the middleware). Read-only.

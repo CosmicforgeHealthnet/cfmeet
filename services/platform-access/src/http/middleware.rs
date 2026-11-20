@@ -11,7 +11,7 @@
 //! caller is available through [`InternalCaller`]. Diagnostics (reason, kid, issuer) are
 //! logged; tokens never are. Spans carry the matched ROUTE PATTERN, never the path.
 //!
-//! Operator attribution (ADR 0067): `X-CF-Operator` / `X-CF-Approver` /
+//! Operator attribution (ADR 0068): `X-CF-Operator` / `X-CF-Approver` /
 //! `X-CF-Approval-Ref` / `X-CF-Intent-Digest` are read once here:
 //! * from `cfmeet.admin-bridge`: strict `hq:<staff>` attribution
 //!   (`cf_service_auth::OperatorAttribution`), required on every bridge request;

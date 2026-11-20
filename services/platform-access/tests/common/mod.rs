@@ -243,7 +243,7 @@ pub struct Peers {
     pub gateway: Arc<ServiceTokenSigner>,
     /// Blueprint Section 7: the Organizations Service (FIRST_PARTY organization scopes).
     pub organizations: Arc<ServiceTokenSigner>,
-    /// ADR 0067: the admin bridge (operator reads with HQ attribution).
+    /// ADR 0068: the admin bridge (operator reads with HQ attribution).
     pub bridge: Arc<ServiceTokenSigner>,
     /// Correctly signing, but not in Platform Access's trust bundle.
     pub untrusted: Arc<ServiceTokenSigner>,
