@@ -390,6 +390,7 @@ const SCOPE_BODY: &[BodyField] = &[
     ),
 ];
 
+#[allow(clippy::too_many_arguments)]
 const fn pa(
     id: &'static str,
     source: &'static str,
