@@ -1009,8 +1009,8 @@ impl HttpPlatformAccess {
 
 impl HttpPlatformAccess {
     /// Build contract §2.1: the signed delegated context (which carries the initiating
-    /// credential id) rides on the service token; `CF-Forwarded-Credential-Id` is added
-    /// as soon as the shared client allows forwarding it (`FORWARDABLE_REQUEST_HEADERS`).
+    /// credential id) rides on the service token and `CF-Forwarded-Credential-Id` names the
+    /// forwarded credential; Platform Access refuses a Partner Users call without it.
     async fn end_users_http(
         &self,
         call: EndUserCall,
@@ -1022,13 +1022,7 @@ impl HttpPlatformAccess {
         let request = OutboundServiceRequest::continuing(ServiceId::platform_access(), correlation)
             .with_delegated_context(forwarded.delegated.clone());
         let credential = forwarded.credential_id.to_string();
-        let headers: Vec<(&str, &str)> = if cf_service_auth::client::FORWARDABLE_REQUEST_HEADERS
-            .contains(&FORWARDED_CREDENTIAL_HEADER)
-        {
-            vec![(FORWARDED_CREDENTIAL_HEADER, credential.as_str())]
-        } else {
-            Vec::new()
-        };
+        let headers = [(FORWARDED_CREDENTIAL_HEADER, credential.as_str())];
         let response = self
             .client
             .exchange_json_query_with_headers(
