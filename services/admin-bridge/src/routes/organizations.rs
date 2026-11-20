@@ -161,6 +161,117 @@ pub fn binding_item(b: &Value) -> T<Value> {
 /// Services an organization can be bound to (Organizations `bindings::SERVICES`).
 pub const BINDING_SERVICES: &[&str] = &["calling", "messaging"];
 
+fn section<'a>(doc: &'a Value, key: &str) -> T<&'a Value> {
+    doc.get(key)
+        .filter(|v| v.is_object())
+        .ok_or(OwnerError::Contract)
+}
+
+/// The organization's policy document, field by field. A section the bridge does not know
+/// is dropped (reviewed before it is relayed); a known field that is missing or mistyped
+/// fails the answer.
+pub fn policies(v: &Value) -> T<Value> {
+    let doc = v
+        .get("policy")
+        .filter(|p| p.is_object())
+        .ok_or(OwnerError::Contract)?;
+    let md = section(doc, "memberDirectory")?;
+    let guests = section(doc, "guests")?;
+    let meetings = section(doc, "meetings")?;
+    let features = section(doc, "features")?;
+    let retention = section(doc, "retention")?;
+    let delegated = section(doc, "delegatedAdministration")?;
+    let apps = match doc.get("apps") {
+        None | Some(Value::Null) => Value::Null,
+        Some(a) if a.is_object() => {
+            let allow = match a.get("allowList") {
+                None | Some(Value::Null) => Value::Null,
+                Some(Value::Array(ids)) if ids.len() <= 200 => Value::Array(
+                    ids.iter()
+                        .map(|id| {
+                            id.as_str()
+                                .and_then(|s| uuid::Uuid::parse_str(s).ok())
+                                .map(|u| Value::String(u.to_string()))
+                                .ok_or(OwnerError::Contract)
+                        })
+                        .collect::<T<Vec<_>>>()?,
+                ),
+                _ => return Err(OwnerError::Contract),
+            };
+            obj(vec![
+                ("install_tier", t::string(a, "installTier")?),
+                ("allow_list", allow),
+                (
+                    "user_installs_allowed",
+                    t::boolean(a, "userInstallsAllowed")?,
+                ),
+            ])
+        }
+        _ => return Err(OwnerError::Contract),
+    };
+    Ok(obj(vec![
+        ("organization_id", t::uuid(v, "organizationId")?),
+        ("revision", t::int(v, "revision")?),
+        ("updated_at", t::opt_time(v, "updatedAt")?),
+        (
+            "policy",
+            obj(vec![
+                (
+                    "member_directory",
+                    obj(vec![
+                        ("visibility", t::string(md, "visibility")?),
+                        ("searchable", t::boolean(md, "searchable")?),
+                    ]),
+                ),
+                (
+                    "guests",
+                    obj(vec![(
+                        "invitations_allowed",
+                        t::boolean(guests, "invitationsAllowed")?,
+                    )]),
+                ),
+                (
+                    "meetings",
+                    obj(vec![(
+                        "host_creation",
+                        t::string(meetings, "hostCreation")?,
+                    )]),
+                ),
+                (
+                    "features",
+                    obj(vec![
+                        ("meetings", t::boolean(features, "meetings")?),
+                        ("messaging", t::boolean(features, "messaging")?),
+                        ("calling", t::boolean(features, "calling")?),
+                    ]),
+                ),
+                (
+                    "retention",
+                    obj(vec![("hint_days", t::opt_int(retention, "hintDays")?)]),
+                ),
+                (
+                    "delegated_administration",
+                    obj(vec![
+                        (
+                            "managers_may_invite",
+                            t::boolean(delegated, "managersMayInvite")?,
+                        ),
+                        (
+                            "managers_may_create_teams",
+                            t::boolean(delegated, "managersMayCreateTeams")?,
+                        ),
+                        (
+                            "admins_may_manage_policies",
+                            t::boolean(delegated, "adminsMayManagePolicies")?,
+                        ),
+                    ]),
+                ),
+                ("apps", apps),
+            ]),
+        ),
+    ]))
+}
+
 fn listing(items: Vec<Value>, next: Value) -> Value {
     json!({"items": items, "next_cursor": next})
 }
@@ -250,6 +361,21 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Option<Result<Answe
             .await
             {
                 Ok(v) => answer(t::page(&v, member_item).map(|(i, n)| listing(i, n))),
+                Err(e) => Err(e.into()),
+            }
+        }
+        "organizations.policies.read" => {
+            let id = match org_id(auth) {
+                Ok(i) => i,
+                Err(e) => return Some(Err(e)),
+            };
+            match read(
+                format!("/internal/v1/operator/organizations/{id}/policies"),
+                vec![],
+            )
+            .await
+            {
+                Ok(v) => answer(policies(&v)),
                 Err(e) => Err(e.into()),
             }
         }

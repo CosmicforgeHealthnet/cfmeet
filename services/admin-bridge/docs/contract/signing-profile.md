@@ -173,3 +173,4 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `organizations.global-audit.list`
 - `organizations.members.list`
 - `organizations.teams.list`
+- `organizations.policies.read`

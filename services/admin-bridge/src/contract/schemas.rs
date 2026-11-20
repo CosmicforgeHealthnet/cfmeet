@@ -313,6 +313,50 @@ pub fn components() -> Map<String, Value> {
         "OrganizationMemberPage".into(),
         page(json!({"$ref": "#/components/schemas/OrganizationMember"})),
     );
+    let tier3 = json!({"enum": ["MEMBERS", "MANAGERS", "ADMINS"]});
+    let section = |props: Value| {
+        let required: Vec<String> = props
+            .as_object()
+            .map(|o| o.keys().cloned().collect())
+            .unwrap_or_default();
+        json!({"type": "object", "additionalProperties": false, "required": required, "properties": props})
+    };
+    m.insert(
+        "OrganizationPolicies".into(),
+        json!({
+            "description": "The organization's policy document (Organizations PolicyDocument v1, field by field). Sections the bridge has not reviewed are not relayed.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["organization_id", "revision", "updated_at", "policy"],
+            "properties": {
+                "organization_id": uuid,
+                "revision": {"type": "integer", "minimum": 0},
+                "updated_at": nullable_date_time,
+                "policy": section(json!({
+                    "member_directory": section(json!({"visibility": tier3, "searchable": {"type": "boolean"}})),
+                    "guests": section(json!({"invitations_allowed": {"type": "boolean"}})),
+                    "meetings": section(json!({"host_creation": tier3})),
+                    "features": section(json!({"meetings": {"type": "boolean"}, "messaging": {"type": "boolean"}, "calling": {"type": "boolean"}})),
+                    "retention": section(json!({"hint_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 3650}})),
+                    "delegated_administration": section(json!({
+                        "managers_may_invite": {"type": "boolean"},
+                        "managers_may_create_teams": {"type": "boolean"},
+                        "admins_may_manage_policies": {"type": "boolean"}
+                    })),
+                    "apps": {
+                        "anyOf": [
+                            {"type": "null"},
+                            section(json!({
+                                "install_tier": {"enum": ["ADMINS", "MEMBERS"]},
+                                "allow_list": {"type": ["array", "null"], "maxItems": 200, "uniqueItems": true, "items": {"type": "string", "format": "uuid"}},
+                                "user_installs_allowed": {"type": "boolean"}
+                            }))
+                        ]
+                    }
+                }))
+            }
+        }),
+    );
     m.insert(
         "OrganizationTeam".into(),
         json!({

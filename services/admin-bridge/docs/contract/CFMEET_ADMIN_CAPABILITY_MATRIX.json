@@ -2366,7 +2366,7 @@
     "method": "GET",
     "bridge_endpoint": "/organizations/organizations/{organization_id}/policies",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "organizations.policies.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -2375,8 +2375,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-    "blocker": "Phase A2: new organizations operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "organizations_policies_are_relayed_field_by_field"
+    ]
   },
   {
     "id": "organizations.member.change",
