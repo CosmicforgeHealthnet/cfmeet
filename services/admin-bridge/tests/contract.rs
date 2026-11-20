@@ -134,7 +134,12 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "organizations.global-audit.list",
             "organizations.members.list",
             "organizations.teams.list",
-            "organizations.policies.read"
+            "organizations.policies.read",
+            "notifications.deliveries.list",
+            "notifications.failed-deliveries.list",
+            "notifications.suppressions.list",
+            "notifications.routing.read",
+            "notifications.providers.read"
         ]
     );
     for c in catalog() {

@@ -2959,4 +2959,30 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "OrganizationBindingPage",
         &["organizations_bindings_treat_absent_as_unbound"],
     ),
+    // A2.2 Notifications.
+    (
+        "notifications.deliveries.list",
+        "NotificationDeliveryPage",
+        &["notifications_deliveries_map_the_window_and_carry_no_content"],
+    ),
+    (
+        "notifications.failed-deliveries.list",
+        "NotificationDeliveryPage",
+        &["notifications_failed_deliveries_use_the_failure_route"],
+    ),
+    (
+        "notifications.suppressions.list",
+        "NotificationSuppressionPage",
+        &["notifications_suppressions_relay_only_the_digest"],
+    ),
+    (
+        "notifications.routing.read",
+        "NotificationRouting",
+        &["notifications_routing_drops_the_audit_digest"],
+    ),
+    (
+        "notifications.providers.read",
+        "NotificationProviders",
+        &["notifications_providers_report_status_only"],
+    ),
 ];

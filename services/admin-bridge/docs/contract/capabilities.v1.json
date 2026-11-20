@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.2.0",
+  "contract_version": "1.4.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "7c50f191093e09bedaa82d5d0d230d424e74836e7453d150793e7f616e0207c3",
-    "capability_matrix_sha256": "3e7734e0e459a9eb2a17cdaec4e755b24e7df7ea60954db21c93c3f799e4ee63"
+    "openapi_sha256": "5be83d20523e0fb99673f20bdd233ce070dd56b06f30dab4674522ae4383fc4a",
+    "capability_matrix_sha256": "cf714b7ba3b76b24dc5e532a5afe9ca92dd1f489a81646447ffcb866e358f1ed"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 12,
+      "READ_ONLY": 17,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 120
+      "BLOCKED_DEPENDENCY": 115
     }
   },
   "capabilities": [
@@ -11456,9 +11456,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationDeliveryPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.deliveries.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -11467,8 +11467,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: notifications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_deliveries_map_the_window_and_carry_no_content"
+      ]
     },
     {
       "id": "notifications.failed-deliveries.list",
@@ -11504,9 +11506,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationDeliveryPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.failed-deliveries.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -11515,8 +11517,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: notifications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_failed_deliveries_use_the_failure_route"
+      ]
     },
     {
       "id": "notifications.delivery.retry",
@@ -11604,9 +11608,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationSuppressionPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.suppressions.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -11615,8 +11619,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: notifications endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_suppressions_relay_only_the_digest"
+      ]
     },
     {
       "id": "notifications.suppression.remove",
@@ -11703,9 +11709,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationRouting"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.routing.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -11714,8 +11720,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: notifications keeps this in its database only; operator read API required",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_routing_drops_the_audit_digest"
+      ]
     },
     {
       "id": "notifications.routing.change",
@@ -11849,9 +11857,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/NotificationProviders"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "notifications.providers.read",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -11860,8 +11868,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_NOTIFICATIONS",
-      "blocker": "Phase A2: new notifications operator endpoint required",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "notifications_providers_report_status_only"
+      ]
     },
     {
       "id": "privacy.requests.list",
