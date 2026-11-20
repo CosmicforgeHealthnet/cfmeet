@@ -151,6 +151,9 @@ async fn template(admin: &str) -> String {
             messaging_migration::ChatControlsMigrator::up(&tmpl, None)
                 .await
                 .expect("chat-controls migrations apply");
+            messaging_migration::AdminOperationsMigrator::up(&tmpl, None)
+                .await
+                .expect("admin-operations migrations apply");
             tmpl.close().await.ok();
             name
         })

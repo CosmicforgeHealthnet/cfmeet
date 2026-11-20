@@ -131,6 +131,8 @@ pub fn app(state: AppState) -> Router {
                 .merge(crate::sms_bridge::http::internal_routes())
                 // ADR 0068: the admin bridge's operator reads (`messaging-firstparty.administer`).
                 .merge(crate::operator_reads::routes())
+                // ADR 0068: the admin bridge's operator commands and settlement read.
+                .merge(crate::operator_commands::routes())
                 .fallback(not_found)
                 .method_not_allowed_fallback(method_not_allowed),
         )

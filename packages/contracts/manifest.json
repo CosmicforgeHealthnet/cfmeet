@@ -577,14 +577,14 @@
     },
     {
       "id": "cfmeet.messaging.internal-api",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "messaging/internal/v1.openapi.json",
       "owner": "messaging",
       "visibility": "internal",
       "lifecycle": "beta",
       "authority": "contract-first",
-      "description": "Messaging's service-authenticated internal API (Part V H): delegated first-party backend surface and meeting conversation integration. 1.1.0 (gap audit G6 / G7): organization moderation (the moderation handlers for an organization moderator relayed by the Meeting Service) and team channels synchronized from a team snapshot; permission messaging-organization.govern. 1.2.0 (CF Meet Platform): partner meeting chat synchronisation in a partner scope (ADR 0062). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references."
+      "description": "Messaging's service-authenticated internal API (Part V H): delegated first-party backend surface and meeting conversation integration. 1.1.0 (gap audit G6 / G7): organization moderation (the moderation handlers for an organization moderator relayed by the Meeting Service) and team channels synchronized from a team snapshot; permission messaging-organization.govern. 1.2.0 (CF Meet Platform): partner meeting chat synchronisation in a partner scope (ADR 0062). 1.3.0 (ADR 0068, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every internal route from any other caller (403 INTERNAL_PERMISSION_DENIED); the admin bridge's operator reads GET /internal/v1/operator/reports, /reports/{reportId}, /holds, /exports, /deletion-requests, /audit, /switches, /incidents, /failed-messages and /key-transparency (messaging-firstparty.administer, cfmeet.admin-bridge only, plus X-CF-Operator): ids, categories, states, counts and times only, never content, ciphertext, keys, report evidence, audit detail, payloads, export object keys or case references. 1.4.0 (ADR 0068 A4 / A5 / A7): the admin bridge's operator commands POST /internal/v1/operator/reports/{reportId}/remove-message, /reports/{reportId}/dismiss, /conversations/{conversationId}/members/{principalId}/mute and /remove, /conversations/{conversationId}/restrict, /policy, /holds, /holds/{holdId}/release, /deletion-requests, /switches/{switchName}, /incidents/{incidentId}/resolve, /failed-messages/{eventId}/retry and /key-transparency/checkpoint (Idempotency-Key, expectedVersion where versioned, X-CF-Approver for R3 / R4, answer {status, version, resource}, recorded in messaging_admin_operations in the change's transaction), the settlement read GET /internal/v1/operator/operations/{idempotencyKey}, GET /internal/v1/operator/policy, /conversations/{conversationId} and /conversations/{conversationId}/members/{principalId}; reports and holds carry their version."
     },
     {
       "id": "cfmeet.messaging.event",
@@ -634,7 +634,7 @@
     },
     {
       "id": "cfmeet.messaging.internal-api-bundled",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "kind": "openapi",
       "path": "bundled/messaging/internal/v1.openapi.json",
       "owner": "messaging",
