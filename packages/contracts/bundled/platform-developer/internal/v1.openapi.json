@@ -3671,11 +3671,18 @@
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: the verification case as HQ sees it (VerificationCaseDetail).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/platform-developer.control.v1.ProductionAccessRequest"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/platform-developer.control.v1.ProductionAccessRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/platform-developer.control.v1.VerificationCaseDetail"
+                    }
+                  ]
                 }
               }
             }
@@ -4991,11 +4998,18 @@
         },
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: the verification case as HQ sees it (VerificationCaseDetail).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/platform-developer.control.v1.App"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/platform-developer.control.v1.App"
+                    },
+                    {
+                      "$ref": "#/components/schemas/platform-developer.control.v1.VerificationCaseDetail"
+                    }
+                  ]
                 }
               }
             }
