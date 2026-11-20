@@ -326,7 +326,7 @@ struct SearchParams {
     cursor: Option<String>,
 }
 
-fn page(limit: Option<usize>, cursor: Option<String>) -> Result<Page, ApiError> {
+pub(crate) fn page(limit: Option<usize>, cursor: Option<String>) -> Result<Page, ApiError> {
     let p = Page::from_query(&PageQuery { limit, cursor })?;
     if p.has_cursor() && p.cursor_key().is_none() {
         return Err(ApiError(ErrorCode::ValidationError));
@@ -347,7 +347,7 @@ async fn existing<C: ConnectionTrait>(db: &C, tenant_id: Uuid) -> Result<(), Api
 
 /// Runs a keyset page query whose rows carry `k_at`, `k_id` and `v` (a JSON object), the
 /// cursor bound as `$2` / `$3` and the limit (+1) as `$4`.
-async fn keyset<C: ConnectionTrait>(
+pub(crate) async fn keyset<C: ConnectionTrait>(
     db: &C,
     sql: &str,
     mut values: Vec<DbValue>,

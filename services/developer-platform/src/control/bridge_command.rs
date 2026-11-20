@@ -49,6 +49,16 @@ pub enum Subject {
     WebhookDelivery,
     /// A4: the usage rollups (unversioned; the subject id is the environment or nil).
     UsageRollups,
+    /// A6: a price book lineage (`devplat_price_books`).
+    PriceBook,
+    /// A6: a price version (`devplat_price_versions`).
+    PriceVersion,
+    /// A6: a market's freeze (`devplat_market_freezes`; absent row: version 0).
+    Market,
+    /// A6: a CF Meet user plan holder (`devplat_plan_holders`; absent row: version 0).
+    PlanHolder,
+    /// A6: a holder's limit override (`devplat_plan_overrides`; absent row: version 0).
+    PlanOverride,
 }
 
 impl Subject {
@@ -61,6 +71,11 @@ impl Subject {
             Subject::PushKey => "PUSH_KEY",
             Subject::WebhookDelivery => "WEBHOOK_DELIVERY",
             Subject::UsageRollups => "USAGE_ROLLUPS",
+            Subject::PriceBook => "PRICE_BOOK",
+            Subject::PriceVersion => "PRICE_VERSION",
+            Subject::Market => "MARKET",
+            Subject::PlanHolder => "PLAN_HOLDER",
+            Subject::PlanOverride => "PLAN_OVERRIDE",
         }
     }
 
@@ -72,6 +87,11 @@ impl Subject {
             Subject::Organization => ("devplat_organizations", "tenant_id", "state"),
             Subject::SupportProfile => ("devplat_support_profiles", "tenant_id", "support_tier"),
             Subject::PushKey => ("devplat_push_providers", "id", "state"),
+            Subject::PriceBook => ("devplat_price_books", "id", "product_line"),
+            Subject::PriceVersion => ("devplat_price_versions", "id", "state"),
+            Subject::Market => ("devplat_market_freezes", "id", "state"),
+            Subject::PlanHolder => ("devplat_plan_holders", "id", "plan_code"),
+            Subject::PlanOverride => ("devplat_plan_overrides", "id", "state"),
             Subject::WebhookDelivery | Subject::UsageRollups => return None,
         })
     }
@@ -90,6 +110,11 @@ impl Subject {
             Subject::PushKey,
             Subject::WebhookDelivery,
             Subject::UsageRollups,
+            Subject::PriceBook,
+            Subject::PriceVersion,
+            Subject::Market,
+            Subject::PlanHolder,
+            Subject::PlanOverride,
         ]
         .into_iter()
         .find(|k| k.as_str() == s)
@@ -477,6 +502,11 @@ mod tests {
             Subject::PushKey,
             Subject::WebhookDelivery,
             Subject::UsageRollups,
+            Subject::PriceBook,
+            Subject::PriceVersion,
+            Subject::Market,
+            Subject::PlanHolder,
+            Subject::PlanOverride,
         ] {
             assert_eq!(Subject::parse(k.as_str()), Some(k));
             assert!(k.as_str().len() <= 24);

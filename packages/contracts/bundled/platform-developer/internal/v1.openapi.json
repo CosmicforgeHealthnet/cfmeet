@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.14.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read. 1.13.0 (ADR 0068 A3): the verification queue in HQ's case shape (GET /internal/v1/operator/verification/cases, /{caseId}, /{caseId}/history), production-access and app decisions from the admin bridge (Idempotency-Key, expectedVersion, HQ two-person approval instead of the named reviewers, recorded in the same transaction) and GET /internal/v1/operator/operations/{idempotencyKey}. 1.14.0 (ADR 0068 A4): admin bridge partner and app commands — workspace state (R3), support tier and incident record (POST support-profile for the bridge), usage reprocess (unversioned), push key disable and webhook delivery retry (admin bridge only), app suspend / lift-suspension — answering AdminCommandResult {status, version, resource} and recorded for GET /internal/v1/operator/operations/{idempotencyKey} (source_version null when unversioned); reads of a workspace's usage and of recorded incidents; push-provider state and version."
+    "version": "1.15.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read. 1.13.0 (ADR 0068 A3): the verification queue in HQ's case shape (GET /internal/v1/operator/verification/cases, /{caseId}, /{caseId}/history), production-access and app decisions from the admin bridge (Idempotency-Key, expectedVersion, HQ two-person approval instead of the named reviewers, recorded in the same transaction) and GET /internal/v1/operator/operations/{idempotencyKey}. 1.14.0 (ADR 0068 A4): admin bridge partner and app commands — workspace state (R3), support tier and incident record (POST support-profile for the bridge), usage reprocess (unversioned), push key disable and webhook delivery retry (admin bridge only), app suspend / lift-suspension — answering AdminCommandResult {status, version, resource} and recorded for GET /internal/v1/operator/operations/{idempotencyKey} (source_version null when unversioned); reads of a workspace's usage and of recorded incidents; push-provider state and version. 1.15.0 (ADR 0068 A6): pricing and plans under /internal/v1/operator/pricing/** and finance reports under /internal/v1/operator/finance/** (pricing.administer, admin bridge only): price books, versions (draft, edit, submit, two-person approve / reject, schedule, activate), rollback, market freezes, CF Meet user plans, plan assignments, overrides, a charge simulation read and the usage / estimated charges / plan spread reports. Nothing charges anyone."
   },
   "tags": [
     {
@@ -61,6 +61,14 @@
     {
       "name": "Operator: admin bridge",
       "description": "ADR 0068: admin bridge settlement records, partner commands and reads served to the HQ admin bridge."
+    },
+    {
+      "name": "Operator: pricing",
+      "description": "ADR 0068 A6: price books, versions, activations, market freezes, CF Meet user plans, assignments, overrides and the charge simulation; admin bridge only (pricing.administer)."
+    },
+    {
+      "name": "Operator: finance",
+      "description": "ADR 0068 A6: finance reports (usage, estimated charges, plan spread); one currency per figure, minor units, never revenue; admin bridge only (pricing.administer)."
     }
   ],
   "paths": {
@@ -6012,6 +6020,1746 @@
           }
         }
       }
+    },
+    "/internal/v1/operator/pricing/price-books": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List price books",
+        "operationId": "pricingListPriceBooks",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.price-books.list`: every lineage, newest first, keyset-paginated; optional productLine. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "productLine",
+            "in": "query",
+            "required": false,
+            "description": "Only this product line.",
+            "schema": {
+              "enum": [
+                "PARTNER_PLATFORM",
+                "CONSUMER"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PriceBookList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/price-books/{priceBookId}/versions": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List a price book's versions",
+        "operationId": "pricingListVersions",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.versions.list`: newest first (no rates). Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PriceVersionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Draft a price version",
+        "operationId": "pricingDraftVersion",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.version.draft` (R3): a new DRAFT version at the price book's version; its id is the Idempotency-Key. Status DRAFT; version: the new version's row version. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PriceVersionDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/price-books/{priceBookId}/activations": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "A price book's activation history",
+        "operationId": "pricingListActivations",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.activations.list`: the append-only history (SCHEDULED, ACTIVATED, ROLLED_BACK), newest first. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PriceActivationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/price-books/{priceBookId}/rollback": {
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Roll a price book back",
+        "operationId": "pricingRollbackPriceBook",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.price-book.rollback` (R4): an older SUPERSEDED version that was activated before becomes effective again now (a ROLLED_BACK activation; that version is APPROVED again, the one it replaces SUPERSEDED). Status ROLLED_BACK; version: the price book's version. Refused in a frozen market. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PriceBookRollbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/versions/{versionId}": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Read a price version",
+        "operationId": "pricingGetVersion",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.versions.read`: the version with its rates, digests, the HQ staff who drafted, submitted and approved it, and whether it is effective. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PriceVersionDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/versions/{versionId}/{command}": {
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Edit, submit, approve, reject, schedule or activate a price version",
+        "operationId": "pricingVersionCommand",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.version.edit` (R3, DRAFT only; status DRAFT), `.submit` (R3; DRAFT → SUBMITTED, the content must be complete, digest kept), `.approve` (R4; SUBMITTED → APPROVED by a staff member other than the submitter, SELF_APPROVAL_FORBIDDEN otherwise; content unchanged since submission; valid 12 hours), `.reject` (R4; SUBMITTED → REJECTED with a reason code), `.schedule` (R4; an APPROVED, unexpired version takes effect at effectiveFrom; status SCHEDULED) and `.activate` (R4; effective now, the previously active version SUPERSEDED; status ACTIVE). An expired approval is APPROVAL_EXPIRED; a frozen market refuses submit, approve, schedule and activate (POLICY_VIOLATION). version: the version's row version. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "command",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "edit",
+                "submit",
+                "approve",
+                "reject",
+                "schedule",
+                "activate"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PriceVersionCommandRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/freezes": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List market freezes",
+        "operationId": "pricingListFreezes",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.freezes.list`: every market ever frozen, most recently changed first; optional state. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Only this state.",
+            "schema": {
+              "enum": [
+                "FROZEN",
+                "UNFROZEN"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.MarketFreezeList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/markets/{marketCode}/{command}": {
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Freeze or unfreeze a market",
+        "operationId": "pricingMarketFreeze",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.market.freeze` / `pricing.market.unfreeze` (R4): status FROZEN / UNFROZEN; version: the freeze's version (expectedVersion 0 for a market never frozen; unfreezing it is INVALID_STATE). Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "marketCode",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,15}$"
+            }
+          },
+          {
+            "name": "command",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "freeze",
+                "unfreeze"
+              ]
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.MarketFreezeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/plans": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List CF Meet user plans",
+        "operationId": "pricingListPlans",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.plans.list`: the plans of every CONSUMER lineage's effective version (or one lineage), FREE always included. One page (nextCursor null). Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "query",
+            "required": false,
+            "description": "Only this CONSUMER lineage (404 when unknown).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PricingPlanList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/plan-assignments": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List CF Meet user plan assignments",
+        "operationId": "pricingListPlanAssignments",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.plan-assignments.list`: the append-only assignment history, newest first; filters holderId, holderKind, planCode. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "holderId",
+            "in": "query",
+            "required": false,
+            "description": "One user or business organization (opaque id).",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "holderKind",
+            "in": "query",
+            "required": false,
+            "description": "Holder kind.",
+            "schema": {
+              "enum": [
+                "USER",
+                "ORGANIZATION"
+              ]
+            }
+          },
+          {
+            "name": "planCode",
+            "in": "query",
+            "required": false,
+            "description": "Plan code.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z_]{1,23}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.ConsumerPlanAssignmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Assign a CF Meet user plan",
+        "operationId": "pricingAssignPlan",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.plan.assign` (R3): status the plan code; version: the holder's version. A plan absent from the lineage's effective version is INVALID_STATE. Assignment only: limits are enforced by the Meeting Service and Messaging, and nothing is charged. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.ConsumerPlanAssignRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/overrides": {
+      "get": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "List plan overrides",
+        "operationId": "pricingListOverrides",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.overrides.list`: holders' limit overrides, most recently changed first; filters holderId, state. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "holderId",
+            "in": "query",
+            "required": false,
+            "description": "One holder.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "Only this state.",
+            "schema": {
+              "enum": [
+                "ACTIVE",
+                "REVOKED"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PlanOverrideList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Set or revoke a plan override",
+        "operationId": "pricingChangeOverride",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.override.change` (R4): status ACTIVE (limits set) or REVOKED (limits null); version: the override's version. Every pricing command is two-person: `Idempotency-Key`, `expectedVersion` (locked FOR UPDATE, VERSION_CONFLICT otherwise, nothing done) and HQ's approver (POLICY_VIOLATION without) are required; the answer is AdminCommandResult; a repeated key returns the result without applying twice; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}) and in the operator audit. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}; also the id of a drafted version).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PlanOverrideChangeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/pricing/simulations": {
+      "post": {
+        "tags": [
+          "Operator: pricing"
+        ],
+        "summary": "Simulate charges",
+        "operationId": "pricingSimulateCharges",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`pricing.charges.simulate`: a READ that uses POST (its input is a usage vector): no Idempotency-Key, no record, no side effect, nothing charged. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/platform-developer.control.v1.ChargeSimulationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.ChargeSimulation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/finance/usage": {
+      "get": {
+        "tags": [
+          "Operator: finance"
+        ],
+        "summary": "Usage report",
+        "operationId": "financeUsageReport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`finance.usage.report`: metered usage per partner workspace and usage type over the window's UTC days (default the last 30, at most 31), with the workspace's commercial plan code. Offset-paginated. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.FinanceUsageReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/finance/estimated-charges": {
+      "get": {
+        "tags": [
+          "Operator: finance"
+        ],
+        "summary": "Estimated charges report",
+        "operationId": "financeEstimatedChargesReport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`finance.estimated-charges.report`: what each partner workspace's metered usage over the window would cost under a PARTNER_PLATFORM lineage's effective version (the window counts as one month for minimums; monthly active users are not metered and not estimated). An estimate in one currency, never revenue, nothing charged. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "priceBookId",
+            "in": "query",
+            "required": false,
+            "description": "Required: a PARTNER_PLATFORM lineage.",
+            "schema": {
+              "$ref": "#/components/schemas/platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.EstimatedChargesReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/finance/plan-spread": {
+      "get": {
+        "tags": [
+          "Operator: finance"
+        ],
+        "summary": "Plan spread report",
+        "operationId": "financePlanSpreadReport",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "`finance.plan-spread.report`: holders per CF Meet user plan as of `until` (default now; never-assigned holders are on FREE and not counted) and the assignments made since `since`. Admin bridge only: permission `pricing.administer` (grantable to cfmeet.admin-bridge alone) AND its `hq:<staff>` attribution (INTERNAL_PERMISSION_DENIED otherwise).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.PlanSpreadReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6915,6 +8663,126 @@
         },
         "description": "Billing-account REFERENCE metadata. Never card, bank, charge or balance data."
       },
+      "platform-developer.control.v1.ChargeSimulation": {
+        "description": "ADR 0068 A6: an estimate (minor units of the lineage's currency; nothing is charged). Partner: lines per rate and totalMinor; CF Meet user plan: planCode, cycle and totalMinor.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "priceBookId",
+          "versionId",
+          "versionState",
+          "currency",
+          "estimate",
+          "totalMinor"
+        ],
+        "properties": {
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionState": {
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED",
+              "SUPERSEDED"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "estimate": {
+            "const": true
+          },
+          "totalMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "usageType",
+                "quantity",
+                "includedQuantity",
+                "billableQuantity",
+                "amountMinor"
+              ],
+              "properties": {
+                "usageType": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "includedQuantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "billableQuantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "amountMinor": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "planCode": {
+            "type": "string"
+          },
+          "cycle": {
+            "enum": [
+              "MONTHLY",
+              "YEARLY"
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.ChargeSimulationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "priceBookId"
+        ],
+        "properties": {
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "planCode": {
+            "type": "string"
+          },
+          "cycle": {
+            "enum": [
+              "MONTHLY",
+              "YEARLY"
+            ]
+          }
+        },
+        "description": "ADR 0068 A6: a usage vector (PARTNER_PLATFORM) or a plan and cycle (CONSUMER); versionId omitted: the effective version."
+      },
       "platform-developer.control.v1.CommercialPlan": {
         "type": "object",
         "additionalProperties": false,
@@ -6981,6 +8849,212 @@
           }
         },
         "description": "An immutable commercial plan version. No price exists in Part VI."
+      },
+      "platform-developer.control.v1.ConsumerPlanAssignRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "holderKind",
+          "holderId",
+          "planCode",
+          "priceBookId"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 when the row was never created."
+          },
+          "holderKind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "planCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,23}$"
+          },
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "billingAccountRef": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:/-]{1,128}$"
+          }
+        },
+        "description": "ADR 0068 A6: expectedVersion is the holder's version (0: never assigned, on FREE). The plan must exist in the CONSUMER lineage's effective version (FREE always)."
+      },
+      "platform-developer.control.v1.ConsumerPlanAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignmentId",
+          "holderKind",
+          "holderId",
+          "planCode",
+          "priceBookId",
+          "reasonCode",
+          "assignedBy",
+          "effectiveFrom",
+          "current"
+        ],
+        "properties": {
+          "assignmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "holderKind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "planCode": {
+            "type": "string"
+          },
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "assignedBy": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "description": "ADR 0068 A6: one CF Meet user plan assignment (append-only history; a holder never assigned is on FREE)."
+      },
+      "platform-developer.control.v1.ConsumerPlanAssignmentList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.ConsumerPlanAssignment"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.ConsumerPlanSet": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "plans"
+        ],
+        "properties": {
+          "plans": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "label",
+                "monthlyMinor",
+                "yearlyMinor",
+                "limits"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z_]{1,23}$"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40
+                },
+                "monthlyMinor": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "yearlyMinor": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "limits": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "meetingMinutes",
+                    "participants",
+                    "recording",
+                    "storageBytes",
+                    "attachmentBytes",
+                    "webinars"
+                  ],
+                  "properties": {
+                    "meetingMinutes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "participants": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "recording": {
+                      "type": "boolean"
+                    },
+                    "storageBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "attachmentBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "webinars": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "ADR 0068 A6: CONSUMER content: CF Meet user plans (FREE required at 0 when submitted)."
       },
       "platform-developer.control.v1.CostCenterRequest": {
         "type": "object",
@@ -7327,6 +9401,187 @@
         },
         "description": "Effective platform entitlements (Section 54 §10.4 precedence: organization plan, explicit operator override, stricter project plan, environment cap, service-account and credential restrictions; the most restrictive value wins and the limiting level is named). Internal reads also carry the versioned snapshot consuming services cache."
       },
+      "platform-developer.control.v1.EstimatedChargesReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "priceBookId",
+          "versionId",
+          "currency",
+          "estimate",
+          "items",
+          "nextCursor",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "estimate": {
+            "const": true
+          },
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "organizationId",
+                "lines",
+                "totalMinor"
+              ],
+              "properties": {
+                "organizationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "usageType",
+                      "quantity",
+                      "includedQuantity",
+                      "billableQuantity",
+                      "amountMinor"
+                    ],
+                    "properties": {
+                      "usageType": {
+                        "type": "string"
+                      },
+                      "quantity": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "includedQuantity": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "billableQuantity": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "amountMinor": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                },
+                "totalMinor": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "description": "ADR 0068 A6: estimated charges per partner workspace under a PARTNER_PLATFORM lineage's effective version (one currency, minor units; an estimate, never revenue, nothing charged)."
+      },
+      "platform-developer.control.v1.FinanceUsageReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "organizationId",
+                "planCode",
+                "usageType",
+                "unit",
+                "quantity",
+                "factCount"
+              ],
+              "properties": {
+                "organizationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "planCode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "usageType": {
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "quantity": {
+                  "type": "integer"
+                },
+                "factCount": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "from": {
+            "type": "string",
+            "format": "date"
+          },
+          "to": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "description": "ADR 0068 A6: metered usage per partner workspace and usage type over the window's UTC days, with the workspace's commercial plan code."
+      },
       "platform-developer.control.v1.FirstPartyRegistration": {
         "type": "object",
         "additionalProperties": false,
@@ -7516,6 +9771,101 @@
             "description": "One-time acceptance token, returned ONLY in this response (stored as a digest; never readable again)."
           }
         }
+      },
+      "platform-developer.control.v1.MarketFreeze": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "marketCode",
+          "state",
+          "reasonCode",
+          "changedBy",
+          "frozenAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "marketCode": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "FROZEN",
+              "UNFROZEN"
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "changedBy": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "frozenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "description": "ADR 0068 A6: a market's freeze (a frozen market refuses submit, approve, schedule, activate and rollback)."
+      },
+      "platform-developer.control.v1.MarketFreezeList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.MarketFreeze"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.MarketFreezeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "reasonCode"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 when the row was never created."
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          }
+        },
+        "description": "ADR 0068 A6: expectedVersion is the market freeze's version (0: never frozen)."
       },
       "platform-developer.control.v1.OperatorActivityEvent": {
         "description": "Section 15 (PLT-009): one operator command — an OPERATOR event of an organization's activity (scope ORGANIZATION) or a platform-level command such as a plan publication or a usage rebuild (scope PLATFORM, organizationId null).",
@@ -9256,6 +11606,79 @@
           "CLOSED"
         ]
       },
+      "platform-developer.control.v1.PartnerRateCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rates"
+        ],
+        "properties": {
+          "rates": {
+            "type": "array",
+            "maxItems": 7,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "usageType",
+                "unitAmountMinor"
+              ],
+              "properties": {
+                "usageType": {
+                  "enum": [
+                    "MONTHLY_ACTIVE_USERS",
+                    "MEETING_MINUTES",
+                    "IN_APP_CALL_MINUTES",
+                    "MESSAGES",
+                    "RECORDING_MINUTES",
+                    "STORAGE",
+                    "API_CALLS"
+                  ]
+                },
+                "unitAmountMinor": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "includedQuantity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minimumMonthlyMinor": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "tiers": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 16,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "unitAmountMinor"
+                    ],
+                    "properties": {
+                      "upTo": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 1
+                      },
+                      "unitAmountMinor": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              },
+              "description": "One usage type's rate (minor units): graduated tiers over the quantity beyond the included amount, at least the minimum monthly charge."
+            }
+          }
+        },
+        "description": "ADR 0068 A6: PARTNER_PLATFORM content (one rate per usage type)."
+      },
       "platform-developer.control.v1.PlanAssignment": {
         "type": "object",
         "additionalProperties": false,
@@ -9342,6 +11765,799 @@
           },
           "plan": {
             "$ref": "#/components/schemas/platform-developer.control.v1.CommercialPlan"
+          }
+        }
+      },
+      "platform-developer.control.v1.PlanOverride": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "overrideId",
+          "holderKind",
+          "holderId",
+          "state",
+          "limits",
+          "reasonCode",
+          "changedBy",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "overrideId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "holderKind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "REVOKED"
+            ]
+          },
+          "limits": {
+            "type": "object"
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "changedBy": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "description": "ADR 0068 A6: a holder's limit override."
+      },
+      "platform-developer.control.v1.PlanOverrideChangeRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "holderKind",
+          "holderId",
+          "limits",
+          "reasonCode"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "0 when the row was never created."
+          },
+          "holderKind": {
+            "enum": [
+              "USER",
+              "ORGANIZATION"
+            ]
+          },
+          "holderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limits": {
+            "oneOf": [
+              {
+                "type": "object",
+                "minProperties": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          }
+        },
+        "description": "ADR 0068 A6: expectedVersion is the override's version (0: none yet); limits null revokes."
+      },
+      "platform-developer.control.v1.PlanOverrideList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.PlanOverride"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.PlanSpreadReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor",
+          "asOf"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "planCode",
+                "holderKind",
+                "holders",
+                "assignedInWindow"
+              ],
+              "properties": {
+                "planCode": {
+                  "type": "string"
+                },
+                "holderKind": {
+                  "enum": [
+                    "USER",
+                    "ORGANIZATION"
+                  ]
+                },
+                "holders": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "assignedInWindow": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "type": "null"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "ADR 0068 A6: holders per CF Meet user plan as of `asOf` (never-assigned users and organizations are on FREE and not counted) and the assignments made in the window."
+      },
+      "platform-developer.control.v1.PriceActivation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "activationId",
+          "priceBookId",
+          "versionId",
+          "kind",
+          "effectiveFrom",
+          "operatorRef",
+          "approverRef",
+          "recordedAt"
+        ],
+        "properties": {
+          "activationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "SCHEDULED",
+              "ACTIVATED",
+              "ROLLED_BACK"
+            ]
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operatorRef": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "approverRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "ADR 0068 A6: one entry of the append-only activation history."
+      },
+      "platform-developer.control.v1.PriceActivationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.PriceActivation"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.PriceBook": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "priceBookId",
+          "productLine",
+          "currency",
+          "marketCode",
+          "effectiveVersionId",
+          "frozen",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "productLine": {
+            "enum": [
+              "PARTNER_PLATFORM",
+              "CONSUMER"
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "marketCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,15}$"
+          },
+          "effectiveVersionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "frozen": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "description": "ADR 0068 A6: a price book lineage (product line, currency, market); its effective version is its latest activation already effective."
+      },
+      "platform-developer.control.v1.PriceBookList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.PriceBook"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.PriceBookRollbackRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "versionId"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "description": "ADR 0068 A6: expectedVersion is the price book's version; versionId a SUPERSEDED version of the book that was activated before."
+      },
+      "platform-developer.control.v1.PriceVersion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "versionId",
+          "priceBookId",
+          "seq",
+          "state",
+          "ratesDigest",
+          "submittedAt",
+          "approvedAt",
+          "approvalExpiresAt",
+          "rejectedReason",
+          "decidedAt",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED",
+              "SUPERSEDED"
+            ]
+          },
+          "ratesDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approvalExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "rejectedReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "description": "ADR 0068 A6: a price version (no rates). DRAFT → SUBMITTED → APPROVED | REJECTED → SUPERSEDED; an approval expires after 12 hours."
+      },
+      "platform-developer.control.v1.PriceVersionCommandRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rates": {
+            "type": "object"
+          },
+          "reasonCode": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "effectiveFrom": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "ADR 0068 A6: edit (rates, DRAFT only), submit / approve / activate (expectedVersion only), reject (reasonCode, default NOT_APPROVED), schedule (effectiveFrom, more than 1 minute and at most 366 days ahead). expectedVersion is the version's row version."
+      },
+      "platform-developer.control.v1.PriceVersionDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "versionId",
+          "priceBookId",
+          "seq",
+          "state",
+          "ratesDigest",
+          "submittedAt",
+          "approvedAt",
+          "approvalExpiresAt",
+          "rejectedReason",
+          "decidedAt",
+          "createdAt",
+          "updatedAt",
+          "version",
+          "productLine",
+          "marketCode",
+          "rates",
+          "submittedDigest",
+          "draftedBy",
+          "submittedBy",
+          "approvedBy",
+          "approverRef",
+          "effective"
+        ],
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "enum": [
+              "DRAFT",
+              "SUBMITTED",
+              "APPROVED",
+              "REJECTED",
+              "SUPERSEDED"
+            ]
+          },
+          "ratesDigest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "submittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approvalExpiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "rejectedReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "productLine": {
+            "enum": [
+              "PARTNER_PLATFORM",
+              "CONSUMER"
+            ]
+          },
+          "marketCode": {
+            "type": "string"
+          },
+          "rates": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/platform-developer.control.v1.PartnerRateCard"
+              },
+              {
+                "$ref": "#/components/schemas/platform-developer.control.v1.ConsumerPlanSet"
+              }
+            ]
+          },
+          "submittedDigest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "draftedBy": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "submittedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "approvedBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "approverRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "effective": {
+            "type": "boolean"
+          }
+        },
+        "description": "ADR 0068 A6: a price version with its rates and the HQ staff who drafted, submitted and approved it."
+      },
+      "platform-developer.control.v1.PriceVersionDraftRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rates": {
+            "type": "object"
+          }
+        },
+        "description": "ADR 0068 A6: expectedVersion is the price book's version; rates omitted: a copy of the effective (else latest) version."
+      },
+      "platform-developer.control.v1.PriceVersionList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.PriceVersion"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.PricingPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "priceBookId",
+          "currency",
+          "marketCode",
+          "versionId",
+          "planCode",
+          "label",
+          "monthlyMinor",
+          "yearlyMinor",
+          "limits"
+        ],
+        "properties": {
+          "priceBookId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "marketCode": {
+            "type": "string"
+          },
+          "versionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "planCode": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "monthlyMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "yearlyMinor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limits": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "meetingMinutes",
+                  "participants",
+                  "recording",
+                  "storageBytes",
+                  "attachmentBytes",
+                  "webinars"
+                ],
+                "properties": {
+                  "meetingMinutes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "participants": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "recording": {
+                    "type": "boolean"
+                  },
+                  "storageBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "attachmentBytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "webinars": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "ADR 0068 A6: a CF Meet user plan of a CONSUMER lineage's effective version (FREE always listed; limits null when no version is effective)."
+      },
+      "platform-developer.control.v1.PricingPlanList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.PricingPlan"
+            }
+          },
+          "nextCursor": {
+            "type": "null"
           }
         }
       },
