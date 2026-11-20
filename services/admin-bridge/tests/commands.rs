@@ -247,7 +247,37 @@ async fn the_key_is_bound_to_one_intent_and_one_target_version() {
     let mut no_version = retry(key2, "5");
     no_version.body = serde_json::to_vec(&json!({"operation_id": key2})).unwrap();
     assert_eq!(code(&send(&h, &no_version).await.1), "COMMAND_BODY_INVALID");
+    let mut negative = retry(key2, "5");
+    negative.body =
+        serde_json::to_vec(&json!({"operation_id": key2, "expected_version": -1})).unwrap();
+    assert_eq!(code(&send(&h, &negative).await.1), "COMMAND_BODY_INVALID");
     assert_eq!(owner.sent().len(), 1);
+}
+
+#[tokio::test]
+async fn an_integer_expected_version_is_the_same_slot_as_its_string() {
+    let owner = FakeOwner::answering(applied("RETRY_QUEUED", "8"));
+    let h = harness(owner.clone()).await;
+    let key = Uuid::new_v4();
+    let mut c = retry(key, "7");
+    c.body = serde_json::to_vec(&json!({"operation_id": key, "expected_version": 7})).unwrap();
+    assert_eq!(send(&h, &c).await.0, 200);
+    assert_eq!(
+        owner.sent()[0].body["expected_version"],
+        7,
+        "forwarded as sent"
+    );
+    let op = h
+        .store
+        .operations()
+        .into_iter()
+        .find(|o| o.idempotency_key == key)
+        .unwrap();
+    assert_eq!(op.expected_version, "7");
+    assert_eq!(
+        code(&send(&h, &retry(Uuid::new_v4(), "7")).await.1),
+        "VERSION_CONFLICT"
+    );
 }
 
 #[tokio::test]

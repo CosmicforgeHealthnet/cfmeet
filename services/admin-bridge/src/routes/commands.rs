@@ -100,12 +100,12 @@ pub fn parse_body(raw: &[u8], extra: &[&str]) -> Result<(BaseBody, Value), Error
         .filter(|s| crate::chain::assertion::uuid_ok(s))
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or(bad)?;
-    let expected_version = obj
-        .get("expected_version")
-        .and_then(Value::as_str)
-        .filter(|s| version_ok(s))
-        .ok_or(bad)?
-        .to_string();
+    // A string, or the owner's integer row version (HQ sends `case.version` as is).
+    let expected_version = match obj.get("expected_version") {
+        Some(Value::String(s)) if version_ok(s) => s.clone(),
+        Some(Value::Number(n)) if n.as_u64().is_some() => n.to_string(),
+        _ => return Err(bad),
+    };
     let reason_code = match obj.get("reason_code") {
         None | Some(Value::Null) => None,
         Some(Value::String(s)) if reason_ok(s) => Some(s.clone()),

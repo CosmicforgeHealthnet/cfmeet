@@ -640,7 +640,7 @@ Only `pricing.charges.simulate` (its input is a usage vector). Every other non-G
 No command is served by A3.0 itself; it is the core every A3+ family runs through (`services/admin-bridge/src/routes/commands.rs`).
 
 - **One UUID per HQ command.** `Idempotency-Key` = body `operation_id` = the readback key. A body whose `operation_id` differs is `COMMAND_BODY_INVALID`.
-- **Every command body** is `{operation_id, expected_version, reason_code?, note?}` plus the family's own fields; unknown fields are refused.
+- **Every command body** is `{operation_id, expected_version, reason_code?, note?}` plus the family's own fields; unknown fields are refused. `expected_version` is a string or the owner's non-negative integer row version (the same slot either way).
 - **Ledger** (`admin_operations`), keyed by staff member + `Idempotency-Key`:
   - A replay with the same intent (capability, path parameters, purpose, scope, exact body, approval) returns the stored outcome and does not consume the approval again.
   - A different intent under the same key is `IDEMPOTENCY_CONFLICT`.
