@@ -112,6 +112,8 @@ pub struct Bridge {
     pub clock: Clock,
     pub metrics: Metrics,
     pub health: crate::routes::HealthProbe,
+    /// Owner reads (none configured: every owner read is OWNER_UNAVAILABLE).
+    pub owners: Arc<dyn crate::owners::OwnerPort>,
     /// False when no database is configured (disabled bridge): readiness says so.
     pub database_configured: bool,
     hmac_cache: Mutex<HashMap<String, CachedKey>>,
@@ -193,6 +195,7 @@ impl Bridge {
             clock,
             metrics: Metrics::default(),
             health,
+            owners: Arc::new(crate::owners::NoOwners),
             database_configured: true,
             hmac_cache: Mutex::new(HashMap::new()),
         }
@@ -200,6 +203,11 @@ impl Bridge {
 
     /// Replaces the route table (tests exercise refusal paths of capabilities that no
     /// phase serves yet). Never used by the binary.
+    pub fn with_owners(mut self, owners: Arc<dyn crate::owners::OwnerPort>) -> Self {
+        self.owners = owners;
+        self
+    }
+
     #[doc(hidden)]
     pub fn with_catalog(mut self, caps: Vec<Capability>) -> Self {
         self.routes = RouteTable::new(caps);

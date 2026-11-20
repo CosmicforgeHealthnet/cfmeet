@@ -333,6 +333,730 @@
           }
         }
       },
+      "OrganizationSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organization_id",
+          "name",
+          "slug",
+          "lifecycle_status",
+          "provisioning_state",
+          "member_count",
+          "created_at",
+          "updated_at",
+          "version"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "lifecycle_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "provisioning_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "member_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OrganizationPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OrganizationSummary"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "OrganizationDetail": {
+        "description": "Operational view of one business organization. Contact details (address, public email, registration number) are never included.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organization_id",
+          "name",
+          "slug",
+          "lifecycle_status",
+          "provisioning_state",
+          "member_count",
+          "created_at",
+          "updated_at",
+          "version",
+          "creation_source",
+          "archived_at",
+          "organization_type",
+          "industry",
+          "country_code",
+          "legal_verification"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "lifecycle_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "provisioning_state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "member_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "creation_source": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "archived_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "organization_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "industry": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "country_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z]{2}$"
+          },
+          "legal_verification": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        }
+      },
+      "OrganizationAuditEvent": {
+        "description": "One organization audit event: who, what, when and the target. The owner's free-form summary is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "sequence",
+          "organization_id",
+          "action",
+          "actor",
+          "target_type",
+          "target_id",
+          "occurred_at"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "organization_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[a-z][a-z._]{0,63}$"
+          },
+          "actor": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "user_id",
+              "service"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "user_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "service": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
+          },
+          "target_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "target_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationAuditPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OrganizationAuditEvent"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "OrganizationMember": {
+        "description": "One membership. The member is an opaque CF Meet user id; no name or email.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "membership_id",
+          "user_id",
+          "role",
+          "status",
+          "joined_via",
+          "created_at",
+          "updated_at",
+          "removed_at",
+          "version"
+        ],
+        "properties": {
+          "membership_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "joined_via": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "removed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OrganizationMemberPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OrganizationMember"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "OrganizationPolicies": {
+        "description": "The organization's policy document (Organizations PolicyDocument v1, field by field). Sections the bridge has not reviewed are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "organization_id",
+          "revision",
+          "updated_at",
+          "policy"
+        ],
+        "properties": {
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "policy": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "member_directory",
+              "guests",
+              "meetings",
+              "features",
+              "retention",
+              "delegated_administration",
+              "apps"
+            ],
+            "properties": {
+              "member_directory": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "visibility",
+                  "searchable"
+                ],
+                "properties": {
+                  "visibility": {
+                    "enum": [
+                      "MEMBERS",
+                      "MANAGERS",
+                      "ADMINS"
+                    ]
+                  },
+                  "searchable": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "guests": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "invitations_allowed"
+                ],
+                "properties": {
+                  "invitations_allowed": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "meetings": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "host_creation"
+                ],
+                "properties": {
+                  "host_creation": {
+                    "enum": [
+                      "MEMBERS",
+                      "MANAGERS",
+                      "ADMINS"
+                    ]
+                  }
+                }
+              },
+              "features": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "meetings",
+                  "messaging",
+                  "calling"
+                ],
+                "properties": {
+                  "meetings": {
+                    "type": "boolean"
+                  },
+                  "messaging": {
+                    "type": "boolean"
+                  },
+                  "calling": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "retention": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "hint_days"
+                ],
+                "properties": {
+                  "hint_days": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 3650
+                  }
+                }
+              },
+              "delegated_administration": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "managers_may_invite",
+                  "managers_may_create_teams",
+                  "admins_may_manage_policies"
+                ],
+                "properties": {
+                  "managers_may_invite": {
+                    "type": "boolean"
+                  },
+                  "managers_may_create_teams": {
+                    "type": "boolean"
+                  },
+                  "admins_may_manage_policies": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "apps": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "install_tier",
+                      "allow_list",
+                      "user_installs_allowed"
+                    ],
+                    "properties": {
+                      "install_tier": {
+                        "enum": [
+                          "ADMINS",
+                          "MEMBERS"
+                        ]
+                      },
+                      "allow_list": {
+                        "type": [
+                          "array",
+                          "null"
+                        ],
+                        "maxItems": 200,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "user_installs_allowed": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "OrganizationTeam": {
+        "description": "One team. Its free-text description is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "team_id",
+          "name",
+          "parent_team_id",
+          "status",
+          "member_count",
+          "created_at",
+          "updated_at",
+          "archived_at",
+          "version"
+        ],
+        "properties": {
+          "team_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "parent_team_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "member_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archived_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OrganizationTeamPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OrganizationTeam"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "OrganizationBinding": {
+        "description": "One automatic or operator service binding of the organization's primary scope. Service account and credential ids are not relayed; no secret is ever held by the owner response.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "service",
+          "source",
+          "version",
+          "verified_at",
+          "credential_expires_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "service": {
+            "enum": [
+              "calling",
+              "messaging"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "verified_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "credential_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OrganizationBindingPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OrganizationBinding"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
       "Purpose": {
         "enum": [
           "support-review",

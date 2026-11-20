@@ -713,12 +713,24 @@ pub async fn list(
         return Err(ApiError::validation("status must be ACTIVE or ARCHIVED"));
     }
     read_access(&state, &caller, id).await?;
+    page(&state, id, status, q.cursor, limit).await
+}
+
+/// One page of an organization's teams in `status` (id order), with active member
+/// counts. Callers check access (and that the organization exists) first.
+pub(super) async fn page(
+    state: &AppState,
+    id: Uuid,
+    status: &str,
+    cursor: Option<Uuid>,
+    limit: i64,
+) -> ApiResult<Response> {
     let rows: Vec<TeamWithCount> = db::all(
         &state.db,
         "SELECT t.id, t.organization_id, t.name, t.description, t.parent_team_id, t.status, t.created_by, t.created_at, t.updated_at, t.archived_at, t.version, \
                 (SELECT count(*) FROM organization_team_members m WHERE m.team_id = t.id AND m.status = 'ACTIVE')::bigint AS member_count \
          FROM organization_teams t WHERE t.organization_id = $1 AND t.status = $2 AND ($3::uuid IS NULL OR t.id > $3) ORDER BY t.id LIMIT $4",
-        vec![id.into(), status.into(), q.cursor.into(), (limit + 1).into()],
+        vec![id.into(), status.into(), cursor.into(), (limit + 1).into()],
     )
     .await?;
     let more = rows.len() as i64 > limit;

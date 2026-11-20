@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.1.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.2.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -142,10 +142,23 @@ Every command needs `Idempotency-Key` (UUID). HQ never retries; the bridge sends
 | `RATE_LIMITED` | 429 | per staff member, permission and scope limit reached |
 | `AUDIT_UNAVAILABLE` | 503 | the audit row could not be written; nothing was done and no data is returned |
 | `DATASET_NOT_FOUND` | 404 | unknown dataset id |
+| `RESOURCE_NOT_FOUND` | 404 | the owning service has no such resource |
 | `OWNER_UNAVAILABLE` | 503 | the owning service did not answer a read |
 | `OWNER_REFUSED` | 422 | the owning service refused the command (FAILED) |
 | `UNKNOWN_OUTCOME` | 502 | a command was sent and no clear answer came back; settle by reading back, never resend |
 | `INTERNAL` | 500 | unexpected bridge failure |
+
+## Command outcomes
+
+For a command, these codes guarantee the owning service was never called (nothing was done): every 4xx code, and these 5xx codes, which the bridge raises before any owner call:
+
+- `BRIDGE_DISABLED`
+- `BRIDGE_UNAVAILABLE`
+- `POLICY_UNAVAILABLE`
+- `CAPABILITY_DISABLED`
+- `AUDIT_UNAVAILABLE`
+
+Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UNAVAILABLE`) is an unknown outcome: settle it by reading back, never resend.
 
 ## Served in this contract version
 
@@ -153,3 +166,11 @@ Every command needs `Idempotency-Key` (UUID). HQ never retries; the bridge sends
 - `bridge.health.read`
 - `bridge.datasets.read`
 - `hq.projections.status`
+- `organizations.organizations.search`
+- `organizations.organizations.read`
+- `organizations.bindings.list`
+- `organizations.audit.list`
+- `organizations.global-audit.list`
+- `organizations.members.list`
+- `organizations.teams.list`
+- `organizations.policies.read`

@@ -55,12 +55,23 @@ pub async fn list(
                 .ok_or(ApiError::new(ErrorCode::OrganizationNotFound))?;
         }
     }
+    page(&state, id, q.cursor, limit).await
+}
+
+/// One page of an organization's non-removed memberships (id order). Callers check
+/// access (and that the organization exists) first.
+pub(super) async fn page(
+    state: &AppState,
+    id: Uuid,
+    cursor: Option<Uuid>,
+    limit: i64,
+) -> ApiResult<Response> {
     let rows: Vec<MembershipRow> = db::all(
         &state.db,
         &format!(
             "SELECT {MEMBERSHIP_COLUMNS} FROM organization_memberships WHERE organization_id = $1 AND status <> 'REMOVED' AND ($2::uuid IS NULL OR id > $2) ORDER BY id LIMIT $3"
         ),
-        vec![id.into(), q.cursor.into(), (limit + 1).into()],
+        vec![id.into(), cursor.into(), (limit + 1).into()],
     )
     .await?;
     let more = rows.len() as i64 > limit;

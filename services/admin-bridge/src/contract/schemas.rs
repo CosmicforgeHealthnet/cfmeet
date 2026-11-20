@@ -181,6 +181,219 @@ pub fn components() -> Map<String, Value> {
         }),
     );
 
+    // ---- Organizations (A2) ----------------------------------------------------------
+    let uuid = json!({"type": "string", "format": "uuid"});
+    let nullable_uuid = json!({"type": ["string", "null"], "format": "uuid"});
+    let code = json!({"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"});
+    let short = |max: u32| json!({"type": "string", "minLength": 1, "maxLength": max});
+    let nullable_short = |max: u32| json!({"type": ["string", "null"], "maxLength": max});
+    let page = |item: Value| {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["items", "next_cursor"],
+            "properties": {
+                "items": {"type": "array", "maxItems": 100, "items": item},
+                "next_cursor": {"type": ["string", "null"], "pattern": CURSOR_PATTERN}
+            }
+        })
+    };
+    let org_summary_props = json!({
+        "organization_id": uuid,
+        "name": short(200),
+        "slug": short(100),
+        "lifecycle_status": code,
+        "provisioning_state": code,
+        "member_count": nullable_count,
+        "created_at": date_time,
+        "updated_at": date_time,
+        "version": {"type": "integer", "minimum": 0}
+    });
+    let summary_required = [
+        "organization_id",
+        "name",
+        "slug",
+        "lifecycle_status",
+        "provisioning_state",
+        "member_count",
+        "created_at",
+        "updated_at",
+        "version",
+    ];
+    m.insert(
+        "OrganizationSummary".into(),
+        json!({"type": "object", "additionalProperties": false, "required": summary_required, "properties": org_summary_props}),
+    );
+    m.insert(
+        "OrganizationPage".into(),
+        page(json!({"$ref": "#/components/schemas/OrganizationSummary"})),
+    );
+    let mut detail_props = org_summary_props.as_object().cloned().unwrap_or_default();
+    for (k, v) in [
+        ("creation_source", code.clone()),
+        ("archived_at", nullable_date_time.clone()),
+        ("organization_type", nullable_short(64)),
+        ("industry", nullable_short(128)),
+        (
+            "country_code",
+            json!({"type": ["string", "null"], "pattern": "^[A-Z]{2}$"}),
+        ),
+        (
+            "legal_verification",
+            json!({"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{0,63}$"}),
+        ),
+    ] {
+        detail_props.insert(k.into(), v);
+    }
+    let mut detail_required: Vec<&str> = summary_required.to_vec();
+    detail_required.extend([
+        "creation_source",
+        "archived_at",
+        "organization_type",
+        "industry",
+        "country_code",
+        "legal_verification",
+    ]);
+    m.insert(
+        "OrganizationDetail".into(),
+        json!({
+            "description": "Operational view of one business organization. Contact details (address, public email, registration number) are never included.",
+            "type": "object", "additionalProperties": false, "required": detail_required, "properties": detail_props
+        }),
+    );
+    m.insert(
+        "OrganizationAuditEvent".into(),
+        json!({
+            "description": "One organization audit event: who, what, when and the target. The owner's free-form summary is not relayed.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["event_id", "sequence", "organization_id", "action", "actor", "target_type", "target_id", "occurred_at"],
+            "properties": {
+                "event_id": uuid,
+                "sequence": {"type": "integer", "minimum": 1},
+                "organization_id": nullable_uuid,
+                "action": {"type": "string", "pattern": "^[a-z][a-z._]{0,63}$"},
+                "actor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["kind", "user_id", "service"],
+                    "properties": {"kind": code, "user_id": nullable_uuid, "service": short(64)}
+                },
+                "target_type": short(64),
+                "target_id": nullable_uuid,
+                "occurred_at": date_time
+            }
+        }),
+    );
+    m.insert(
+        "OrganizationAuditPage".into(),
+        page(json!({"$ref": "#/components/schemas/OrganizationAuditEvent"})),
+    );
+    m.insert(
+        "OrganizationMember".into(),
+        json!({
+            "description": "One membership. The member is an opaque CF Meet user id; no name or email.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["membership_id", "user_id", "role", "status", "joined_via", "created_at", "updated_at", "removed_at", "version"],
+            "properties": {
+                "membership_id": uuid,
+                "user_id": uuid,
+                "role": code,
+                "status": code,
+                "joined_via": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+                "created_at": date_time,
+                "updated_at": date_time,
+                "removed_at": nullable_date_time,
+                "version": {"type": "integer", "minimum": 0}
+            }
+        }),
+    );
+    m.insert(
+        "OrganizationMemberPage".into(),
+        page(json!({"$ref": "#/components/schemas/OrganizationMember"})),
+    );
+    let tier3 = json!({"enum": ["MEMBERS", "MANAGERS", "ADMINS"]});
+    let section = |props: Value| {
+        let required: Vec<String> = props
+            .as_object()
+            .map(|o| o.keys().cloned().collect())
+            .unwrap_or_default();
+        json!({"type": "object", "additionalProperties": false, "required": required, "properties": props})
+    };
+    m.insert(
+        "OrganizationPolicies".into(),
+        json!({
+            "description": "The organization's policy document (Organizations PolicyDocument v1, field by field). Sections the bridge has not reviewed are not relayed.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["organization_id", "revision", "updated_at", "policy"],
+            "properties": {
+                "organization_id": uuid,
+                "revision": {"type": "integer", "minimum": 0},
+                "updated_at": nullable_date_time,
+                "policy": section(json!({
+                    "member_directory": section(json!({"visibility": tier3, "searchable": {"type": "boolean"}})),
+                    "guests": section(json!({"invitations_allowed": {"type": "boolean"}})),
+                    "meetings": section(json!({"host_creation": tier3})),
+                    "features": section(json!({"meetings": {"type": "boolean"}, "messaging": {"type": "boolean"}, "calling": {"type": "boolean"}})),
+                    "retention": section(json!({"hint_days": {"type": ["integer", "null"], "minimum": 1, "maximum": 3650}})),
+                    "delegated_administration": section(json!({
+                        "managers_may_invite": {"type": "boolean"},
+                        "managers_may_create_teams": {"type": "boolean"},
+                        "admins_may_manage_policies": {"type": "boolean"}
+                    })),
+                    "apps": {
+                        "anyOf": [
+                            {"type": "null"},
+                            section(json!({
+                                "install_tier": {"enum": ["ADMINS", "MEMBERS"]},
+                                "allow_list": {"type": ["array", "null"], "maxItems": 200, "uniqueItems": true, "items": {"type": "string", "format": "uuid"}},
+                                "user_installs_allowed": {"type": "boolean"}
+                            }))
+                        ]
+                    }
+                }))
+            }
+        }),
+    );
+    m.insert(
+        "OrganizationTeam".into(),
+        json!({
+            "description": "One team. Its free-text description is not relayed.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["team_id", "name", "parent_team_id", "status", "member_count", "created_at", "updated_at", "archived_at", "version"],
+            "properties": {
+                "team_id": uuid, "name": short(200), "parent_team_id": nullable_uuid, "status": code,
+                "member_count": nullable_count, "created_at": date_time, "updated_at": date_time,
+                "archived_at": nullable_date_time, "version": {"type": "integer", "minimum": 0}
+            }
+        }),
+    );
+    m.insert(
+        "OrganizationTeamPage".into(),
+        page(json!({"$ref": "#/components/schemas/OrganizationTeam"})),
+    );
+    m.insert(
+        "OrganizationBinding".into(),
+        json!({
+            "description": "One automatic or operator service binding of the organization's primary scope. Service account and credential ids are not relayed; no secret is ever held by the owner response.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["service", "source", "version", "verified_at", "credential_expires_at", "created_at", "updated_at"],
+            "properties": {
+                "service": {"enum": ["calling", "messaging"]}, "source": code, "version": {"type": "integer", "minimum": 0},
+                "verified_at": nullable_date_time, "credential_expires_at": nullable_date_time,
+                "created_at": date_time, "updated_at": date_time
+            }
+        }),
+    );
+    m.insert(
+        "OrganizationBindingPage".into(),
+        page(json!({"$ref": "#/components/schemas/OrganizationBinding"})),
+    );
+
     m.insert(
         "Purpose".into(),
         json!({"enum": names(Purpose::ALL, Purpose::as_str)}),
