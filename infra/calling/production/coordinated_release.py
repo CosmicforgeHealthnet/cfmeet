@@ -102,9 +102,9 @@ NOTIFICATIONS_DARK_ENV = {
     'NOTIFICATIONS_PUSH_PROVIDER': 'none',
     'NOTIFICATIONS_DATA_KEY_ID': 'notifications-data-1',
     'NOTIFICATIONS_DATA_KEY_FILE': NOTIFICATIONS_DATA_KEY_TARGET,
-    # B6 / C5: 16 per replica (two replicas); activate-database-pools applies it to
-    # running replicas after checking the core database's connection budget.
-    'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '16',
+    # B6 / C5: raised (to DATABASE_POOLS) only by activate-database-pools, after checking the
+    # core database's connection budget.
+    'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '8',
 }
 
 SERVICES = {
@@ -2787,21 +2787,23 @@ POOL_SETTINGS = {
     'organizations': ('ORGANIZATIONS_DATABASE_MAX_CONNECTIONS', 10),
     'notifications': ('NOTIFICATIONS_DATABASE_MAX_CONNECTIONS', 10),
     'notifications-2': ('NOTIFICATIONS_DATABASE_MAX_CONNECTIONS', 10),
-    'messaging': ('MESSAGING_DATABASE_MAX_CONNECTIONS', 25),
-    'calling': ('CALLING_DATABASE_MAX_CONNECTIONS', 20),
+    'messaging': ('MESSAGING_DATABASE_MAX_CONNECTIONS', 10),
+    'calling': ('CALLING_DATABASE_MAX_CONNECTIONS', 10),
     'communications': (None, 12),
     'numbering': ('NUMBERING_DATABASE_MAX_CONNECTIONS', 10),
     'privacy-relay': ('PRIVACY_RELAY_DATABASE_MAX_CONNECTIONS', 10),
     'sms-gateway': ('SMS_GATEWAY_DATABASE_MAX_CONNECTIONS', 10),
     'telephony': ('TELEPHONY_DATABASE_MAX_CONNECTIONS', 10),
-    'meeting-service': ('DATABASE_MAX_CONNECTIONS', 20),
+    'meeting-service': ('DATABASE_MAX_CONNECTIONS', 10),
     'developer-platform': ('DEVELOPER_PLATFORM_DATABASE_MAX_CONNECTIONS', 10),
     'developer-platform-worker': ('DEVELOPER_PLATFORM_DATABASE_MAX_CONNECTIONS', 10),
 }
 POOL_UNKNOWN = 10
-# The Notification Service's pool per replica (two replicas): its team owns the code; only the
-# release configuration changes here (the dark template used 8).
-NOTIFICATIONS_POOL = '16'
+# The pools activate-database-pools sets (the only way they rise above the code defaults of 10
+# and the Notification Service template's 8). The Notification Service's code is not changed:
+# only its release configuration (two replicas, 16 each).
+DATABASE_POOLS = {'messaging': '25', 'calling': '20', 'meeting-service': '20',
+                  'notifications': '16', 'notifications-2': '16'}
 # Connections kept free for migrators, backups, monitoring and an operator's psql.
 POOL_HEADROOM = 15
 
@@ -2810,7 +2812,9 @@ def pool_plan(envs, overrides):
     """{service: pool size} once `overrides` ({service: {var: value}}) apply to `envs`."""
     plan = {}
     for name in SERVICES:
-        if not SERVICES[name]['db'] or name not in envs:
+        # The Meeting Service's database is not listed in SERVICES (it predates the
+        # catalogue); counted conservatively, as if it were on cfmeet-core-db too.
+        if name not in envs or not (SERVICES[name]['db'] or name == 'meeting-service'):
             continue
         var, default = POOL_SETTINGS.get(name, (None, POOL_UNKNOWN))
         env = dict(envs[name], **overrides.get(name, {}))
@@ -2831,13 +2835,13 @@ def pool_budget_errors(plan, max_connections, reserved):
 
 
 def activate_database_pools(sha, run_id, confirm):
-    """B6 / C5: Messaging, Notifications and Calling logged slow pool acquisition. The
-    Messaging (25), Calling (20) and Meeting Service (20) code defaults rise with their images;
-    the Notification Service replicas carry their pool in the release configuration (8), raised
-    here to NOTIFICATIONS_POOL each. Refuses unless every pool together fits the core
-    database's max_connections with headroom. `rollback` restores the previous containers."""
-    overrides = {'notifications': {'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': NOTIFICATIONS_POOL},
-                 'notifications-2': {'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': NOTIFICATIONS_POOL}}
+    """B6 / C5: Messaging, Notifications and Calling logged slow pool acquisition. The only way
+    the bigger pools take effect (code defaults stay 10, the Notification template 8): sets
+    DATABASE_POOLS on Messaging, Calling, the Meeting Service and both Notification replicas,
+    and refuses unless every pool together (the planned values plus every other service's
+    current one) fits the core database's max_connections with reserve and headroom.
+    `rollback` restores the previous containers (previous pools)."""
+    overrides = {name: {POOL_SETTINGS[name][0]: size} for name, size in DATABASE_POOLS.items()}
     envs = running_envs()
     max_connections = int(release.db_sql('postgres', 'SHOW max_connections;').strip())
     reserved = int(release.db_sql('postgres', 'SHOW superuser_reserved_connections;').strip())
@@ -2910,7 +2914,7 @@ ACTIVATIONS = {
     'activate-client-address-limits': ((), activate_client_address_limits),
     # S2: account deletion / data download reach Calling (call history).
     'activate-account-privacy': ((), activate_account_privacy),
-    # B6 / C5: Notification Service pool size within the core database's connection budget.
+    # B6 / C5: the bigger database pools, only within the core database's connection budget.
     'activate-database-pools': ((), activate_database_pools),
     # Notification Service N6: owner read APIs (X1-X5) granted to cfmeet.notifications.
     'activate-notifications-owners': ((), lambda sha, run_id, confirm: notif_ops.activate_owners(

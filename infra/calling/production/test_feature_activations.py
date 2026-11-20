@@ -615,12 +615,21 @@ class DatabasePools(unittest.TestCase):
         envs = {'messaging': {}, 'calling': {'CALLING_DATABASE_MAX_CONNECTIONS': '12'},
                 'notifications': {'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '8'}, 'api-gateway': {}}
         plan = cr.pool_plan(envs, {'notifications': {'NOTIFICATIONS_DATABASE_MAX_CONNECTIONS': '16'}})
-        self.assertEqual(plan, {'messaging': 25, 'calling': 12, 'notifications': 16})
+        self.assertEqual(plan, {'messaging': 10, 'calling': 12, 'notifications': 16})
 
     def test_budget_refuses_more_than_the_server_allows(self):
         self.assertEqual(cr.pool_budget_errors({'a': 40, 'b': 40}, 100, 3), [])
         self.assertTrue(cr.pool_budget_errors({'a': 50, 'b': 40}, 100, 3))
 
-    def test_notification_pool_change_is_release_configuration_only(self):
-        self.assertEqual(cr.NOTIFICATIONS_DARK_ENV['NOTIFICATIONS_DATABASE_MAX_CONNECTIONS'], cr.NOTIFICATIONS_POOL)
+    def test_bigger_pools_only_through_the_operation(self):
+        # Releases keep the conservative pools; the operation sets every raised one.
+        self.assertEqual(cr.NOTIFICATIONS_DARK_ENV['NOTIFICATIONS_DATABASE_MAX_CONNECTIONS'], '8')
+        self.assertTrue(all(cr.POOL_SETTINGS[n][1] == 10 for n in ('messaging', 'calling', 'meeting-service')))
+        self.assertEqual(set(cr.DATABASE_POOLS), {'messaging', 'calling', 'meeting-service', 'notifications', 'notifications-2'})
+        envs = {n: {} for n in cr.DATABASE_POOLS}
+        overrides = {n: {cr.POOL_SETTINGS[n][0]: v} for n, v in cr.DATABASE_POOLS.items()}
+        plan = cr.pool_plan(envs, overrides)
+        self.assertEqual(plan, {n: int(v) for n, v in cr.DATABASE_POOLS.items()})
+        self.assertTrue(cr.pool_budget_errors(plan, 100, 3))  # 97 needed: a default server refuses
+        self.assertEqual(cr.pool_budget_errors(plan, 200, 3), [])
         self.assertIn(('activate-account-privacy', 'calling', 'meeting-service', ('calling-account.privacy',)), cr.GRANTS)

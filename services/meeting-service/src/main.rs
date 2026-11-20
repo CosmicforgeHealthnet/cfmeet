@@ -16,12 +16,12 @@ use backend::{
     },
 };
 
-/// `DATABASE_MAX_CONNECTIONS` (2-200, default 20).
+/// `DATABASE_MAX_CONNECTIONS` (2-200, default 10).
 fn database_max_connections() -> u32 {
     std::env::var("DATABASE_MAX_CONNECTIONS")
         .ok()
         .and_then(|v| v.trim().parse::<u32>().ok())
-        .unwrap_or(20)
+        .unwrap_or(10)
         .clamp(2, 200)
 }
 
@@ -40,8 +40,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Connecting to database...");
     let mut db_opts = ConnectOptions::new(&app_config.database_url);
     db_opts
-        // B6: the pool is sized for production bursts (sign-in, meeting joins, the outbox
-        // workers); `DATABASE_MAX_CONNECTIONS` (2-200, default 20) tunes it per deployment.
+        // B6: `DATABASE_MAX_CONNECTIONS` (2-200, default 10) sizes the pool per deployment;
+        // production raises it only through the release operation `activate-database-pools`,
+        // which checks the database's connection budget first.
         .max_connections(database_max_connections())
         .min_connections(2)
         .connect_timeout(std::time::Duration::from_secs(30))
