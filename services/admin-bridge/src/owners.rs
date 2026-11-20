@@ -3,8 +3,12 @@
 //! * The bridge signs with its OWN `cf-service+jwt` (`cfmeet.admin-bridge`, one audience,
 //!   short-lived); the HQ staff token is never passed on.
 //! * Every call carries `X-CF-Operator: hq:<sub>`; owners accept it only from the bridge.
-//! * Reads only in A2. A 401 / 403 from an owner is OUR misconfiguration (missing grant)
-//!   and never becomes data: it is logged and answered `OWNER_UNAVAILABLE`.
+//! * A 401 / 403 from an owner on a read is OUR misconfiguration (missing grant) and never
+//!   becomes data: it is logged and answered `OWNER_UNAVAILABLE`.
+//! * Commands (A3+) are sent ONCE with HQ's `Idempotency-Key` and the two-person approval
+//!   headers; the answer is classified into [`CommandOutcome`]. Anything after the request
+//!   may have left the bridge without a clear answer is `Unknown`, settled only from the
+//!   owner's own record (`GET /internal/v1/operator/operations/{idempotency_key}`).
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -60,6 +64,42 @@ impl From<OwnerError> for ErrorCode {
     }
 }
 
+/// The second person of a two-person approval, forwarded to the owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalHeaders {
+    /// `hq:<approver>`.
+    pub approver: String,
+    pub approval_ref: String,
+    pub intent_digest: String,
+}
+
+/// One command to one owner.
+#[derive(Debug, Clone)]
+pub struct CommandCall<'a> {
+    pub path: &'a str,
+    pub body: &'a Value,
+    /// `hq:<sub>`.
+    pub operator: &'a str,
+    pub approval: Option<&'a ApprovalHeaders>,
+    pub idempotency_key: &'a str,
+}
+
+/// What became of a command.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommandOutcome {
+    /// 2xx with a JSON body.
+    Applied(Value),
+    /// The owner refused it (4xx): nothing was done.
+    Refused { status: u16, code: Option<String> },
+    /// It never left the bridge (no target, path, signing or encoding failure).
+    NotSent { configured: bool },
+    /// Sent, and no clear answer: settle from the owner's record, never resend.
+    Unknown,
+}
+
+/// The owner's own record of a command, by `Idempotency-Key`.
+pub const OPERATION_RECORD_PATH: &str = "/internal/v1/operator/operations/";
+
 /// One read from one owner.
 #[async_trait]
 pub trait OwnerPort: Send + Sync + 'static {
@@ -71,6 +111,22 @@ pub trait OwnerPort: Send + Sync + 'static {
         query: &[(&str, String)],
         operator: &str,
     ) -> Result<Value, OwnerError>;
+
+    /// Sends one command, once.
+    async fn command(&self, _owner: Owner, _call: CommandCall<'_>) -> CommandOutcome {
+        CommandOutcome::NotSent { configured: false }
+    }
+
+    /// The owner's record of the command sent with `idempotency_key` (`None`: the owner has
+    /// no such record).
+    async fn operation_record(
+        &self,
+        _owner: Owner,
+        _idempotency_key: &str,
+        _operator: &str,
+    ) -> Result<Option<Value>, OwnerError> {
+        Err(OwnerError::Unavailable)
+    }
 }
 
 /// No owner is configured: every owner read is unavailable (honest, never empty data).
@@ -175,6 +231,76 @@ impl OwnerPort for HttpOwners {
             return Err(OwnerError::Unavailable);
         }
         response.json::<Value>().map_err(|_| OwnerError::Contract)
+    }
+
+    async fn command(&self, owner: Owner, call: CommandCall<'_>) -> CommandOutcome {
+        let Some(target) = self.configured.get(&owner) else {
+            return CommandOutcome::NotSent { configured: false };
+        };
+        let request = OutboundServiceRequest::new_operation(target.clone());
+        let mut headers = vec![
+            ("x-cf-operator", call.operator),
+            ("idempotency-key", call.idempotency_key),
+        ];
+        if let Some(a) = call.approval {
+            headers.push(("x-cf-approver", a.approver.as_str()));
+            headers.push(("x-cf-approval-ref", a.approval_ref.as_str()));
+            headers.push(("x-cf-intent-digest", a.intent_digest.as_str()));
+        }
+        let result = self
+            .client
+            .exchange_json_query_with_headers(
+                &request,
+                http::Method::POST,
+                call.path,
+                &[],
+                &headers,
+                Some(call.body),
+            )
+            .await;
+        match result {
+            Ok(r) if (200..300).contains(&r.status()) => match r.json::<Value>() {
+                Ok(v) => CommandOutcome::Applied(v),
+                Err(_) => CommandOutcome::Unknown,
+            },
+            Ok(_) => CommandOutcome::Unknown,
+            Err(InternalCallError::Status { status, code, .. }) if (400..500).contains(&status) => {
+                if matches!(status, 401 | 403) {
+                    tracing::error!(
+                        owner = owner.as_str(),
+                        status,
+                        code = code.as_deref().unwrap_or("-"),
+                        "owner refused a bridge command: check its grant"
+                    );
+                }
+                CommandOutcome::Refused { status, code }
+            }
+            Err(
+                InternalCallError::UnknownTarget(_)
+                | InternalCallError::InvalidPath
+                | InternalCallError::Signing(_)
+                | InternalCallError::Encoding
+                | InternalCallError::InvalidHeader,
+            ) => CommandOutcome::NotSent { configured: true },
+            Err(e) => {
+                tracing::warn!(owner = owner.as_str(), error = %e, "command outcome unknown");
+                CommandOutcome::Unknown
+            }
+        }
+    }
+
+    async fn operation_record(
+        &self,
+        owner: Owner,
+        idempotency_key: &str,
+        operator: &str,
+    ) -> Result<Option<Value>, OwnerError> {
+        let path = format!("{OPERATION_RECORD_PATH}{idempotency_key}");
+        match self.read(owner, &path, &[], operator).await {
+            Ok(v) => Ok(Some(v)),
+            Err(OwnerError::NotFound) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 

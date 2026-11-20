@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Admin Bridge (HQ interface v1)",
-    "version": "1.10.0",
+    "version": "1.11.0",
     "description": "Private HQ -> CF Meet admin bridge. Transport, signing, staff assertion and authorization rules: signing-profile.md. Artifact state never authorizes anything at runtime."
   },
   "servers": [
@@ -747,6 +747,253 @@
         "x-cfmeet-query-shape": "SCOPED_WINDOW",
         "x-cfmeet-permission": "bridge.datasets.read",
         "x-cfmeet-risk": "R0",
+        "x-cfmeet-approval": "NONE",
+        "x-cfmeet-state": "READ_ONLY",
+        "x-cfmeet-owner": "admin-bridge"
+      }
+    },
+    "/internal/cfmeet-admin/v1/hq/operations/{idempotency_key}": {
+      "get": {
+        "operationId": "bridge.operations.read",
+        "summary": "bridge.operations.read",
+        "tags": [
+          "bridge"
+        ],
+        "parameters": [
+          {
+            "name": "idempotency_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "const": "cfmeet"
+            }
+          },
+          {
+            "name": "zone",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "production",
+                "sandbox"
+              ]
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "purpose",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "support-review",
+                "verification-review",
+                "abuse-review",
+                "billing-review",
+                "pricing-change",
+                "ops-incident",
+                "release-request",
+                "privacy-request"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "contract_version",
+                    "product",
+                    "correlation_id",
+                    "as_of",
+                    "freshness",
+                    "result",
+                    "error"
+                  ],
+                  "properties": {
+                    "contract_version": {
+                      "const": "1.0"
+                    },
+                    "product": {
+                      "const": "cfmeet"
+                    },
+                    "correlation_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "as_of": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "freshness": {
+                      "enum": [
+                        "LIVE",
+                        "RECENT",
+                        "STALE",
+                        "PARTIAL",
+                        "UNKNOWN",
+                        "UNAVAILABLE"
+                      ]
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/OperationReadback"
+                    },
+                    "error": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Error (signing-profile.md lists every code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-cfmeet-kind": "READ",
+        "x-cfmeet-query-shape": "SCOPED",
+        "x-cfmeet-permission": "bridge.operations.read",
+        "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
         "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "admin-bridge"
@@ -63570,6 +63817,60 @@
                 }
               }
             }
+          }
+        }
+      },
+      "OperationReadback": {
+        "description": "One command as the bridge's operations ledger holds it, keyed by the Idempotency-Key HQ sent (bridge.operations.read). SUCCEEDED and FAILED are settled and never change. UNKNOWN_OUTCOME and SENT are settled only from the owning service's own record of that key, never by resending: FAILED with source_status NOT_RECEIVED when the owner has no record after 600 s, NOT_SENT when the bridge never sent it.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotency_key",
+          "capability_id",
+          "status",
+          "source_status",
+          "source_version",
+          "settled_at"
+        ],
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "capability_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*){1,3}$",
+            "maxLength": 96
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "SENT",
+              "SUCCEEDED",
+              "FAILED",
+              "UNKNOWN_OUTCOME"
+            ]
+          },
+          "source_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._:-]{1,64}$"
+          },
+          "settled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           }
         }
       },

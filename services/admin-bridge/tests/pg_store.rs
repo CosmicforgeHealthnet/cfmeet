@@ -11,7 +11,7 @@ use admin_bridge::store::{
     GENESIS_HASH,
 };
 use admin_bridge_migration::MigratorTrait;
-use chrono::{Duration, NaiveDate, TimeZone, Utc};
+use chrono::{Duration, NaiveDate, SubsecRound, TimeZone, Utc};
 use sea_orm::{
     ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement, Value as DbValue,
 };
@@ -633,4 +633,160 @@ async fn migrations_create_only_admin_tables_and_roll_back() {
     let _ = conn
         .execute_unprepared(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
         .await;
+}
+
+fn operation(key: Uuid, target: &str, version: &str) -> admin_bridge::store::Operation {
+    admin_bridge::store::Operation {
+        principal_sub: "staff-0001".into(),
+        idempotency_key: key,
+        operation_id: key,
+        capability: "partners.webhook-delivery.retry".into(),
+        owner: "developer-platform".into(),
+        purpose: "ops-incident".into(),
+        // Key order kept exact by `json` (the readback compares scopes).
+        scope: json!({"market": "GLOBAL", "organization": "cfmeet", "zone": "production", "tenant": "t1"}),
+        intent_sha256: HEX_A.into(),
+        target: target.into(),
+        expected_version: version.into(),
+        approval_id: None,
+        correlation_id: Uuid::new_v4(),
+        status: admin_bridge::store::OpStatus::Pending,
+        source_status: None,
+        source_version: None,
+        error_code: None,
+        created_at: Utc.timestamp_opt(1_795_000_000, 123_456_789).unwrap(),
+        sent_at: None,
+        settled_at: None,
+    }
+}
+
+#[tokio::test]
+async fn operations_are_sent_once_settled_once_and_never_deleted() {
+    use admin_bridge::store::{BeginOutcome, OpStatus, Settlement};
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let s = &db.store;
+    let key = Uuid::new_v4();
+    let op = operation(key, "t:1", "3");
+    assert_eq!(s.begin_operation(&op).await.unwrap(), BeginOutcome::Started);
+    let stored = s.operation("staff-0001", key).await.unwrap().unwrap();
+    assert_eq!(stored.status, OpStatus::Pending);
+    assert_eq!(stored.scope, op.scope);
+    assert_eq!(stored.created_at, op.created_at.trunc_subsecs(6));
+    // Same key: the stored row comes back. Same target and version under another key: taken.
+    assert!(matches!(
+        s.begin_operation(&op).await.unwrap(),
+        BeginOutcome::Existing(_)
+    ));
+    assert_eq!(
+        s.begin_operation(&operation(Uuid::new_v4(), "t:1", "3"))
+            .await
+            .unwrap(),
+        BeginOutcome::VersionTaken
+    );
+    // Another staff member's key space is separate.
+    let mut other = operation(key, "t:2", "1");
+    other.principal_sub = "staff-0002".into();
+    assert_eq!(
+        s.begin_operation(&other).await.unwrap(),
+        BeginOutcome::Started
+    );
+
+    let now = Utc::now();
+    assert!(s.mark_sent("staff-0001", key, now).await.unwrap());
+    assert!(
+        !s.mark_sent("staff-0001", key, now).await.unwrap(),
+        "sent once"
+    );
+    let unknown = Settlement {
+        status: OpStatus::UnknownOutcome,
+        source_status: None,
+        source_version: None,
+        error_code: Some("UNKNOWN_OUTCOME".into()),
+        at: now,
+    };
+    assert!(s
+        .settle_operation("staff-0001", key, &unknown)
+        .await
+        .unwrap());
+    let done = Settlement {
+        status: OpStatus::Succeeded,
+        source_status: Some("RETRY_QUEUED".into()),
+        source_version: Some("4".into()),
+        error_code: None,
+        at: now,
+    };
+    assert!(s.settle_operation("staff-0001", key, &done).await.unwrap());
+    let failed = Settlement {
+        status: OpStatus::Failed,
+        ..done.clone()
+    };
+    assert!(
+        !s.settle_operation("staff-0001", key, &failed)
+            .await
+            .unwrap(),
+        "settled rows never change"
+    );
+    let row = s.operation("staff-0001", key).await.unwrap().unwrap();
+    assert_eq!(
+        (row.status, row.source_version.as_deref()),
+        (OpStatus::Succeeded, Some("4"))
+    );
+    assert!(row.settled_at.is_some());
+
+    // The trigger refuses what the store never does.
+    assert!(db
+        .exec("UPDATE admin_operations SET status = 'FAILED' WHERE idempotency_key = $1 AND principal_sub = 'staff-0001'", vec![key.into()])
+        .await
+        .is_err());
+    assert!(db
+        .exec(
+            "UPDATE admin_operations SET target = 'x' WHERE principal_sub = 'staff-0002'",
+            vec![]
+        )
+        .await
+        .is_err());
+    assert!(db
+        .exec("UPDATE admin_operations SET status = 'SUCCEEDED', sent_at = now(), settled_at = now() WHERE principal_sub = 'staff-0002'", vec![])
+        .await
+        .is_err(), "PENDING cannot skip SENT");
+    assert!(db
+        .exec("DELETE FROM admin_operations", vec![])
+        .await
+        .is_err());
+    assert!(db.exec("TRUNCATE admin_operations", vec![]).await.is_err());
+
+    // A FAILED operation frees its target version.
+    let k2 = Uuid::new_v4();
+    let pending_fail = Settlement {
+        status: OpStatus::Failed,
+        source_status: Some("NOT_SENT".into()),
+        source_version: None,
+        error_code: Some("BRIDGE_UNAVAILABLE".into()),
+        at: now,
+    };
+    assert_eq!(
+        s.begin_operation(&operation(k2, "t:3", "1")).await.unwrap(),
+        BeginOutcome::Started
+    );
+    assert!(s
+        .settle_operation("staff-0001", k2, &pending_fail)
+        .await
+        .unwrap());
+    assert_eq!(
+        s.begin_operation(&operation(Uuid::new_v4(), "t:3", "1"))
+            .await
+            .unwrap(),
+        BeginOutcome::Started
+    );
+
+    // Open rows, oldest first; settled ones are not listed.
+    let open = s
+        .open_operations(now + Duration::days(1), 10)
+        .await
+        .unwrap();
+    assert_eq!(open.len(), 2);
+    assert!(open.iter().all(|o| !o.status.settled()));
+    db.drop().await;
 }

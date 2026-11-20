@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.10.0",
+  "contract_version": "1.11.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "1b744cb1867d53a7416a82a5ffff29d5a296958613b84f5bcfc919e54887862b",
-    "capability_matrix_sha256": "65868ef86dbe74a36e7a4383fb435bac61c0276455b8c502a26c80127b938761"
+    "openapi_sha256": "007c970ea7ab11f3167c317d7acb24d71d2a0819c677cb0055953534243a7ae4",
+    "capability_matrix_sha256": "471ec41d6f7e44200480ab764f894e6c37316430ca04c5eb680f4820cb46b1f5"
   },
   "query_shapes": {
     "SCOPED": [
@@ -49,9 +49,9 @@
     ]
   },
   "totals": {
-    "capabilities": 246,
+    "capabilities": 247,
     "by_state": {
-      "READ_ONLY": 88,
+      "READ_ONLY": 89,
       "AVAILABLE": 0,
       "DISABLED": 114,
       "BLOCKED_DEPENDENCY": 44
@@ -230,6 +230,74 @@
       "source_tests": [
         "datasets_are_null_not_zero_until_sources_report",
         "worker_identity_reads_datasets_with_the_workload_acr"
+      ],
+      "contact_search": false
+    },
+    {
+      "id": "bridge.operations.read",
+      "version": "1.0",
+      "module": "bridge",
+      "kind": "READ",
+      "owner": "admin-bridge",
+      "owner_status": "LOCAL",
+      "phase": "A3",
+      "method": "GET",
+      "path": "/hq/operations/{idempotency_key}",
+      "source_endpoint": null,
+      "path_params": [
+        {
+          "name": "idempotency_key",
+          "format": "uuid"
+        }
+      ],
+      "query_shape": "SCOPED",
+      "query_required": [
+        "market",
+        "organization",
+        "zone",
+        "tenant",
+        "purpose"
+      ],
+      "purposes": [
+        "support-review",
+        "verification-review",
+        "abuse-review",
+        "billing-review",
+        "pricing-change",
+        "ops-incident",
+        "release-request",
+        "privacy-request"
+      ],
+      "roles": [
+        "cfmeet.support",
+        "cfmeet.trust_safety",
+        "cfmeet.verification.reviewer",
+        "cfmeet.partner_ops",
+        "cfmeet.pricing.editor",
+        "cfmeet.pricing.approver",
+        "cfmeet.platform_ops",
+        "cfmeet.security_admin",
+        "cfmeet.release_manager"
+      ],
+      "request_body": null,
+      "success_status": 200,
+      "success_media": "application/json",
+      "result_schema": {
+        "$ref": "#/components/schemas/OperationReadback"
+      },
+      "matrix_state": "READ_ONLY",
+      "permission": "bridge.operations.read",
+      "risk": "R1",
+      "privacy": "INTERNAL",
+      "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; bridge-local, no owner call",
+      "source_version_required": false,
+      "idempotency_required": false,
+      "approval": "NONE",
+      "feature_flag": "ADMIN_BRIDGE_ENABLED",
+      "blocker": null,
+      "source_tests": [
+        "operations_readback_settles_from_the_owner_record_and_never_resends",
+        "operations_readback_is_private_to_the_staff_member_purpose_and_scope"
       ],
       "contact_search": false
     },

@@ -164,6 +164,15 @@ jobs:
           must_fail "UPDATE admin_remote_principals SET material = repeat('b', 64)"
           must_fail "CREATE TABLE admin_rogue (id int)"
           must_fail "DROP TABLE admin_projections"
+          # Operations ledger: insert and the send-once transitions only.
+          rt "INSERT INTO admin_operations (principal_sub, idempotency_key, operation_id, capability, owner, purpose, scope, intent_sha256, target, expected_version, correlation_id, status, created_at) VALUES ('s', '6f1e8c2a-3b4d-4e5f-8a6b-7c8d9e0f1a2b', '6f1e8c2a-3b4d-4e5f-8a6b-7c8d9e0f1a2b', 'c.x.y', 'o', 'p', '{}'::json, repeat('a', 64), 't', '1', gen_random_uuid(), 'PENDING', now())"
+          rt "UPDATE admin_operations SET status = 'SENT', sent_at = now() WHERE principal_sub = 's'"
+          must_fail "UPDATE admin_operations SET status = 'PENDING', sent_at = NULL"
+          must_fail "UPDATE admin_operations SET target = 'other'"
+          rt "UPDATE admin_operations SET status = 'SUCCEEDED', settled_at = now() WHERE principal_sub = 's'"
+          must_fail "UPDATE admin_operations SET status = 'FAILED'"
+          must_fail "DELETE FROM admin_operations"
+          must_fail "TRUNCATE admin_operations"
           echo "runtime role is least-privilege"
 
 

@@ -101,6 +101,7 @@ pub struct Harness {
     pub pki: Pki,
     pub store: Arc<MemoryStore>,
     pub addr: std::net::SocketAddr,
+    pub bridge: Arc<Bridge>,
 }
 
 pub struct Options {
@@ -109,6 +110,7 @@ pub struct Options {
     pub policy: bool,
     pub catalog: Option<Vec<Capability>>,
     pub switches_all_on: bool,
+    pub test_commands: Vec<(&'static str, Owner, &'static str)>,
 }
 
 impl Default for Options {
@@ -119,6 +121,7 @@ impl Default for Options {
             policy: true,
             catalog: None,
             switches_all_on: false,
+            test_commands: Vec::new(),
         }
     }
 }
@@ -206,6 +209,9 @@ pub async fn start(opts: Options) -> Harness {
     if let Some(o) = opts.owners {
         bridge = bridge.with_owners(o);
     }
+    if !opts.test_commands.is_empty() {
+        bridge = bridge.with_test_commands(opts.test_commands);
+    }
     let bridge = Arc::new(bridge);
     if opts.policy {
         bridge.load_policy().await.unwrap();
@@ -218,8 +224,13 @@ pub async fn start(opts: Options) -> Harness {
     .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(server::run_hq(bridge, listener, acceptor));
-    Harness { pki, store, addr }
+    tokio::spawn(server::run_hq(bridge.clone(), listener, acceptor));
+    Harness {
+        pki,
+        store,
+        addr,
+        bridge,
+    }
 }
 
 // ---- HQ client side (mirrors karryam-admin signing.js with cfmeet values) ---------

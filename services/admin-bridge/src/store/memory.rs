@@ -25,6 +25,7 @@ struct Inner {
     audit: Vec<(AuditDraft, AuditReceipt)>,
     datasets: Vec<DatasetDay>,
     projections: Vec<ProjectionRow>,
+    operations: Vec<Operation>,
 }
 
 #[derive(Default)]
@@ -37,6 +38,23 @@ pub struct MemoryStore {
 impl MemoryStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Tests: moves an operation's timestamps `seconds` into the past.
+    pub fn backdate_operation(&self, key: uuid::Uuid, seconds: i64) {
+        let mut inner = self.inner.lock().unwrap();
+        for o in inner
+            .operations
+            .iter_mut()
+            .filter(|o| o.idempotency_key == key)
+        {
+            o.created_at -= Duration::seconds(seconds);
+            o.sent_at = o.sent_at.map(|t| t - Duration::seconds(seconds));
+        }
+    }
+
+    pub fn operations(&self) -> Vec<Operation> {
+        self.inner.lock().unwrap().operations.clone()
     }
 
     pub fn enroll(&self, p: Principal) {
@@ -213,6 +231,105 @@ impl Store for MemoryStore {
         let mut v = self.inner.lock().unwrap().projections.clone();
         v.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(v)
+    }
+
+    async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(existing) = inner.operations.iter().find(|o| {
+            o.principal_sub == op.principal_sub && o.idempotency_key == op.idempotency_key
+        }) {
+            return Ok(BeginOutcome::Existing(Box::new(existing.clone())));
+        }
+        if inner.operations.iter().any(|o| {
+            o.target == op.target
+                && o.expected_version == op.expected_version
+                && o.status != OpStatus::Failed
+        }) {
+            return Ok(BeginOutcome::VersionTaken);
+        }
+        let mut row = op.clone();
+        row.status = OpStatus::Pending;
+        row.sent_at = None;
+        row.settled_at = None;
+        inner.operations.push(row);
+        Ok(BeginOutcome::Started)
+    }
+
+    async fn mark_sent(&self, sub: &str, key: uuid::Uuid, at: DateTime<Utc>) -> StoreResult<bool> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .operations
+            .iter_mut()
+            .find(|o| o.principal_sub == sub && o.idempotency_key == key)
+        {
+            Some(o) if o.status == OpStatus::Pending => {
+                o.status = OpStatus::Sent;
+                o.sent_at = Some(at);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn settle_operation(
+        &self,
+        sub: &str,
+        key: uuid::Uuid,
+        st: &Settlement,
+    ) -> StoreResult<bool> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        match inner
+            .operations
+            .iter_mut()
+            .find(|o| o.principal_sub == sub && o.idempotency_key == key)
+        {
+            Some(o) if o.status.may_become(st.status) => {
+                o.status = st.status;
+                o.source_status = st.source_status.clone();
+                o.source_version = st.source_version.clone();
+                o.error_code = st.error_code.clone();
+                if st.status.settled() {
+                    o.settled_at = Some(st.at);
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    async fn operation(&self, sub: &str, key: uuid::Uuid) -> StoreResult<Option<Operation>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .operations
+            .iter()
+            .find(|o| o.principal_sub == sub && o.idempotency_key == key)
+            .cloned())
+    }
+
+    async fn open_operations(
+        &self,
+        before: DateTime<Utc>,
+        limit: u32,
+    ) -> StoreResult<Vec<Operation>> {
+        self.check()?;
+        let mut open: Vec<Operation> = self
+            .inner
+            .lock()
+            .unwrap()
+            .operations
+            .iter()
+            .filter(|o| !o.status.settled() && o.created_at < before)
+            .cloned()
+            .collect();
+        open.sort_by_key(|o| o.created_at);
+        open.truncate(limit as usize);
+        Ok(open)
     }
 
     async fn cleanup(&self, now: DateTime<Utc>) -> StoreResult<CleanupStats> {
