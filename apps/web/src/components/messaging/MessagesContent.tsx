@@ -118,12 +118,12 @@ const clock = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString([]
 
 function ProfileBadge({ profile }: { profile: SecurityProfile }) {
   return profile === "PRIVATE_E2EE" ? (
-    <span data-testid="profile-badge" data-profile={profile} className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
-      <Lock className="size-3" /> End-to-end encrypted
+    <span data-testid="profile-badge" data-profile={profile} title="End-to-end encrypted: only people in this chat can read it" className="inline-flex min-w-0 items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+      <Lock className="size-3 shrink-0" /><span className="truncate"><span className="sm:hidden">Encrypted</span><span className="hidden sm:inline">End-to-end encrypted</span></span>
     </span>
   ) : (
-    <span data-testid="profile-badge" data-profile={profile} className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-      <LockOpen className="size-3" /> Managed · CF Meet can read this chat
+    <span data-testid="profile-badge" data-profile={profile} title="Managed: CF Meet can read this chat" className="inline-flex min-w-0 items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+      <LockOpen className="size-3 shrink-0" /><span className="truncate"><span className="sm:hidden">Managed</span><span className="hidden sm:inline">Managed · CF Meet can read this chat</span></span>
     </span>
   );
 }
@@ -554,9 +554,10 @@ function lastSeenText(iso: string) {
 
 /** WhatsApp ticks: one = sent, two = delivered, two coloured = read. */
 function Ticks({ receipt, list }: { receipt: "sent" | "delivered" | "read"; list?: boolean }) {
-  if (receipt === "sent") return <Check className="size-4 shrink-0" aria-label="Sent" />;
-  const read = list ? "text-sky-500" : "text-[#5EEAD4] dark:text-[#0E7490]";
-  return <CheckCheck className={cn("size-4 shrink-0", receipt === "read" && read)} aria-label={receipt === "read" ? "Read" : "Delivered"} />;
+  if (receipt === "sent") return <Check className={cn("size-4 shrink-0", !list && "opacity-70")} aria-label="Sent" />;
+  if (receipt === "delivered") return <CheckCheck className={cn("size-4 shrink-0", !list && "opacity-70")} aria-label="Delivered" />;
+  // Read: on your own blue bubble a bright aqua with a heavier stroke (blue on blue would vanish).
+  return <CheckCheck strokeWidth={2.75} className={cn("size-4 shrink-0", list ? "text-sky-500" : "text-[#7CFFF4] drop-shadow-[0_0_1px_rgba(0,0,0,0.35)]")} aria-label="Read" />;
 }
 
 /* ─── Message bubble ──────────────────────────────────────────────────── */

@@ -1959,6 +1959,9 @@ export class MessagingEngine {
   }
 
   async markRead(conversationId: string): Promise<void> {
+    // Ask for everyone's latest read / delivered positions (ticks) whenever the chat is looked at,
+    // not only when the live connection starts: a missed update can't leave ticks stuck.
+    try { this.transport?.queryReceipts(conversationId); } catch { /* not connected: the next connect asks */ }
     const list = this.snapshot.messages[conversationId] ?? [];
     const last = [...list].reverse().find((m) => m.sequence !== null)?.sequence;
     // Only a read position that moves is written (no duplicate receipt events, MSG-018).
