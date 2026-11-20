@@ -1,0 +1,170 @@
+{
+  "description": "One CF Meet App for review: versions, directory listing, the developer's workspace name, the last decision and the review history. Manifest URLs and test accounts are not relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "app_id",
+    "workspace_id",
+    "name",
+    "distribution",
+    "status",
+    "current_version",
+    "published_version",
+    "published_at",
+    "created_at",
+    "updated_at",
+    "submitted_version",
+    "reviewed_version",
+    "listed_in_directory",
+    "developer_name",
+    "review",
+    "history"
+  ],
+  "properties": {
+    "app_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200
+    },
+    "distribution": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "current_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "published_version": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "submitted_version": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "reviewed_version": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "listed_in_directory": {
+      "type": "boolean"
+    },
+    "developer_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "review": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "reason_code",
+        "decided_at"
+      ],
+      "properties": {
+        "reason_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "decided_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from_status",
+          "to_status",
+          "version",
+          "actor_kind",
+          "reason_code",
+          "occurred_at"
+        ],
+        "properties": {
+          "from_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "to_status": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "actor_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "reason_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

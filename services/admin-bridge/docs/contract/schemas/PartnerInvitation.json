@@ -1,0 +1,42 @@
+{
+  "description": "One workspace invitation. The invitee's address is never relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "invitation_id",
+    "role",
+    "status",
+    "created_at",
+    "expires_at",
+    "decided_at"
+  ],
+  "properties": {
+    "invitation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "role": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "decided_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}
