@@ -1,6 +1,9 @@
+import base64
 import contextlib
+import hashlib
 import io
 import json
+import os
 import re
 import tempfile
 import subprocess
@@ -767,25 +770,203 @@ class AdminBridge(unittest.TestCase):
         self.assertEqual(calls[1], ('sql', 'cfmeet_admin_bridge', sql))
 
     def test_hq_port_is_a_passthrough_relay_admitting_only_hq(self):
-        config = cr.admin_bridge_hq_relay_config('10.77.0.1', '10.77.0.2')
-        self.assertIn('listen 10.77.0.1:%d;' % cr.ADMIN_BRIDGE_HQ_PORT, config, 'bound to the tunnel address only')
+        config = cr.admin_bridge_hq_relay_config('10.77.0.2')
+        self.assertIn('listen %d;' % cr.ADMIN_BRIDGE_HQ_PORT, config)
         self.assertIn('allow 10.77.0.2;\n        deny all;', config)
+        self.assertIn('resolver 127.0.0.11', config, 'Docker DNS: the relay sits on the private network')
         self.assertIn('set $peer cfmeet-admin-bridge:8443;', config)
         self.assertNotIn('ssl', config, 'TLS passes straight through: the bridge terminates mTLS')
+        args = cr.admin_bridge_hq_relay_args('img', '/w/relay.conf', '10.77.0.1')
+        self.assertEqual(args[args.index('--publish') + 1], '10.77.0.1:%d:%d/tcp' % ((cr.ADMIN_BRIDGE_HQ_PORT,) * 2),
+                         'published on the tunnel address only')
+        self.assertEqual(args[args.index('--network') + 1], cr.ADMIN_BRIDGE_HQ_RELAY_NET)
+        self.assertNotEqual(cr.ADMIN_BRIDGE_HQ_RELAY_NET, cr.p.NET, 'the private network cannot publish')
+        for flag in ('--read-only', 'no-new-privileges'):
+            self.assertIn(flag, args)
+        self.assertEqual(args[args.index('--cap-drop') + 1], 'ALL')
+        self.assertTrue(cr.owned(cr.ADMIN_BRIDGE_HQ_RELAY))
         # Owner decision 2026-11-20: private tunnel only; HQ never uses a public address.
         for bad_listen in ('', '0.0.0.0', '203.0.113.5', '10.77.0.0/24', '999.1.1.1', '100.64.0.1'):
             with self.assertRaises(RuntimeError, msg=bad_listen):
-                cr.admin_bridge_hq_relay_config(bad_listen, '10.77.0.2')
+                cr.admin_bridge_hq_relay_args('img', '/w/relay.conf', bad_listen)
         for bad in ('', '0.0.0.0/0', '10.0.0.0/8', '203.0.113.7', '8.8.8.8/32', '999.1.1.1', 'any',
                     '10.77.0.2; allow all', '172.32.0.1', '192.169.1.1', '100.64.0.9'):
             with self.assertRaises(RuntimeError, msg=bad):
-                cr.admin_bridge_hq_relay_config('10.77.0.1', bad)
+                cr.admin_bridge_hq_relay_config(bad)
         for ok in ('172.16.5.4', '192.168.1.0/24', '10.250.0.2'):
-            cr.admin_bridge_hq_relay_config('10.77.0.1', ok)
+            cr.admin_bridge_hq_relay_config(ok)
         self.assertNotIn(cr.ADMIN_BRIDGE_HQ_PORT, [s['tls'] for s in cr.SERVICES.values() if s['tls']])
         routes = cr.tls_routes('http {\n  server { listen 9999 ssl; }\n}')
         self.assertNotIn(str(cr.ADMIN_BRIDGE_HQ_PORT), routes)
         self.assertNotIn('admin-bridge', routes)
+
+
+TENANT = '0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0'
+POLICY_KEY = 'ab' * 32
+HMAC_TEXT = base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip('=')
+
+
+def enable_record(**changes):
+    record = {'policy_revision': 1, 'policy_key_id': 'cfmeet-policy-1', 'policy_public_key_hex': POLICY_KEY,
+              'hq_workload_uri': 'cf://staging/product-admin/cfmeet', 'enrolled_markets': ['GLOBAL'],
+              'enrolled_tenants': [TENANT], 'listen_address': '10.250.0.1', 'allowed_source': '10.250.0.2'}
+    record.update(changes)
+    return record
+
+
+class AdminBridgeHq(unittest.TestCase):
+    """Runbook §3: activate-admin-bridge-hq switches the bridge on for HQ, read-only."""
+
+    def test_settings_are_exactly_what_the_bridge_and_hq_accept(self):
+        overrides, listen, source = cr.admin_bridge_enable_settings(enable_record())
+        self.assertEqual((listen, source), ('10.250.0.1', '10.250.0.2'))
+        self.assertEqual(overrides['ADMIN_BRIDGE_ENABLED'], 'true')
+        self.assertEqual(overrides['ADMIN_BRIDGE_WRITES_ENABLED'], 'false', 'reads only')
+        self.assertEqual(overrides['ADMIN_BRIDGE_ENROLLED_TENANTS'], TENANT)
+        self.assertEqual(overrides['ADMIN_BRIDGE_HMAC_KEY_DIR'], cr.ADMIN_BRIDGE_HMAC_TARGET)
+        self.assertTrue(overrides['ADMIN_BRIDGE_TLS_KEY_FILE'].startswith(cr.ADMIN_BRIDGE_TLS_TARGET + '/'))
+        self.assertFalse([k for k in overrides if k.startswith('ADMIN_BRIDGE_MODULE_')], 'modules belong to their own activations')
+        bad = [dict(policy_revision=0), dict(policy_revision='1'), dict(policy_revision=True),
+               dict(policy_public_key_hex='AB' * 32), dict(policy_public_key_hex='ab' * 31),
+               dict(policy_key_id='bad id'), dict(hq_workload_uri='cf://staging/product-admin/other'),
+               dict(hq_workload_uri='https://hq'), dict(enrolled_markets=[]), dict(enrolled_markets=['global']),
+               dict(enrolled_tenants=['cfmeet-first-party']), dict(enrolled_tenants=[TENANT.upper()]),
+               dict(enrolled_tenants=[TENANT, TENANT]), dict(enrolled_tenants=TENANT),
+               dict(listen_address='0.0.0.0'), dict(listen_address='100.64.0.1'),
+               dict(allowed_source='0.0.0.0/0'), dict(allowed_source='203.0.113.9')]
+        for change in bad:
+            with self.assertRaises(RuntimeError, msg=change):
+                cr.admin_bridge_enable_settings(enable_record(**change))
+        with self.assertRaisesRegex(RuntimeError, 'exactly'):
+            cr.admin_bridge_enable_settings(dict(enable_record(), writes_enabled=True))
+        with self.assertRaisesRegex(RuntimeError, 'exactly'):
+            record = enable_record()
+            del record['allowed_source']
+            cr.admin_bridge_enable_settings(record)
+
+    def test_hmac_key_file_decodes_like_the_bridge(self):
+        self.assertEqual(cr.hmac_key_bytes(HMAC_TEXT + '\n'), bytes(range(32)))
+        self.assertEqual(cr.hmac_key_bytes(base64.urlsafe_b64encode(bytes(range(40))).decode()), bytes(range(40)))
+        for bad in ('', 'c2hvcnQ', HMAC_TEXT + '+', '\x00' * 40, HMAC_TEXT[:40]):
+            self.assertIsNone(cr.hmac_key_bytes(bad), bad)
+
+    def test_material_must_be_sealed_and_owned_by_the_bridge(self):
+        if not hasattr(os, 'getuid'):
+            self.skipTest('POSIX ownership')
+        root = Path(tempfile.mkdtemp())
+        for d in ('tls', 'hmac'):
+            (root / d).mkdir(mode=0o750)
+        for name in cr.ADMIN_BRIDGE_TLS_FILES:
+            (root / 'tls' / name).write_text('x')
+            (root / 'tls' / name).chmod(0o400)
+        (root / 'hmac' / 'hq-hmac-1.key').write_text(HMAC_TEXT + '\n')
+        (root / 'hmac' / 'hq-hmac-1.key').chmod(0o400)
+        uid = os.getuid()  # the test owns the files; production requires the bridge's uid 10001
+        with patch.object(cr, '_sealed', lambda path, mask: ORIGINAL_SEALED(path, mask, uid)):
+            digests = cr.admin_bridge_material(root)
+            self.assertEqual(digests, {'hq-hmac-1': hashlib.sha256(bytes(range(32))).hexdigest()})
+            (root / 'hmac' / 'hq-hmac-1.key').chmod(0o440)
+            with self.assertRaisesRegex(RuntimeError, 'too permissive'):
+                cr.admin_bridge_material(root)
+            (root / 'hmac' / 'hq-hmac-1.key').chmod(0o400)
+            (root / 'hmac' / 'notes.txt').write_text('x')
+            with self.assertRaisesRegex(RuntimeError, 'only <X-HQ-Key-ID>.key'):
+                cr.admin_bridge_material(root)
+            (root / 'hmac' / 'notes.txt').unlink()
+            (root / 'hmac' / 'raw.key').write_bytes(os.urandom(32))
+            (root / 'hmac' / 'raw.key').chmod(0o400)
+            with self.assertRaisesRegex(RuntimeError, 'base64url'):
+                cr.admin_bridge_material(root)
+            (root / 'hmac' / 'raw.key').unlink()
+            (root / 'tls' / 'server.key').unlink()
+            (root / 'tls' / 'server.key').symlink_to(root / 'tls' / 'server.crt')
+            with self.assertRaisesRegex(RuntimeError, 'symbolic link'):
+                cr.admin_bridge_material(root)
+        with self.assertRaisesRegex(RuntimeError, 'owned by uid'):
+            ORIGINAL_SEALED(root / 'tls' / 'server.crt', 0o022, uid + 1)
+
+    def test_hq_is_admitted_only_when_fully_enrolled(self):
+        digest = hashlib.sha256(bytes(range(32))).hexdigest()
+        good = {'certs': 1, 'staffKeys': 1, 'hmac': {'hq-hmac-1': digest}, 'policies': {'1': 'cfmeet-policy-1'}}
+        check = lambda state: cr.admin_bridge_enrolment_problems(state, {'hq-hmac-1': digest}, 1, 'cfmeet-policy-1')
+        self.assertEqual(check(good), [])
+        self.assertIn('enroll-cert', check(dict(good, certs=0))[0])
+        self.assertIn('enroll-staff-key', check(dict(good, staffKeys=0))[0])
+        self.assertIn('enroll-hmac', check(dict(good, hmac={'hq-hmac-1': '0' * 64}))[0])
+        self.assertIn('enroll-hmac', check(dict(good, hmac={}))[0])
+        self.assertIn('policy-put', check(dict(good, policies={}))[0])
+        self.assertIn('another key id', check(dict(good, policies={'1': 'other'}))[0])
+        self.assertIn('newer', check(dict(good, policies={'1': 'cfmeet-policy-1', '2': 'cfmeet-policy-1'}))[0])
+        sql = cr.ADMIN_BRIDGE_ENROLMENT_SQL
+        self.assertEqual(sql.count('revoked_at IS NULL'), 3)
+        self.assertNotIn('%(', sql)
+
+    def test_it_needs_the_owner_confirmation_and_refuses_before_changing_anything(self):
+        with patch.object(cr, 'apply_activation', side_effect=AssertionError('must not apply')):
+            with self.assertRaisesRegex(RuntimeError, 'confirm=hq-enrolled-read-only'):
+                cr.activate_admin_bridge_hq('a' * 40, '1', '')
+        env = {'CF_RUNTIME_ENVIRONMENT': 'production', 'CF_SERVICE_AUTH_KEY_ID': 'k', 'CF_SERVICE_AUTH_PRIVATE_KEY_FILE': '/f'}
+        root = Path(tempfile.mkdtemp())
+        (root / 'enable.json').write_text(json.dumps(enable_record()))
+        digest = hashlib.sha256(bytes(range(32))).hexdigest()
+        state = {'certs': 1, 'staffKeys': 0, 'hmac': {'hq-hmac-1': digest}, 'policies': {'1': 'cfmeet-policy-1'}}
+        with patch.object(cr, 'env_of', lambda name: env), patch.object(cr, 'ADMIN_BRIDGE_ROOT', root), \
+                patch.object(cr, 'admin_bridge_material', lambda: {'hq-hmac-1': digest}), \
+                patch.object(cr.release, 'db_sql', lambda db, sql: json.dumps(state)), \
+                patch.object(cr, 'apply_activation', side_effect=AssertionError('must not apply')):
+            with self.assertRaisesRegex(RuntimeError, 'not ready to be admitted.*enroll-staff-key'):
+                cr.activate_admin_bridge_hq('a' * 40, '1', cr.ADMIN_BRIDGE_HQ_CONFIRM)
+
+    def test_it_recreates_the_bridge_with_mounts_then_installs_the_relay(self):
+        env = {'CF_RUNTIME_ENVIRONMENT': 'production', 'CF_SERVICE_AUTH_KEY_ID': 'k', 'CF_SERVICE_AUTH_PRIVATE_KEY_FILE': '/f'}
+        root = Path(tempfile.mkdtemp())
+        (root / 'enable.json').write_text(json.dumps(enable_record()))
+        digest = hashlib.sha256(bytes(range(32))).hexdigest()
+        state = {'certs': 1, 'staffKeys': 1, 'hmac': {'hq-hmac-1': digest}, 'policies': {'1': 'cfmeet-policy-1'}}
+        applied, events = [], []
+
+        def apply(op, sha, run, changes, post=None, **kw):
+            applied.append((op, changes))
+            post()
+
+        with patch.object(cr, 'env_of', lambda name: env), patch.object(cr, 'ADMIN_BRIDGE_ROOT', root), \
+                patch.object(cr, 'admin_bridge_material', lambda: {'hq-hmac-1': digest}), \
+                patch.object(cr.release, 'db_sql', lambda db, sql: json.dumps(state)), \
+                patch.object(cr, 'apply_activation', apply), patch.object(cr, 'emit', lambda *a: None), \
+                patch.object(cr, 'admin_bridge_ready_document', lambda: {'enabled': True, 'policy_revision': 1}), \
+                patch.object(cr, 'install_admin_bridge_hq_relay', lambda l, s: events.append(('relay', l, s))), \
+                patch.object(cr, 'remove_admin_bridge_hq_relay', lambda: events.append('removed')):
+            cr.activate_admin_bridge_hq('a' * 40, '1', cr.ADMIN_BRIDGE_HQ_CONFIRM)
+            (op, [(service, overrides, extra)]), = applied
+            self.assertEqual((op, service), ('activate-admin-bridge-hq', 'admin-bridge'))
+            self.assertEqual(overrides['ADMIN_BRIDGE_ENABLED'], 'true')
+            self.assertEqual(extra['mounts'], [(str(root / 'tls'), cr.ADMIN_BRIDGE_TLS_TARGET),
+                                               (str(root / 'hmac'), cr.ADMIN_BRIDGE_HMAC_TARGET)])
+            self.assertEqual(events, [('relay', '10.250.0.1', '10.250.0.2')])
+            # Not enabled on the pinned revision: the relay is never left behind.
+            events.clear()
+            with patch.object(cr, 'admin_bridge_ready_document', lambda: {'enabled': True, 'policy_revision': None}):
+                with self.assertRaisesRegex(RuntimeError, 'policy revision 1'):
+                    cr.activate_admin_bridge_hq('a' * 40, '1', cr.ADMIN_BRIDGE_HQ_CONFIRM)
+            self.assertEqual(events, ['removed'])
+
+    def test_registry_safe_defaults_rollback_and_workflow(self):
+        self.assertEqual(cr.ACTIVATIONS['activate-admin-bridge-hq'][0], ('activate-admin-bridge',))
+        on = dict(cr.SERVICES['admin-bridge']['env'], ADMIN_BRIDGE_ENABLED='true')
+        writes = dict(on, ADMIN_BRIDGE_WRITES_ENABLED='true')
+        with patch.object(cr, 'done', lambda op: op in ('activate-admin-bridge', 'activate-admin-bridge-hq')):
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': on}), [])
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': writes}), ['admin-bridge ADMIN_BRIDGE_WRITES_ENABLED'])
+        source = (REPO / 'infra/calling/production/coordinated_release.py').read_text(encoding='utf-8')
+        rollback = source[source.index('def rollback(sha, run_id):'):source.index('# --- activation steps')]
+        self.assertLess(rollback.index('remove_admin_bridge_hq_relay()'), rollback.index('restore(component, run_id)'),
+                        'HQ loses its way in before the bridge goes dark')
+        workflow = (REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        self.assertIn('activate-admin-bridge-hq,', workflow)
+        self.assertIn('activate-admin-bridge-hq: hq-enrolled-read-only', workflow)
+
+
+ORIGINAL_SEALED = cr._sealed
 
 
 class PublicInternalDenial(unittest.TestCase):

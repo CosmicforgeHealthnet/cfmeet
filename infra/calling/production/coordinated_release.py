@@ -43,6 +43,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import time
@@ -141,9 +142,10 @@ ADMIN_BRIDGE_DARK_ENV = dict({
 # HQ's client certificate on every request). It is NEVER routed by api.cfmeet.com or any
 # public ingress and is never part of the private TLS proxy (which terminates TLS). Declared
 # here; the tunnel and relay are installed by the HQ enablement step of the runbook (a
-# privileged operator step), never by `release`.
+# privileged operator step); the relay by activate-admin-bridge-hq, never by `release`.
 ADMIN_BRIDGE_HQ_PORT = 8460
 ADMIN_BRIDGE_HQ_RELAY = 'cfmeet-admin-bridge-hq-relay'
+ADMIN_BRIDGE_HQ_RELAY_NET = 'cfmeet-admin-bridge-hq-net'
 ADMIN_BRIDGE_HQ_SOURCE_ENV = 'ADMIN_BRIDGE_HQ_ALLOWED_SOURCE'
 ADMIN_BRIDGE_HQ_LISTEN_ENV = 'ADMIN_BRIDGE_HQ_LISTEN_ADDRESS'
 ADMIN_BRIDGE_SERVER_NAME = 'admin-bridge.cfmeet.internal'
@@ -165,18 +167,32 @@ def _private_ipv4(value, var, allow_prefix):
     return v
 
 
-def admin_bridge_hq_relay_config(listen_address, allowed_source):
-    """nginx stream relay (TCP passthrough, no TLS termination) bound to the CF Meet host's
-    private tunnel address and admitting only HQ's tunnel address. Refuses public, wildcard
-    or malformed addresses."""
-    listen = _private_ipv4(listen_address, ADMIN_BRIDGE_HQ_LISTEN_ENV, allow_prefix=False)
+def admin_bridge_hq_relay_config(allowed_source):
+    """nginx stream relay (TCP passthrough, no TLS termination) admitting only HQ's tunnel
+    address. It runs in a container on its own network (published ONLY on the CF Meet host's
+    tunnel address, admin_bridge_hq_relay_args) joined to the private network, so Docker's DNS
+    finds the bridge after every recreate. Traffic arriving on the tunnel interface is DNATed
+    to the container with its source address intact, so `allow` sees HQ's tunnel address.
+    Refuses public, wildcard or malformed addresses."""
     source = _private_ipv4(allowed_source, ADMIN_BRIDGE_HQ_SOURCE_ENV, allow_prefix=True)
     return ('daemon off;\nworker_processes 1;\npid /tmp/nginx.pid;\nerror_log stderr warn;\n'
             'events { worker_connections 256; }\nstream {\n    resolver 127.0.0.11 valid=10s ipv6=off;\n'
-            '    server {\n        listen %s:%d;\n        allow %s;\n        deny all;\n'
+            '    server {\n        listen %d;\n        allow %s;\n        deny all;\n'
             '        set $peer %s:8443;\n        proxy_pass $peer;\n'
             '        proxy_connect_timeout 5s;\n        proxy_timeout 60s;\n    }\n}\n'
-            % (listen, ADMIN_BRIDGE_HQ_PORT, source, SERVICES['admin-bridge']['container']))
+            % (ADMIN_BRIDGE_HQ_PORT, source, SERVICES['admin-bridge']['container']))
+
+
+def admin_bridge_hq_relay_args(image, config, listen_address):
+    """The relay container: published on the CF Meet host's tunnel address only (never 0.0.0.0
+    or a public address), read-only, no capabilities, unprivileged."""
+    listen = _private_ipv4(listen_address, ADMIN_BRIDGE_HQ_LISTEN_ENV, allow_prefix=False)
+    return ['docker', 'create', '--name', ADMIN_BRIDGE_HQ_RELAY, '--restart', 'unless-stopped',
+            '--network', ADMIN_BRIDGE_HQ_RELAY_NET, '--publish', '%s:%d:%d/tcp' % (listen, ADMIN_BRIDGE_HQ_PORT, ADMIN_BRIDGE_HQ_PORT),
+            '--read-only', '--tmpfs', '/tmp:rw,size=1m', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+            '--user', '101:101', '--memory', '32m', '--pids-limit', '32', '--log-opt', 'max-size=5m',
+            '--log-opt', 'max-file=2', '--mount', 'type=bind,src=%s,dst=/etc/nginx/nginx.conf,readonly' % config,
+            '--entrypoint', 'nginx', image, '-e', 'stderr', '-c', '/etc/nginx/nginx.conf']
 
 SERVICES = {
     'platform-access': _service('cfmeet-platform-access', 8094, '/ready', tls=8443,
@@ -320,7 +336,7 @@ def disk_free_bytes(path='/'):
 # --- Container ownership -----------------------------------------------------------------
 
 _SERVICE_NAMES = '|'.join(re.escape(s['container'].removeprefix('cfmeet-')) for s in SERVICES.values())
-OWNED_RE = re.compile(r'^cfmeet-(%s|gateway-ingress)(-(rollback|failed|rolled-back)-[A-Za-z0-9-]+)?$' % _SERVICE_NAMES)
+OWNED_RE = re.compile(r'^cfmeet-(%s|gateway-ingress|admin-bridge-hq-relay)(-(rollback|failed|rolled-back)-[A-Za-z0-9-]+)?$' % _SERVICE_NAMES)
 RESTORE_RE = re.compile(r'^cfmeet-restore-test-[0-9]+(-[0-9]+)?-[a-z][a-z0-9-]*$')
 EXEC_ONLY = ('cfmeet-core-db', 'cfmeet-core-tls')
 FOREIGN_PREFIXES = ('cosmicforge-', 'cfmeet-staging-', 'lk-server')
@@ -1448,8 +1464,8 @@ SAFE_DEFAULTS = {
     'notifications': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
     'notifications-2': {'NOTIFICATIONS_EMAIL_PROVIDER': (None, '', 'none'), 'NOTIFICATIONS_PUSH_PROVIDER': (None, '', 'none')},
     # HQ admin bridge: off, no writes, every module off. A module may be on only after its
-    # activation is recorded (safe_defaults); enabling the bridge itself (HQ enrolment, TLS and
-    # policy key mounts) is a later dedicated operation, so ADMIN_BRIDGE_ENABLED stays false here.
+    # activation is recorded (safe_defaults); the bridge itself is switched on only by
+    # activate-admin-bridge-hq (HQ enrolled, TLS and HMAC mounts, signed policy). Writes stay off.
     'admin-bridge': dict({'ADMIN_BRIDGE_ENABLED': (None, 'false'), 'ADMIN_BRIDGE_WRITES_ENABLED': (None, 'false')},
                          **{'ADMIN_BRIDGE_MODULE_' + m: (None, 'false') for m in ADMIN_BRIDGE_MODULES}),
 }
@@ -1491,6 +1507,9 @@ def safe_defaults():
     # HQ admin bridge: the Organizations module after activate-admin-bridge (its grants).
     if done('activate-admin-bridge'):
         rules['admin-bridge']['ADMIN_BRIDGE_MODULE_ORGANIZATIONS'] = (None, 'false', 'true')
+    # ...and switched on for HQ (reads only) after activate-admin-bridge-hq.
+    if done('activate-admin-bridge-hq'):
+        rules['admin-bridge']['ADMIN_BRIDGE_ENABLED'] = (None, 'false', 'true')
     # CF Meet Platform "Build" flags: off until their activation is recorded (platform_operations).
     for name, flags in platform_ops.safe_default_rules(done).items():
         rules.setdefault(name, {}).update(flags)
@@ -1816,6 +1835,8 @@ def rollback(sha, run_id):
     if entry['operation'] in integrate_ops.EDGE:
         # CF Meet Apps prefixes (/v1/oauth, /v1/app-directory) leave the edge before their containers.
         integrate_ops.undo_edge(sys.modules[__name__], entry)
+    if entry['operation'] == 'activate-admin-bridge-hq':
+        remove_admin_bridge_hq_relay()  # HQ's way in closes before the bridge goes dark
     if entry.get('edge'):
         undo_gateway_docs(entry['edge'])
     if entry.get('edgeLimits'):
@@ -2015,6 +2036,226 @@ def activate_admin_bridge(sha, run_id, confirm):
     apply_activation('activate-admin-bridge', sha, run_id, [
         ('admin-bridge', {'CF_ORGANIZATIONS_BASE_URL': private_url(SERVICES['organizations']['tls']),
                           'ADMIN_BRIDGE_MODULE_ORGANIZATIONS': 'true'})])
+
+
+
+# --- HQ admin bridge: switched on for HQ (runbook §3) -----------------------------------------
+# The operator stages, BEFORE the run and never through chat or git:
+#   /opt/cfmeet-core/admin-bridge/enable.json   the non-secret settings (ADMIN_BRIDGE_ENABLE_KEYS)
+#   /opt/cfmeet-core/admin-bridge/tls/          server.crt, server.key, hq-client-ca.pem
+#   /opt/cfmeet-core/admin-bridge/hmac/         <X-HQ-Key-ID>.key (base64url text, the file HQ reads)
+# and enrols HQ (enroll-cert, enroll-hmac, enroll-staff-key) and puts the signed READ-ONLY policy
+# (policy-put). Every file is owned by the bridge's uid; no key is group or world readable.
+# Commands stay off (ADMIN_BRIDGE_WRITES_ENABLED=false): this switches the reads on.
+ADMIN_BRIDGE_ROOT = p.ROOT / 'admin-bridge'
+ADMIN_BRIDGE_UID = 10001
+ADMIN_BRIDGE_TLS_TARGET = '/run/admin-bridge/tls'
+ADMIN_BRIDGE_HMAC_TARGET = '/run/admin-bridge/hmac'
+ADMIN_BRIDGE_TLS_FILES = {'server.crt': 0o022, 'server.key': 0o077, 'hq-client-ca.pem': 0o022}
+ADMIN_BRIDGE_ENABLE_KEYS = ('policy_revision', 'policy_key_id', 'policy_public_key_hex', 'hq_workload_uri',
+                            'enrolled_markets', 'enrolled_tenants', 'listen_address', 'allowed_source')
+ADMIN_BRIDGE_HQ_CONFIRM = 'hq-enrolled-read-only'
+_LOWER_UUID = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+_KID = r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}'
+
+
+def admin_bridge_enable_settings(record):
+    """enable.json → (bridge env overrides, relay listen address, relay allowed source). Refuses
+    anything but the exact keys and values the bridge and HQ accept."""
+    if not isinstance(record, dict) or sorted(record) != sorted(ADMIN_BRIDGE_ENABLE_KEYS):
+        raise RuntimeError('enable.json must hold exactly: ' + ', '.join(ADMIN_BRIDGE_ENABLE_KEYS))
+    revision = record['policy_revision']
+    if type(revision) is not int or revision < 1:
+        raise RuntimeError('policy_revision must be an integer >= 1')
+    if not isinstance(record['policy_key_id'], str) or not re.fullmatch(_KID, record['policy_key_id']):
+        raise RuntimeError('policy_key_id is not a key id')
+    if not isinstance(record['policy_public_key_hex'], str) \
+            or not re.fullmatch(r'[0-9a-f]{64}', record['policy_public_key_hex']):
+        raise RuntimeError('policy_public_key_hex must be 64 lowercase hex (Ed25519 public key)')
+    uri = record['hq_workload_uri']
+    if not isinstance(uri, str) or not re.fullmatch(r'cf://(staging|production)/product-admin/cfmeet', uri):
+        raise RuntimeError('hq_workload_uri must be cf://<staging|production>/product-admin/cfmeet')
+    markets, tenants = record['enrolled_markets'], record['enrolled_tenants']
+    if not isinstance(markets, list) or not 1 <= len(markets) <= 16 \
+            or not all(isinstance(m, str) and re.fullmatch(r'[A-Z][A-Z0-9_]{1,31}', m) for m in markets):
+        raise RuntimeError('enrolled_markets must be 1-16 market codes (e.g. GLOBAL)')
+    if not isinstance(tenants, list) or not 1 <= len(tenants) <= 16 \
+            or not all(isinstance(t, str) and re.fullmatch(_LOWER_UUID, t) for t in tenants):
+        raise RuntimeError('enrolled_tenants must be 1-16 Platform Access tenant UUIDs in canonical lowercase')
+    if len(set(markets)) != len(markets) or len(set(tenants)) != len(tenants):
+        raise RuntimeError('enrolled_markets and enrolled_tenants must not repeat a value')
+    listen = _private_ipv4(record['listen_address'], ADMIN_BRIDGE_HQ_LISTEN_ENV, allow_prefix=False)
+    source = _private_ipv4(record['allowed_source'], ADMIN_BRIDGE_HQ_SOURCE_ENV, allow_prefix=True)
+    overrides = {
+        'ADMIN_BRIDGE_ENABLED': 'true',
+        'ADMIN_BRIDGE_WRITES_ENABLED': 'false',
+        'ADMIN_BRIDGE_POLICY_REVISION': str(revision),
+        'ADMIN_BRIDGE_POLICY_KEY_ID': record['policy_key_id'],
+        'ADMIN_BRIDGE_POLICY_PUBLIC_KEY_HEX': record['policy_public_key_hex'],
+        'ADMIN_BRIDGE_HQ_WORKLOAD_URI': uri,
+        'ADMIN_BRIDGE_ENROLLED_MARKETS': ','.join(markets),
+        'ADMIN_BRIDGE_ENROLLED_TENANTS': ','.join(tenants),
+        'ADMIN_BRIDGE_TLS_CERT_FILE': ADMIN_BRIDGE_TLS_TARGET + '/server.crt',
+        'ADMIN_BRIDGE_TLS_KEY_FILE': ADMIN_BRIDGE_TLS_TARGET + '/server.key',
+        'ADMIN_BRIDGE_CLIENT_CA_FILE': ADMIN_BRIDGE_TLS_TARGET + '/hq-client-ca.pem',
+        'ADMIN_BRIDGE_HMAC_KEY_DIR': ADMIN_BRIDGE_HMAC_TARGET,
+    }
+    return overrides, listen, source
+
+
+def hmac_key_bytes(text):
+    """The bridge's decode_hmac_key_file: base64url text (padding optional, surrounding
+    whitespace trimmed) of at least 32 bytes; anything else is refused."""
+    v = text.strip()
+    if not re.fullmatch(r'[A-Za-z0-9_-]+={0,2}', v):
+        return None
+    try:
+        key = base64.urlsafe_b64decode(v.rstrip('=') + '=' * (-len(v.rstrip('=')) % 4))
+    except ValueError:
+        return None
+    return key if len(key) >= 32 else None
+
+
+def _sealed(path, mask, uid=ADMIN_BRIDGE_UID):
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode):
+        raise RuntimeError('%s must not be a symbolic link' % path.name)
+    if st.st_uid != uid:
+        raise RuntimeError('%s must be owned by uid %d (the bridge)' % (path.name, uid))
+    if st.st_mode & mask:
+        raise RuntimeError('%s is too permissive (mode %o)' % (path.name, st.st_mode & 0o777))
+    return st
+
+
+def admin_bridge_material(root=ADMIN_BRIDGE_ROOT):
+    """Checks the staged TLS and HMAC files; returns {kid: sha256 of the decoded key}. Key
+    material is read only to compute digests and is never emitted."""
+    for d in (root / 'tls', root / 'hmac'):
+        if not d.is_dir():
+            raise RuntimeError('Missing %s (stage it first: runbook §3)' % d)
+        _sealed(d, 0o022)
+    for name, mask in ADMIN_BRIDGE_TLS_FILES.items():
+        f = root / 'tls' / name
+        if not f.exists():
+            raise RuntimeError('Missing tls/%s' % name)
+        if not stat.S_ISREG(_sealed(f, mask).st_mode):
+            raise RuntimeError('tls/%s must be a regular file' % name)
+    extra = sorted(x.name for x in (root / 'tls').iterdir() if x.name not in ADMIN_BRIDGE_TLS_FILES)
+    if extra:
+        raise RuntimeError('Unexpected files in tls/: ' + ', '.join(extra))
+    digests = {}
+    for f in sorted((root / 'hmac').iterdir()):
+        if not f.name.endswith('.key') or not re.fullmatch(_KID, f.name[:-4]):
+            raise RuntimeError('hmac/ holds only <X-HQ-Key-ID>.key files (found %s)' % f.name)
+        if not stat.S_ISREG(_sealed(f, 0o077).st_mode):
+            raise RuntimeError('hmac/%s must be a regular file' % f.name)
+        key = hmac_key_bytes(f.read_text(encoding='ascii', errors='replace'))
+        if key is None:
+            raise RuntimeError('hmac/%s is not base64url text of at least 32 bytes' % f.name)
+        digests[f.name[:-4]] = hashlib.sha256(key).hexdigest()
+    if not digests:
+        raise RuntimeError('hmac/ holds no key')
+    return digests
+
+
+ADMIN_BRIDGE_ENROLMENT_SQL = (
+    "SELECT json_build_object("
+    "'certs', (SELECT count(*) FROM admin_remote_principals WHERE kind = 'CLIENT_CERT' AND %(active)s), "
+    "'staffKeys', (SELECT count(*) FROM admin_remote_principals WHERE kind = 'STAFF_KEY' AND %(active)s), "
+    "'hmac', (SELECT coalesce(json_object_agg(key_id, material), '{}') FROM admin_remote_principals "
+    "WHERE kind = 'HMAC_KEY' AND %(active)s), "
+    "'policies', (SELECT coalesce(json_object_agg(revision, key_id), '{}') FROM admin_policy_revisions));"
+) % {'active': "revoked_at IS NULL AND not_before <= now() AND expires_at > now() + interval '1 day'"}
+
+
+def admin_bridge_enrolment_problems(state, digests, revision, policy_key_id):
+    """What is missing before HQ can be admitted (empty: ready)."""
+    problems = []
+    if not state.get('certs'):
+        problems.append('no active HQ client certificate (enroll-cert)')
+    if not state.get('staffKeys'):
+        problems.append('no active HQ staff-token key (enroll-staff-key)')
+    enrolled = state.get('hmac') or {}
+    for kid, digest in sorted(digests.items()):
+        if enrolled.get(kid) != digest:
+            problems.append('hmac/%s.key is not the active enrolled HMAC key %s (enroll-hmac)' % (kid, kid))
+    policies = state.get('policies') or {}
+    if str(revision) not in policies:
+        problems.append('access policy revision %d is not stored (policy-put)' % revision)
+    elif policies[str(revision)] != policy_key_id:
+        problems.append('access policy revision %d is signed by another key id' % revision)
+    elif any(int(r) > revision for r in policies):
+        problems.append('a newer access policy revision than %d is stored' % revision)
+    return problems
+
+
+def admin_bridge_ready_document():
+    s = SERVICES['admin-bridge']
+    out = p.run('docker', 'run', '--rm', '--network', 'container:' + s['container'], PROBE_IMAGE,
+                '-fsS', '--max-time', '4', 'http://127.0.0.1:%d%s' % (s['port'], s['health']))
+    return json.loads(out)
+
+
+def install_admin_bridge_hq_relay(listen, source):
+    if ADMIN_BRIDGE_HQ_RELAY in container_names():
+        raise RuntimeError('%s already exists: roll back the previous enablement first' % ADMIN_BRIDGE_HQ_RELAY)
+    config = WORK / 'admin-bridge-hq-relay.conf'
+    config.write_text(admin_bridge_hq_relay_config(source))
+    config.chmod(0o644)
+    if ADMIN_BRIDGE_HQ_RELAY_NET not in p.run('docker', 'network', 'ls', '--format', '{{.Name}}').splitlines():
+        p.run('docker', 'network', 'create', ADMIN_BRIDGE_HQ_RELAY_NET)
+    _own(ADMIN_BRIDGE_HQ_RELAY)
+    p.run(*admin_bridge_hq_relay_args(p.inspect('cfmeet-core-tls')['Image'], config, listen))
+    p.run('docker', 'network', 'connect', p.NET, ADMIN_BRIDGE_HQ_RELAY)
+    start(ADMIN_BRIDGE_HQ_RELAY)
+    p.run('docker', 'exec', ADMIN_BRIDGE_HQ_RELAY, 'nginx', '-t', '-c', '/etc/nginx/nginx.conf')
+    bindings = p.inspect(ADMIN_BRIDGE_HQ_RELAY)['HostConfig']['PortBindings']
+    if bindings != {'%d/tcp' % ADMIN_BRIDGE_HQ_PORT: [{'HostIp': listen, 'HostPort': str(ADMIN_BRIDGE_HQ_PORT)}]}:
+        raise RuntimeError('HQ relay must be published on the tunnel address only')
+
+
+def remove_admin_bridge_hq_relay():
+    if ADMIN_BRIDGE_HQ_RELAY in container_names():
+        remove(ADMIN_BRIDGE_HQ_RELAY)
+
+
+def activate_admin_bridge_hq(sha, run_id, confirm):
+    """Runbook §3 (HQ stage S3): switch the bridge on for HQ, READ-ONLY. Refuses unless HQ is
+    enrolled (client certificate, staff-token key, the staged HMAC key's digest), the pinned
+    signed policy revision is stored, and every staged file is sealed. Recreates the bridge with
+    the settings and read-only mounts, checks /ready, then installs the tunnel-only relay. A
+    failure (or `rollback`) removes the relay first, then restores the dark bridge."""
+    if confirm != ADMIN_BRIDGE_HQ_CONFIRM:
+        raise RuntimeError('activate-admin-bridge-hq needs confirm=%s (owner go-ahead, HQ enrolled, '
+                           'read-only policy)' % ADMIN_BRIDGE_HQ_CONFIRM)
+    has_signing_identity('admin-bridge')
+    record = json.loads((ADMIN_BRIDGE_ROOT / 'enable.json').read_text())
+    overrides, listen, source = admin_bridge_enable_settings(record)
+    digests = admin_bridge_material()
+    state = json.loads(release.db_sql(SERVICES['admin-bridge']['db'], ADMIN_BRIDGE_ENROLMENT_SQL))
+    problems = admin_bridge_enrolment_problems(state, digests, record['policy_revision'], record['policy_key_id'])
+    if problems:
+        raise RuntimeError('HQ is not ready to be admitted: ' + '; '.join(problems))
+    emit('adminBridgeHq', {'policyRevision': record['policy_revision'], 'hmacKeys': sorted(digests),
+                           'workload': record['hq_workload_uri'], 'markets': record['enrolled_markets'],
+                           'tenants': len(record['enrolled_tenants'])})
+
+    def admitted():
+        try:
+            ready = admin_bridge_ready_document()
+            if ready.get('enabled') is not True or ready.get('policy_revision') != record['policy_revision']:
+                raise RuntimeError('The bridge did not come up enabled on policy revision %d'
+                                   % record['policy_revision'])
+            install_admin_bridge_hq_relay(listen, source)
+            emit('adminBridgeHqRelay', {'port': ADMIN_BRIDGE_HQ_PORT, 'openapiSha256': ready.get('openapi_sha256')})
+        except Exception:
+            remove_admin_bridge_hq_relay()
+            raise
+
+    apply_activation('activate-admin-bridge-hq', sha, run_id, [
+        ('admin-bridge', overrides, {'mounts': [(str(ADMIN_BRIDGE_ROOT / 'tls'), ADMIN_BRIDGE_TLS_TARGET),
+                                                (str(ADMIN_BRIDGE_ROOT / 'hmac'), ADMIN_BRIDGE_HMAC_TARGET)]})],
+        post=admitted)
 
 
 PUBLIC_SITE = Path('/etc/nginx/sites-available/api.cfmeet.com')
@@ -3142,6 +3383,8 @@ ACTIVATIONS = {
                                           developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
     # HQ admin bridge (ADR 0068): owner grants for the served reads, bridge still disabled.
     'activate-admin-bridge': ((), activate_admin_bridge),
+    # Runbook §3: switched on for HQ, read-only, with the tunnel-only relay (confirm=hq-enrolled-read-only).
+    'activate-admin-bridge-hq': (('activate-admin-bridge',), activate_admin_bridge_hq),
     # Notification Service N0-1: the missing Hub preference grant (meeting notices fail closed).
     'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),
     # Notification Service N0-6: public host refuses the Meeting Service operator routes.
