@@ -127,6 +127,8 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "bridge.health.read",
             "bridge.datasets.read",
             "bridge.operations.read",
+            "hq.events.feed",
+            "hq.events.ack",
             "hq.projections.status",
             "accounts.users.search",
             "accounts.users.read",
@@ -347,6 +349,9 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "privacy.request.register",
             "privacy.request.complete-service",
             "operations.health.read",
+            "operations.activations.list",
+            "operations.activation.request",
+            "operations.releases.list",
             "audit.entries.list",
         ]
     );

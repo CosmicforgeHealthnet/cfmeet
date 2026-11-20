@@ -1,0 +1,19 @@
+{
+  "description": "The consumer's acknowledged sequence. It never moves backwards: a lower value answers the stored one.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "consumer",
+    "acknowledged_sequence"
+  ],
+  "properties": {
+    "consumer": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+    },
+    "acknowledged_sequence": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

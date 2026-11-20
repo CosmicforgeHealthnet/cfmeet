@@ -1,0 +1,25 @@
+{
+  "description": "Runs of cfmeet-coordinated-release.yml created within the window, newest first. Freshness UNAVAILABLE with no items when the bridge has no GitHub access configured (never read as \"no releases\").",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "items",
+    "next_cursor"
+  ],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/components/schemas/OperationsRelease"
+      }
+    },
+    "next_cursor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9]{1,4}$"
+    }
+  }
+}

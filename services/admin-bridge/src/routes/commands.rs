@@ -75,7 +75,7 @@ fn version_ok(v: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b':' | b'-'))
 }
 
-fn reason_ok(v: &str) -> bool {
+pub(crate) fn reason_ok(v: &str) -> bool {
     !v.is_empty()
         && v.len() <= 64
         && v.as_bytes()[0].is_ascii_uppercase()
@@ -162,7 +162,7 @@ pub fn intent_sha256(auth: &Authorized) -> String {
     crate::wire::sha256_hex(&serde_json::to_vec(&v).expect("serializable"))
 }
 
-fn scope_of(auth: &Authorized) -> Value {
+pub(crate) fn scope_of(auth: &Authorized) -> Value {
     let q = &auth.query;
     json!({"market": q.market, "organization": q.organization, "zone": q.zone, "tenant": q.tenant})
 }
@@ -183,7 +183,7 @@ pub fn readback_json(op: &Operation) -> Value {
     })
 }
 
-fn stored_code(op: &Operation) -> ErrorCode {
+pub(crate) fn stored_code(op: &Operation) -> ErrorCode {
     op.error_code
         .as_deref()
         .and_then(|c| ErrorCode::ALL.iter().copied().find(|e| e.code() == c))
@@ -204,7 +204,7 @@ fn answer_for(op: &Operation, view: Option<Value>) -> Result<Answer, ErrorCode> 
     }
 }
 
-async fn audit_outcome(
+pub(crate) async fn audit_outcome(
     bridge: &Bridge,
     auth: &Authorized,
     op: &Operation,
@@ -487,6 +487,11 @@ pub async fn execute(
 /// never sent (FAILED); a sent one is settled from the owner's record of its
 /// `Idempotency-Key`, or FAILED as never received once the owner has had long enough.
 pub async fn settle(bridge: &Bridge, op: &mut Operation) {
+    // Release workflow dispatches settle from GitHub's runs list (routes::operations).
+    if op.owner == super::operations::DISPATCH_OWNER {
+        super::operations::settle_dispatch(bridge, op).await;
+        return;
+    }
     let now = (bridge.clock)();
     match op.status {
         OpStatus::Pending => {

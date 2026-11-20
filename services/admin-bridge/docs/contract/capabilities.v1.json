@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.16.0",
+  "contract_version": "1.17.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "4bdbea7903d8fcdeb2ff7f7c4b1e7a06802eaed73237ffeb4e4f755cb8f8baae",
-    "capability_matrix_sha256": "cbd945c41f35aabc803a6cf3ecbb22e00238638743a143a4a57f17253105003b"
+    "openapi_sha256": "b65ea5d83268136ec202f12047c3af8d6b599e19b79dc82ab50a34fcee641486",
+    "capability_matrix_sha256": "cf31a845032087931f34af3f4680d24ac9f5921acd53265ce8afbddae3c4c049"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 255,
     "by_state": {
-      "READ_ONLY": 123,
-      "AVAILABLE": 102,
-      "DISABLED": 14,
-      "BLOCKED_DEPENDENCY": 16
+      "READ_ONLY": 127,
+      "AVAILABLE": 103,
+      "DISABLED": 13,
+      "BLOCKED_DEPENDENCY": 12
     }
   },
   "capabilities": [
@@ -333,9 +333,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/HqEventPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "hq.events.read",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -344,8 +344,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED",
-      "blocker": "Phase A7: bridge route not implemented yet",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "owner_events_are_deduplicated_versioned_and_quarantined",
+        "the_feed_pages_in_sequence_and_acknowledgements_never_move_back"
+      ],
       "contact_search": false
     },
     {
@@ -375,14 +378,14 @@
         "cfmeet.source_sync"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/HqEventAckRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/HqEventAck"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "hq.events.ack",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -391,8 +394,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED",
-      "blocker": "Phase A7: bridge route not implemented yet",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "the_feed_pages_in_sequence_and_acknowledgements_never_move_back"
+      ],
       "contact_search": false
     },
     {
@@ -13492,9 +13497,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OperationsActivationPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "operations.activations.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -13503,8 +13508,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
-      "blocker": "Phase A8: bridge route not implemented yet",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "activation_requests_dispatch_once_and_list_their_runs"
+      ],
       "contact_search": false
     },
     {
@@ -13517,7 +13524,7 @@
       "phase": "A8",
       "method": "POST",
       "path": "/operations/activations",
-      "source_endpoint": null,
+      "source_endpoint": "POST /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/dispatches",
       "path_params": [],
       "query_shape": "SCOPED",
       "query_required": [
@@ -13534,14 +13541,14 @@
         "cfmeet.release_manager"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/OperationsActivationRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OperationsActivationCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "operations.activation.request",
       "risk": "R4",
       "privacy": "INTERNAL",
@@ -13550,8 +13557,12 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A8: bridge route not implemented yet; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "activation_requests_dispatch_once_and_list_their_runs",
+        "an_unknown_dispatch_settles_from_the_runs_list_and_is_never_resent",
+        "activation_requests_are_disabled_without_github"
+      ],
       "contact_search": false
     },
     {
@@ -13564,7 +13575,7 @@
       "phase": "A8",
       "method": "GET",
       "path": "/operations/releases",
-      "source_endpoint": null,
+      "source_endpoint": "GET /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/runs",
       "path_params": [],
       "query_shape": "SCOPED_WINDOW",
       "query_required": [
@@ -13588,9 +13599,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OperationsReleasePage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "operations.releases.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -13599,8 +13610,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
-      "blocker": "Phase A8: bridge route not implemented yet",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "release_history_is_the_workflow_runs_without_logs",
+        "activation_requests_are_disabled_without_github"
+      ],
       "contact_search": false
     },
     {
