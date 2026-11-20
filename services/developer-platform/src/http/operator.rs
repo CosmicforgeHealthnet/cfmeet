@@ -385,19 +385,25 @@ async fn record_incident(
     ))
 }
 
-fn operator_of(
+pub(super) fn operator_of(
     caller: &InternalCaller,
     headers: &HeaderMap,
 ) -> Result<(String, RequestContext), ApiError> {
     caller.require_permission(InternalPermission::DeveloperPlatformAdminister)?;
-    let name = headers
-        .get("x-cf-operator")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| operator::valid_operator(v))
-        .ok_or(ApiError(ErrorCode::OperatorRequired))?;
+    // The admin bridge names an HQ staff member (`hq:<staff>`, verified by the middleware);
+    // the operator console names a human operator in the legacy form.
+    let name = match caller.bridge_operator() {
+        Some(a) => a.operator.as_str().to_string(),
+        None => headers
+            .get("x-cf-operator")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|v| operator::valid_operator(v))
+            .ok_or(ApiError(ErrorCode::OperatorRequired))?
+            .to_string(),
+    };
     let ctx = current_context().ok_or(ApiError(ErrorCode::InternalError))?;
-    Ok((name.to_string(), ctx))
+    Ok((name, ctx))
 }
 
 #[derive(serde::Deserialize)]
@@ -449,6 +455,11 @@ struct ActivityQuery {
     operator: Option<String>,
     #[serde(default)]
     action: Option<String>,
+    /// ADR 0067: optional window (RFC 3339), at most 31 days when both are given.
+    #[serde(default)]
+    since: Option<String>,
+    #[serde(default)]
+    until: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
     #[serde(default)]
@@ -468,10 +479,13 @@ async fn operator_activity(
         limit: q.limit,
         cursor: q.cursor,
     })?;
+    let (since, until) = super::operator_reads::window(q.since.as_deref(), q.until.as_deref())?;
     let filter = operator::OperatorActivityFilter {
         organization_id: q.organization_id,
         operator: q.operator,
         action: q.action,
+        since,
+        until,
     };
     Ok(Json(
         operator::operator_activity(&s.db, &filter, &page).await?,

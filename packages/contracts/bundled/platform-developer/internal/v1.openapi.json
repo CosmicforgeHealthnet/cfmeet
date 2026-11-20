@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.11.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED)."
+    "version": "1.12.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0067, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read."
   },
   "tags": [
     {
@@ -285,7 +285,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -381,7 +381,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -451,7 +451,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -482,6 +482,26 @@
               "type": "string",
               "maxLength": 64,
               "pattern": "^[a-z][a-z_.]*$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339, inclusive); at most 31 days before `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (RFC 3339, exclusive).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -591,6 +611,628 @@
         }
       }
     },
+    "/internal/v1/operator/organizations/{organizationId}/projects": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's projects",
+        "operationId": "operatorListProjects",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: the workspace's projects, newest first, keyset-paginated (no description, labels or support address). Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorProjectList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/environments": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's environments",
+        "operationId": "operatorListEnvironments",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: every environment of the workspace's projects, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorEnvironmentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/members": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's members",
+        "operationId": "operatorListMembers",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: workspace memberships (opaque CF Meet user ids; no name or address), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorMemberList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/invitations": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's invitations",
+        "operationId": "operatorListInvitations",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: invitations without the invitee's address or token, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorInvitationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/push-providers": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's push credential details",
+        "operationId": "operatorListPushProviders",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: push credential details (provider identifiers and fingerprints); never the credential itself. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorPushProviderList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/webhooks": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's webhook subscriptions",
+        "operationId": "operatorListWebhooks",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: live webhook subscriptions with the endpoint host only (never the URL path or query, the signing secret or the description), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorWebhookList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/webhook-deliveries": {
+      "get": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "List a workspace's webhook deliveries",
+        "operationId": "operatorListWebhookDeliveries",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: webhook delivery outcomes in an optional window (no payload, no response body), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "description": "Organization (tenant) id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (RFC 3339, inclusive); at most 31 days before `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (RFC 3339, exclusive).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorWebhookDeliveryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/internal/v1/operator/organizations/{organizationId}/state": {
       "post": {
         "tags": [
@@ -612,7 +1254,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -690,7 +1332,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -768,7 +1410,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -846,7 +1488,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -916,7 +1558,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -1760,7 +2402,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -1830,7 +2472,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -1908,7 +2550,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2000,7 +2642,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2070,7 +2712,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           },
           {
@@ -2147,7 +2789,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2211,7 +2853,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2296,7 +2938,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2358,7 +3000,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -2424,7 +3066,7 @@
             "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the migration audit.",
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
             }
           }
         ],
@@ -3991,6 +4633,264 @@
             "$ref": "#/components/responses/Error"
           },
           "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/app-search": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "Search apps",
+        "operationId": "operatorSearchApps",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: apps whose current manifest name contains `q` (case-insensitive, wildcards literal) or whose id equals `q`, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Name substring or exact app id.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorAppSummaryList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps/{appId}/versions": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "List an app's versions",
+        "operationId": "operatorListAppVersions",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: the app's manifest versions (name and distribution only), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "description": "App id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorAppVersionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/apps/{appId}/installations": {
+      "get": {
+        "tags": [
+          "Operator: apps"
+        ],
+        "summary": "List an app's installations",
+        "operationId": "operatorListAppInstallations",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0067: the app's installation grants (opaque targets, scope counts), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "description": "App id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/platform-developer.control.v1.OperatorAppInstallationList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
             "$ref": "#/components/responses/Error"
           },
           "404": {
@@ -5853,6 +6753,489 @@
           }
         }
       },
+      "platform-developer.control.v1.OperatorAppInstallation": {
+        "description": "ADR 0067: one installation grant of an app (targets are opaque ids; scopes are counted, not listed).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "grantId",
+          "targetKind",
+          "organizationId",
+          "principalId",
+          "scopeCount",
+          "status",
+          "revokedReason",
+          "installedAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "grantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetKind": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "principalId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "scopeCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "revokedReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "installedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorAppInstallationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorAppInstallation"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorAppSummary": {
+        "description": "ADR 0067: an app in operator search results (the current manifest's name and distribution).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "appId",
+          "organizationId",
+          "name",
+          "distribution",
+          "status",
+          "currentVersion",
+          "publishedVersion",
+          "publishedAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "appId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "distribution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 16
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "currentVersion": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "publishedVersion": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorAppSummaryList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorAppSummary"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorAppVersion": {
+        "description": "ADR 0067: one manifest version of an app (name and distribution only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "name",
+          "distribution",
+          "createdAt"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "distribution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 16
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorAppVersionList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorAppVersion"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorEnvironment": {
+        "description": "ADR 0067: an environment of a workspace's project.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environmentId",
+          "projectId",
+          "kind",
+          "displayName",
+          "status",
+          "productionAccessState",
+          "createdAt",
+          "updatedAt",
+          "version"
+        ],
+        "properties": {
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "productionAccessState": {
+            "type": "string",
+            "maxLength": 24
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorEnvironmentList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorEnvironment"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorInvitation": {
+        "description": "ADR 0067: a workspace invitation without the invitee's address or token.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "invitationId",
+          "role",
+          "status",
+          "createdAt",
+          "expiresAt",
+          "decidedAt"
+        ],
+        "properties": {
+          "invitationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorInvitationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorInvitation"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorMember": {
+        "description": "ADR 0067: a workspace membership (opaque CF Meet user id; no name or address).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "membershipId",
+          "userId",
+          "role",
+          "status",
+          "joinedVia",
+          "createdAt",
+          "updatedAt",
+          "removedAt",
+          "version"
+        ],
+        "properties": {
+          "membershipId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "joinedVia": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "removedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorMemberList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorMember"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "platform-developer.control.v1.OperatorOrganization": {
         "description": "Section 15 (PLT-009): an organization as listed to operators (no member role; who created it and whether a rename still has to reach Platform Access).",
         "type": "object",
@@ -5938,6 +7321,230 @@
           }
         }
       },
+      "platform-developer.control.v1.OperatorProject": {
+        "description": "ADR 0067: a project of a workspace for operators (no description, labels or support address).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "projectId",
+          "displayName",
+          "status",
+          "statusReason",
+          "environments",
+          "createdAt",
+          "updatedAt",
+          "archivedAt",
+          "version"
+        ],
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "statusReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "environments": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorProjectList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorProject"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorPushProvider": {
+        "description": "ADR 0067: push credential DETAILS (provider identifiers and the credential fingerprint); the sealed credential never leaves the vault.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pushProviderId",
+          "projectId",
+          "environmentId",
+          "environmentKind",
+          "provider",
+          "apnsKeyId",
+          "apnsTeamId",
+          "apnsBundleId",
+          "apnsHost",
+          "fcmProjectId",
+          "fingerprint",
+          "verification",
+          "lastVerifiedAt",
+          "lastErrorCode",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "pushProviderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentKind": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "provider": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "apnsKeyId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 10
+          },
+          "apnsTeamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 10
+          },
+          "apnsBundleId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 155
+          },
+          "apnsHost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 16
+          },
+          "fcmProjectId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 30
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "verification": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "lastVerifiedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastErrorCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorPushProviderList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorPushProvider"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "platform-developer.control.v1.OperatorScopeGrantRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -5983,6 +7590,222 @@
           "supportReference": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorWebhook": {
+        "description": "ADR 0067: a webhook subscription: the endpoint HOST only (never the URL path or query, the signing secret or the description).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subscriptionId",
+          "projectId",
+          "environmentId",
+          "environmentKind",
+          "endpointHost",
+          "eventTypes",
+          "status",
+          "consecutiveFailures",
+          "lastSuccessAt",
+          "lastFailureAt",
+          "disabledReason",
+          "origin",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "subscriptionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environmentKind": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "endpointHost": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 253
+          },
+          "eventTypes": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "consecutiveFailures": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastSuccessAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lastFailureAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "disabledReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "origin": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorWebhookDelivery": {
+        "description": "ADR 0067: a webhook delivery outcome (no payload, no response body).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deliveryId",
+          "subscriptionId",
+          "eventId",
+          "environmentId",
+          "status",
+          "attemptCount",
+          "lastHttpStatus",
+          "failureCategory",
+          "createdAt",
+          "completedAt"
+        ],
+        "properties": {
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventId": {
+            "type": "string",
+            "maxLength": 36
+          },
+          "environmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 16
+          },
+          "attemptCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lastHttpStatus": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "failureCategory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorWebhookDeliveryList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorWebhookDelivery"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "platform-developer.control.v1.OperatorWebhookList": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/platform-developer.control.v1.OperatorWebhook"
+            }
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },

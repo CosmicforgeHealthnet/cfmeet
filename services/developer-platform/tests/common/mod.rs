@@ -201,6 +201,9 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     /// A key nobody trusts, claiming to be the gateway.
     pub rogue_gateway: Arc<ServiceTokenSigner>,
+    /// The admin bridge (ADR 0067); granted `developer-platform.administer` only in the
+    /// [`Control`] harness bundle.
+    pub bridge: Arc<ServiceTokenSigner>,
 }
 
 fn signer(id: ServiceId, k: ServiceSigningKey) -> Arc<ServiceTokenSigner> {
@@ -219,6 +222,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
     let me = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
     let messaging = key("messaging-test-1");
+    let bridge = key("admin-bridge-test-1");
     let bundle = json!({
         "bundle_version": 1,
         "receiver": cf_service_auth::services::DEVELOPER_PLATFORM,
@@ -252,6 +256,7 @@ pub fn service_auth() -> (ServiceAuthRuntime, Peers) {
             gateway: signer(ServiceId::api_gateway(), gateway),
             messaging: signer(ServiceId::messaging(), messaging),
             rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-test-1")),
+            bridge: signer(ServiceId::admin_bridge(), bridge),
         },
     )
 }
@@ -1910,6 +1915,35 @@ impl Control {
             .map(|(c, w)| (c, w.expect("producers").producers))
     }
 
+    /// A GET from the admin bridge with the given attribution headers (ADR 0067).
+    pub async fn bridge(&self, path: &str, attribution: &[(&str, &str)]) -> Response {
+        self.signed_with(&self.peers.bridge, path, attribution)
+            .await
+    }
+
+    /// A GET signed by `signer` with extra headers (attribution tests).
+    pub async fn signed_with(
+        &self,
+        signer: &ServiceTokenSigner,
+        path: &str,
+        extra: &[(&str, &str)],
+    ) -> Response {
+        let signed = signer
+            .sign(&OutboundServiceRequest::new_operation(
+                ServiceId::developer_platform(),
+            ))
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        signed.apply_to(&mut headers);
+        for (k, v) in extra {
+            headers.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        self.send(Method::GET, path, headers, None).await
+    }
+
     pub async fn operator(&self, method: Method, path: &str, body: Option<Value>) -> Response {
         let signed = self
             .operator
@@ -1957,6 +1991,7 @@ pub fn service_auth_with_producers() -> (
     let me = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
     let messaging = key("messaging-test-1");
+    let bridge = key("admin-bridge-test-1");
     let operator = key("operator-test-1");
     let producer_keys: Vec<(&str, ServiceSigningKey)> = [
         svc::CALLING,
@@ -1992,6 +2027,11 @@ pub fn service_auth_with_producers() -> (
         issuer(
             svc::OPERATOR_CONSOLE,
             &operator,
+            &["developer-platform.administer"],
+        ),
+        issuer(
+            svc::ADMIN_BRIDGE,
+            &bridge,
             &["developer-platform.administer"],
         ),
     ];
@@ -2034,6 +2074,7 @@ pub fn service_auth_with_producers() -> (
             gateway: signer(ServiceId::api_gateway(), gateway),
             messaging: signer(ServiceId::messaging(), messaging),
             rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-test-1")),
+            bridge: signer(ServiceId::admin_bridge(), bridge),
         },
         signer(ServiceId::operator_console(), operator),
         producers,
@@ -2047,6 +2088,7 @@ pub fn service_auth_with_operator() -> (ServiceAuthRuntime, Peers, Arc<ServiceTo
     let me = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
     let messaging = key("messaging-test-1");
+    let bridge = key("admin-bridge-test-1");
     let operator = key("operator-test-1");
     let issuer = |id: &str, k: &ServiceSigningKey, perms: &[&str]| {
         json!({
@@ -2078,6 +2120,7 @@ pub fn service_auth_with_operator() -> (ServiceAuthRuntime, Peers, Arc<ServiceTo
             gateway: signer(ServiceId::api_gateway(), gateway),
             messaging: signer(ServiceId::messaging(), messaging),
             rogue_gateway: signer(ServiceId::api_gateway(), key("api-gateway-test-1")),
+            bridge: signer(ServiceId::admin_bridge(), bridge),
         },
         signer(ServiceId::operator_console(), operator),
     )
