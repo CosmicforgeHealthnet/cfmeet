@@ -40,6 +40,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use axum::http::Method;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use cf_service_auth::{
     client::{InternalCallError, InternalServiceClient},
@@ -306,10 +307,11 @@ impl PartnerDirectory for PlatformAccessPartners {
         let request = OutboundServiceRequest::new_operation(platform_access());
         let response = self
             .client
-            .post_json(
+            .exchange_json(
                 &request,
+                Method::POST,
                 "/internal/v1/user-tokens/verify",
-                &json!({ "token": token }),
+                Some(&json!({ "token": token })),
             )
             .await
             .map_err(unavailable)?;
@@ -337,9 +339,11 @@ impl PartnerDirectory for PlatformAccessPartners {
             .with_delegated_context(scope.delegated());
         let response = self
             .client
-            .get(
+            .exchange_json(
                 &request,
+                Method::GET,
                 &format!("/internal/v1/credentials/{credential_id}"),
+                None::<&Value>,
             )
             .await
             .map_err(unavailable)?;
@@ -371,9 +375,11 @@ impl PartnerDirectory for PlatformAccessPartners {
         let request = OutboundServiceRequest::new_operation(platform_access());
         let response = self
             .client
-            .get(
+            .exchange_json(
                 &request,
+                Method::GET,
                 &format!("/internal/v1/environments/{environment_id}/origins"),
+                None::<&Value>,
             )
             .await
             .map_err(unavailable)?;
