@@ -28,7 +28,27 @@ Prerequisites: the bridge is released, its signing identity exists, and Organiza
 2. Sets `CF_ORGANIZATIONS_BASE_URL` (the private TLS route) and `ADMIN_BRIDGE_MODULE_ORGANIZATIONS=true` on the bridge.
 3. Any failure restores both containers.
 
-The bridge **stays disabled**. Later phases add one `ADMIN_BRIDGE_GRANTS` row per owner and permission, the matching owner base URL, and the module switch.
+The bridge **stays disabled**.
+
+### 2.1 The other owners (one activation per owner family)
+
+Run each after `activate-admin-bridge`, in any order. Each operation does three things:
+- Grants the bridge the permissions that owner's bridge routes check, in the owner's trust bundle. The bundle is merged: nothing is dropped.
+- Sets the owner's private TLS base URL on the bridge.
+- Switches on that owner's modules.
+
+None of them touches `ADMIN_BRIDGE_ENABLED` or `ADMIN_BRIDGE_WRITES_ENABLED`. Any failure restores every container. Safe defaults refuse a module that is switched on without its activation.
+
+| Operation | Owner grants | Bridge settings |
+|---|---|---|
+| `activate-admin-bridge-notifications` | both Notifications replicas: `notifications.administer`, `notifications-observability.read` | `CF_NOTIFICATIONS_BASE_URL`; `NOTIFICATIONS` |
+| `activate-admin-bridge-partners` | Developer Platform: `developer-platform.administer`; Platform Access: `platform-identity.administer` | `CF_DEVELOPER_PLATFORM_BASE_URL`, `CF_PLATFORM_ACCESS_BASE_URL`; `PARTNERS`, `IDENTITY`, `APPS`, `VERIFICATION` |
+| `activate-admin-bridge-communications` | `communications.administer` | `CF_COMMUNICATIONS_BASE_URL`; `COMMUNICATIONS` |
+| `activate-admin-bridge-meetings` | `account.administer`, `meeting.administer`; also sets `ADMIN_OPERATOR_API_ENABLED=true` on the Meeting Service | `CF_MEETING_SERVICE_BASE_URL`; `ACCOUNTS`, `MEETINGS` |
+| `activate-admin-bridge-messaging` | `messaging-firstparty.administer` | `CF_MESSAGING_BASE_URL`; `MESSAGING` |
+| `activate-admin-bridge-calling` | `calling.administer` | `CF_CALLING_BASE_URL`; `CALLING` |
+
+Every permission except `notifications-observability.read`, `developer-platform.administer` and `platform-identity.administer` is bridge-only in the registry. Even those three require the bridge's `hq:<staff>` attribution, or the console's named operator, on the routes the bridge uses.
 
 ## 3. Enabling for HQ (HQ stage S3), operator steps
 
