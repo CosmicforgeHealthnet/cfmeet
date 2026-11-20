@@ -73,7 +73,7 @@ pub fn pki() -> Pki {
     std::fs::create_dir(dir.path().join("hmac")).unwrap();
     std::fs::write(
         dir.path().join("hmac").join(format!("{HMAC_KID}.key")),
-        HMAC_KEY,
+        base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, HMAC_KEY),
     )
     .unwrap();
     Pki {

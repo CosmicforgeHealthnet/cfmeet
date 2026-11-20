@@ -223,6 +223,8 @@ pub struct Peers {
     pub messaging: Arc<ServiceTokenSigner>,
     pub developer: Arc<ServiceTokenSigner>,
     pub operator: Arc<ServiceTokenSigner>,
+    /// ADR 0068: the admin bridge (operator reads only).
+    pub bridge: Arc<ServiceTokenSigner>,
     pub rogue_meeting: Arc<ServiceTokenSigner>,
 }
 
@@ -237,6 +239,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
         "messaging",
         "developer",
         "operator",
+        "bridge",
     ]
     .iter()
     .map(|n| (*n, key(&format!("{n}-test-1"))))
@@ -255,6 +258,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
             issuer(s::MESSAGING, k("messaging"), &["notifications-event.publish", "notifications-push-registration.sync"]),
             issuer(s::DEVELOPER_PLATFORM, k("developer"), &["notifications-event.publish", "notifications-push-provider.manage"]),
             issuer(s::OPERATOR_CONSOLE, k("operator"), &["notifications-observability.read", "notifications-operations.replay", "notifications-operations.reroute"]),
+            issuer(s::ADMIN_BRIDGE, k("bridge"), &["notifications.administer", "notifications-observability.read"]),
         ],
     })
     .to_string();
@@ -285,6 +289,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
                 take("developer"),
             ),
             operator: signer(ServiceId::operator_console(), take("operator")),
+            bridge: signer(ServiceId::admin_bridge(), take("bridge")),
             rogue_meeting: signer(ServiceId::meeting_service(), key("meeting-test-1")),
         },
     )
