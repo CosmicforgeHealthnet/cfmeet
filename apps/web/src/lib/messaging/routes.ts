@@ -21,7 +21,7 @@ const routes: [MessagingMethod, string, readonly string[]][] = [
   ["GET", `${c}/messages/${id}/reactions`, []],
   ["PUT", `${c}/messages/${id}/reactions/${reaction}`, []], ["DELETE", `${c}/messages/${id}/reactions/${reaction}`, []],
   ["GET", `${c}/pins`, []], ["PUT", `${c}/pins/${id}`, []], ["DELETE", `${c}/pins/${id}`, []],
-  ["PUT", `${c}/read-cursor`, []], ["POST", `${c}/owner`, []], ["GET", `${c}/unread`, []],
+  ["PUT", `${c}/read-cursor`, []], ["PUT", `${c}/inbox-settings`, []], ["POST", `${c}/owner`, []], ["GET", `${c}/unread`, []],
   // Messaging's canonical replay cursor is `after` (the relay still rewrites the old
   // `afterEventSequence` spelling, MSG-001).
   ["GET", `${c}/events`, ["after", "afterEventSequence", "limit"]],

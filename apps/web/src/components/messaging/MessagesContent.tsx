@@ -12,6 +12,9 @@
 import { ForwardDialog, GroupAdminTools, ReportDialog } from "./ChatActions";
 import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
+import { ArchivedHeader, ArchivedRow, ChatListToggles } from "./ChatListControls";
+import { RichContentView, ShareMenu } from "./RichMessages";
+import { arrangeChats, pinnedCount } from "@/lib/messaging/chat-list";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -576,6 +579,8 @@ type BubbleActions = {
   report: () => void;
   retry: () => void;
   discard: () => void;
+  /** F4: vote in a private chat's poll (absent: not a poll). */
+  vote?: (choices: number[]) => void;
 };
 
 function MessageBubble({ m, name, names, onDownload, actions, managed, first, last, group }: {
@@ -627,8 +632,9 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
                 </span>
               </form>
             ) : m.text !== null ? (
-              <p className="whitespace-pre-wrap break-words" data-testid="message-text">{m.text}</p>
+              m.rich && m.rich.kind !== "link" ? null : <p className="whitespace-pre-wrap break-words" data-testid="message-text">{m.text}</p>
             ) : null}
+            {m.rich && editing === null ? <RichContentView rich={m.rich} mine={mine} onVote={actions.vote} /> : null}
             {m.file ? (
               <button type="button" className={cn("mt-1 flex w-full min-w-48 items-center gap-3 rounded-xl p-2 text-left", mine ? "bg-white/15 hover:bg-white/20" : "bg-background/70 hover:bg-background")} data-testid="attachment" onClick={onDownload}>
                 <span className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg", mine ? "bg-white/20" : "bg-primary/10 text-primary")}><FileText className="size-4" /></span>
@@ -666,7 +672,7 @@ function MessageBubble({ m, name, names, onDownload, actions, managed, first, la
                     {!mine ? <button type="button" className={item} data-testid="report" onClick={() => { actions.report(); setMenu(false); }}><Flag className="size-4 text-muted-foreground" />Report</button> : null}
                     <button type="button" className={item} data-testid="star" onClick={() => { actions.star(); setMenu(false); }}><Star className={cn("size-4", actions.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground")} />{actions.starred ? "Unstar" : "Star"}</button>
                     <button type="button" className={item} data-testid="pin" onClick={() => { actions.pin(!m.pinned); setMenu(false); }}>{m.pinned ? <PinOff className="size-4 text-muted-foreground" /> : <Pin className="size-4 text-muted-foreground" />}{m.pinned ? "Unpin" : "Pin"}</button>
-                    {mine && m.text !== null ? <button type="button" className={item} data-testid="edit" onClick={() => { setEditing(m.text ?? ""); setMenu(false); }}><Pencil className="size-4 text-muted-foreground" />Edit</button> : null}
+                    {mine && m.text !== null && (!m.rich || m.rich.kind === "link") ? <button type="button" className={item} data-testid="edit" onClick={() => { setEditing(m.text ?? ""); setMenu(false); }}><Pencil className="size-4 text-muted-foreground" />Edit</button> : null}
                     <button type="button" className={item} data-testid="hide" onClick={() => { actions.remove("ME"); setMenu(false); }}><EyeOff className="size-4 text-muted-foreground" />Delete for me</button>
                     {mine ? <button type="button" className={cn(item, "text-destructive")} data-testid="delete" onClick={() => { actions.remove("EVERYONE"); setMenu(false); }}><Trash2 className="size-4" />Delete for everyone</button> : null}
                   </Popover.Content>
@@ -768,6 +774,7 @@ function DetailsPanel({ engine, conversation, title, onClose, shareEnabled }: { 
         ) : null}
         {shareEnabled ? <ShareMeeting engine={engine} conversation={conversation} /> : null}
         <ChatInfoExtras conversationId={conversation.id} direct={!isGroup} groupTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? null} />
+        <ChatListToggles engine={engine} conversation={conversation} pinnedTotal={pinnedCount(s.conversations)} />
         <section>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{conversation.members.length} {conversation.members.length === 1 ? "member" : "members"}</p>
           <ul className="space-y-1">
@@ -977,6 +984,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     },
     retry: () => { if (m.outboxKey) engine.retrySend(m.outboxKey); },
     discard: () => { if (m.outboxKey) engine.discardSend(m.outboxKey); },
+    vote: m.messageId && m.rich?.kind === "poll" ? (choices) => { void engine.sendRich(conversation.id, { t: "vote", poll: m.messageId!, choices }).catch(fail); } : undefined,
   });
   const mentions = (t: string) =>
     conversation.members.filter((p) => p !== s.identity?.principalId && s.names[p] && t.includes(`@${s.names[p]}`));
@@ -988,8 +996,9 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
     setReplyTo(null);
     setError(null);
     engine.typing(conversation.id, false);
-    // The server takes @mentions only in managed chats; replies work in both.
-    void engine.send(conversation.id, t, { replyToMessageId: reply, mentionedPrincipalIds: managed ? mentions(t) : [] }).catch((cause) => {
+    // @mentions: only the mentioned members' ids reach the server (for their mention badge and
+    // "only @mentions" notifications); in a private chat the text stays end-to-end encrypted.
+    void engine.send(conversation.id, t, { replyToMessageId: reply, mentionedPrincipalIds: mentions(t) }).catch((cause) => {
       setText((draft) => draft || t);
       setError(messagingErrorMessage(cause));
     });
@@ -1121,6 +1130,7 @@ function ConversationPane({ engine, conversation, onBack }: { engine: MessagingE
                 }}
               />
               <button type="button" className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={!canAttach} onClick={() => file.current?.click()} aria-label="Attach a file" title={attachments.enabled ? "Attach a file" : "Sending files isn't available in this chat"}><Paperclip className="size-5" /></button>
+              {e2ee ? <ShareMenu disabled={!canSend} onSend={(payload) => engine.sendRich(conversation.id, payload)} /> : null}
               <textarea
                 ref={composer}
                 rows={1}
@@ -1177,6 +1187,7 @@ function PersonalMessages() {
   const [securityOpen, setSecurityOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [starredOpen, setStarredOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const capabilities = useHubCapabilities();
   const areas = communicationsAreas(capabilities.data);
   const inbox = useHubInbox(areas.contacts || areas.managedMessaging);
@@ -1190,7 +1201,8 @@ function PersonalMessages() {
   // Keep the number on the Chats tab in step with this list.
   const tabCounter = useQueryClient();
   useEffect(() => { tabCounter.setQueryData(["messaging", "unread-chats"], unreadTotal); }, [tabCounter, unreadTotal]);
-  const conversations = s.conversations.filter((conversation) => {
+  const archivedChats = s.conversations.filter((c) => c.archived);
+  const conversations = arrangeChats(s.conversations, showArchived && archivedChats.length > 0).filter((conversation) => {
     const matchesSearch = conversation.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
     const matchesFilter = filter === "ALL" || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected : conversation.securityProfile === filter);
     return matchesSearch && matchesFilter;
@@ -1245,6 +1257,8 @@ function PersonalMessages() {
             </div>
           </div>
           <ul className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-2" data-testid="conversation-list">
+            {s.phase === "loading" ? null : showArchived && archivedChats.length ? <ArchivedHeader onBack={() => setShowArchived(false)} />
+              : <ArchivedRow count={archivedChats.length} unread={archivedChats.filter((c) => c.unreadCount > 0 && c.id !== selected).length} onOpen={() => setShowArchived(true)} />}
             {s.phase === "loading" ? (
               [0, 1, 2, 3].map((i) => <li key={i} className="flex items-center gap-3 px-3 py-3"><span className="size-12 animate-pulse rounded-full bg-muted" /><span className="flex-1 space-y-2"><span className="block h-3.5 w-1/2 animate-pulse rounded bg-muted" /><span className="block h-3 w-3/4 animate-pulse rounded bg-muted" /></span></li>)
             ) : conversations.map((c) => {
@@ -1277,6 +1291,7 @@ function PersonalMessages() {
                         <span className={cn("flex min-w-0 items-center gap-1.5 text-[15px]", unread ? "font-bold" : "font-semibold")}>
                           <span className="truncate">{c.title}</span>
                           {muted.has(c.id) ? <BellOff className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" /> : null}
+                          {c.pinned ? <Pin className="size-3.5 shrink-0 text-muted-foreground" aria-label="Pinned" /> : null}
                         </span>
                         {at ? <time className={cn("shrink-0 text-xs", unread ? "font-semibold text-primary" : "text-muted-foreground")}>{listTime(at)}</time> : null}
                       </span>

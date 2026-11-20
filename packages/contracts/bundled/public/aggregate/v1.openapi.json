@@ -26,7 +26,7 @@
     },
     {
       "name": "messaging",
-      "description": "cfmeet.messaging.http-api 1.22.0"
+      "description": "cfmeet.messaging.http-api 1.23.0"
     },
     {
       "name": "numbering",
@@ -17007,6 +17007,97 @@
         },
         "x-cfmeet-service": "messaging",
         "x-cfmeet-route-id": "messaging.replayConversationEvents",
+        "x-cfmeet-auth": [
+          "PLATFORM_CREDENTIAL",
+          "CLIENT_TOKEN",
+          "OAUTH_ACCESS_TOKEN"
+        ]
+      }
+    },
+    "/v1/conversations/{conversationId}/inbox-settings": {
+      "put": {
+        "operationId": "setConversationInboxSettings",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "set Conversation Inbox Settings",
+        "security": [
+          {
+            "messaging.customerCredential": []
+          },
+          {
+            "messaging.clientToken": []
+          },
+          {
+            "messaging.oauthAccessToken": []
+          }
+        ],
+        "x-cfmeet-required-scope": "messages.read",
+        "description": "Scope messages.read. F1: the acting member archives / pins this chat for itself (never visible to other members). At most three pinned chats per principal (409 CONFLICT / PIN_LIMIT_REACHED); pinning un-archives, archiving un-pins; an archived chat stays archived when new messages arrive. GET /v1/conversations returns both in each inbox summary. A non-member is 404.",
+        "parameters": [
+          {
+            "name": "CF-Acting-Principal",
+            "in": "header",
+            "required": true,
+            "description": "The verified acting principal (Platform Access resolves it ACTIVE in the credential's environment).",
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          },
+          {
+            "name": "conversationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/messaging.messaging.common.v1.ConversationInboxSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/messaging.Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/messaging.Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/messaging.messaging.common.v1.ConversationInboxSettingsRequest"
+              }
+            }
+          }
+        },
+        "x-cfmeet-service": "messaging",
+        "x-cfmeet-route-id": "messaging.setConversationInboxSettings",
         "x-cfmeet-auth": [
           "PLATFORM_CREDENTIAL",
           "CLIENT_TOKEN",
@@ -70858,9 +70949,78 @@
           "mentionCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext)."
+            "description": "Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext)."
+          },
+          "archived": {
+            "type": "boolean",
+            "description": "F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first)."
+          },
+          "pinnedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned."
           }
         }
+      },
+      "messaging.messaging.common.v1.ConversationInboxSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conversationId",
+          "archived",
+          "pinned",
+          "pinnedAt"
+        ],
+        "properties": {
+          "conversationId": {
+            "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "pinnedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "description": "F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary)."
+      },
+      "messaging.messaging.common.v1.ConversationInboxSettingsRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "archived": {
+            "type": "boolean",
+            "description": "Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED."
+          }
+        },
+        "description": "F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true."
       },
       "messaging.messaging.common.v1.ConversationLastMessage": {
         "type": "object",
@@ -75202,7 +75362,7 @@
             "items": {
               "$ref": "#/components/schemas/messaging.platform.common.v1.Uuid"
             },
-            "description": "Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
+            "description": "Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the \"mentions only\" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate limits are charged."
           },
           "frankingCommitment": {
             "type": "string",
@@ -75822,10 +75982,17 @@
             "format": "date-time"
           },
           "retentionSeconds": {
-            "type": "integer",
-            "minimum": 60,
-            "maximum": 3153600000,
-            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS)."
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 60,
+                "maximum": 3153600000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "§90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that limit — by the owner, a group's ADMIN or either member of a DIRECT conversation (another member: 403 PRINCIPAL_NOT_AUTHORIZED / NOT_ADMIN); each message keeps the retention in force when it was sent, so a change applies to messages sent after it."
           },
           "title": {
             "oneOf": [

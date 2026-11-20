@@ -73,6 +73,11 @@ jobs:
       - name: Chat title tests
         run: node --experimental-strip-types --test tests/messaging-titles.test.mjs
 
+      # Chat controls: archive / pin (F1) and private-chat polls, locations, contact cards and
+      # link previews (F4-F7) inside the encrypted content, validated by the crypto worker.
+      - name: Messaging chat controls tests
+        run: node --experimental-strip-types --test tests/messaging-chat-controls.test.mjs
+
       # FE-015: src/types/generated/meeting-service.ts matches the served OpenAPI contract.
       - name: Contract types are fresh
         run: node scripts/generate-contract-types.mjs --check

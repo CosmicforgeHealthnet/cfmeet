@@ -163,6 +163,51 @@ function aadFor(conversationId, clientMessageId, senderDeviceId) {
   return core.message_aad(s.tenantId, s.applicationId, s.environmentId, conversationId, clientMessageId, senderDeviceId);
 }
 
+// Structured payloads (F4-F7), validated on the way in AND out: only these shapes are ever
+// encrypted or shown, every string is bounded, and nothing here is fetched (a link preview
+// is built by the sender's device, the server never sees or fetches the link).
+const str = (v, max, min = 0) => (typeof v === "string" && v.length >= min && v.length <= max ? v : fail("PAYLOAD_INVALID"));
+const optStr = (v, max) => (v === undefined || v === null ? null : str(v, max));
+const CF_MEET_ID = /^[A-Za-z0-9._-]{3,40}$/;
+function linkPreview(v) {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object") fail("PAYLOAD_INVALID");
+  const url = str(v.url, 2048, 8);
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    fail("PAYLOAD_INVALID");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") fail("PAYLOAD_INVALID");
+  return { url: parsed.href, title: optStr(v.title, 200), description: optStr(v.description, 300), siteName: optStr(v.siteName, 100) };
+}
+function coordinate(v, limit) {
+  return typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= limit ? Math.round(v * 1e6) / 1e6 : fail("PAYLOAD_INVALID");
+}
+/** A structured payload (not text / file), normalized; throws PAYLOAD_INVALID otherwise. */
+function richPayload(p) {
+  switch (p?.t) {
+    case "contact":
+      if (typeof p.cfMeetId !== "string" || !CF_MEET_ID.test(p.cfMeetId)) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "contact", cfMeetId: p.cfMeetId, name: str(p.name, 120, 1) };
+    case "location":
+      return { v: 1, t: "location", lat: coordinate(p.lat, 90), lng: coordinate(p.lng, 180), label: optStr(p.label, 200) };
+    case "poll": {
+      if (!Array.isArray(p.options) || p.options.length < 2 || p.options.length > 12) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "poll", question: str(p.question, 300, 1), options: p.options.map((o) => str(o, 100, 1)), multiple: p.multiple === true };
+    }
+    case "vote": {
+      if (!Array.isArray(p.choices) || p.choices.length > 12) fail("PAYLOAD_INVALID");
+      const choices = [...new Set(p.choices)];
+      if (choices.length !== p.choices.length || !choices.every((c) => Number.isInteger(c) && c >= 0 && c < 12)) fail("PAYLOAD_INVALID");
+      return { v: 1, t: "vote", poll: uuid(p.poll, "PAYLOAD_INVALID"), choices };
+    }
+    default:
+      return fail("PAYLOAD_INVALID");
+  }
+}
+
 /** The CF Meet message payload inside MLS (validated before anything is shown). */
 function parsePayload(plain) {
   let p;
@@ -173,14 +218,17 @@ function parsePayload(plain) {
   }
   if (!p || typeof p !== "object" || p.v !== 1) fail("PAYLOAD_INVALID");
   if (p.t === "text" && typeof p.text === "string" && p.text.length >= 1 && p.text.length <= MAX_TEXT) {
-    return { t: "text", text: p.text };
+    const preview = linkPreview(p.preview);
+    return preview ? { t: "text", text: p.text, preview } : { t: "text", text: p.text };
   }
   if (p.t === "file" && typeof p.d === "string") {
     const descriptor = b64u.dec(p.d);
     if (!core.is_descriptor(descriptor)) fail("PAYLOAD_INVALID");
     return { t: "file", d: p.d, caption: typeof p.caption === "string" ? p.caption.slice(0, 1024) : null };
   }
-  fail("PAYLOAD_INVALID");
+  const rich = richPayload(p);
+  delete rich.v;
+  return rich;
 }
 
 /** What the page sees of a stored record (never the attachment key). */
@@ -421,6 +469,8 @@ const ops = {
     if (payload?.t === "text") {
       if (typeof payload.text !== "string" || payload.text.length < 1 || payload.text.length > MAX_TEXT) fail("TEXT_INVALID");
       p = { v: 1, t: "text", text: payload.text };
+      const preview = linkPreview(payload.preview);
+      if (preview) p.preview = preview;
     } else if (payload?.t === "file") {
       const h = handles.get(payload.handle) ?? fail("UNKNOWN_ATTACHMENT");
       attachmentId = uuid(payload.attachmentId);
@@ -430,7 +480,7 @@ const ops = {
       handles.delete(payload.handle);
       h.file.free();
     } else {
-      fail("PAYLOAD_INVALID");
+      p = richPayload(payload);
     }
     const plain = enc.encode(JSON.stringify(p));
     const ciphertext = device.encrypt(bytes(groupId), aadFor(conversationId, clientMessageId, ctx.deviceId), plain);

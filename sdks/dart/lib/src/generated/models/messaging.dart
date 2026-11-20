@@ -1047,27 +1047,91 @@ class ConversationInbox {
   const ConversationInbox.fromJson(this.json);
 
   /// Builds the JSON object from typed values (absent optional values are omitted).
-  factory ConversationInbox.create({required String lastActivityAt, required ConversationLastMessage? lastMessage, required int mentionCount, required int unreadCount}) =>
+  factory ConversationInbox.create({bool? archived, required String lastActivityAt, required ConversationLastMessage? lastMessage, required int mentionCount, bool? pinned, String? pinnedAt, required int unreadCount}) =>
       ConversationInbox.fromJson(<String, Object?>{
+        if (archived != null) 'archived': archived,
         'lastActivityAt': lastActivityAt,
         'lastMessage': lastMessage?.toJson(),
         'mentionCount': mentionCount,
+        if (pinned != null) 'pinned': pinned,
+        if (pinnedAt != null) 'pinnedAt': pinnedAt,
         'unreadCount': unreadCount,
       });
 
   /// The JSON object, including fields this SDK version does not know.
   final Map<String, Object?> json;
 
+  /// F1 (1.34.0): the member archived this chat for itself (PUT /v1/conversations/{conversationId}/inbox-settings). It stays archived when new messages arrive. Never visible to other members.
+  bool? get archived => json['archived'] as bool?;
+
   /// The latest application message (or the creation time); the key of orderBy=lastActivity.
   String get lastActivityAt => json['lastActivityAt']! as String;
 
   ConversationLastMessage? get lastMessage => json['lastMessage'] == null ? null : ConversationLastMessage.fromJson(json['lastMessage']! as Map<String, Object?>);
 
-  /// Unread messages that mention the member (MANAGED mentions; always 0 for PRIVATE_E2EE, whose mentions stay inside the ciphertext).
+  /// Unread messages that mention the member (the sender's declared mention ids: MANAGED and — B3, 1.34.0 — PRIVATE_E2EE, whose mention text stays inside the ciphertext).
   int get mentionCount => (json['mentionCount']! as num).toInt();
+
+  /// F1 (1.34.0): the member pinned this chat for itself (at most three; clients list pinned chats first, most recently pinned first).
+  bool? get pinned => json['pinned'] as bool?;
+
+  /// F1 (1.34.0): when the member pinned this chat (the pin order); null when not pinned.
+  String? get pinnedAt => json['pinnedAt'] as String?;
 
   /// Active application messages from others after the member's read cursor, inside its history window, not hidden for it.
   int get unreadCount => (json['unreadCount']! as num).toInt();
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// F1 (1.34.0): the acting member's chat-list settings of one conversation after the change (the same fields as its inbox summary).
+class ConversationInboxSettings {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConversationInboxSettings.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConversationInboxSettings.create({required bool archived, required Uuid conversationId, required bool pinned, required String? pinnedAt}) =>
+      ConversationInboxSettings.fromJson(<String, Object?>{
+        'archived': archived,
+        'conversationId': conversationId,
+        'pinned': pinned,
+        'pinnedAt': pinnedAt,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  bool get archived => json['archived']! as bool;
+
+  Uuid get conversationId => json['conversationId']! as String;
+
+  bool get pinned => json['pinned']! as bool;
+
+  String? get pinnedAt => json['pinnedAt'] as String?;
+
+  Map<String, Object?> toJson() => json;
+}
+
+/// F1 (1.34.0): the acting member's own chat-list settings of one conversation. archived and pinned are not both true.
+class ConversationInboxSettingsRequest {
+  /// Wraps a decoded JSON object (unknown fields are kept).
+  const ConversationInboxSettingsRequest.fromJson(this.json);
+
+  /// Builds the JSON object from typed values (absent optional values are omitted).
+  factory ConversationInboxSettingsRequest.create({bool? archived, bool? pinned}) =>
+      ConversationInboxSettingsRequest.fromJson(<String, Object?>{
+        if (archived != null) 'archived': archived,
+        if (pinned != null) 'pinned': pinned,
+      });
+
+  /// The JSON object, including fields this SDK version does not know.
+  final Map<String, Object?> json;
+
+  /// Archive (true) or unarchive (false) the chat for the acting member. Archiving un-pins it.
+  bool? get archived => json['archived'] as bool?;
+
+  /// Pin (true) or unpin (false) the chat for the acting member. Pinning un-archives it; a fourth pin is 409 CONFLICT / PIN_LIMIT_REACHED.
+  bool? get pinned => json['pinned'] as bool?;
 
   Map<String, Object?> toJson() => json;
 }
@@ -3507,7 +3571,7 @@ class SendMessageRequest {
   /// MANAGED only (refused for PRIVATE_E2EE, whose presentation travels inside the ciphertext).
   String? get managedPresentation => json['managedPresentation'] as String?;
 
-  /// Section 13, MANAGED only: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). PRIVATE_E2EE refuses it (CONTENT_REJECTED / MENTIONS_MANAGED_ONLY): encrypted mentions stay inside the ciphertext. A retry with the same clientMessageId must repeat the text and the attachment set (IDEMPOTENCY_KEY_REUSED otherwise) and is answered before rate …
+  /// Section 13: current ACTIVE members this message mentions (ids only; the sender is ignored; anyone else is VALIDATION_ERROR). Used only for the members' mention count and the "mentions only" notification preference. B3 (1.34.0): PRIVATE_E2EE accepts it too — only these ids reach the server, the mention text stays inside the ciphertext; not on an EDIT. A retry with the same clientMessageId must …
   List<Uuid>? get mentionedPrincipalIds => json['mentionedPrincipalIds'] == null ? null : (json['mentionedPrincipalIds']! as List<Object?>).map((e) => e! as String).toList();
 
   /// false: no push notification jobs (mirrored / migrated writes). Default true.
@@ -3927,7 +3991,7 @@ class UpdateConversationRequest {
 
   String? get reason => json['reason'] as String?;
 
-  /// §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. Only ever tightens (RETENTION_ONLY_TIGHTENS).
+  /// §90 / disappearing messages: a conversation-specific retention, never looser than the context's (or environment's) retention policy (RETENTION_LOOSER_THAN_POLICY). The retention worker expires older messages (tombstone, then purge unless a legal hold protects them); clients delete locally on the same timer. Audited. B4 (1.34.0): it can be shortened, lengthened or turned off (null) within that …
   int? get retentionSeconds => (json['retentionSeconds'] as num?)?.toInt();
 
   /// Section 13: a new display title; null clears it (MANAGED only, owner).

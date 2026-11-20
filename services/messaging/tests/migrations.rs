@@ -135,9 +135,21 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
         messaging_migration::pending_migrations(&db.conn)
             .await
             .unwrap(),
-        vec!["m20261210_000038_mls_group_infos".to_string()]
+        vec![
+            "m20261210_000038_mls_group_infos".to_string(),
+            "m20261212_000040_inbox_and_chat_controls".to_string()
+        ]
     );
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        messaging_migration::pending_migrations(&db.conn)
+            .await
+            .unwrap(),
+        vec!["m20261212_000040_inbox_and_chat_controls".to_string()]
+    );
+    messaging_migration::ChatControlsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     assert!(messaging_migration::pending_migrations(&db.conn)
@@ -177,6 +189,72 @@ async fn the_mls_join_history_is_separate_so_a_rollback_still_starts() {
         0
     );
     messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::pending_migrations(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+/// Chat controls live in their OWN history: the previous image still finds exactly its
+/// histories (it never reads this one), the history rolls back cleanly (the retention
+/// "only tightens" trigger comes back) and re-applies.
+#[tokio::test]
+async fn the_chat_controls_history_is_separate_and_rolls_back() {
+    let Some(db) = TestDb::empty().await else {
+        return;
+    };
+    messaging_migration::Migrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::GapClosureMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    messaging_migration::MlsJoinMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::mls_join_pending(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        messaging_migration::chat_controls_pending(&db.conn)
+            .await
+            .unwrap(),
+        vec!["m20261212_000040_inbox_and_chat_controls".to_string()]
+    );
+    let trigger = "SELECT count(*) FROM pg_trigger WHERE tgname = 'trg_messaging_conversation_retention_tightens'";
+    assert_eq!(count(&db, trigger).await, 1);
+    messaging_migration::ChatControlsMigrator::up(&db.conn, None)
+        .await
+        .unwrap();
+    assert!(messaging_migration::pending_migrations(&db.conn)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(count(&db, trigger).await, 0);
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM messaging_chat_controls_seaql_migrations"
+        )
+        .await,
+        1
+    );
+    messaging_migration::ChatControlsMigrator::reset(&db.conn)
+        .await
+        .unwrap();
+    assert_eq!(count(&db, trigger).await, 1);
+    assert_eq!(
+        count(
+            &db,
+            "SELECT count(*) FROM pg_tables WHERE tablename IN ('messaging_conversation_inbox_preferences', 'messaging_policy_invalidations')"
+        )
+        .await,
+        0
+    );
+    messaging_migration::ChatControlsMigrator::up(&db.conn, None)
         .await
         .unwrap();
     assert!(messaging_migration::pending_migrations(&db.conn)

@@ -1,8 +1,8 @@
 # Messaging — native authenticated API map
 
-Generated from the Account relay and Messaging 1.22.0 contract.
-Canonical SDK contract: **106 operations**; audience-filtered public Swagger:
-**90 operations**; native Account transports: **73 operations**.
+Generated from the Account relay and Messaging 1.23.0 contract.
+Canonical SDK contract: **107 operations**; audience-filtered public Swagger:
+**91 operations**; native Account transports: **74 operations**.
 There are no new canonical message/conversation/device endpoints.
 
 CF Meet consumer REST calls use the native path below with the existing Account bearer
@@ -140,6 +140,7 @@ required. Meetings and established permitted service contexts retain independent
 | DELETE | `/v1/conversations/{conversationId}/messages/{messageId}` | deleteMessage | `/api/v2/messaging/relay/v1/conversations/{conversationId}/messages/{messageId}` | Account session |
 | GET | `/v1/conversations/{conversationId}/messages/{messageId}/revisions` | listMessageRevisions | `/api/v2/messaging/relay/v1/conversations/{conversationId}/messages/{messageId}/revisions` | Account session |
 | PUT | `/v1/conversations/{conversationId}/read-cursor` | setReadCursor | `/api/v2/messaging/relay/v1/conversations/{conversationId}/read-cursor` | Account session |
+| PUT | `/v1/conversations/{conversationId}/inbox-settings` | setConversationInboxSettings | `/api/v2/messaging/relay/v1/conversations/{conversationId}/inbox-settings` | Account session |
 | GET | `/v1/conversations/{conversationId}/events` | replayConversationEvents | `/api/v2/messaging/relay/v1/conversations/{conversationId}/events` | Account session |
 | POST | `/v1/conversations/{conversationId}/mls/commits` | submitMlsCommit | `/api/v2/messaging/relay/v1/conversations/{conversationId}/mls/commits` | Account session |
 | GET | `/v1/conversations/{conversationId}/mls/state` | getMlsGroupState | `/api/v2/messaging/relay/v1/conversations/{conversationId}/mls/state` | Account session |

@@ -79,7 +79,8 @@ test("every page sends a nonce CSP with Trusted Types and hydrates without viola
     assert.equal(h["x-content-type-options"], "nosniff");
     assert.equal(h["x-frame-options"], "DENY");
     assert.equal(h["cross-origin-opener-policy"], "same-origin");
-    assert.ok(h["permissions-policy"].includes("geolocation=()"));
+    // F5: a private chat can share your location (this origin only, never a frame or third party).
+    assert.ok(h["permissions-policy"].includes("geolocation=(self)"));
     assert.ok(h["strict-transport-security"]);
     assert.equal(h["x-powered-by"], undefined);
     // The framework's own nonced scripts ran (React Server Components payload).
