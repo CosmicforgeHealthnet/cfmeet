@@ -64,6 +64,28 @@
     ]
   },
   {
+    "id": "bridge.operations.read",
+    "version": "1.0",
+    "owner": "admin-bridge",
+    "method": "GET",
+    "bridge_endpoint": "/hq/operations/{idempotency_key}",
+    "source_endpoint": null,
+    "state": "READ_ONLY",
+    "permission": "bridge.operations.read",
+    "risk": "R1",
+    "privacy": "INTERNAL",
+    "scope": "cfmeet + exact market, organization, zone and tenant inside the staff assertion scopes; bridge-local, no owner call",
+    "source_version_required": false,
+    "idempotency_required": false,
+    "approval": "NONE",
+    "feature_flag": "ADMIN_BRIDGE_ENABLED",
+    "blocker": null,
+    "tests": [
+      "operations_readback_settles_from_the_owner_record_and_never_resends",
+      "operations_readback_is_private_to_the_staff_member_purpose_and_scope"
+    ]
+  },
+  {
     "id": "hq.events.feed",
     "version": "1.0",
     "owner": "admin-bridge",

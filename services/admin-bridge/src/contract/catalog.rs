@@ -309,6 +309,23 @@ pub fn catalog() -> Vec<Capability> {
             "worker_identity_reads_datasets_with_the_workload_acr",
         ]),
     );
+    // HQ's generic settlement of a command (roles and purposes: every command's, below).
+    c.push(
+        get(
+            "bridge.operations.read",
+            "/hq/operations/{idempotency_key}",
+            Q::Scoped,
+        )
+        .at(AdminBridge, S::Local, P::A3)
+        .risk(R::R1, V::Internal)
+        .perm("bridge.operations.read")
+        .uuid("idempotency_key")
+        .result("OperationReadback")
+        .served(&[
+            "operations_readback_settles_from_the_owner_record_and_never_resends",
+            "operations_readback_is_private_to_the_staff_member_purpose_and_scope",
+        ]),
+    );
     c.push(
         get("hq.events.feed", "/hq/events", Q::ScopedWindow)
             .at(AdminBridge, S::Local, P::A7)
@@ -2911,6 +2928,24 @@ pub fn catalog() -> Vec<Capability> {
         );
         cap.contact_search = true;
     }
+    // bridge.operations.read: whoever may run a command may read its operation back, for
+    // that command's purposes (the readback also checks the operation's own purpose).
+    let mut roles: Vec<Role> = Vec::new();
+    let mut purposes: Vec<Purpose> = Vec::new();
+    for c in caps.iter().filter(|c| c.kind == Kind::Command) {
+        roles.extend(c.roles.iter().copied());
+        purposes.extend(c.purposes.iter().copied());
+    }
+    roles.sort();
+    roles.dedup();
+    purposes.sort();
+    purposes.dedup();
+    let readback = caps
+        .iter_mut()
+        .find(|c| c.id == "bridge.operations.read")
+        .expect("bridge.operations.read");
+    readback.roles = roles;
+    readback.purposes = purposes;
     caps
 }
 

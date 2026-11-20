@@ -2,6 +2,7 @@
 //! owner reads by module (`organizations`, A2). Every other capability is refused before it gets here (`served == false`).
 
 pub mod calling;
+pub mod commands;
 pub mod communications;
 pub mod identity;
 pub mod meetings;
@@ -46,10 +47,18 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
     if let Some(answer) = messaging::dispatch(bridge, auth).await {
         return answer;
     }
+    if let Some((_, owner, path)) = bridge
+        .test_commands
+        .iter()
+        .find(|(id, _, _)| *id == auth.capability.id)
+    {
+        return commands::generic(bridge, auth, *owner, path).await;
+    }
     match auth.capability.id {
         "bridge.capabilities.read" => Ok(discovery(bridge)),
         "bridge.health.read" => Ok(health(bridge).await),
         "bridge.datasets.read" => datasets(bridge, auth).await,
+        "bridge.operations.read" => commands::readback(bridge, auth).await,
         "hq.projections.status" => projections(bridge, auth.now).await,
         _ => Err(ErrorCode::CapabilityDisabled),
     }
