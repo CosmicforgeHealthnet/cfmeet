@@ -3,6 +3,7 @@
 //!
 //!   enroll-cert       --fingerprint HEX [--not-before T] --expires T --operator NAME
 //!   enroll-hmac       --kid ID --key-file PATH [--not-before T] --expires T --operator NAME
+//!                     (the key file is base64url text of 32+ key bytes, the same file HQ reads)
 //!   enroll-staff-key  --kid ID --public-key-hex HEX --issuer ISS --audience AUD
 //!                     [--not-before T] --expires T --operator NAME
 //!   revoke-principal  --kind CLIENT_CERT|HMAC_KEY|STAFF_KEY --key-id ID --operator NAME
@@ -185,9 +186,15 @@ async fn run(a: Args) -> Result<(), String> {
             if !key_id_ok(kid) {
                 return Err("--kid is not a valid key id".into());
             }
-            let bytes = zeroize::Zeroizing::new(
+            let raw = zeroize::Zeroizing::new(
                 std::fs::read(a.req("key-file")?)
                     .map_err(|_| "cannot read --key-file".to_string())?,
+            );
+            // The same file HQ reads: base64url text of at least 32 key bytes.
+            let bytes = zeroize::Zeroizing::new(
+                admin_bridge::wire::decode_hmac_key_file(&raw).ok_or_else(|| {
+                    format!("--key-file must be base64url text of at least {MIN_HMAC_KEY_BYTES} key bytes")
+                })?,
             );
             if bytes.len() < MIN_HMAC_KEY_BYTES {
                 return Err(format!(

@@ -250,11 +250,12 @@ impl Bridge {
                 return Some(k.clone());
             }
         }
-        let bytes = Zeroizing::new(std::fs::read(dir.join(format!("{kid}.key"))).ok()?);
+        let raw = Zeroizing::new(std::fs::read(dir.join(format!("{kid}.key"))).ok()?);
+        let bytes = Zeroizing::new(wire::decode_hmac_key_file(&raw).unwrap_or_default());
         if bytes.len() < 32 || wire::sha256_hex(&bytes) != digest {
             tracing::error!(
                 kid_len = kid.len(),
-                "HMAC key file missing, short, or not the enrolled key"
+                "HMAC key file missing, not base64url text of 32+ bytes, or not the enrolled key"
             );
             return None;
         }
