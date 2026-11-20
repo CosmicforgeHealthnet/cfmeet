@@ -57,7 +57,7 @@ Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`)
    - Never add 8460 to `api.cfmeet.com`, the public site, or the private TLS proxy.
    - **Server certificate:** issue it from CF Meet's private admin-bridge CA with DNS SAN `admin-bridge.cfmeet.internal` (HQ uses it as SNI), never a public name. Give HQ the CA bundle and the leaf SHA-256 fingerprint out of band. HQ pins both, so send the new fingerprint **before** each rotation.
    - **HQ's client certificate:** exactly one URI SAN, `cf://staging/product-admin/cfmeet`. Enrol the leaf's DER SHA-256 with `enroll-cert`.
-   - **Enrolled scope:** `ADMIN_BRIDGE_ENROLLED_MARKETS=GLOBAL`; `ADMIN_BRIDGE_ENROLLED_TENANTS=<CF Meet first-party Platform Access tenant UUID>`. Tenant scopes are always Platform Access tenant **UUIDs**, never slugs: owner reads are scoped by that UUID (Calling refuses anything else), and a partner's workspace id is its Platform Access tenant UUID.
+   - **Enrolled scope:** `ADMIN_BRIDGE_ENROLLED_MARKETS=GLOBAL`; `ADMIN_BRIDGE_ENROLLED_TENANTS=<CF Meet first-party Platform Access tenant UUID>`. Tenant scopes are always Platform Access tenant **UUIDs in canonical lowercase** (8-4-4-4-12; normalise any upper-case value first), never slugs: owner reads are scoped by that UUID (Calling refuses anything else), and a partner's workspace id is its Platform Access tenant UUID.
 5. **Verify.**
    - `/ready` returns `{"ready":true,"enabled":true,"policy_revision":1,"openapi_sha256":<pinned hash>}`.
    - HQ's `bridge.capabilities.read` returns the same `openapi_sha256` as HQ's pin.
