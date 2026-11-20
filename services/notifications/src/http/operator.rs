@@ -1,4 +1,4 @@
-//! The admin bridge's operator reads (ADR 0067, design §6.13): `/internal/v1/operator/*`.
+//! The admin bridge's operator reads (ADR 0068, design §6.13): `/internal/v1/operator/*`.
 //!
 //! Only `cfmeet.admin-bridge` can hold `notifications.administer`, and every request must
 //! name the HQ staff member it reads for (`X-CF-Operator`). The reads are PII-free:

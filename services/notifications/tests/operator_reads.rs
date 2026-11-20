@@ -1,4 +1,4 @@
-//! The admin bridge's operator reads (ADR 0067): `/internal/v1/operator/*` need
+//! The admin bridge's operator reads (ADR 0068): `/internal/v1/operator/*` need
 //! `notifications.administer` (bridge only) and `X-CF-Operator`; attribution headers from
 //! any other caller are refused on every route; nothing returned carries an address,
 //! content or credential.
