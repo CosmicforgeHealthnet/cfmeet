@@ -1,7 +1,7 @@
 //! Closed result schemas of the identity reads and the partner reads served from Platform
 //! Access (A2.3). Identifiers, names, kinds, states, scopes and timestamps only: never a
 //! credential secret, verifier or label, never a principal's external reference (a
-//! partner's own user id, an email address or a telephone number), never OAuth redirect
+//! partner's own user id, which may be an email address), never OAuth redirect
 //! URIs or test accounts, never the audit detail. No property name is on HQ's
 //! personal-data list.
 

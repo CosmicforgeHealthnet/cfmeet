@@ -7,7 +7,7 @@
 //!
 //! Translation keeps identifiers, names, kinds, states, scopes and timestamps only: never a
 //! credential secret, verifier or label, never a principal's external reference (which may
-//! be an email address or a telephone number), never OAuth redirect URIs or test accounts,
+//! be an email address), never OAuth redirect URIs or test accounts,
 //! never the audit detail. Cursors are checked here; a malformed one never reaches the owner.
 
 use serde_json::{json, Value};

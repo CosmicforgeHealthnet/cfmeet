@@ -6,8 +6,8 @@
 //! Platform Access is the identity authority, so these reads are deliberately narrow:
 //! * never a credential secret, verifier, verifier algorithm or key version, client
 //!   secret, token or refresh token: credentials carry their public id and last four only;
-//! * never a principal's external reference (a partner's own user id, an email address,
-//!   a telephone number): principals carry their opaque id, kind and status. A search may
+//! * never a principal's external reference (a partner's own user id, which may be an email
+//!   address; plaintext telephone numbers are refused at registration): principals carry their opaque id, kind and status. A search may
 //!   MATCH on the external reference (exact match only), it never returns it;
 //! * never free text (service-account descriptions, credential labels) and never the
 //!   audit `detail`;
@@ -443,8 +443,8 @@ async fn tenant_principals(
 }
 
 /// `GET /operator/principals?q&cursor&limit` — identity records across tenants. `q` is
-/// required (a principal id or an exact external reference, which may be a telephone
-/// number); it only matches and is never echoed back.
+/// required (a principal id or an exact external reference, which may be an email
+/// address); it only matches and is never echoed back.
 async fn principals(
     State(s): State<AppState>,
     caller: InternalCaller,

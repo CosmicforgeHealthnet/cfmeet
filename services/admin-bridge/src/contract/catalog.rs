@@ -2922,7 +2922,8 @@ const CONTACT_SEARCH: &[&str] = &[
     "partners.users.list",
     "identity.partner-users.list",
     "notifications.suppressions.list",
-    // Telephone endpoints are principals whose external reference is a phone number.
+    // A partner-chosen principal reference may be an email address (plaintext telephone
+    // numbers are refused by Platform Access at registration).
     "identity.records.list",
 ];
 
