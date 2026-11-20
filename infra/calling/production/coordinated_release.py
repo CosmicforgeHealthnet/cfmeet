@@ -136,8 +136,8 @@ ADMIN_BRIDGE_DARK_ENV = dict({
 # bridge over a private tunnel (e.g. WireGuard) between the HQ staging host and the CF Meet
 # host, never over a public address: HQ only connects to a pinned private IP. The relay
 # listens ONLY on the CF Meet host's tunnel address (ADMIN_BRIDGE_HQ_LISTEN_ADDRESS) and admits
-# ONLY HQ's tunnel address (ADMIN_BRIDGE_HQ_ALLOWED_SOURCE); both must be private IPv4 (RFC 1918
-# or 100.64/10). TLS is passed straight through (the bridge terminates mutual TLS and checks
+# ONLY HQ's tunnel address (ADMIN_BRIDGE_HQ_ALLOWED_SOURCE); both must be RFC 1918 private IPv4
+# (HQ refuses 100.64/10 as shared CGNAT space, never private). TLS is passed straight through (the bridge terminates mutual TLS and checks
 # HQ's client certificate on every request). It is NEVER routed by api.cfmeet.com or any
 # public ingress and is never part of the private TLS proxy (which terminates TLS). Declared
 # here; the tunnel and relay are installed by the HQ enablement step of the runbook (a
@@ -150,7 +150,8 @@ ADMIN_BRIDGE_SERVER_NAME = 'admin-bridge.cfmeet.internal'
 
 
 def _private_ipv4(value, var, allow_prefix):
-    """A private IPv4 address (RFC 1918 or 100.64/10), optionally a CIDR of /24 or narrower."""
+    """An RFC 1918 private IPv4 address, optionally a CIDR of /24 or narrower. 100.64/10 is
+    refused: HQ treats it as shared CGNAT space, never private."""
     v = (value or '').strip()
     m = re.fullmatch(r'(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(/(\d{1,2}))?', v)
     if not m or any(int(o) > 255 for o in m.groups()[:4]):
@@ -158,9 +159,9 @@ def _private_ipv4(value, var, allow_prefix):
     if m.group(5) and (not allow_prefix or not 24 <= int(m.group(6)) <= 32):
         raise RuntimeError('%s must be one private address%s' % (var, ' or a CIDR of /24 or narrower' if allow_prefix else ''))
     a, b = int(m.group(1)), int(m.group(2))
-    private = a == 10 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168) or (a == 100 and 64 <= b <= 127)
+    private = a == 10 or (a == 172 and 16 <= b <= 31) or (a == 192 and b == 168)
     if not private:
-        raise RuntimeError('%s must be a private (tunnel) address, never public' % var)
+        raise RuntimeError('%s must be an RFC 1918 private (tunnel) address, never public or CGNAT' % var)
     return v
 
 

@@ -773,14 +773,14 @@ class AdminBridge(unittest.TestCase):
         self.assertIn('set $peer cfmeet-admin-bridge:8443;', config)
         self.assertNotIn('ssl', config, 'TLS passes straight through: the bridge terminates mTLS')
         # Owner decision 2026-11-20: private tunnel only; HQ never uses a public address.
-        for bad_listen in ('', '0.0.0.0', '203.0.113.5', '10.77.0.0/24', '999.1.1.1'):
+        for bad_listen in ('', '0.0.0.0', '203.0.113.5', '10.77.0.0/24', '999.1.1.1', '100.64.0.1'):
             with self.assertRaises(RuntimeError, msg=bad_listen):
                 cr.admin_bridge_hq_relay_config(bad_listen, '10.77.0.2')
         for bad in ('', '0.0.0.0/0', '10.0.0.0/8', '203.0.113.7', '8.8.8.8/32', '999.1.1.1', 'any',
-                    '10.77.0.2; allow all', '172.32.0.1', '192.169.1.1'):
+                    '10.77.0.2; allow all', '172.32.0.1', '192.169.1.1', '100.64.0.9'):
             with self.assertRaises(RuntimeError, msg=bad):
                 cr.admin_bridge_hq_relay_config('10.77.0.1', bad)
-        for ok in ('172.16.5.4', '192.168.1.0/24', '100.64.0.9'):
+        for ok in ('172.16.5.4', '192.168.1.0/24', '10.250.0.2'):
             cr.admin_bridge_hq_relay_config('10.77.0.1', ok)
         self.assertNotIn(cr.ADMIN_BRIDGE_HQ_PORT, [s['tls'] for s in cr.SERVICES.values() if s['tls']])
         routes = cr.tls_routes('http {\n  server { listen 9999 ssl; }\n}')
