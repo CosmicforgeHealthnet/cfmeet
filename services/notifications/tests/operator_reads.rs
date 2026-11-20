@@ -29,9 +29,10 @@ fn verification(h: &Harness, recipient: &str, code: &str) -> Value {
     )
 }
 
-/// Ingests one real (sealed) verification notification, then records one delivery for every
-/// notification that has none. The default harness runs with email disabled, so routing
-/// creates no email delivery by itself; the operator reads are about the delivery rows.
+/// Ingests one real (sealed) verification notification (so the "no address, no content"
+/// assertions have something to leak), then records one notification + delivery pair
+/// directly. The default harness runs with email disabled, so the pipeline itself creates
+/// no email delivery; the operator reads are about the delivery rows.
 async fn with_deliveries(h: &Harness) {
     let meeting = h.peers.meeting.clone();
     h.ingest(&meeting, vec![verification(h, &alice(), "135790")])
@@ -39,7 +40,7 @@ async fn with_deliveries(h: &Harness) {
         .expect(200);
     h.process_all().await;
     h.exec(
-        "INSERT INTO notif_deliveries (id, notification_id, channel, lane, target_ref, status, routing_version)          SELECT gen_random_uuid(), n.id, 'EMAIL', n.lane, 'operator-read-test', 'SENT', 1            FROM notif_notifications n           WHERE NOT EXISTS (SELECT 1 FROM notif_deliveries d WHERE d.notification_id = n.id)",
+        "WITH n AS (            INSERT INTO notif_notifications (id, recipient_ref, category, route_category, lane, dedupe_key,                                             source_producer, source_event_id, template_key, params, policy_snapshot, state)            VALUES (gen_random_uuid(), 'cfmeet-user:00000000-0000-4000-8000-000000000002', 'ACCOUNT', 'ACCOUNT',                    'STANDARD', 'operator-read-' || gen_random_uuid()::text, 'cfmeet.meeting-service',                    gen_random_uuid()::text, 't', '{}', '{}', 'ROUTED')            RETURNING id, lane)          INSERT INTO notif_deliveries (id, notification_id, channel, lane, target_ref, status, routing_version)          SELECT gen_random_uuid(), n.id, 'EMAIL', n.lane, 'operator-read-test', 'SENT', 1 FROM n",
     )
     .await
     .unwrap();
