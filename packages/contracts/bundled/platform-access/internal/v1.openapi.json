@@ -12778,7 +12778,7 @@
           "Internal Admin — Bridge Reads"
         ],
         "summary": "Search identity records (admin bridge)",
-        "description": "Principals across tenants matching q (required): a principal id or an exact external reference (which may be a telephone number). The external reference is never returned. Requires platform-identity.administer and the admin bridge's HQ operator (X-CF-Operator: hq:<staff>); refused (OPERATOR_REQUIRED) without it. Read-only, keyset paginated.",
+        "description": "Principals across tenants matching q (required): a principal id or an exact external reference (which may be an email address). The external reference is never returned. Requires platform-identity.administer and the admin bridge's HQ operator (X-CF-Operator: hq:<staff>); refused (OPERATOR_REQUIRED) without it. Read-only, keyset paginated.",
         "parameters": [
           {
             "$ref": "#/components/parameters/CfRequestId"
