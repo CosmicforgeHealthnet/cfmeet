@@ -1,0 +1,44 @@
+{
+  "description": "Request a feature switch-on: the bridge starts cfmeet-coordinated-release.yml on main with these inputs, once (expected_version 0: a new request; its request_id is the operation_id). operation must be one of the release workflow's options; confirm carries the owner confirmation words where the workflow requires them. TWO_PERSON. The workflow's own gates (exact main head, green CI, confirmations) still apply.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "expected_version",
+    "operation",
+    "release_sha"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "expected_version": {
+      "const": 0
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "release_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "confirm": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z0-9][a-z0-9=,._:-]{0,127}$"
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}

@@ -13,11 +13,18 @@
 --                                                                admin_projections,
 --                                                                admin_operations (its
 --                                                                trigger allows only the
---                                                                send-once transitions)
+--                                                                send-once transitions),
+--                                                                admin_privacy_requests and
+--                                                                its services,
+--                                                                admin_hq_consumer_cursors
+--                                                                (never backwards),
+--                                                                admin_activation_requests
+--                                                                (dispatch state, run once)
 --                            DELETE                              admin_security_claims,
 --                                                                admin_rate_limits (cleanup)
---                          The append-only tables (audit, revocations, policy revisions)
---                          get no UPDATE / DELETE privilege on top of their triggers.
+--                          The append-only tables (audit, revocations, policy revisions,
+--                          event inbox, HQ feed) get no UPDATE / DELETE privilege on top of
+--                          their triggers.
 --
 -- OWNER ACTION, two steps (passwords never pass through this file):
 --   1. as a superuser on the maintenance database, create roles and database:
@@ -79,11 +86,13 @@ ALTER DEFAULT PRIVILEGES FOR ROLE admin_bridge_migrator IN SCHEMA public REVOKE 
 GRANT SELECT, INSERT ON
     admin_remote_principals, admin_security_claims, admin_revocations, admin_rate_limits,
     admin_policy_revisions, admin_audit_entries, admin_dataset_days, admin_projections,
-    admin_operations, admin_privacy_requests, admin_privacy_request_services
+    admin_operations, admin_privacy_requests, admin_privacy_request_services,
+    admin_event_inbox, admin_hq_outbox, admin_hq_consumer_cursors, admin_activation_requests
     TO admin_bridge_runtime;
 GRANT UPDATE (revoked_at) ON admin_remote_principals TO admin_bridge_runtime;
 GRANT UPDATE ON admin_rate_limits, admin_dataset_days, admin_projections, admin_operations,
-    admin_privacy_requests, admin_privacy_request_services TO admin_bridge_runtime;
+    admin_privacy_requests, admin_privacy_request_services, admin_hq_consumer_cursors,
+    admin_activation_requests TO admin_bridge_runtime;
 GRANT DELETE ON admin_security_claims, admin_rate_limits TO admin_bridge_runtime;
 -- Identity columns (audit sequence, revocation id).
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO admin_bridge_runtime;
@@ -98,8 +107,10 @@ BEGIN
      WHERE grantee = 'admin_bridge_runtime'
        AND (privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER')
             OR (privilege_type IN ('UPDATE', 'DELETE')
-                AND table_name IN ('admin_audit_entries', 'admin_revocations', 'admin_policy_revisions'))
-            OR (privilege_type = 'DELETE' AND table_name = 'admin_operations'));
+                AND table_name IN ('admin_audit_entries', 'admin_revocations', 'admin_policy_revisions',
+                                   'admin_event_inbox', 'admin_hq_outbox'))
+            OR (privilege_type = 'DELETE' AND table_name IN ('admin_operations', 'admin_privacy_requests',
+                'admin_privacy_request_services', 'admin_hq_consumer_cursors', 'admin_activation_requests')));
     IF bad IS NOT NULL THEN
         RAISE EXCEPTION 'admin_bridge_runtime has forbidden privileges: %', bad;
     END IF;

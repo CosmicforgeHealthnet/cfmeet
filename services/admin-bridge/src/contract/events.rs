@@ -1,6 +1,6 @@
 //! Owner events the bridge accepts (design §11). One adapter per (source service,
-//! export type): HQ rejects an event whose source does not match its adapter.
-//! Field-level adapters are defined with the event pipeline (phase A7).
+//! export type): the bridge quarantines an event whose producer does not match an adapter
+//! (`crate::events`), and HQ rejects one whose source does not match its adapter.
 
 use serde_json::{json, Value};
 
@@ -116,7 +116,7 @@ pub fn adapters_document() -> Value {
         "contract": "cfmeet.admin-events.v1",
         "export_schema": EXPORT_SCHEMA,
         "max_event_bytes": MAX_EVENT_BYTES,
-        "status": "PROVISIONAL: adapter fields are defined in phase A7; until then the bridge accepts no owner event",
+        "status": "ACTIVE (A7): the source service posts {event_id, type, subject {kind, id}, state, version, occurred_at} to the bridge's private event listener (POST /internal/v1/hq-bridge/events, cf-service+jwt with hq-bridge-events.publish); the producer is the authenticated service; an event of a type its source does not publish here is quarantined; ids, states, versions and times only",
         "exportable_classifications": ["INTERNAL", "OPERATIONS_MINIMIZED", "FINANCIAL_SENSITIVE", "SAFETY_EVIDENCE"],
         "adapters": ADAPTERS.iter().map(|a| json!({
             "source_service": a.source.as_str(),

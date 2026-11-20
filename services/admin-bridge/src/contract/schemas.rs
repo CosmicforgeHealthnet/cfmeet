@@ -673,6 +673,7 @@ pub fn components() -> Map<String, Value> {
     super::schemas_calling::insert(&mut m);
     super::schemas_commands::insert(&mut m);
     super::schemas_verification::insert(&mut m);
+    super::schemas_operations::insert(&mut m);
 
     m.insert(
         "Purpose".into(),

@@ -1,0 +1,70 @@
+{
+  "description": "One run of the release workflow: GitHub's run id, the triggering event, the operation when the bridge requested the run (null otherwise: GitHub does not list workflow inputs), the commit, status, conclusion and times. Never logs, inputs, artifacts or anything the workflow printed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "event",
+    "operation",
+    "head_sha",
+    "status",
+    "conclusion",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event": {
+      "type": "string",
+      "pattern": "^[a-z][a-z_]{0,63}$"
+    },
+    "operation": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "status": {
+      "enum": [
+        "REQUESTED",
+        "QUEUED",
+        "PENDING",
+        "WAITING",
+        "IN_PROGRESS",
+        "COMPLETED",
+        "UNKNOWN"
+      ]
+    },
+    "conclusion": {
+      "enum": [
+        "SUCCESS",
+        "FAILURE",
+        "NEUTRAL",
+        "CANCELLED",
+        "SKIPPED",
+        "TIMED_OUT",
+        "ACTION_REQUIRED",
+        "STALE",
+        "STARTUP_FAILURE",
+        "UNKNOWN",
+        null
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

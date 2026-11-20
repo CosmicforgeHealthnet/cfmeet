@@ -92,7 +92,7 @@
     "method": "GET",
     "bridge_endpoint": "/hq/events",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "hq.events.read",
     "risk": "R0",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -101,8 +101,11 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED",
-    "blocker": "Phase A7: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "owner_events_are_deduplicated_versioned_and_quarantined",
+      "the_feed_pages_in_sequence_and_acknowledgements_never_move_back"
+    ]
   },
   {
     "id": "hq.events.ack",
@@ -111,7 +114,7 @@
     "method": "POST",
     "bridge_endpoint": "/hq/event-acknowledgements",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "hq.events.ack",
     "risk": "R0",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -120,8 +123,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED",
-    "blocker": "Phase A7: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "the_feed_pages_in_sequence_and_acknowledgements_never_move_back"
+    ]
   },
   {
     "id": "hq.projections.status",
@@ -5149,7 +5154,7 @@
     "method": "GET",
     "bridge_endpoint": "/operations/activations",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "operations.activations.read",
     "risk": "R0",
     "privacy": "INTERNAL",
@@ -5158,8 +5163,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
-    "blocker": "Phase A8: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "activation_requests_dispatch_once_and_list_their_runs"
+    ]
   },
   {
     "id": "operations.activation.request",
@@ -5167,8 +5174,8 @@
     "owner": "admin-bridge",
     "method": "POST",
     "bridge_endpoint": "/operations/activations",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/dispatches",
+    "state": "AVAILABLE",
     "permission": "operations.activation.request",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -5177,8 +5184,12 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A8: bridge route not implemented yet; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "activation_requests_dispatch_once_and_list_their_runs",
+      "an_unknown_dispatch_settles_from_the_runs_list_and_is_never_resent",
+      "activation_requests_are_disabled_without_github"
+    ]
   },
   {
     "id": "operations.releases.list",
@@ -5186,8 +5197,8 @@
     "owner": "admin-bridge",
     "method": "GET",
     "bridge_endpoint": "/operations/releases",
-    "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "source_endpoint": "GET /repos/{repository}/actions/workflows/cfmeet-coordinated-release.yml/runs",
+    "state": "READ_ONLY",
     "permission": "operations.releases.read",
     "risk": "R0",
     "privacy": "INTERNAL",
@@ -5196,8 +5207,11 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
-    "blocker": "Phase A8: bridge route not implemented yet",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "release_history_is_the_workflow_runs_without_logs",
+      "activation_requests_are_disabled_without_github"
+    ]
   },
   {
     "id": "audit.entries.list",

@@ -18660,6 +18660,428 @@
           }
         }
       },
+      "HqEvent": {
+        "description": "One owner event on the HQ feed: the authenticated producer, the event type (one of verification.case.changed.v1, abuse.report.changed.v1, partner.workspace.changed.v1, app.review.changed.v1, incident.changed.v1, pricing.version.changed.v1, from the producers in event-adapters.v1.json), the subject by kind and opaque id, its state and version (strictly increasing per producer and subject), when it happened at the owner and when the bridge appended it.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "event_id",
+          "type",
+          "producer",
+          "subject",
+          "state",
+          "version",
+          "occurred_at",
+          "appended_at"
+        ],
+        "properties": {
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*\\.v[0-9]{1,3}$",
+            "maxLength": 96
+          },
+          "producer": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,31}$"
+          },
+          "subject": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "id"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,47}$"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+              }
+            }
+          },
+          "state": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "appended_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "HqEventPage": {
+        "description": "The append-only feed in increasing sequence, appended within the window. next_cursor is the last sequence of this page when more follow; pass the last sequence seen as cursor.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/HqEvent"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,19}$"
+          }
+        }
+      },
+      "HqEventAckRequest": {
+        "description": "Acknowledge the feed up to sequence for one consumer. Not a command: no Idempotency-Key; repeating it is harmless. A sequence beyond the last appended one is COMMAND_BODY_INVALID.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "consumer",
+          "sequence"
+        ],
+        "properties": {
+          "consumer": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "HqEventAck": {
+        "description": "The consumer's acknowledged sequence. It never moves backwards: a lower value answers the stored one.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "consumer",
+          "acknowledged_sequence"
+        ],
+        "properties": {
+          "consumer": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+          },
+          "acknowledged_sequence": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OperationsActivationRequest": {
+        "description": "Request a feature switch-on: the bridge starts cfmeet-coordinated-release.yml on main with these inputs, once (expected_version 0: a new request; its request_id is the operation_id). operation must be one of the release workflow's options; confirm carries the owner confirmation words where the workflow requires them. TWO_PERSON. The workflow's own gates (exact main head, green CI, confirmations) still apply.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "operation",
+          "release_sha"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expected_version": {
+            "const": 0
+          },
+          "operation": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "release_sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "confirm": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9=,._:-]{0,127}$"
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "OperationsActivation": {
+        "description": "One feature switch-on request. state: REQUESTED (dispatch sent, outcome not yet known), DISPATCHED (GitHub started the workflow), FAILED (no run was started). run_id links the workflow run once it is listed; run_status, run_conclusion and run_updated_at are GitHub's latest view of that run (null when unknown).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "operation",
+          "release_sha",
+          "confirm",
+          "requested_by",
+          "approver",
+          "state",
+          "created_at",
+          "dispatched_at",
+          "run_id",
+          "run_status",
+          "run_conclusion",
+          "run_updated_at"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "release_sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "confirm": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z0-9][a-z0-9=,._:-]{0,127}$"
+          },
+          "requested_by": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+            "maxLength": 132
+          },
+          "approver": {
+            "type": "string",
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$",
+            "maxLength": 132
+          },
+          "state": {
+            "enum": [
+              "REQUESTED",
+              "DISPATCHED",
+              "FAILED"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dispatched_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "run_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "run_status": {
+            "enum": [
+              "REQUESTED",
+              "QUEUED",
+              "PENDING",
+              "WAITING",
+              "IN_PROGRESS",
+              "COMPLETED",
+              "UNKNOWN",
+              null
+            ]
+          },
+          "run_conclusion": {
+            "enum": [
+              "SUCCESS",
+              "FAILURE",
+              "NEUTRAL",
+              "CANCELLED",
+              "SKIPPED",
+              "TIMED_OUT",
+              "ACTION_REQUIRED",
+              "STALE",
+              "STARTUP_FAILURE",
+              "UNKNOWN",
+              null
+            ]
+          },
+          "run_updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperationsActivationPage": {
+        "description": "Switch-on requests, newest first.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperationsActivation"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,19}\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        }
+      },
+      "OperationsActivationCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/OperationsActivation"
+          }
+        }
+      },
+      "OperationsRelease": {
+        "description": "One run of the release workflow: GitHub's run id, the triggering event, the operation when the bridge requested the run (null otherwise: GitHub does not list workflow inputs), the commit, status, conclusion and times. Never logs, inputs, artifacts or anything the workflow printed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_id",
+          "event",
+          "operation",
+          "head_sha",
+          "status",
+          "conclusion",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "event": {
+            "type": "string",
+            "pattern": "^[a-z][a-z_]{0,63}$"
+          },
+          "operation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "head_sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "status": {
+            "enum": [
+              "REQUESTED",
+              "QUEUED",
+              "PENDING",
+              "WAITING",
+              "IN_PROGRESS",
+              "COMPLETED",
+              "UNKNOWN"
+            ]
+          },
+          "conclusion": {
+            "enum": [
+              "SUCCESS",
+              "FAILURE",
+              "NEUTRAL",
+              "CANCELLED",
+              "SKIPPED",
+              "TIMED_OUT",
+              "ACTION_REQUIRED",
+              "STALE",
+              "STARTUP_FAILURE",
+              "UNKNOWN",
+              null
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperationsReleasePage": {
+        "description": "Runs of cfmeet-coordinated-release.yml created within the window, newest first. Freshness UNAVAILABLE with no items when the bridge has no GitHub access configured (never read as \"no releases\").",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperationsRelease"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,4}$"
+          }
+        }
+      },
       "Purpose": {
         "enum": [
           "support-review",
