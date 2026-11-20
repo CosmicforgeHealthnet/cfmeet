@@ -605,6 +605,7 @@ impl PlatformService {
         ))
         .await?;
         self.touch_credential(db, credential_id, now).await?;
+        note_suspension_change(db, credential_id).await?;
         tracing::info!(credential_id = %credential_id, "API credential suspended");
         Ok((self.credential_in(db, credential_id).await?, true))
     }
@@ -628,6 +629,7 @@ impl PlatformService {
         if removed {
             self.touch_credential(db, credential_id, self.clock.now())
                 .await?;
+            note_suspension_change(db, credential_id).await?;
             tracing::info!(credential_id = %credential_id, "API credential resumed");
         }
         Ok((self.credential_in(db, credential_id).await?, removed))
@@ -836,6 +838,24 @@ pub fn expiring_soon(
     }
     let ends = supersession_valid_until.map_or(expires_at, |u| u.min(expires_at));
     ends - now <= Duration::days(EXPIRY_WARNING_DAYS)
+}
+
+/// Counts one effective suspend / resume of a credential (migration 000011): the admin
+/// bridge's credential version is `revision + changes`, so it moves on a suspension too
+/// (which never changes the credential row's revision).
+async fn note_suspension_change<C: ConnectionTrait>(
+    db: &C,
+    credential_id: CredentialId,
+) -> PlatformResult<()> {
+    db.execute(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DbBackend::Postgres,
+        "INSERT INTO platform_credential_suspension_changes (credential_id, changes) VALUES ($1, 1) \
+         ON CONFLICT (credential_id) DO UPDATE \
+           SET changes = platform_credential_suspension_changes.changes + 1",
+        [credential_id.as_uuid().into()],
+    ))
+    .await?;
+    Ok(())
 }
 
 /// `credential id -> suspended_at` of the suspended credentials among `ids`.

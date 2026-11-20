@@ -333,6 +333,7 @@ async fn scope_grants(
 
 /// `GET /operator/tenants/{tenantId}/credentials` — API keys: public id, last four,
 /// scopes, state and times. Never the verifier, its algorithm or key version, or a label.
+/// `version` (`revision` + suspension changes) is the bridge commands' expected version.
 async fn credentials(
     State(s): State<AppState>,
     caller: InternalCaller,
@@ -352,9 +353,11 @@ async fn credentials(
            'notBefore', c.not_before, 'expiresAt', c.expires_at, 'revokedAt', c.revoked_at, \
            'supersededAt', c.superseded_at, 'suspendedAt', su.suspended_at, \
            'suspensionReason', su.reason_code, 'lastUsedAt', u.last_authenticated_at, \
-           'revision', c.revision, 'createdAt', c.created_at) AS v \
+           'revision', c.revision, 'version', c.revision + COALESCE(x.changes, 0), \
+           'createdAt', c.created_at) AS v \
          FROM platform_api_credentials c \
          LEFT JOIN platform_credential_suspensions su ON su.credential_id = c.id \
+         LEFT JOIN platform_credential_suspension_changes x ON x.credential_id = c.id \
          LEFT JOIN platform_credential_usage u ON u.credential_id = c.id \
          WHERE c.tenant_id = $1 AND ($2::uuid IS NULL OR c.id > $2) \
          ORDER BY c.id LIMIT $3",
