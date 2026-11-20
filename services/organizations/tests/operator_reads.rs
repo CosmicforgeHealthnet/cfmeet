@@ -269,3 +269,31 @@ fn the_trust_bundle_admits_the_bridge_with_operator_read_only() {
     let (_verifier, peers) = common::verifier_and_peers();
     assert_eq!(peers.bridge.issuer().as_str(), "cfmeet.admin-bridge");
 }
+
+#[tokio::test]
+async fn the_operator_console_keeps_its_legacy_named_operator() {
+    let Some(h) = Harness::new().await else {
+        return;
+    };
+    let (org, _) = fixture(&h, "operator-console-legacy").await;
+    // As before ADR 0068: the operator console names its operator in free form ...
+    h.by(&h.peers.operator)
+        .header("x-cf-operator", "cfmeet-certification")
+        .get("/internal/v1/admin/event-delivery")
+        .await
+        .expect(200);
+    h.by(&h.peers.operator)
+        .header("x-cf-operator", "cfmeet-certification")
+        .get(&format!(
+            "/internal/v1/admin/organizations/{org}/audit-events"
+        ))
+        .await
+        .expect(200);
+    // ... but may never send approval attribution, which only the admin bridge carries.
+    h.by(&h.peers.operator)
+        .header("x-cf-operator", "cfmeet-certification")
+        .header("x-cf-approver", "hq:staff-0002")
+        .get("/internal/v1/admin/event-delivery")
+        .await
+        .expect_error(403, "ACTOR_NOT_ALLOWED");
+}
