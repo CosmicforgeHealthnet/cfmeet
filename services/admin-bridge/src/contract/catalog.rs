@@ -3156,6 +3156,17 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "PartnerWebhookDeliveryPage",
         &["partners_activity_maps_window_and_workspace"],
     ),
+    // A4 Developer Platform.
+    (
+        "partners.usage.read",
+        "PartnerUsagePage",
+        &["partners_usage_and_incidents_map_the_window"],
+    ),
+    (
+        "partners.incidents.list",
+        "PartnerIncidentPage",
+        &["partners_usage_and_incidents_map_the_window"],
+    ),
     ("apps.apps.search", "AppPage", &["apps_search_and_detail"]),
     ("apps.apps.read", "AppDetail", &["apps_search_and_detail"]),
     (

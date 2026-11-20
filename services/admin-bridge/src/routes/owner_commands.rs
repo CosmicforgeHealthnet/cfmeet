@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use super::commands::{self, Applied, CommandSpec};
 use super::translate as t;
 use crate::chain::{Answer, Authorized, Bridge};
-use crate::contract::owner_commands::{command, In, Out, OutField, OwnerCommand, Place};
+use crate::contract::owner_commands::{command, In, Out, OutField, OwnerCommand, Place, Reason};
 use crate::errors::ErrorCode;
 use crate::owners::OwnerError;
 
@@ -58,6 +58,13 @@ fn valid(kind: In, v: &Value) -> bool {
                     .all(|x| x.as_str().is_some_and(|s| values.contains(&s)))
                 && a.iter().collect::<std::collections::HashSet<_>>().len() == a.len()
         }),
+        In::Time => v.as_str().is_some_and(|s| {
+            s.len() <= 40 && s.ends_with('Z') && chrono::DateTime::parse_from_rfc3339(s).is_ok()
+        }),
+        In::Date => v.as_str().is_some_and(|s| {
+            s.len() == 10 && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+        }),
+        In::NullableObject => v.is_null() || v.is_object(),
     }
 }
 
@@ -70,7 +77,8 @@ pub struct Mapped {
     pub target: Vec<String>,
 }
 
-pub fn owner_body(spec: &OwnerCommand, body: &Value) -> Result<Mapped, ErrorCode> {
+/// `tenant`: the request's tenant scope (filled into [`Place::Tenant`] fields).
+pub fn owner_body(spec: &OwnerCommand, body: &Value, tenant: &str) -> Result<Mapped, ErrorCode> {
     let bad = ErrorCode::CommandBodyInvalid;
     let mut out = Map::new();
     let version = match spec.version {
@@ -99,6 +107,18 @@ pub fn owner_body(spec: &OwnerCommand, body: &Value) -> Result<Mapped, ErrorCode
             out.insert(f.owner.into(), Value::from(value));
             continue;
         }
+        if f.place == Place::Tenant {
+            if body.get(f.hq).is_some() {
+                return Err(bad);
+            }
+            // A tenant scope that is not a UUID names no owner tenant.
+            let t = uuid::Uuid::parse_str(tenant)
+                .map(|u| u.hyphenated().to_string())
+                .map_err(|_| ErrorCode::ResourceNotFound)?;
+            out.insert(f.owner.into(), Value::from(t.clone()));
+            target.push(t);
+            continue;
+        }
         match body.get(f.hq) {
             None if f.required => return Err(bad),
             None => {}
@@ -119,13 +139,19 @@ pub fn owner_body(spec: &OwnerCommand, body: &Value) -> Result<Mapped, ErrorCode
                             .unwrap_or_else(|| v.to_string()),
                     );
                 }
-                Place::Fixed(_) => unreachable!("fixed values are handled above"),
+                Place::Fixed(_) | Place::Tenant => {
+                    unreachable!("bridge-filled values are handled above")
+                }
             },
             Some(_) => return Err(bad),
         }
     }
-    if let Some(r) = body.get("reason_code") {
-        out.insert("reasonCode".into(), r.clone());
+    match (spec.reason, body.get("reason_code")) {
+        (Reason::Required, None | Some(Value::Null)) => return Err(bad),
+        (Reason::Forward | Reason::Required, Some(r)) if !r.is_null() => {
+            out.insert("reasonCode".into(), r.clone());
+        }
+        _ => {}
     }
     Ok(Mapped {
         version,
@@ -180,6 +206,14 @@ fn extract(fields: &[OutField], v: &Value) -> Result<Value, OwnerError> {
                     _ => return Err(OwnerError::Contract),
                 },
                 Out::Obj(inner) => extract(inner, x)?,
+                Out::ObjList(inner) => match x.as_array() {
+                    Some(a) if a.len() <= 100 => Value::Array(
+                        a.iter()
+                            .map(|i| extract(inner, i))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                    _ => return Err(OwnerError::Contract),
+                },
             },
         };
         out.insert(f.hq.into(), value);
@@ -223,11 +257,11 @@ async fn run(
     let extra: Vec<&str> = spec
         .body
         .iter()
-        .filter(|f| !matches!(f.place, Place::Fixed(_)))
+        .filter(|f| !matches!(f.place, Place::Fixed(_) | Place::Tenant))
         .map(|f| f.hq)
         .collect();
     let (base, body) = commands::parse_command_body(&auth.body, &extra, spec.version.is_some())?;
-    let mapped = owner_body(spec, &body)?;
+    let mapped = owner_body(spec, &body, &auth.query.tenant)?;
     let mut path = spec.owner_path().to_string();
     let mut target = format!("{}:{}", spec.owner.as_str(), spec.id);
     for (name, value) in &auth.params {

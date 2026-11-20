@@ -28,6 +28,17 @@ fn rfc(t: chrono::DateTime<chrono::Utc>) -> String {
     t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// A calendar day `YYYY-MM-DD`, strictly.
+pub fn day(v: &Value, k: &str) -> T<Value> {
+    let s = v
+        .get(k)
+        .and_then(Value::as_str)
+        .ok_or(OwnerError::Contract)?;
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map(|d| Value::String(d.format("%Y-%m-%d").to_string()))
+        .map_err(|_| OwnerError::Contract)
+}
+
 fn listing(items: Vec<Value>, next: Value) -> Value {
     json!({"items": items, "next_cursor": next})
 }
@@ -140,6 +151,31 @@ fn push_key(p: &Value) -> T<Value> {
         ("last_error_code", t::opt_string(p, "lastErrorCode")?),
         ("created_at", t::time(p, "createdAt")?),
         ("updated_at", t::time(p, "updatedAt")?),
+        ("state", t::string(p, "state")?),
+        ("disabled_at", t::opt_time(p, "disabledAt")?),
+        ("version", t::int(p, "version")?),
+    ]))
+}
+
+fn usage(u: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("project_id", t::uuid(u, "projectId")?),
+        ("environment_id", t::uuid(u, "environmentId")?),
+        ("environment_kind", t::string(u, "environmentKind")?),
+        ("usage_type", t::string(u, "usageType")?),
+        ("unit", t::string(u, "unit")?),
+        ("quantity", t::int(u, "quantity")?),
+        ("fact_count", t::int(u, "factCount")?),
+    ]))
+}
+
+fn incident(i: &Value) -> T<Value> {
+    Ok(obj(vec![
+        ("incident_record_id", t::uuid(i, "incidentRecordId")?),
+        ("workspace_id", t::uuid(i, "organizationId")?),
+        ("incident_ref", t::opt_string(i, "incidentRef")?),
+        ("occurred_at", t::opt_time(i, "occurredAt")?),
+        ("recorded_at", t::time(i, "recordedAt")?),
     ]))
 }
 
@@ -353,6 +389,18 @@ fn plan(auth: &Authorized) -> Option<Result<Read, ErrorCode>> {
             "partners.webhooks.list" => {
                 page(format!("{BASE}/organizations/{}/webhooks", ws()?), webhook)
             }
+            "partners.usage.read" => Read::Page {
+                path: format!("{BASE}/organizations/{}/usage", ws()?),
+                item: usage,
+                window: true,
+                search: None,
+            },
+            "partners.incidents.list" => Read::Page {
+                path: format!("{BASE}/incidents"),
+                item: incident,
+                window: true,
+                search: None,
+            },
             "partners.webhook-deliveries.list" => Read::Page {
                 path: format!("{BASE}/organizations/{}/webhook-deliveries", ws()?),
                 item: delivery,
@@ -423,6 +471,14 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Option<Result<Answe
             query.extend(q.limit.map(|l| ("limit", l.to_string())));
             query.extend(q.cursor.clone().map(|c| ("cursor", c)));
             match bridge.owners.read(O, &path, &query, &operator).await {
+                Ok(v) if auth.capability.id == "partners.usage.read" => {
+                    answer(t::page(&v, item).and_then(|(i, n)| {
+                        let mut out = listing(i, n);
+                        out["from"] = day(&v, "from")?;
+                        out["to"] = day(&v, "to")?;
+                        Ok(out)
+                    }))
+                }
                 Ok(v) => answer(t::page(&v, item).map(|(i, n)| listing(i, n))),
                 Err(e) => Err(e.into()),
             }

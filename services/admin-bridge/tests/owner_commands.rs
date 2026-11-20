@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex};
 
 use admin_bridge::contract::catalog::catalog;
 use admin_bridge::contract::model::{Owner, ParamFormat, Risk};
-use admin_bridge::contract::owner_commands::{In, Out, OutField, OwnerCommand, Place, COMMANDS};
+use admin_bridge::contract::owner_commands::{
+    In, Out, OutField, OwnerCommand, Place, Reason, COMMANDS,
+};
 use admin_bridge::owners::{CommandCall, CommandOutcome, OwnerError, OwnerPort};
 use admin_bridge::wire;
 use async_trait::async_trait;
@@ -57,6 +59,9 @@ fn sample_in(kind: In) -> Value {
         In::UuidList(_) => json!([ID]),
         In::Object => json!({"section": {"enabled": true}}),
         In::EnumList(values, _) => json!([values[0]]),
+        In::Time => json!("2026-12-01T10:00:00Z"),
+        In::Date => json!("2026-11-01"),
+        In::NullableObject => json!({"participants": 50}),
     }
 }
 
@@ -73,6 +78,7 @@ fn sample_out(fields: &[OutField]) -> Value {
             Out::Text => json!("a reason"),
             Out::StrList => json!(["sharing"]),
             Out::Obj(inner) => sample_out(inner),
+            Out::ObjList(inner) => json!([sample_out(inner)]),
         };
         m.insert(f.owner.into(), v);
     }
@@ -116,9 +122,17 @@ fn hq_call(row: &OwnerCommand, sub: &str) -> (Call, Value, String) {
         body["expected_version"] = json!(min.max(1));
         owner.insert("expectedVersion".into(), json!(min.max(1)));
     }
+    if row.reason != Reason::Ledger {
+        body["reason_code"] = json!("POLICY_REVIEW");
+        owner.insert("reasonCode".into(), json!("POLICY_REVIEW"));
+    }
     for f in row.body {
         if let Place::Fixed(value) = f.place {
             owner.insert(f.owner.into(), json!(value));
+            continue;
+        }
+        if f.place == Place::Tenant {
+            owner.insert(f.owner.into(), json!(TENANT_ID));
             continue;
         }
         let v = sample_in(f.kind);
@@ -132,12 +146,13 @@ fn hq_call(row: &OwnerCommand, sub: &str) -> (Call, Value, String) {
             }
         }
     }
-    let mut c = call(
-        &path,
-        &scoped(cap.purposes[0].as_str()),
-        row.id,
-        &[cap.roles[0].as_str()],
+    // The Platform Access tenant id scope: owners keyed by tenant receive it.
+    let query = format!(
+        "market=GLOBAL&organization=cfmeet&zone=production&tenant={TENANT_ID}&purpose={}",
+        cap.purposes[0].as_str()
     );
+    let mut c = call(&path, &query, row.id, &[cap.roles[0].as_str()]);
+    c.tenant_scopes = vec![TENANT_ID];
     c.method = "POST";
     c.sub = sub.into();
     c.body = serde_json::to_vec(&body).unwrap();
@@ -253,6 +268,46 @@ async fn owner_command_bodies_and_answers_are_strict() {
     body["expected_version"] = json!(7);
     c.body = serde_json::to_vec(&body).unwrap();
     assert_eq!(code(&send(&h, &c).await.1), "UNKNOWN_OUTCOME");
+}
+
+#[tokio::test]
+async fn reason_codes_follow_the_row() {
+    let owner = Arc::new(FakeOwner::default());
+    let h = start(Options {
+        owners: Some(owner.clone()),
+        switches_all_on: true,
+        ..Default::default()
+    })
+    .await;
+    // Kept in the bridge's record only: the owner's body has no reason field.
+    let ledger = COMMANDS
+        .iter()
+        .find(|r| r.reason == Reason::Ledger)
+        .unwrap();
+    *owner.answer.lock().unwrap() = Some(json!({
+        "status": status_of(ledger),
+        "version": ledger.version.map(|_| json!("4")).unwrap_or(Value::Null),
+        "resource": sample_out(ledger.resource),
+    }));
+    let (mut c, owner_body, _) = hq_call(ledger, "staff-2001");
+    let mut body: Value = serde_json::from_slice(&c.body).unwrap();
+    body["reason_code"] = json!("POLICY_REVIEW");
+    c.body = serde_json::to_vec(&body).unwrap();
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{}: {v}", ledger.id);
+    let sent = owner.sent.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(sent.2, owner_body, "{}", ledger.id);
+    assert!(sent.2.get("reasonCode").is_none());
+    // Required: refused without one, before the owner is called.
+    if let Some(required) = COMMANDS.iter().find(|r| r.reason == Reason::Required) {
+        let before = owner.sent.lock().unwrap().len();
+        let (mut c, _, _) = hq_call(required, "staff-2002");
+        let mut body: Value = serde_json::from_slice(&c.body).unwrap();
+        body.as_object_mut().unwrap().remove("reason_code");
+        c.body = serde_json::to_vec(&body).unwrap();
+        assert_eq!(code(&send(&h, &c).await.1), "COMMAND_BODY_INVALID");
+        assert_eq!(owner.sent.lock().unwrap().len(), before);
+    }
 }
 
 #[test]

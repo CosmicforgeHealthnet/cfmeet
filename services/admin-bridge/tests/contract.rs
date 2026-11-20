@@ -197,6 +197,7 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "partners.workspaces.search",
             "partners.workspaces.read",
             "partners.workspace-activity.list",
+            "partners.workspace.state.change",
             "partners.projects.list",
             "partners.environments.list",
             "partners.members.list",
@@ -208,10 +209,17 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "partners.websites.list",
             "partners.website.remove",
             "partners.push-keys.list",
+            "partners.push-key.disable",
             "partners.users.list",
             "partners.user.sign-out",
             "partners.webhooks.list",
             "partners.webhook-deliveries.list",
+            "partners.webhook-delivery.retry",
+            "partners.usage.read",
+            "partners.usage.reprocess",
+            "partners.support-tier.change",
+            "partners.incidents.list",
+            "partners.incident.record",
             "identity.tenants.list",
             "identity.applications.list",
             "identity.environments.list",
@@ -237,6 +245,8 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "apps.apps.read",
             "apps.versions.list",
             "apps.installs.list",
+            "apps.app.suspend",
+            "apps.app.lift-suspension",
             "verification.cases.list",
             "verification.cases.read",
             "verification.case-history.list",
@@ -261,7 +271,7 @@ fn served_capabilities_are_exactly_the_ones_built() {
             "privacy.request.register",
             "privacy.request.complete-service",
             "operations.health.read",
-            "audit.entries.list"
+            "audit.entries.list",
         ]
     );
     for c in catalog() {

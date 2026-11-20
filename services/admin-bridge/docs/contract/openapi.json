@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Admin Bridge (HQ interface v1)",
-    "version": "1.14.0",
+    "version": "1.15.0",
     "description": "Private HQ -> CF Meet admin bridge. Transport, signing, staff assertion and authorization rules: signing-profile.md. Artifact state never authorizes anything at runtime."
   },
   "servers": [
@@ -33737,7 +33737,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerWorkspaceStateChangeResult"
                     },
                     "error": {
                       "type": "null"
@@ -33863,14 +33863,14 @@
         "x-cfmeet-permission": "partners.workspace.state.change",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/PartnerWorkspaceStateChangeRequest"
               }
             }
           }
@@ -37173,7 +37173,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerPushKeyDisableResult"
                     },
                     "error": {
                       "type": "null"
@@ -37299,14 +37299,14 @@
         "x-cfmeet-permission": "partners.push-key.disable",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/PartnerPushKeyDisableRequest"
               }
             }
           }
@@ -38532,7 +38532,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerWebhookDeliveryRetryResult"
                     },
                     "error": {
                       "type": "null"
@@ -38658,14 +38658,14 @@
         "x-cfmeet-permission": "partners.webhook-delivery.retry",
         "x-cfmeet-risk": "R2",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/PartnerWebhookDeliveryRetryRequest"
               }
             }
           }
@@ -38822,7 +38822,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerUsagePage"
                     },
                     "error": {
                       "type": "null"
@@ -38948,7 +38948,7 @@
         "x-cfmeet-permission": "partners.usage.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "developer-platform"
       }
     },
@@ -39063,7 +39063,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerUsageReprocessResult"
                     },
                     "error": {
                       "type": "null"
@@ -39189,14 +39189,14 @@
         "x-cfmeet-permission": "partners.usage.reprocess",
         "x-cfmeet-risk": "R2",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/PartnerUsageReprocessRequest"
               }
             }
           }
@@ -39325,7 +39325,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerSupportProfileCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -39451,14 +39451,14 @@
         "x-cfmeet-permission": "partners.support-tier.change",
         "x-cfmeet-risk": "R2",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/PartnerSupportTierChangeRequest"
               }
             }
           }
@@ -39605,7 +39605,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerIncidentPage"
                     },
                     "error": {
                       "type": "null"
@@ -39731,7 +39731,7 @@
         "x-cfmeet-permission": "partners.incidents.read",
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "developer-platform"
       },
       "post": {
@@ -39843,7 +39843,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/PartnerSupportProfileCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -39969,14 +39969,14 @@
         "x-cfmeet-permission": "partners.incident.record",
         "x-cfmeet-risk": "R2",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/PartnerIncidentRecordRequest"
               }
             }
           }
@@ -47219,7 +47219,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AppCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -47345,14 +47345,14 @@
         "x-cfmeet-permission": "apps.app.suspend",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AppSuspendRequest"
               }
             }
           }
@@ -47480,7 +47480,7 @@
                       ]
                     },
                     "result": {
-                      "not": {}
+                      "$ref": "#/components/schemas/AppCommandResult"
                     },
                     "error": {
                       "type": "null"
@@ -47606,14 +47606,14 @@
         "x-cfmeet-permission": "apps.app.lift-suspension",
         "x-cfmeet-risk": "R3",
         "x-cfmeet-approval": "TWO_PERSON",
-        "x-cfmeet-state": "DISABLED",
+        "x-cfmeet-state": "AVAILABLE",
         "x-cfmeet-owner": "developer-platform",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "not": {}
+                "$ref": "#/components/schemas/AppLiftSuspensionRequest"
               }
             }
           }
@@ -66027,7 +66027,10 @@
           "last_verified_at",
           "last_error_code",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "state",
+          "disabled_at",
+          "version"
         ],
         "properties": {
           "push_key_id": {
@@ -66117,6 +66120,23 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "DISABLED"
+            ]
+          },
+          "disabled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },
@@ -66133,6 +66153,154 @@
             "maxItems": 100,
             "items": {
               "$ref": "#/components/schemas/PartnerPushKey"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "PartnerUsage": {
+        "description": "Metered usage of one environment and usage type over the window (quantities only).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "environment_id",
+          "environment_kind",
+          "usage_type",
+          "unit",
+          "quantity",
+          "fact_count"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16
+          },
+          "usage_type": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fact_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "PartnerUsagePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PartnerUsage"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          }
+        },
+        "description": "The workspace's usage over the window's UTC days [from, to]."
+      },
+      "PartnerIncident": {
+        "description": "One incident recorded against a workspace's support profile (the reference and time the operator gave).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "incident_record_id",
+          "workspace_id",
+          "incident_ref",
+          "occurred_at",
+          "recorded_at"
+        ],
+        "properties": {
+          "incident_record_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "incident_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 160
+          },
+          "occurred_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PartnerIncidentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/PartnerIncident"
             }
           },
           "next_cursor": {
@@ -74306,6 +74474,652 @@
               }
             },
             "description": "The resource after partners.user.sign-out; status: SIGNED_OUT."
+          }
+        }
+      },
+      "PartnerWorkspaceStateChangeRequest": {
+        "description": "Request of partners.workspace.state.change (POST /internal/v1/operator/organizations/{workspace_id}/state).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "state",
+          "reason"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "state": {
+            "enum": [
+              "INVITED",
+              "ACTIVE",
+              "RESTRICTED",
+              "SUSPENDED",
+              "CLOSED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        }
+      },
+      "PartnerWorkspaceStateChangeResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "workspace_id",
+              "state",
+              "state_reason",
+              "updated_at",
+              "closed_at"
+            ],
+            "properties": {
+              "workspace_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "state_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "closed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after partners.workspace.state.change; status: INVITED, ACTIVE, RESTRICTED, SUSPENDED, CLOSED."
+          }
+        }
+      },
+      "PartnerPushKeyDisableRequest": {
+        "description": "Request of partners.push-key.disable (POST /internal/v1/operator/organizations/{workspace_id}/push-providers/{push_key_id}/disable).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "PartnerPushKeyDisableResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "push_key_id",
+              "workspace_id",
+              "project_id",
+              "environment_id",
+              "provider",
+              "state",
+              "disabled_at",
+              "disabled_reason",
+              "updated_at"
+            ],
+            "properties": {
+              "push_key_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "workspace_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "project_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "provider": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "disabled_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "disabled_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after partners.push-key.disable; status: DISABLED."
+          }
+        }
+      },
+      "PartnerWebhookDeliveryRetryRequest": {
+        "description": "Request of partners.webhook-delivery.retry (POST /internal/v1/operator/organizations/{workspace_id}/webhook-deliveries/{delivery_id}/retry).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "PartnerWebhookDeliveryRetryResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "delivery_id",
+              "retry_of",
+              "subscription_id",
+              "environment_id",
+              "state",
+              "created_at"
+            ],
+            "properties": {
+              "delivery_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "retry_of": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "subscription_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "environment_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after partners.webhook-delivery.retry; status: RETRIED."
+          }
+        }
+      },
+      "PartnerUsageReprocessRequest": {
+        "description": "Request of partners.usage.reprocess (POST /internal/v1/operator/usage/rollups/rebuild).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PartnerUsageReprocessResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "environment_id",
+              "from",
+              "to",
+              "removed",
+              "rebuilt"
+            ],
+            "properties": {
+              "environment_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "to": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+              },
+              "removed": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "rebuilt": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "description": "The resource after partners.usage.reprocess; status: REPROCESSED."
+          }
+        }
+      },
+      "PartnerSupportTierChangeRequest": {
+        "description": "Request of partners.support-tier.change (POST /internal/v1/operator/organizations/{workspace_id}/support-profile).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "support_tier"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "support_tier": {
+            "enum": [
+              "COMMUNITY",
+              "STANDARD",
+              "PREMIUM",
+              "ENTERPRISE",
+              "INTERNAL"
+            ]
+          },
+          "support_reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          }
+        }
+      },
+      "PartnerSupportProfileCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "workspace_id",
+              "support_tier",
+              "last_incident",
+              "updated_at"
+            ],
+            "properties": {
+              "workspace_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "support_tier": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "last_incident": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "additionalProperties": false,
+                "required": [
+                  "reference",
+                  "occurred_at"
+                ],
+                "properties": {
+                  "reference": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "occurred_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  }
+                }
+              },
+              "updated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after partners.incident.record; status: RECORDED."
+          }
+        }
+      },
+      "PartnerIncidentRecordRequest": {
+        "description": "Request of partners.incident.record (POST /internal/v1/operator/organizations/{workspace_id}/incidents).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version",
+          "workspace_id",
+          "incident_ref",
+          "occurred_at"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$",
+            "description": "Kept in the bridge's operation record; not sent to the owning service."
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "incident_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "maxLength": 40,
+            "pattern": "Z$"
+          }
+        }
+      },
+      "AppSuspendRequest": {
+        "description": "Request of apps.app.suspend (POST /internal/v1/operator/apps/{app_id}/suspend).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
+          }
+        }
+      },
+      "AppCommandResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "resource"
+        ],
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/OperationReadback"
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "app_id",
+              "workspace_id",
+              "state",
+              "published_version",
+              "updated_at"
+            ],
+            "properties": {
+              "app_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "workspace_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "published_version": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "description": "The resource after apps.app.lift-suspension; status: any state code."
+          }
+        }
+      },
+      "AppLiftSuspensionRequest": {
+        "description": "Request of apps.app.lift-suspension (POST /internal/v1/operator/apps/{app_id}/lift-suspension).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "expected_version"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "HQ's command id; equal to the Idempotency-Key header."
+          },
+          "reason_code": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The resource version the command applies to (VERSION_CONFLICT otherwise); 0 means none yet where allowed."
           }
         }
       },

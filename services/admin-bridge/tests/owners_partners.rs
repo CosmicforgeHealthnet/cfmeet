@@ -105,7 +105,27 @@ impl OwnerPort for FakeDeveloperPlatform {
                 "environmentKind": "PRODUCTION", "provider": "APNS", "apnsKeyId": "ABCDE12345", "apnsTeamId": "TEAM123456",
                 "apnsBundleId": "com.acme.app", "apnsHost": "PRODUCTION", "fcmProjectId": null,
                 "fingerprint": "a".repeat(64), "verification": "VERIFIED", "lastVerifiedAt": T0, "lastErrorCode": null,
-                "createdAt": T0, "updatedAt": T0}),
+                "createdAt": T0, "updatedAt": T0, "state": "DISABLED", "disabledAt": T0, "version": 4}),
+                ],
+                Value::Null,
+            ),
+            x if x.ends_with("/usage") => {
+                let mut v = page(
+                    vec![
+                        json!({"projectId": ID, "environmentId": ID, "environmentKind": "PRODUCTION",
+                        "usageType": "MESSAGE_SENT", "unit": "MESSAGE", "quantity": 120, "factCount": 7,
+                        "organizationName": "Acme Partner"}),
+                    ],
+                    json!("c2VxOjUw"),
+                );
+                v["from"] = json!("2026-11-01");
+                v["to"] = json!("2026-11-09");
+                v
+            }
+            "/incidents" => page(
+                vec![
+                    json!({"incidentRecordId": ID, "organizationId": WS, "incidentRef": "INC-2026-114",
+                    "occurredAt": T0, "recordedAt": T0, "summary": "call help@acme.example"}),
                 ],
                 Value::Null,
             ),
@@ -373,6 +393,12 @@ async fn partners_push_keys_are_details_only() {
         (json!("ABCDE12345"), json!("APNS"))
     );
     assert_eq!(k["fingerprint"].as_str().unwrap().len(), 64);
+    // The state and row version an operator's disable command acts on.
+    assert_eq!(
+        (k["state"].clone(), k["version"].clone()),
+        (json!("DISABLED"), json!(4))
+    );
+    assert_eq!(k["disabled_at"], "2026-11-01T10:00:00Z");
 }
 
 #[tokio::test]
@@ -442,27 +468,56 @@ async fn apps_search_and_detail() {
 }
 
 #[tokio::test]
-async fn blocked_partner_reads_stay_refused() {
+async fn partners_usage_and_incidents_map_the_window() {
     let (h, fake) = harness().await;
-    // Keys, service accounts, websites and users moved to the Platform Access slice (A2.3).
-    let window = "&start=2026-11-01T00:00:00Z&end=2026-11-10T00:00:00Z";
-    for (path, query, perm) in [
-        (
-            format!("/partners/workspaces/{WS}/usage"),
-            format!("{}{window}", scoped("support-review")),
-            "partners.usage.read",
-        ),
-        (
-            "/partners/incidents".to_string(),
-            format!("{}{window}", scoped("ops-incident")),
-            "partners.incidents.read",
-        ),
-    ] {
-        let c = call(&path, &query, perm, &["cfmeet.partner_ops"]);
-        assert_eq!(code(&send(&h, &c).await.1), "CAPABILITY_DISABLED", "{path}");
-    }
-    assert!(
-        fake.calls.lock().unwrap().is_empty(),
-        "no owner call for an unserved capability"
+    let c = call(
+        &format!("/partners/workspaces/{WS}/usage"),
+        &window_query("support-review"),
+        "partners.usage.read",
+        &["cfmeet.partner_ops"],
     );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (_, path, query, operator) = last_call(&fake);
+    assert_eq!(
+        path,
+        format!("/internal/v1/operator/organizations/{WS}/usage")
+    );
+    assert_eq!(operator, "hq:staff-0001");
+    let q: Vec<(&str, &str)> = query
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    assert_eq!(
+        q,
+        [
+            ("since", "2026-11-01T00:00:00Z"),
+            ("until", "2026-11-10T00:00:00Z"),
+            ("limit", "10")
+        ]
+    );
+    let r = &v["result"];
+    assert_eq!(
+        (r["from"].clone(), r["to"].clone()),
+        (json!("2026-11-01"), json!("2026-11-09"))
+    );
+    assert_eq!(r["next_cursor"], "c2VxOjUw");
+    assert_eq!(r["items"][0]["quantity"], 120);
+    assert!(r["items"][0].get("organizationName").is_none());
+
+    let c = call(
+        "/partners/incidents",
+        &window_query("ops-incident"),
+        "partners.incidents.read",
+        &["cfmeet.partner_ops"],
+    );
+    let (status, v) = send(&h, &c).await;
+    assert_eq!(status, 200, "{v}");
+    let (_, path, query, _) = last_call(&fake);
+    assert_eq!(path, "/internal/v1/operator/incidents");
+    assert!(query.contains(&("until".into(), "2026-11-10T00:00:00Z".into())));
+    let i = &v["result"]["items"][0];
+    assert_eq!(i["incident_ref"], "INC-2026-114");
+    assert_eq!(i["workspace_id"], WS);
+    assert!(!v.to_string().contains("help@acme.example"));
 }
