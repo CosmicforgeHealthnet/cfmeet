@@ -1,4 +1,4 @@
-"""Sections 4–7 release operations through the existing GitHub-controlled VPS access.
+"""Sections 4â€“7 release operations through the existing GitHub-controlled VPS access.
 Secret-bearing inspection and rollback files never leave the VPS.
 """
 import json
@@ -238,7 +238,7 @@ def database(name):
     p.write_private(config,json.dumps(value));return value
 
 def migrate(service,sha,url,feature_only=False,network=None):
-    binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-hardening-migration','organization-integration-migration','account-communications-migration','lifecycle-delivery-migration','notification-fence-migration','gap-closure-migration','platform-build-migration','meeting-audit-migration','account-privacy-migration','account-phone-migration'],
+    binaries={'platform-access':['platform-access-migration'],'meeting-service':['migration','account-security-migration','meetings-calendar-migration','profile-notifications-migration','account-hardening-migration','organization-integration-migration','account-communications-migration','lifecycle-delivery-migration','notification-fence-migration','gap-closure-migration','platform-build-migration','meeting-audit-migration','account-privacy-migration','account-phone-migration','admin-operations-migration'],
               'calling':['calling-migration','calling-communications-migration'],'messaging':['messaging-migration','messaging-communications-migration','messaging-notification-fence-migration','messaging-send-policy-projection-migration'],
               'communications':['communications-migration']}[service]
     # Feature-only releases apply every additive history after the base one (meeting-service:

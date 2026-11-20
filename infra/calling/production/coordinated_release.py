@@ -133,7 +133,7 @@ ADMIN_BRIDGE_DARK_ENV = dict({
     'ADMIN_BRIDGE_DATABASE_MAX_CONNECTIONS': '5',
 }, **{'ADMIN_BRIDGE_MODULE_' + m: 'false' for m in ADMIN_BRIDGE_MODULES})
 
-# The HQ port (design §14; owner decision 2026-11-20: private tunnel). HQ staging reaches the
+# The HQ port (design Â§14; owner decision 2026-11-20: private tunnel). HQ staging reaches the
 # bridge over a private tunnel (e.g. WireGuard) between the HQ staging host and the CF Meet
 # host, never over a public address: HQ only connects to a pinned private IP. The relay
 # listens ONLY on the CF Meet host's tunnel address (ADMIN_BRIDGE_HQ_LISTEN_ADDRESS) and admits
@@ -246,7 +246,7 @@ SERVICES = {
                     'organization-integration-migration', 'account-communications-migration',
                     'lifecycle-delivery-migration', 'notification-fence-migration',
                     'gap-closure-migration', 'platform-build-migration', 'meeting-audit-migration',
-                    'account-privacy-migration','account-phone-migration'],
+                    'account-privacy-migration','account-phone-migration','admin-operations-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
@@ -274,7 +274,7 @@ SERVICES = {
              'API_GATEWAY_WEBSOCKETS_ENABLED': 'false', 'API_GATEWAY_CORS_ALLOWED_ORIGINS': ','.join(WEB_ORIGINS)}),
 }
 
-# Owners before callers (final-production-activation-runbook §1).
+# Owners before callers (final-production-activation-runbook Â§1).
 ORDER = ('platform-access', 'organizations', 'notifications', 'notifications-2',
          'messaging', 'calling', 'communications', 'numbering', 'privacy-relay', 'sms-gateway', 'telephony',
          'meeting-service', 'developer-platform', 'developer-platform-worker', 'admin-bridge', 'api-gateway')
@@ -488,8 +488,8 @@ RELEASE_SCOPE = Path(__file__).resolve().parent / 'release-scope.json'
 
 def expected_image(name, sha, manifest=None):
     """(image id, revision) a service must run under the completed release `sha`: the
-    release's own image, or — for a service the release kept because its build inputs did
-    not change — the exact image it kept running (recorded in the journal entry)."""
+    release's own image, or â€” for a service the release kept because its build inputs did
+    not change â€” the exact image it kept running (recorded in the journal entry)."""
     entry = last_release(sha)
     kept = (entry or {}).get('kept') or {}
     if name in kept:
@@ -715,9 +715,9 @@ ADMIN_BRIDGE_GRANTS += tuple((op, receiver, 'admin-bridge', permissions)
                              for op, spec in ADMIN_BRIDGE_OWNERS.items()
                              for receiver, permissions in spec['grants'])
 
-# (operation, receiver, issuer, permissions): final-production-activation-runbook §2,
+# (operation, receiver, issuer, permissions): final-production-activation-runbook Â§2,
 # organizations-cutover-runbook (Organizations bundle) and the developer-platform gateway
-# activation checklist §4. Every row is checked against packages/service-auth/src/permissions.rs
+# activation checklist Â§4. Every row is checked against packages/service-auth/src/permissions.rs
 # (test_coordinated_release.py). Nothing is granted by `release`: new services start dark.
 GRANTS = (
     ('activate-provisioning', 'platform-access', 'organizations', ('platform-identity.provision-first-party',)),
@@ -1877,11 +1877,11 @@ def rollback(sha, run_id):
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
     if entry.get('irreversible'):
-        raise RuntimeError('%s cannot be rolled back (organizations-cutover-runbook §7: never back to a stale writer)'
+        raise RuntimeError('%s cannot be rolled back (organizations-cutover-runbook Â§7: never back to a stale writer)'
                            % entry['operation'])
     if any(component['service'] in ('communications', 'calling') for component in entry['components']):
         send_policy_operations.require_remote_path(sys.modules[__name__])
-    # Routing fence rollback floor (Document 4 §9.6): checked for every producer before anything moves.
+    # Routing fence rollback floor (Document 4 Â§9.6): checked for every producer before anything moves.
     for component in entry['components']:
         previous = component.get('previous')
         if previous and component['status'] not in ('unchanged', 'rolled-back') and previous in container_names():
@@ -2104,7 +2104,7 @@ def activate_admin_bridge(sha, run_id, confirm):
 
 
 
-# --- HQ admin bridge: switched on for HQ (runbook §3) -----------------------------------------
+# --- HQ admin bridge: switched on for HQ (runbook Â§3) -----------------------------------------
 # The operator stages, BEFORE the run and never through chat or git:
 #   /opt/cfmeet-core/admin-bridge/enable.json   the non-secret settings (ADMIN_BRIDGE_ENABLE_KEYS)
 #   /opt/cfmeet-core/admin-bridge/tls/          server.crt, server.key, hq-client-ca.pem
@@ -2125,7 +2125,7 @@ _KID = r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}'
 
 
 def admin_bridge_enable_settings(record):
-    """enable.json → (bridge env overrides, relay listen address, relay allowed source). Refuses
+    """enable.json â†’ (bridge env overrides, relay listen address, relay allowed source). Refuses
     anything but the exact keys and values the bridge and HQ accept."""
     if not isinstance(record, dict) or sorted(record) != sorted(ADMIN_BRIDGE_ENABLE_KEYS):
         raise RuntimeError('enable.json must hold exactly: ' + ', '.join(ADMIN_BRIDGE_ENABLE_KEYS))
@@ -2197,7 +2197,7 @@ def admin_bridge_material(root=ADMIN_BRIDGE_ROOT):
     material is read only to compute digests and is never emitted."""
     for d in (root / 'tls', root / 'hmac'):
         if not d.is_dir():
-            raise RuntimeError('Missing %s (stage it first: runbook §3)' % d)
+            raise RuntimeError('Missing %s (stage it first: runbook Â§3)' % d)
         _sealed(d, 0o022)
     for name, mask in ADMIN_BRIDGE_TLS_FILES.items():
         f = root / 'tls' / name
@@ -2285,7 +2285,7 @@ def remove_admin_bridge_hq_relay():
 
 
 def activate_admin_bridge_hq(sha, run_id, confirm):
-    """Runbook §3 (HQ stage S3): switch the bridge on for HQ, READ-ONLY. Refuses unless HQ is
+    """Runbook Â§3 (HQ stage S3): switch the bridge on for HQ, READ-ONLY. Refuses unless HQ is
     enrolled (client certificate, staff-token key, the staged HMAC key's digest), the pinned
     signed policy revision is stored, and every staged file is sealed. Recreates the bridge with
     the settings and read-only mounts, checks /ready, then installs the tunnel-only relay. A
@@ -2454,7 +2454,7 @@ COMMIT;
 
 
 def org_export(sha, run_id, confirm):
-    """organizations-cutover-runbook §1-2: counts-only inventory, then the read-only export."""
+    """organizations-cutover-runbook Â§1-2: counts-only inventory, then the read-only export."""
     inventory = json.loads(meeting_psql(INVENTORY_SQL))
     emit('organizationsInventory', inventory)
     if inventory['slugsOutsideContract'] or inventory['duplicateSlugs'] or inventory['duplicateLiveMemberships']:
@@ -2504,7 +2504,7 @@ def import_summary(report):
 
 
 def org_import(sha, run_id, confirm, backup_gate=True):
-    """organizations-cutover-runbook §3: import, reconcile, prove idempotence, delete the export.
+    """organizations-cutover-runbook Â§3: import, reconcile, prove idempotence, delete the export.
     backup_gate=False only for the empty-dataset first activation (ADR 0059 Amendment 1: owner
     decision, no backup prerequisite); the standard import keeps owner gate 1."""
     if backup_gate:
@@ -2742,7 +2742,7 @@ def activate_web_origins(sha, run_id, confirm):
 
 
 def activate_developer_console(sha, run_id, confirm):
-    """Developer Console sessions (Part VI §50): the Developer Platform verifies a CF Meet
+    """Developer Console sessions (Part VI Â§50): the Developer Platform verifies a CF Meet
     session through the Meeting Service's session bridge (`user-session.verify`); without it
     every DEVELOPER_SESSION request is refused and no customer can create an organization,
     project, environment, credential or webhook. The bridge fails closed (revocation store
@@ -2837,7 +2837,7 @@ FAMILY_PROBES = (('GET', '/v1/abuse-reports'), ('GET', '/v1/blocks'), ('GET', '/
 def activate_gateway_families(sha, run_id, confirm):
     """Messaging (/v1/conversations, /v1/messaging), Calling account controls (/v1/abuse-reports,
     /v1/blocks, /v1/limits, /v1/usage) and central customer webhooks (/v1/webhooks,
-    /v1/webhook-deliveries → Developer Platform) through the API Gateway: platform credential
+    /v1/webhook-deliveries â†’ Developer Platform) through the API Gateway: platform credential
     authentication at the gateway, entitlement quotas and rate limits, a request-bound service
     token that the receiver authorizes by grant, tenant context delegated, never forwarded."""
     if env_of('api-gateway').get('API_GATEWAY_PUBLIC_ROUTING_ENABLED') != 'true' or not GATEWAY_SNIPPET.exists():
@@ -2898,7 +2898,7 @@ USAGE_STREAMS_SQL = ("SELECT coalesce(json_agg(json_build_object('producer', pro
 
 
 def activate_usage_export(sha, run_id, confirm):
-    """Part VI §55 unified usage ledger: Calling, Messaging and the Meeting Service export their
+    """Part VI Â§55 unified usage ledger: Calling, Messaging and the Meeting Service export their
     billing-neutral usage facts (safe refs only; platform application environments only, never
     CF Meet consumer usage) to the Developer Platform, authenticated by the
     `developer-event.publish` grants of activate-developer-webhooks. Customer /v1/usage and
@@ -3516,7 +3516,7 @@ ACTIVATIONS = {
                                           developer_access.activate(sys.modules[__name__], sha, run_id, confirm)),
     # HQ admin bridge (ADR 0068): owner grants for the served reads, bridge still disabled.
     'activate-admin-bridge': ((), activate_admin_bridge),
-    # Runbook §3: switched on for HQ, read-only, with the tunnel-only relay (confirm=hq-enrolled-read-only).
+    # Runbook Â§3: switched on for HQ, read-only, with the tunnel-only relay (confirm=hq-enrolled-read-only).
     'activate-admin-bridge-hq': (('activate-admin-bridge',), activate_admin_bridge_hq),
     # The other owner families (grants, owner URL, modules), each after activate-admin-bridge.
     **{op: (('activate-admin-bridge',), activate_admin_bridge_owner(op)) for op in ADMIN_BRIDGE_OWNERS},
@@ -3586,7 +3586,7 @@ ACTIVATIONS = {
     # Notification Service N5 / N11: Resend as the service's own provider (VPS credentials).
     'activate-notifications-email': (('activate-resend-email',), lambda sha, run_id, confirm:
                                      notif_ops.activate_email(sys.modules[__name__], sha, run_id, confirm)),
-    # Document 4 §9.6: one producer fence row per run, LEGACY_ONLY <-> SHADOW only, reversible.
+    # Document 4 Â§9.6: one producer fence row per run, LEGACY_ONLY <-> SHADOW only, reversible.
     'activate-notification-fence': ((), lambda sha, run_id, confirm: notif_ops.activate_fence(
         sys.modules[__name__], sha, run_id, confirm)),
     # Audit M4: meeting notices reach the in-app inbox while their email stays with the Meeting
