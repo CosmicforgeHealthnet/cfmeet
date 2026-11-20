@@ -43,6 +43,10 @@ fn route_pattern(request: &Request) -> String {
 #[derive(Debug, Clone)]
 pub struct Caller {
     pub context: InternalServiceContext,
+    /// Operator attribution (ADR 0067): present only for `cfmeet.admin-bridge` requests that
+    /// name the HQ staff member (`X-CF-Operator`); attribution headers from any other caller
+    /// are refused before the handler runs.
+    pub operator: Option<cf_service_auth::OperatorAttribution>,
 }
 
 impl Caller {
@@ -55,6 +59,16 @@ impl Caller {
             tracing::warn!(caller = %denied.service, permission = denied.permission.as_str(), "internal permission denied");
             ApiError::new(ErrorCode::Forbidden)
         })
+    }
+
+    /// The admin bridge's operator reads: `permission` (bridge-only) and a named operator.
+    pub fn require_operator(&self, permission: InternalPermission) -> Result<(), ApiError> {
+        self.require(permission)?;
+        if self.operator.is_none() {
+            tracing::warn!(caller = %self.service(), "operator read without X-CF-Operator refused");
+            return Err(ApiError::new(ErrorCode::Forbidden));
+        }
+        Ok(())
     }
 }
 
@@ -128,13 +142,23 @@ pub async fn require_internal_service(
     let span = tracing::info_span!("internal_request", request_id = %request_id,
         correlation_id = %ctx.correlation_id(), caller = %ctx.authenticated_service(),
         method = %request.method(), route = %route);
+    // Parsed before the async block: it borrows only the headers, synchronously.
+    let attribution = cf_service_auth::OperatorAttribution::from_headers(
+        ctx.authenticated_service(),
+        request.headers(),
+    );
     let outcome: Result<Caller, ApiError> = async {
         if !first_use(&state, &ctx).await? {
             tracing::warn!("replayed service token refused");
             return Err(ApiError::new(ErrorCode::InternalAuthenticationFailed));
         }
+        let operator = attribution.map_err(|e| {
+            tracing::warn!(reason = %e, "operator attribution refused");
+            ApiError::new(ErrorCode::Forbidden)
+        })?;
         Ok(Caller {
             context: ctx.clone(),
+            operator,
         })
     }
     .instrument(span.clone())
