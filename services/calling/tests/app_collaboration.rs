@@ -195,15 +195,58 @@ async fn upgrades_are_version_scope_and_state_checked() {
     let Some(a) = AppWorld::new().await else {
         return;
     };
-    // Pre-answer: the offer keeps the kind it was offered with.
-    let (call, _caller, _callee) = a.ringing_call("VOICE").await;
+    // CF2: switching to video while it still rings offers the Call as a video call; the
+    // callee then answers a video call (its media permissions include video).
+    let (call, _caller, callee) = a.ringing_call("VOICE").await;
     let (_, version) = a.state(call).await;
     let r = upgrade(&a, call, version).await;
-    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.text);
-    assert_eq!(r.json["error"]["code"], "CALL_STATE_CONFLICT");
-    let (_, version) = a.state(call).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(r.json["call"]["kind"], "VIDEO", "{}", r.text);
+    assert_eq!(a.state(call).await.0, CallState::Ringing);
+    let token = a.signaling_token(&callee).await;
+    let offers = a
+        .as_endpoint(&token, Method::GET, "/v1/calling/invitations", None, &[])
+        .await;
+    assert_eq!(offers.status, StatusCode::OK, "{}", offers.text);
     assert_eq!(
-        a.command(call, "cancel", version).await.status,
+        offers.json["data"][0]["callKind"], "VIDEO",
+        "{}",
+        offers.text
+    );
+    let invitation = a.invitation_for(call, callee.endpoint).await.unwrap();
+    let (_, version) = a.state(call).await;
+    let r = a.accept(call, invitation, &callee, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    let session = a.session_on(call, callee.endpoint).await.unwrap();
+    let credential = a.media_credential(call, session).await;
+    assert_eq!(credential.status, StatusCode::OK, "{}", credential.text);
+    assert_eq!(
+        credential.json["capabilities"]["canPublishVideo"], true,
+        "{}",
+        credential.text
+    );
+    let (_, version) = a.state(call).await;
+    assert_eq!(a.command(call, "end", version).await.status, StatusCode::OK);
+    // A DIALING Call (no device rang yet) may switch too.
+    let caller = a.device(&a.w.initiator, "caller-main").await;
+    let r = a
+        .create_call(
+            "VOICE",
+            &a.w.initiator,
+            &caller,
+            &[&a.w.recipient],
+            &Uuid::new_v4().to_string(),
+        )
+        .await;
+    assert_eq!(r.json["call"]["state"], "DIALING", "{}", r.text);
+    let dialing: Uuid = r.json["call"]["callId"].as_str().unwrap().parse().unwrap();
+    let (_, version) = a.state(dialing).await;
+    let r = upgrade(&a, dialing, version).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text);
+    assert_eq!(a.call_view(dialing).await["kind"], "VIDEO");
+    let (_, version) = a.state(dialing).await;
+    assert_eq!(
+        a.command(dialing, "cancel", version).await.status,
         StatusCode::OK
     );
 

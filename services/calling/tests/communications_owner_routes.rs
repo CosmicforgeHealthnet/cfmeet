@@ -427,6 +427,98 @@ async fn launch_runs_the_canonical_creation_path_and_replays_idempotently() {
     assert_eq!(w.w.count("SELECT count(*) FROM calls").await, 2);
 }
 
+/// The callee's device as the web app runs it: recover the offers over its own signaling
+/// credential and acknowledge every new PENDING one. Returns the acknowledged offer.
+async fn device_rings(w: &AppWorld, device: &Device, call: Uuid) -> Value {
+    let token = w.signaling_token(device).await;
+    let offers = w
+        .as_endpoint(&token, Method::GET, "/v1/calling/invitations", None, &[])
+        .await;
+    assert_eq!(offers.status, StatusCode::OK, "{}", offers.text);
+    let offer = offers.json["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["callId"] == call.to_string())
+        .unwrap_or_else(|| panic!("no offer of {call} reached the device: {}", offers.text))
+        .clone();
+    assert_eq!(offer["status"], "PENDING", "{offer}");
+    assert_eq!(offer["actionable"], true, "{offer}");
+    let invitation = offer["invitationId"].as_str().unwrap();
+    let ack = w
+        .as_endpoint(
+            &token,
+            Method::POST,
+            &format!("/v1/calling/invitations/{invitation}/acknowledge"),
+            None,
+            &[],
+        )
+        .await;
+    assert_eq!(ack.status, StatusCode::OK, "{}", ack.text);
+    ack.json
+}
+
+/// Owner report (2026-11-19): after adding a contact directly by CF Meet ID (no request:
+/// the connection is CONNECTED at once), calling her stayed on "Calling…" although she was
+/// online, while her call to the adder rang. A Hub launch rings the callee's device in
+/// BOTH directions, the device's acknowledgement moves the Call to RINGING (what the
+/// caller's "Ringing…" shows), and nothing on the Calling side depends on who added whom.
+#[tokio::test]
+async fn hub_launch_rings_the_callee_both_ways_between_directly_added_contacts() {
+    let Some((w, hub)) = world(true).await else {
+        return;
+    };
+    // Production runs Calling's independently versioned Communications migration too
+    // (credential revocations read by every signaling request in a governed scope).
+    {
+        use calling_migration::MigratorTrait;
+        calling_migration::CommunicationsMigrator::up(w.h().conn(), None)
+            .await
+            .unwrap();
+    }
+    let (adder, added) = (&w.w.initiator, &w.w.recipient);
+    let adder_device = w.device(adder, "adder-web").await;
+    let added_device = w.device(added, "added-web").await;
+    let (adder_id, added_id) = (adder.id().as_uuid(), added.id().as_uuid());
+
+    for (key, from, from_device, to, to_device) in [
+        (
+            "direct-a-to-b",
+            adder_id,
+            &adder_device,
+            added_id,
+            &added_device,
+        ),
+        (
+            "direct-b-to-a",
+            added_id,
+            &added_device,
+            adder_id,
+            &adder_device,
+        ),
+    ] {
+        let checks = hub.checks();
+        let r = hub_as(&w, from, LAUNCH, launch_body(key, from, from_device, &[to])).await;
+        assert_eq!(r.status, StatusCode::OK, "{key}: {}", r.text);
+        // DIALING until the callee's device says it rings (never RINGING on its own).
+        assert_eq!(r.json["state"], "DIALING", "{key}: {}", r.text);
+        assert!(
+            hub.checks() > checks,
+            "{key}: the personal policy was asked"
+        );
+        let call: Uuid = r.json["callId"].as_str().unwrap().parse().unwrap();
+        // The offer reached the callee's device, and its acknowledgement rings the Call.
+        let ack = device_rings(&w, to_device, call).await;
+        assert_eq!(ack["status"], "RINGING", "{key}: {ack}");
+        assert_eq!(ack["callState"], "RINGING", "{key}: {ack}");
+        // The caller sees RINGING.
+        assert_eq!(w.call_view(call).await["state"], "RINGING", "{key}");
+        let (_, version) = w.state(call).await;
+        let r = w.command(call, "cancel", version).await;
+        assert_eq!(r.status, StatusCode::OK, "{key}: {}", r.text);
+    }
+}
+
 #[tokio::test]
 async fn launch_fails_closed_without_a_launch_authority() {
     let Some((w, hub)) = world(false).await else {

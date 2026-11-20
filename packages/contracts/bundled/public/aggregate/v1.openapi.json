@@ -18,7 +18,7 @@
     },
     {
       "name": "calling",
-      "description": "cfmeet.calling.http-api 1.30.0"
+      "description": "cfmeet.calling.http-api 1.31.0"
     },
     {
       "name": "privacy-relay",
@@ -12831,7 +12831,7 @@
           "calling"
         ],
         "summary": "Create and ring an application call",
-        "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice. 1.25.0 (direct forwarding): a one-to-one application call (one targetPrincipalIds entry, no privacyRelaySessionId) to a callee with an ACTIVE forwarding rule (/v1/enterprise/forwarding-rules) or an ACTIVE mailbox of its own is routed like an extension call from the callee: ALWAYS forwards before ringing; with no eligible endpoint the UNAVAILABLE rule (else the mailbox) takes it instead of FAILED; BUSY (every offer declined) / NO_ANSWER (offers expired) follow the matching rule, else the callee's mailbox, on the same Call. Loops (including back to the caller) are blocked, the scope's effective enterprise policy applies (forwardingAllowed, voicemailAllowed), ENTERPRISE_CALLING_ENABLED off disables it, and in a scope governed by the Communications personal policy only the voicemail fallback applies. The response of such a call carries no enterprise block; without a rule or mailbox nothing changes.",
+        "description": "Requires calls.write and an Idempotency-Key. Creates the Call (REQUESTED), records the APP_DIRECT_V1 authorization, resolves the target principals inside the credential's scope, selects the APPLICATION route, prepares the Call's media resource through the configured media provider, authorizes the initiator's session and rings every eligible endpoint of every target (one offer each, server-owned expiry). Answers 201 with the call (normally RINGING). A replay with the same key returns the recorded response; the call is never created twice. 1.25.0 (direct forwarding): a one-to-one application call (one targetPrincipalIds entry, no privacyRelaySessionId) to a callee with an ACTIVE forwarding rule (/v1/enterprise/forwarding-rules) or an ACTIVE mailbox of its own is routed like an extension call from the callee: ALWAYS forwards before ringing; with no eligible endpoint the UNAVAILABLE rule (else the mailbox) takes it instead of FAILED; BUSY (every offer declined) / NO_ANSWER (offers expired) follow the matching rule, else the callee's mailbox, on the same Call. Loops (including back to the caller) are blocked, the scope's effective enterprise policy applies (forwardingAllowed, voicemailAllowed), ENTERPRISE_CALLING_ENABLED off disables it, and in a scope governed by the Communications personal policy only the voicemail fallback applies. The response of such a call carries no enterprise block; without a rule or mailbox nothing changes. 1.31.0 (CF1, \"on another call\"): a target that is already in a live call (a session in another ANSWERED, CONNECTED, HELD or TRANSFERRING Call of the same scope) is not rung: its offers are recorded and closed at once (CANCELLED with CALL_CANCELLED, or with the Call when it ends; never delivered, so no device rings), which makes it a MISSED call in that target's history. When every target is on another call the Call ends BUSY at once (201 with the Call BUSY, terminalReason BUSY; its media resource is released); a group Call with at least one free target rings the free ones. The deployment switch CALLING_BUSY_ON_ANOTHER_CALL=false turns this off.",
         "security": [
           {
             "calling.platformCredential": [
@@ -13356,7 +13356,7 @@
           "calling"
         ],
         "summary": "Cancel a call before it is active",
-        "description": "Requires calls.write. Pre-active termination (REQUESTED ... ANSWERED): cancels live offers and outstanding attempts, closes route, leg and sessions and tears down the media resource. Repeating it on a CANCELLED call is a no-op.",
+        "description": "Requires calls.write. Pre-active termination (REQUESTED ... ANSWERED): cancels live offers and outstanding attempts, closes route, leg and sessions and tears down the media resource. 1.31.0: the answer comes as soon as the cancellation is committed; the media teardown runs after it (a failed teardown is retried by reconciliation). Repeating it on a CANCELLED call is a no-op.",
         "security": [
           {
             "calling.platformCredential": [
@@ -13793,7 +13793,7 @@
           "calling"
         ],
         "summary": "End an active call",
-        "description": "Requires calls.write. Moves the Call to ENDING, removes every media connection and terminates the media resource; the Call becomes ENDED only on cleanup evidence (otherwise it stays ENDING and the reconciler retries). Usage and quality are finalized. 1.21.0 (host): actingParticipantId names the participant acting for everyone; in a group Call (more than two participants, ever) only the host may do this (another participant: 403 CALL_NOT_AUTHORIZED - it leaves by removing its session). Without actingParticipantId the application backend acts on its own authority, as before.",
+        "description": "Requires calls.write. Moves the Call to ENDING, removes every media connection and terminates the media resource; the Call becomes ENDED only on cleanup evidence (otherwise it stays ENDING and the reconciler retries). 1.31.0: the answer comes as soon as ENDING is committed (normally state ENDING); the cleanup runs after it and moves the Call to ENDED (call.ended is signalled then). Usage and quality are finalized. 1.21.0 (host): actingParticipantId names the participant acting for everyone; in a group Call (more than two participants, ever) only the host may do this (another participant: 403 CALL_NOT_AUTHORIZED - it leaves by removing its session). Without actingParticipantId the application backend acts on its own authority, as before.",
         "security": [
           {
             "calling.platformCredential": [
@@ -15643,7 +15643,7 @@
           "calling"
         ],
         "summary": "Upgrade a voice call to video",
-        "description": "Requires calls.write (Idempotency-Key honoured). C5: a VOICE Call that is ANSWERED, CONNECTED or HELD becomes VIDEO, once and for good (never back to VOICE). In one transaction under the Call row lock (expectedVersion checked; state and version unchanged) every active participant's authorized permissions gain video publishing, CALL_KIND_CHANGED is recorded and call.kind_changed is signalled to every endpoint of the Call. The media provider then receives each connected session's re-derived permissions (HOLD still masks them); no camera is ever turned on — a client publishes video only when its user chooses. Upgrading a Call that is already VIDEO answers the current Call (Idempotent-Replayed: true). A pre-answer, TRANSFERRING, ENDING or terminal Call is 409 CALL_STATE_CONFLICT; a protected (Privacy Relay) or public-network Call, or a provider that cannot update permissions, is 422 CAPABILITY_UNAVAILABLE.",
+        "description": "Requires calls.write (Idempotency-Key honoured). C5: a VOICE Call that is DIALING, RINGING, ANSWERED, CONNECTED or HELD becomes VIDEO (1.31.0, CF2: switched while it is still being offered, the callee's offer shows and is answered as a video call), once and for good (never back to VOICE). In one transaction under the Call row lock (expectedVersion checked; state and version unchanged) every active participant's authorized permissions gain video publishing, CALL_KIND_CHANGED is recorded and call.kind_changed is signalled to every endpoint of the Call. The media provider then receives each connected session's re-derived permissions (HOLD still masks them); no camera is ever turned on — a client publishes video only when its user chooses. Upgrading a Call that is already VIDEO answers the current Call (Idempotent-Replayed: true). A Call still being set up (before DIALING), TRANSFERRING, ENDING or terminal is 409 CALL_STATE_CONFLICT; a protected (Privacy Relay) or public-network Call, or a provider that cannot update permissions, is 422 CAPABILITY_UNAVAILABLE.",
         "security": [
           {
             "calling.platformCredential": [

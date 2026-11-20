@@ -444,6 +444,19 @@ class SecretsAreNeverPrinted(unittest.TestCase):
 
 
 class SafeDefaultsAndRouting(unittest.TestCase):
+    def test_a_release_gives_calling_its_private_metrics_listener_once(self):
+        # C4: call counters for cfmeet-prometheus; an operator's own value is kept.
+        self.assertEqual(cr.release_env_defaults('calling', {}), {'CALLING_METRICS_ADDRESS': '0.0.0.0:9464'})
+        self.assertEqual(cr.release_env_defaults('calling', {'CALLING_METRICS_ADDRESS': ' '}),
+                         {'CALLING_METRICS_ADDRESS': '0.0.0.0:9464'})
+        self.assertEqual(cr.release_env_defaults('calling', {'CALLING_METRICS_ADDRESS': '0.0.0.0:9500'}), {})
+        self.assertEqual(cr.release_env_defaults('messaging', {}), {})
+        import monitoring_stack
+        target = monitoring_stack.listener_target(cr.SERVICES['calling']['container'],
+                                                  cr.RELEASE_ENV_DEFAULTS['calling']['CALLING_METRICS_ADDRESS'])
+        self.assertEqual(target, 'cfmeet-calling:9464')
+        self.assertNotEqual(9464, cr.SERVICES['calling']['port'])
+
     def test_provider_dependent_features_must_stay_off(self):
         envs = {name: dict(cr.SERVICES[name]['env']) for name in cr.ORDER if not cr.SERVICES[name]['existing']}
         envs['messaging'] = {'MESSAGING_E2EE_DEVICES_ENABLED': 'false'}
