@@ -203,6 +203,13 @@ async fn decide_production_request(
         .and_then(|v| v.to_str().ok())
         .map(|v| Uuid::parse_str(v.trim()).map_err(|_| ApiError(ErrorCode::OperatorRequired)))
         .transpose()?;
+    let decision = body.map(|Json(b)| b).unwrap_or_default();
+    let bridge = crate::control::bridge_command::BridgeCommand::of(
+        &caller,
+        &headers,
+        decision.expected_version,
+        command.two_person(),
+    )?;
     Ok(Json(
         crate::control::production::operator_decide(
             &s,
@@ -211,7 +218,8 @@ async fn decide_production_request(
             &ctx,
             id,
             command,
-            body.map(|Json(b)| b).unwrap_or_default(),
+            decision,
+            bridge.as_ref(),
         )
         .await?,
     ))

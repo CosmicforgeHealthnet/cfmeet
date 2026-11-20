@@ -17,6 +17,7 @@
 
 pub mod activity;
 pub mod allowed_origins;
+pub mod bridge_command;
 pub mod commercial;
 pub mod credential_lifecycle;
 pub mod credentials;
@@ -34,6 +35,7 @@ pub mod service_accounts;
 pub mod support;
 pub mod usage;
 pub mod users;
+pub mod verification;
 
 use cf_service_auth::DelegatedPlatformContext;
 use sea_orm::{ConnectionTrait, DbBackend, Statement};

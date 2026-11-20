@@ -3099,6 +3099,11 @@
         "reasonCode": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A3: admin bridge decisions only, the row version the decision applies to."
         }
       }
     },
@@ -5928,6 +5933,11 @@
         "reasonCode": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A3: admin bridge decisions only, the row version the decision applies to."
         }
       }
     },
@@ -7253,6 +7263,452 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "VerificationCase": {
+      "description": "ADR 0068 A3: one case in HQ's shared verification shape (cfmeet-admin-parallel-workplan §3.6, snake_case) plus approvals_required and partner_tenant_id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "product",
+        "kind",
+        "subject_ref",
+        "state",
+        "version",
+        "assignee_ref",
+        "submitted_at",
+        "updated_at",
+        "evidence",
+        "approvals_required",
+        "partner_tenant_id"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "product": {
+          "const": "cfmeet"
+        },
+        "kind": {
+          "enum": [
+            "PARTNER_GO_LIVE",
+            "APP_REVIEW"
+          ]
+        },
+        "subject_ref": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "CLAIMED",
+            "APPROVED",
+            "REJECTED",
+            "PUBLISHED",
+            "SUSPENDED",
+            "CANCELLED"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "assignee_ref": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submitted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "ref",
+              "sha256"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "USE_CASE_SUMMARY",
+                  "APP_MANIFEST"
+                ]
+              },
+              "ref": {
+                "type": "string",
+                "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "approvals_required": {
+          "const": 2
+        },
+        "partner_tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "VerificationCaseList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/VerificationCase"
+          }
+        },
+        "next_cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "VerificationCaseDetail": {
+      "description": "VerificationCase plus its decision details (PARTNER_GO_LIVE: requested / approved capabilities; APP_REVIEW: the version under review and the published version).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "product",
+        "kind",
+        "subject_ref",
+        "state",
+        "version",
+        "assignee_ref",
+        "submitted_at",
+        "updated_at",
+        "evidence",
+        "approvals_required",
+        "partner_tenant_id",
+        "details"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "product": {
+          "const": "cfmeet"
+        },
+        "kind": {
+          "enum": [
+            "PARTNER_GO_LIVE",
+            "APP_REVIEW"
+          ]
+        },
+        "subject_ref": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "enum": [
+            "OPEN",
+            "CLAIMED",
+            "APPROVED",
+            "REJECTED",
+            "PUBLISHED",
+            "SUSPENDED",
+            "CANCELLED"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "assignee_ref": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "submitted_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "ref",
+              "sha256"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "USE_CASE_SUMMARY",
+                  "APP_MANIFEST"
+                ]
+              },
+              "ref": {
+                "type": "string",
+                "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "approvals_required": {
+          "const": 2
+        },
+        "partner_tenant_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "details": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requested_capabilities",
+                "approved_capabilities"
+              ],
+              "properties": {
+                "requested_capabilities": {
+                  "type": "array",
+                  "maxItems": 16,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                  }
+                },
+                "approved_capabilities": {
+                  "type": "array",
+                  "maxItems": 16,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "app_version",
+                "published_version"
+              ],
+              "properties": {
+                "app_version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "published_version": {
+                  "oneOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "VerificationCaseHistory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "items",
+        "next_cursor"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sequence",
+              "from_state",
+              "to_state",
+              "actor_kind",
+              "actor_ref",
+              "reason_code",
+              "occurred_at"
+            ],
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "from_state": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "OPEN",
+                      "CLAIMED",
+                      "APPROVED",
+                      "REJECTED",
+                      "PUBLISHED",
+                      "SUSPENDED",
+                      "CANCELLED"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "to_state": {
+                "oneOf": [
+                  {
+                    "enum": [
+                      "OPEN",
+                      "CLAIMED",
+                      "APPROVED",
+                      "REJECTED",
+                      "PUBLISHED",
+                      "SUSPENDED",
+                      "CANCELLED"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "actor_kind": {
+                "enum": [
+                  "STAFF",
+                  "PARTNER",
+                  "SYSTEM"
+                ]
+              },
+              "actor_ref": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason_code": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "occurred_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "next_cursor": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 32
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AdminOperationRecord": {
+      "description": "ADR 0068 A3: an applied admin bridge command (outcome is always APPLIED; a key never applied is 404).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "outcome",
+        "source_status",
+        "source_version"
+      ],
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "outcome": {
+          "const": "APPLIED"
+        },
+        "source_status": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "source_version": {
+          "type": "string",
+          "pattern": "^[0-9]{1,19}$"
         }
       }
     }
