@@ -303,7 +303,7 @@ async fn accept<B: CommandBody>(
         ));
     }
     let expected_version = body.expected_version();
-    if versioned && !expected_version.is_some_and(|v| v >= 1) {
+    if versioned && expected_version.is_none_or(|v| v < 1) {
         return Err(refuse(
             StatusCode::BAD_REQUEST,
             "VALIDATION_ERROR",
