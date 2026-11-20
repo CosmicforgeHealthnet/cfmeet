@@ -1,4 +1,4 @@
-//! ADR 0067: the admin bridge's operator reads (`/internal/v1/operator/*`).
+//! ADR 0068: the admin bridge's operator reads (`/internal/v1/operator/*`).
 //!
 //! * `GET /internal/v1/operator/tenants`
 //! * `GET /internal/v1/operator/tenants/{tenantId}/applications`
