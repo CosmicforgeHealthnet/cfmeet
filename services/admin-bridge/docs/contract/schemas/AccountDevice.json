@@ -1,0 +1,83 @@
+{
+  "description": "One Account device: class, platform, trust, state and times. No label, key or digest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "device_id",
+    "device_class",
+    "platform",
+    "trust",
+    "trusted_via",
+    "trusted_at",
+    "state",
+    "created_at",
+    "last_seen_at",
+    "revoked_at",
+    "revoke_reason"
+  ],
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "device_class": {
+      "enum": [
+        "WEB",
+        "MOBILE"
+      ]
+    },
+    "platform": {
+      "enum": [
+        "WEB",
+        "IOS",
+        "ANDROID"
+      ]
+    },
+    "trust": {
+      "enum": [
+        "UNTRUSTED",
+        "TRUSTED"
+      ]
+    },
+    "trusted_via": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "trusted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_seen_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revoke_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "description": "One meeting (conference): state, times and participant counts. No room names or provider ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "meeting_id",
+    "space_id",
+    "title",
+    "kind",
+    "status",
+    "scheduled_start_at",
+    "scheduled_end_at",
+    "started_at",
+    "ended_at",
+    "termination_reason",
+    "locked",
+    "recording_state",
+    "transcription_state",
+    "participants_admitted",
+    "participants_total",
+    "created_at",
+    "version"
+  ],
+  "properties": {
+    "meeting_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "space_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "kind": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "scheduled_start_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "scheduled_end_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "termination_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "locked": {
+      "type": "boolean"
+    },
+    "recording_state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "transcription_state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "participants_admitted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "participants_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

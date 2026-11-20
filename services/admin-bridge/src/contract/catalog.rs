@@ -3164,4 +3164,65 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "Summary",
         &["communications_metrics_are_an_hq_summary"],
     ),
+    // A2.5 Meeting Service (accounts, meetings).
+    (
+        "accounts.users.search",
+        "AccountUserPage",
+        &["meetings_user_search_never_returns_an_address"],
+    ),
+    (
+        "accounts.users.read",
+        "AccountUserDetail",
+        &["meetings_user_detail_masks_the_address"],
+    ),
+    (
+        "accounts.sessions.list",
+        "AccountSessionPage",
+        &["meetings_account_lists_translate_strictly"],
+    ),
+    (
+        "accounts.devices.list",
+        "AccountDevicePage",
+        &["meetings_account_lists_translate_strictly"],
+    ),
+    (
+        "accounts.mfa.read",
+        "AccountMfa",
+        &["meetings_mfa_reports_state_only"],
+    ),
+    (
+        "accounts.security-history.list",
+        "AccountSecurityEventPage",
+        &["meetings_security_history_maps_window_and_sequence_cursor"],
+    ),
+    (
+        "meetings.spaces.search",
+        "MeetingSpacePage",
+        &["meetings_space_and_meeting_search"],
+    ),
+    (
+        "meetings.meetings.search",
+        "MeetingConferencePage",
+        &["meetings_space_and_meeting_search"],
+    ),
+    (
+        "meetings.meetings.read",
+        "MeetingConference",
+        &["meetings_detail_and_participants"],
+    ),
+    (
+        "meetings.live.list",
+        "MeetingConferencePage",
+        &["meetings_live_list"],
+    ),
+    (
+        "meetings.participants.list",
+        "MeetingParticipantPage",
+        &["meetings_detail_and_participants"],
+    ),
+    (
+        "meetings.audit.list",
+        "MeetingAuditEventPage",
+        &["meetings_audit_maps_window_and_time_cursor"],
+    ),
 ];

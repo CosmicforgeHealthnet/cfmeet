@@ -1,0 +1,43 @@
+{
+  "description": "MFA status: TOTP enrolment state and the count of unused recovery codes. Never a secret or a code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "user_id",
+    "totp_state",
+    "totp_enrolled_at",
+    "totp_confirmed_at",
+    "recovery_codes_remaining"
+  ],
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "totp_state": {
+      "enum": [
+        "NOT_ENROLLED",
+        "PENDING_CONFIRMATION",
+        "ENABLED"
+      ]
+    },
+    "totp_enrolled_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "totp_confirmed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "recovery_codes_remaining": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
