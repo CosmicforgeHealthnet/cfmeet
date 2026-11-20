@@ -1,0 +1,49 @@
+{
+  "description": "One emergency off-switch (global or per environment). A switch only stops a capability.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "switch_name",
+    "scope_key",
+    "engaged",
+    "reason",
+    "changed_by",
+    "changed_at",
+    "version"
+  ],
+  "properties": {
+    "switch_name": {
+      "enum": [
+        "MESSAGE_SEND",
+        "CONVERSATION_CREATE",
+        "E2EE_ONBOARDING",
+        "ATTACHMENT_UPLOAD",
+        "SMS_BRIDGE",
+        "WEBHOOK_RELAY"
+      ]
+    },
+    "scope_key": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "engaged": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "changed_by": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "changed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

@@ -5052,6 +5052,1100 @@
           }
         }
       },
+      "MessagingReport": {
+        "description": "One chat report: ids, category, states and times. The evidence itself (a sealed reporter disclosure or a MANAGED message reference) is never relayed; evidence_kind only says which kind was given.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "report_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "conversation_id",
+          "security_profile",
+          "reporter_principal_id",
+          "reported_principal_id",
+          "message_ids",
+          "category",
+          "evidence_kind",
+          "status",
+          "resolution",
+          "resolved_at",
+          "created_at"
+        ],
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "security_profile": {
+            "enum": [
+              "PRIVATE_E2EE",
+              "MANAGED"
+            ]
+          },
+          "reporter_principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reported_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "message_ids": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "category": {
+            "enum": [
+              "SPAM",
+              "HARASSMENT",
+              "HATE",
+              "VIOLENCE",
+              "SEXUAL_CONTENT",
+              "CHILD_SAFETY",
+              "SELF_HARM",
+              "ILLEGAL_CONTENT",
+              "IMPERSONATION",
+              "OTHER"
+            ]
+          },
+          "evidence_kind": {
+            "enum": [
+              "NONE",
+              "MANAGED_REFERENCE",
+              "REPORTER_DISCLOSURE"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingReportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingReport"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingReportDetail": {
+        "description": "One chat report and its moderation actions (no evidence).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "report_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "conversation_id",
+          "security_profile",
+          "reporter_principal_id",
+          "reported_principal_id",
+          "message_ids",
+          "category",
+          "evidence_kind",
+          "status",
+          "resolution",
+          "resolved_at",
+          "created_at",
+          "actions"
+        ],
+        "properties": {
+          "report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "security_profile": {
+            "enum": [
+              "PRIVATE_E2EE",
+              "MANAGED"
+            ]
+          },
+          "reporter_principal_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reported_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "message_ids": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "category": {
+            "enum": [
+              "SPAM",
+              "HARASSMENT",
+              "HATE",
+              "VIOLENCE",
+              "SEXUAL_CONTENT",
+              "CHILD_SAFETY",
+              "SELF_HARM",
+              "ILLEGAL_CONTENT",
+              "IMPERSONATION",
+              "OTHER"
+            ]
+          },
+          "evidence_kind": {
+            "enum": [
+              "NONE",
+              "MANAGED_REFERENCE",
+              "REPORTER_DISCLOSURE"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "ACTIONED",
+              "DISMISSED"
+            ]
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "description": "One moderation action taken on the report.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "action_id",
+                "kind",
+                "reason",
+                "conversation_id",
+                "message_id",
+                "principal_id",
+                "effective_until",
+                "created_at"
+              ],
+              "properties": {
+                "action_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "kind": {
+                  "enum": [
+                    "REMOVE_MESSAGE",
+                    "MUTE_MEMBER",
+                    "UNMUTE_MEMBER",
+                    "REMOVE_MEMBER",
+                    "RESTRICT_PRINCIPAL",
+                    "LIFT_RESTRICTION",
+                    "DISMISS_REPORT"
+                  ]
+                },
+                "reason": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+                },
+                "conversation_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "message_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "principal_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "effective_until": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingHold": {
+        "description": "One legal hold. The case reference is not relayed: reason_category says why.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hold_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "scope_kind",
+          "conversation_id",
+          "principal_id",
+          "reason_category",
+          "status",
+          "created_at",
+          "expires_at",
+          "released_at",
+          "release_reason"
+        ],
+        "properties": {
+          "hold_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope_kind": {
+            "enum": [
+              "CONVERSATION",
+              "PRINCIPAL",
+              "ENVIRONMENT"
+            ]
+          },
+          "conversation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason_category": {
+            "enum": [
+              "LITIGATION",
+              "REGULATORY",
+              "INVESTIGATION",
+              "INTERNAL_POLICY"
+            ]
+          },
+          "status": {
+            "enum": [
+              "ACTIVE",
+              "RELEASED"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "release_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
+        }
+      },
+      "MessagingHoldPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingHold"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingExport": {
+        "description": "One MANAGED conversation export (encrypted chats are never exported). The object key and digest are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "export_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "conversation_id",
+          "status",
+          "size_bytes",
+          "message_count",
+          "failure",
+          "attempts",
+          "created_at",
+          "completed_at",
+          "expires_at"
+        ],
+        "properties": {
+          "export_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "READY",
+              "FAILED",
+              "EXPIRED"
+            ]
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "message_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingExportPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingExport"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingDeletionRequest": {
+        "description": "One principal erasure or conversation purge request and its counts.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "kind",
+          "principal_id",
+          "conversation_id",
+          "status",
+          "messages_purged",
+          "attachments_deleted",
+          "held_items",
+          "created_at",
+          "completed_at"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "PRINCIPAL_ERASURE",
+              "CONVERSATION_PURGE"
+            ]
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "conversation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "COMPLETED",
+              "PARTIALLY_HELD"
+            ]
+          },
+          "messages_purged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attachments_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "held_items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingDeletionRequestPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingDeletionRequest"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingAuditEntry": {
+        "description": "One chat audit entry. Its detail object is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entry_id",
+          "occurred_at",
+          "tenant_id",
+          "application_id",
+          "environment_id",
+          "credential_id",
+          "principal_id",
+          "action",
+          "target_kind",
+          "target_id",
+          "correlation_id"
+        ],
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "application_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "credential_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{2,47}$"
+          },
+          "target_kind": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{2,31}$"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "correlation_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{8,64}$"
+          }
+        }
+      },
+      "MessagingAuditPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingAuditEntry"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingSwitch": {
+        "description": "One emergency off-switch (global or per environment). A switch only stops a capability.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "switch_name",
+          "scope_key",
+          "engaged",
+          "reason",
+          "changed_by",
+          "changed_at",
+          "version"
+        ],
+        "properties": {
+          "switch_name": {
+            "enum": [
+              "MESSAGE_SEND",
+              "CONVERSATION_CREATE",
+              "E2EE_ONBOARDING",
+              "ATTACHMENT_UPLOAD",
+              "SMS_BRIDGE",
+              "WEBHOOK_RELAY"
+            ]
+          },
+          "scope_key": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "engaged": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "changed_by": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "changed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "MessagingSwitchPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingSwitch"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingIncident": {
+        "description": "One operational incident. Its summary text is not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "incident_id",
+          "category",
+          "severity",
+          "status",
+          "occurrences",
+          "first_seen_at",
+          "last_seen_at",
+          "resolved_at",
+          "resolved_by"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          },
+          "severity": {
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "RESOLVED"
+            ]
+          },
+          "occurrences": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "MessagingIncidentPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingIncident"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingFailedMessage": {
+        "description": "One outbox event in DEAD_LETTER. Its payload and error string are not relayed.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "sequence",
+          "event_type",
+          "aggregate_type",
+          "aggregate_id",
+          "tenant_id",
+          "environment_id",
+          "attempts",
+          "occurred_at"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "event_type": {
+            "type": "string",
+            "pattern": "^messaging(\\.[a-z][a-z0-9-]*){2,}$",
+            "maxLength": 80
+          },
+          "aggregate_type": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z_]{1,39}$"
+          },
+          "aggregate_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingFailedMessagePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/MessagingFailedMessage"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Za-z0-9._~:@+=-]{1,512}$"
+          }
+        }
+      },
+      "MessagingKeyTransparency": {
+        "description": "Key-transparency status: the tree head (null before the first leaf) and each witness state. No key material.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "head",
+          "witnesses"
+        ],
+        "properties": {
+          "head": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "description": "The key-transparency tree head.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tree_size",
+                  "root_hash",
+                  "updated_at"
+                ],
+                "properties": {
+                  "tree_size": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "root_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "updated_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            ]
+          },
+          "witnesses": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "description": "One witness's last verified state.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "witness_id",
+                "tree_size",
+                "root_hash",
+                "updated_at",
+                "last_cosigned_size"
+              ],
+              "properties": {
+                "witness_id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9.:-]{2,63}$"
+                },
+                "tree_size": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "root_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "last_cosigned_size": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      },
       "Purpose": {
         "enum": [
           "support-review",

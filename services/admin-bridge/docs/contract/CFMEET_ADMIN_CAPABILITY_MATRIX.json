@@ -913,7 +913,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/reports",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.reports.read",
     "risk": "R1",
     "privacy": "SAFETY_EVIDENCE",
@@ -922,8 +922,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A2: new messaging operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_reports_relay_no_evidence"
+    ]
   },
   {
     "id": "messaging.reports.read",
@@ -932,7 +934,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/reports/{report_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.reports.read",
     "risk": "R1",
     "privacy": "SAFETY_EVIDENCE",
@@ -941,8 +943,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A2: new messaging operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_report_detail_carries_actions_not_evidence"
+    ]
   },
   {
     "id": "messaging.message.remove",
@@ -1084,7 +1088,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/holds",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.holds.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1093,8 +1097,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A2: new messaging operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_lists_translate_strictly"
+    ]
   },
   {
     "id": "messaging.hold.place",
@@ -1141,7 +1147,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/exports",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.exports.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1150,8 +1156,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A7: new messaging operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_lists_translate_strictly"
+    ]
   },
   {
     "id": "messaging.export.request",
@@ -1179,7 +1187,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/deletion-requests",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.deletion-requests.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1188,8 +1196,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A7: new messaging operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_lists_translate_strictly"
+    ]
   },
   {
     "id": "messaging.deletion-request.create",
@@ -1217,7 +1227,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/audit",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.audit.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1226,8 +1236,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A2: new messaging operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_windowed_lists_map_since_and_until"
+    ]
   },
   {
     "id": "messaging.switches.list",
@@ -1236,7 +1248,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/switches",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.switches.read",
     "risk": "R0",
     "privacy": "INTERNAL",
@@ -1245,8 +1257,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_switches_are_served"
+    ]
   },
   {
     "id": "messaging.switch.change",
@@ -1274,7 +1288,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/incidents",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.incidents.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1283,8 +1297,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_windowed_lists_map_since_and_until"
+    ]
   },
   {
     "id": "messaging.incident.record",
@@ -1312,7 +1328,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/failed-messages",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.failed-messages.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1321,8 +1337,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_windowed_lists_map_since_and_until"
+    ]
   },
   {
     "id": "messaging.failed-message.retry",
@@ -1350,7 +1368,7 @@
     "method": "GET",
     "bridge_endpoint": "/messaging/key-transparency",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "messaging.key-transparency.read",
     "risk": "R0",
     "privacy": "INTERNAL",
@@ -1359,8 +1377,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_MESSAGING",
-    "blocker": "Phase A2: messaging has a server command-line tool only; operator API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "messaging_key_transparency_is_hashes_and_sizes_only"
+    ]
   },
   {
     "id": "messaging.key-transparency.checkpoint",

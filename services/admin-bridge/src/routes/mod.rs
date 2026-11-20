@@ -4,6 +4,7 @@
 pub mod communications;
 pub mod identity;
 pub mod meetings;
+pub mod messaging;
 pub mod notifications;
 pub mod organizations;
 pub mod partners;
@@ -36,6 +37,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
         return answer;
     }
     if let Some(answer) = meetings::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = messaging::dispatch(bridge, auth).await {
         return answer;
     }
     match auth.capability.id {

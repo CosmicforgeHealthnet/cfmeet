@@ -3225,4 +3225,55 @@ const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
         "MeetingAuditEventPage",
         &["meetings_audit_maps_window_and_time_cursor"],
     ),
+    // A2.6 Messaging.
+    (
+        "messaging.reports.list",
+        "MessagingReportPage",
+        &["messaging_reports_relay_no_evidence"],
+    ),
+    (
+        "messaging.reports.read",
+        "MessagingReportDetail",
+        &["messaging_report_detail_carries_actions_not_evidence"],
+    ),
+    (
+        "messaging.holds.list",
+        "MessagingHoldPage",
+        &["messaging_lists_translate_strictly"],
+    ),
+    (
+        "messaging.exports.list",
+        "MessagingExportPage",
+        &["messaging_lists_translate_strictly"],
+    ),
+    (
+        "messaging.deletion-requests.list",
+        "MessagingDeletionRequestPage",
+        &["messaging_lists_translate_strictly"],
+    ),
+    (
+        "messaging.audit.list",
+        "MessagingAuditPage",
+        &["messaging_windowed_lists_map_since_and_until"],
+    ),
+    (
+        "messaging.switches.list",
+        "MessagingSwitchPage",
+        &["messaging_switches_are_served"],
+    ),
+    (
+        "messaging.incidents.list",
+        "MessagingIncidentPage",
+        &["messaging_windowed_lists_map_since_and_until"],
+    ),
+    (
+        "messaging.failed-messages.list",
+        "MessagingFailedMessagePage",
+        &["messaging_windowed_lists_map_since_and_until"],
+    ),
+    (
+        "messaging.key-transparency.read",
+        "MessagingKeyTransparency",
+        &["messaging_key_transparency_is_hashes_and_sizes_only"],
+    ),
 ];

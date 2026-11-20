@@ -1,0 +1,88 @@
+{
+  "description": "One principal erasure or conversation purge request and its counts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "kind",
+    "principal_id",
+    "conversation_id",
+    "status",
+    "messages_purged",
+    "attachments_deleted",
+    "held_items",
+    "created_at",
+    "completed_at"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "enum": [
+        "PRINCIPAL_ERASURE",
+        "CONVERSATION_PURGE"
+      ]
+    },
+    "principal_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "conversation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "status": {
+      "enum": [
+        "PENDING",
+        "COMPLETED",
+        "PARTIALLY_HELD"
+      ]
+    },
+    "messages_purged": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "attachments_deleted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "held_items": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}
