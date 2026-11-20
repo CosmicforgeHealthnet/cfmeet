@@ -3,6 +3,7 @@
 import json
 import re
 import unittest
+import unittest.mock
 
 import coordinated_release as cr
 import notification_operations as no
@@ -980,6 +981,79 @@ class Push(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'activate-notifications-push'):
             no.activate_calling_push(fake, 'a' * 40, '42-1', '')
         self.assertEqual(fake.activations, [])
+
+
+class MeetingInApp(unittest.TestCase):
+    """Audit M4: meeting notices reach the in-app inbox; email stays with the Meeting Service."""
+    ready = dict(publications_done=True, protocol=1, fence='SHADOW',
+                 service_modes={'EMAIL': 'SHADOW', 'IN_APP': 'ACTIVE', 'PUSH': 'OFF'})
+
+    def test_enable_gate(self):
+        self.assertIsNone(no.meeting_in_app_gate(True, self.ready))
+        self.assertIsNone(no.meeting_in_app_gate(True, dict(self.ready, fence='FENCED_OLD')))
+        self.assertIsNone(no.meeting_in_app_gate(True, dict(self.ready, service_modes={'IN_APP': 'ACTIVE'})))
+        self.assertIn('activate-meeting-publications',
+                      no.meeting_in_app_gate(True, dict(self.ready, publications_done=False)))
+        self.assertIn('routingProtocol', no.meeting_in_app_gate(True, dict(self.ready, protocol=None)))
+        for fence in ('LEGACY_ONLY', 'FENCED_NEW', None):
+            self.assertIn('SHADOW or FENCED_OLD', no.meeting_in_app_gate(True, dict(self.ready, fence=fence)))
+        self.assertIn('IN_APP row ACTIVE', no.meeting_in_app_gate(
+            True, dict(self.ready, service_modes={'EMAIL': 'OFF', 'IN_APP': 'SHADOW'})))
+        self.assertIn('second time', no.meeting_in_app_gate(
+            True, dict(self.ready, service_modes={'EMAIL': 'ACTIVE', 'IN_APP': 'ACTIVE'})))
+        # Turning the path off is always allowed.
+        self.assertIsNone(no.meeting_in_app_gate(False, {}))
+
+    def test_email_active_and_fenced_new_are_refused_while_the_path_is_on(self):
+        facts = dict(email_provider='resend', resend_done=True, owners_done=True)
+        self.assertIn('twice', no.gate('MEETING_NOTIFICATION', 'EMAIL', 'ACTIVE', dict(facts, meeting_in_app=True)))
+        self.assertIsNone(no.gate('MEETING_NOTIFICATION', 'EMAIL', 'ACTIVE', dict(facts, meeting_in_app=False)))
+        self.assertIsNone(no.gate('MEETING_NOTIFICATION', 'IN_APP', 'ACTIVE', dict(facts, meeting_in_app=True)))
+        self.assertIsNone(no.gate('MEETING_NOTIFICATION', 'EMAIL', 'SHADOW', dict(facts, meeting_in_app=True)))
+        fence = dict(protocol=1, publications_done=True, service_modes={'EMAIL': 'ACTIVE', 'IN_APP': 'ACTIVE'})
+        self.assertIn('disable first', no.fence_gate('meeting-service', 'MEETING_NOTIFICATION', 'FENCED_NEW',
+                                                     'SHADOW', dict(fence, meeting_in_app=True)))
+        self.assertIsNone(no.fence_gate('meeting-service', 'MEETING_NOTIFICATION', 'FENCED_NEW', 'SHADOW', fence))
+
+    def test_operation_is_registered_flag_is_a_safe_default_and_confirm_is_checked(self):
+        from unittest import mock
+        self.assertIn(no.MEETING_IN_APP_OPERATION, cr.OPERATIONS)
+        self.assertEqual(cr.ACTIVATIONS[no.MEETING_IN_APP_OPERATION][0], ('activate-meeting-publications',))
+        workflow = (cr.Path(__file__).resolve().parents[3] / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        self.assertIn(no.MEETING_IN_APP_OPERATION, workflow)
+        with mock.patch.object(cr, 'done', return_value=False):
+            self.assertNotIn('true', cr.safe_defaults()['meeting-service'][no.MEETING_IN_APP_FLAG])
+        with mock.patch.object(cr, 'done', side_effect=lambda op: op == no.MEETING_IN_APP_OPERATION):
+            self.assertIn('true', cr.safe_defaults()['meeting-service'][no.MEETING_IN_APP_FLAG])
+        fake = FakeCr([])
+        with self.assertRaisesRegex(RuntimeError, 'enable or disable'):
+            no.activate_meeting_in_app(fake, 'a' * 40, '42-1', 'on')
+
+    def test_enable_applies_only_the_flag_to_the_meeting_service(self):
+        applied = []
+
+        class Fake(FakeCr):
+            def done(self, op):
+                return op == 'activate-meeting-publications'
+
+            def apply_activation(self, op, sha, run_id, changes, **kw):
+                applied.append((op, changes))
+
+        fake = Fake([{'mode': 'SHADOW', 'version': 2}])
+        with unittest.mock.patch.object(no, 'routing_protocol', return_value=1), \
+                unittest.mock.patch.object(no, 'fence_row', return_value={'mode': 'SHADOW', 'version': 2}), \
+                unittest.mock.patch.object(no, 'service_modes', return_value={'EMAIL': 'OFF', 'IN_APP': 'ACTIVE'}):
+            no.activate_meeting_in_app(fake, 'a' * 40, '42-1', 'enable')
+        self.assertEqual(applied, [(no.MEETING_IN_APP_OPERATION,
+                                    [('meeting-service', {'NOTIFICATIONS_IN_APP_DELIVERY_ENABLED': 'true'})])])
+        with unittest.mock.patch.object(no, 'service_modes', return_value={'EMAIL': 'OFF', 'IN_APP': 'OFF'}), \
+                unittest.mock.patch.object(no, 'routing_protocol', return_value=1), \
+                unittest.mock.patch.object(no, 'fence_row', return_value={'mode': 'SHADOW', 'version': 2}):
+            with self.assertRaisesRegex(RuntimeError, 'nothing changed'):
+                no.activate_meeting_in_app(fake, 'a' * 40, '42-2', 'enable')
+        self.assertEqual(len(applied), 1)
+        no.activate_meeting_in_app(fake, 'a' * 40, '42-3', 'disable')
+        self.assertEqual(applied[-1][1], [('meeting-service', {'NOTIFICATIONS_IN_APP_DELIVERY_ENABLED': 'false'})])
 
 
 if __name__ == '__main__':

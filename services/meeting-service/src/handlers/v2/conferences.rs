@@ -333,6 +333,37 @@ pub async fn reschedule_conference(
     Ok(action_response(o))
 }
 
+/// Extend a live conference (MF1).
+///
+/// Adds `minutes` (1 to 240) to the scheduled end of a LIVE conference, counted from now when the
+/// scheduled end has already passed (the grace period before the automatic end). Requires a role
+/// holding `conference.end` (host or co-host). Everyone in the conference receives
+/// `conference.extended` with the new `scheduledEndAt` and `autoEndAt`; a new `conference.ending_soon`
+/// warning is sent 5 minutes before the new automatic end. A conference that is not live returns
+/// CONFERENCE_NOT_LIVE; one without a scheduled end (never ended automatically) returns
+/// CONFERENCE_STATE_CONFLICT; the conference may run at most 24 hours.
+#[utoipa::path(
+    post, path = "/api/v2/conferences/{id}/extend", tag = "Conferences (v2)", operation_id = "v2_extend_conference",
+    params(("id" = Uuid, Path, description = "Conference id")),
+    request_body = ExtendConferenceRequest,
+    responses(
+        (status = 200, description = "Extended", body = ConferenceActionResponse),
+        (status = 400, description = "VALIDATION_ERROR", body = ErrorEnvelope),
+        (status = 403, description = "PERMISSION_DENIED", body = ErrorEnvelope),
+        (status = 409, description = "CONFERENCE_NOT_LIVE / CONFERENCE_STATE_CONFLICT", body = ErrorEnvelope),
+    ),
+    security(("bearer_auth" = []), ("participant_token" = []))
+)]
+pub async fn extend_conference(
+    State(state): State<AppState>,
+    actor: ActorContext,
+    V2Path(id): V2Path<Uuid>,
+    V2Json(req): V2Json<ExtendConferenceRequest>,
+) -> ApiResult<Json<ConferenceActionResponse>> {
+    let o = state.meeting.conferences.extend(&actor, id, req).await?;
+    Ok(action_response(o))
+}
+
 /// Join (or reconnect to) a conference.
 ///
 /// Identity, role and admission are resolved server-side. A WAITING participant never receives

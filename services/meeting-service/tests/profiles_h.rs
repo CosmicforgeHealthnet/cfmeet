@@ -783,7 +783,13 @@ async fn h_c01_same_idempotency_key_registers_once() {
         "{other:?}"
     );
     if other.0 == StatusCode::OK {
-        assert!(other.1["admissionToken"].is_null(), "token shown once");
+        // Audit M10: a repeat returns the same token (with a deployment secret) or none.
+        let first = if a.0 == StatusCode::CREATED { &a } else { &b };
+        assert!(
+            other.1["admissionToken"].is_null()
+                || other.1["admissionToken"] == first.1["admissionToken"],
+            "{other:?}"
+        );
     }
     assert_eq!(
         app.scalar(&format!(

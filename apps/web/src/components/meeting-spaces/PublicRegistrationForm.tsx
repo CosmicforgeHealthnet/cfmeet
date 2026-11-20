@@ -70,6 +70,7 @@ export default function PublicRegistrationForm() {
     {result.admissionToken
       ? <div className="space-y-3 rounded-xl border border-primary/40 bg-card p-4">
           <p className="font-medium">Your admission token is shown only once.</p>
+          {result.emailDelivery === "ACCEPTED" && <p className="text-sm text-muted-foreground">We also emailed this link to you.</p>}
           <p className="text-sm text-muted-foreground">It expires {new Date(result.expiresAt).toLocaleString()} and is limited by the organizer’s admission policy.</p>
           <label className="grid gap-2 text-sm font-medium">Admission link
             <input className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" readOnly value={`${typeof window !== "undefined" ? window.location.origin : ""}/invite#${encodeURIComponent(result.admissionToken)}`} />
@@ -88,7 +89,7 @@ export default function PublicRegistrationForm() {
           </div>
           {copyState && <p role="status" className="text-sm text-muted-foreground">{copyState}</p>}
         </div>
-      : <p className="rounded-xl border border-border p-4 text-sm">No token was returned for this repeat request. If you did not save your original admission link, contact the organizer.</p>}
+      : <p className="rounded-xl border border-border p-4 text-sm">No token was returned for this repeat request: the registration was cancelled or its link has expired. Contact the organizer if you need a new one.</p>}
   </main>;
 
   return <main className="mx-auto max-w-xl space-y-6 p-6">

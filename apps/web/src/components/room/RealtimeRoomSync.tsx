@@ -31,6 +31,15 @@ export default function RealtimeRoomSync({ conferenceId }: { conferenceId: strin
       emitNotice({ id: event.eventId, kind: "breakout", title: "Breakout rooms are closing", body: "You'll be back in the main room shortly." });
     } else if (type === "breakout.opened") {
       emitNotice({ id: event.eventId, kind: "breakout", title: "Breakout rooms are open", panel: "breakouts", action: "See rooms" });
+    } else if (type === "conference.ending_soon") {
+      const minutes = Number(payload.minutesRemaining ?? 5);
+      const at = typeof payload.autoEndAt === "string" ? new Date(payload.autoEndAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
+      emitNotice({ id: "conference-ending", kind: "ending", title: `This meeting ends in ${minutes} minute${minutes === 1 ? "" : "s"}`, body: at ? `It will end automatically at ${at}.` : undefined, extendable: true });
+    } else if (type === "conference.extended") {
+      const at = typeof payload.scheduledEndAt === "string" ? new Date(payload.scheduledEndAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
+      emitNotice({ id: "conference-ending", kind: "ending", title: "The meeting was extended", body: at ? `It is now scheduled to end at ${at}.` : undefined });
+    } else if (type === "conference.waiting_room_unattended") {
+      emitNotice({ id: "waiting-room", kind: "announcement", title: "People are waiting to join", body: "Nobody who can let them in is in the meeting right now." });
     } else if (type === "poll.started") {
       emitNotice({ id: event.eventId, kind: "poll", title: "New poll", body: String(payload.title ?? ""), panel: "polls", action: "Vote" });
     }

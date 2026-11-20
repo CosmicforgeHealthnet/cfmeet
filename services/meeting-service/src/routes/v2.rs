@@ -103,6 +103,14 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route("/conferences/:id", get(conferences::get_conference))
         // Blueprint Section 10: first-party calendar (agenda, RFC 5545 exports)
         .route("/me/conferences", get(calendar::my_conferences))
+        // Audit MF2: private, revocable calendar feed
+        .route(
+            "/me/calendar-feed",
+            get(calendar::get_calendar_feed)
+                .post(calendar::create_calendar_feed)
+                .delete(calendar::delete_calendar_feed),
+        )
+        .route("/calendar-feeds/:file", get(calendar::read_calendar_feed))
         .route(
             "/conferences/:id/calendar.ics",
             get(calendar::conference_calendar),
@@ -132,6 +140,10 @@ pub fn v2_routes(state: AppState) -> Router<AppState> {
         .route(
             "/conferences/:id/reschedule",
             post(conferences::reschedule_conference),
+        )
+        .route(
+            "/conferences/:id/extend",
+            post(conferences::extend_conference),
         )
         .route("/conferences/:id/join", post(conferences::join_conference))
         .route(

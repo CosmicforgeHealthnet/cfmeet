@@ -68,6 +68,18 @@ Two coordinated-release operations, each journaled and reversible:
   first and every Notification Service routing row the category is delivered on ACTIVE, so
   a NEW decision is never left undelivered. Journaled; ``rollback`` restores the previous mode
   (decisions already made stay sticky: a NEW decision is delivered by the service).
+
+* ``activate-meeting-in-app-notices`` (audit M4) turns the Meeting Service's in-app-only path
+  for ``MEETING_NOTIFICATION`` on (``confirm`` ``enable``) or off (``disable``): meeting
+  reminders, reschedules and cancellations keep their legacy email from the Meeting Service
+  exactly as today, and the OLD decision's event is ALSO published as a delivered event
+  addressed to the CF Meet account recipients, so the service writes the in-app inbox item.
+  ``enable`` needs ``activate-meeting-publications``, the Meeting fence row in SHADOW or
+  FENCED_OLD, the service's MEETING_NOTIFICATION IN_APP row ACTIVE and its EMAIL row not
+  ACTIVE (email activation stays suspended). While the path is on, ``activate-notifications-
+  routing`` refuses MEETING_NOTIFICATION EMAIL ACTIVE (the service would send a second email)
+  and ``activate-notification-fence`` refuses MEETING_NOTIFICATION FENCED_NEW: disable it first.
+  Journaled; ``rollback`` restores the previous container.
 """
 
 import json
@@ -221,9 +233,14 @@ def parse_routing(confirm):
 
 
 def gate(category, channel, mode, facts):
-    """Refusal reason, or None. ``facts``: email_provider, resend_done, owners_done."""
+    """Refusal reason, or None. ``facts``: email_provider, resend_done, owners_done,
+    meeting_in_app (the Meeting Service in-app-only path is on)."""
     if mode != 'ACTIVE':
         return None
+    if category == MEETING_IN_APP_CATEGORY and channel == 'EMAIL' and facts.get('meeting_in_app'):
+        return ('MEETING_NOTIFICATION EMAIL ACTIVE while the Meeting Service still emails these notices itself '
+                '(in-app-only path on) would send every notice twice; run activate-meeting-in-app-notices '
+                'disable first')
     if category in CRITICAL and not facts.get('critical_lane_done'):
         return ('%s is CRITICAL: ACTIVE needs the Account CRITICAL lane (activate-critical-lane: X6/X7 lease '
                 'grant, fallback key) first' % category)
@@ -262,12 +279,13 @@ def set_mode(cr, category, channel, mode, run_id, expected_version=None):
     return int(version)
 
 
-def routing_facts(cr):
+def routing_facts(cr, categories=()):
     env = cr.env_of('notifications')
     return dict(email_provider=env.get('NOTIFICATIONS_EMAIL_PROVIDER'), resend_done=cr.done('activate-resend-email'),
                 owners_done=cr.done('activate-notifications-owners'),
                 critical_lane_done=cr.done('activate-critical-lane'),
-                push_done=cr.done('activate-notifications-push'))
+                push_done=cr.done('activate-notifications-push'),
+                meeting_in_app=meeting_in_app_on(cr) if MEETING_IN_APP_CATEGORY in categories else False)
 
 
 def release_held(cr, categories, run_id):
@@ -296,8 +314,8 @@ def release_held(cr, categories, run_id):
 def activate_routing_bundle(cr, sha, run_id, channel, mode):
     """One run, every user-facing row of ``channel`` (see the module docstring)."""
     cr.require_release(sha)
-    facts = routing_facts(cr)
     categories = BUNDLE_CHANNELS[channel]
+    facts = routing_facts(cr, categories)
     if channel == 'PUSH' and mode == 'ACTIVE' and not facts.get('push_done'):
         raise RuntimeError('Routing gate: PUSH ACTIVE needs activate-notifications-push (the push provider); '
                            'nothing changed')
@@ -336,7 +354,7 @@ def activate_routing(cr, sha, run_id, confirm):
         return activate_routing_bundle(cr, sha, run_id, *bundle)
     category, channel, mode = parse_routing(confirm)
     cr.require_release(sha)
-    facts = routing_facts(cr)
+    facts = routing_facts(cr, [category])
     refusal = gate(category, channel, mode, facts)
     if refusal:
         raise RuntimeError('Routing gate: ' + refusal + '; nothing changed')
@@ -775,6 +793,9 @@ def fence_gate(service, category, mode, before, facts):
     if not facts.get('publications_done'):
         return '%s needs %s first' % (mode, spec['publications'])
     if mode == 'FENCED_NEW':
+        if (service, category) == ('meeting-service', MEETING_IN_APP_CATEGORY) and facts.get('meeting_in_app'):
+            return ('FENCED_NEW while the Meeting in-app-only path is on; run activate-meeting-in-app-notices '
+                    'disable first')
         missing = [op for op in spec.get('new_requires', ()) if op not in facts.get('done', ())]
         if missing:
             return 'FENCED_NEW needs %s first' % ', '.join(missing)
@@ -812,7 +833,9 @@ def activate_fence(cr, sha, run_id, confirm):
                  publications_done=bool(spec) and cr.done(spec['publications']),
                  service_modes=service_modes(cr, spec['service_category']) if mode == 'FENCED_NEW' else {},
                  done=tuple(op for op in spec.get('new_requires', ()) if cr.done(op)),
-                 app_urls=app_urls(cr) if mode == 'FENCED_NEW' and spec.get('same_app_url') else {})
+                 app_urls=app_urls(cr) if mode == 'FENCED_NEW' and spec.get('same_app_url') else {},
+                 meeting_in_app=(service, category) == ('meeting-service', MEETING_IN_APP_CATEGORY)
+                 and meeting_in_app_on(cr))
     refusal = fence_gate(service, category, mode, before['mode'], facts)
     if refusal:
         raise RuntimeError('Routing fence gate: ' + refusal + '; nothing changed')
@@ -835,6 +858,60 @@ def undo_fence(cr, record, run_id):
     """Rollback of one fence change: back to the recorded previous mode."""
     version = set_fence_mode(cr, record['service'], record['category'], record['before'], run_id)
     cr.emit('notificationFenceRestored', dict(record, restoredVersion=version))
+
+
+# --- Audit M4: Meeting in-app-only path for MEETING_NOTIFICATION ---------------------------
+MEETING_IN_APP_CATEGORY = 'MEETING_NOTIFICATION'
+MEETING_IN_APP_FLAG = 'NOTIFICATIONS_IN_APP_DELIVERY_ENABLED'
+MEETING_IN_APP_OPERATION = 'activate-meeting-in-app-notices'
+MEETING_IN_APP_CONFIRM = {'enable': 'true', 'disable': 'false'}
+
+
+def meeting_in_app_on(cr):
+    return (cr.env_of('meeting-service').get(MEETING_IN_APP_FLAG) or '').strip().lower() == 'true'
+
+
+def meeting_in_app_gate(enable, facts):
+    """Refusal reason, or None. ``facts``: publications_done, fence (Meeting fence mode of
+    MEETING_NOTIFICATION), service_modes ({channel: mode} of the service's rows), protocol."""
+    if not enable:
+        return None
+    if not facts.get('publications_done'):
+        return 'needs activate-meeting-publications first (the Meeting relay posts to I1)'
+    if not isinstance(facts.get('protocol'), int) or facts['protocol'] < 1:
+        return 'meeting-service reports no routingProtocol; release a fence-capable image first'
+    if facts.get('fence') not in ('SHADOW', 'FENCED_OLD'):
+        return ('needs the Meeting MEETING_NOTIFICATION fence in SHADOW or FENCED_OLD (now %s): '
+                'activate-notification-fence meeting-service-meeting-notification-shadow' % facts.get('fence'))
+    modes = facts.get('service_modes') or {}
+    if modes.get('IN_APP') != 'ACTIVE':
+        return ('needs the Notification Service MEETING_NOTIFICATION IN_APP row ACTIVE '
+                '(activate-notifications-routing meeting-notification-in-app-active)')
+    if modes.get('EMAIL') == 'ACTIVE':
+        return ('the Notification Service MEETING_NOTIFICATION EMAIL row is ACTIVE: the service would email '
+                'these notices a second time')
+    return None
+
+
+def activate_meeting_in_app(cr, sha, run_id, confirm):
+    """Audit M4: the in-app-only path (``confirm`` enable | disable). Email is unchanged."""
+    choice = (confirm or '').strip()
+    if choice not in MEETING_IN_APP_CONFIRM:
+        raise RuntimeError('confirm must be enable or disable')
+    cr.require_release(sha)
+    enable = choice == 'enable'
+    facts = {}
+    if enable:
+        facts = dict(publications_done=cr.done('activate-meeting-publications'),
+                     protocol=routing_protocol(cr, 'meeting-service'),
+                     fence=fence_row(cr, 'meeting-service', MEETING_IN_APP_CATEGORY)['mode'],
+                     service_modes=service_modes(cr, MEETING_IN_APP_CATEGORY))
+    refusal = meeting_in_app_gate(enable, facts)
+    if refusal:
+        raise RuntimeError('Meeting in-app gate: ' + refusal + '; nothing changed')
+    cr.apply_activation(MEETING_IN_APP_OPERATION, sha, run_id,
+                        [('meeting-service', {MEETING_IN_APP_FLAG: MEETING_IN_APP_CONFIRM[choice]})])
+    cr.emit('meetingInAppNotices', {'enabled': enable, 'facts': facts})
 
 
 # --- Read-only notification diagnostics (diagnose): counts only, never ids or content ------

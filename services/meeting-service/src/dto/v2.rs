@@ -499,6 +499,34 @@ pub struct RescheduleConferenceRequest {
     pub version: Option<i32>,
 }
 
+/// Audit MF2: the caller's private calendar feed (webcal / ICS subscription).
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarFeedResponse {
+    /// A feed exists (its URL works until it is replaced or deleted).
+    pub active: bool,
+    /// The feed token, returned only when the feed is created (only its hash is stored).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    /// The feed path relative to the API origin (`/api/v2/calendar-feeds/<token>.ics`), only
+    /// when the feed is created. Subscribe to `https://<api host><path>` (or the same with
+    /// `webcal://`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+/// MF1: extend a live conference's scheduled end.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExtendConferenceRequest {
+    /// Minutes added to the scheduled end (or to now, when the scheduled end has already
+    /// passed and the meeting is in its grace period): 1 to 240.
+    #[schema(minimum = 1, maximum = 240)]
+    pub minutes: u32,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListConferencesQuery {
@@ -2009,6 +2037,7 @@ mod tests {
             "Reschedule",
             json!({ "scheduledStartAt": "2030-01-01T10:00:00Z" }),
         );
+        strict::<ExtendConferenceRequest>("Extend", json!({ "minutes": 15 }));
         strict::<SetRecurrenceRequest>(
             "SetRecurrence",
             json!({ "rrule": "FREQ=DAILY", "startLocal": "2030-01-01T10:00:00", "durationMinutes": 30 }),

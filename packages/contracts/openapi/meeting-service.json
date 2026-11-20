@@ -10,7 +10,7 @@
     "license": {
       "name": ""
     },
-    "version": "1.8.0"
+    "version": "1.9.0"
   },
   "paths": {
     "/": {
@@ -3819,6 +3819,52 @@
         ]
       }
     },
+    "/api/v2/calendar-feeds/{file}": {
+      "get": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Read a calendar feed (audit MF2).",
+        "description": "The iCalendar (RFC 5545, `METHOD:PUBLISH`, UTC times) of the account the feed token belongs\nto. No sign-in: the token in the path is the credential (`calf_…`, followed by `.ics`). An\nunknown or revoked token, or an account that is no longer active, is 404. Served with\n`Cache-Control: no-store`; it never contains passcodes, invitation tokens or provider\nidentifiers.",
+        "operationId": "v2_read_calendar_feed",
+        "parameters": [
+          {
+            "name": "file",
+            "in": "path",
+            "description": "The feed token followed by `.ics`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "iCalendar feed",
+            "content": {
+              "text/calendar": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "CALENDAR_FEED_NOT_FOUND (unknown, replaced or revoked token, or an inactive account)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/api/v2/conferences/{id}": {
       "get": {
         "tags": [
@@ -6280,6 +6326,88 @@
           },
           "403": {
             "description": "PERMISSION_DENIED / PROFILE_POLICY_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          },
+          {
+            "participant_token": []
+          }
+        ]
+      }
+    },
+    "/api/v2/conferences/{id}/extend": {
+      "post": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Extend a live conference (MF1).",
+        "description": "Adds `minutes` (1 to 240) to the scheduled end of a LIVE conference, counted from now when the\nscheduled end has already passed (the grace period before the automatic end). Requires a role\nholding `conference.end` (host or co-host). Everyone in the conference receives\n`conference.extended` with the new `scheduledEndAt` and `autoEndAt`; a new `conference.ending_soon`\nwarning is sent 5 minutes before the new automatic end. A conference that is not live returns\nCONFERENCE_NOT_LIVE; one without a scheduled end (never ended automatically) returns\nCONFERENCE_STATE_CONFLICT; the conference may run at most 24 hours.",
+        "operationId": "v2_extend_conference",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conference id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtendConferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Extended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceActionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "PERMISSION_DENIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFERENCE_NOT_LIVE / CONFERENCE_STATE_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -12025,6 +12153,113 @@
         ]
       }
     },
+    "/api/v2/me/calendar-feed": {
+      "get": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "My calendar feed (audit MF2).",
+        "description": "Whether the caller has a private calendar feed, when it was created and last read. The feed\nURL itself is shown only when it is created.",
+        "operationId": "v2_get_calendar_feed",
+        "responses": {
+          "200": {
+            "description": "Feed state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarFeedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Create (or replace) my calendar feed (audit MF2).",
+        "description": "Returns a private iCalendar subscription URL listing the caller's meetings (the same\nmeetings as `GET /api/v2/me/conferences`, from 30 days ago to 180 days ahead, at most 500;\nHEALTHCARE / HIGH_SECURITY meetings are not included). Subscribe to it from Google Calendar\n(\"From URL\"), Outlook (\"Subscribe from web\") or Apple Calendar; it is read-only and updates\nwhen the calendar app refreshes it. The token is shown once (only its hash is stored);\ncreating the feed again replaces the previous URL, which stops working.",
+        "operationId": "v2_create_calendar_feed",
+        "responses": {
+          "201": {
+            "description": "Feed created (token shown once)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarFeedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Conferences (v2)"
+        ],
+        "summary": "Delete my calendar feed (audit MF2).",
+        "description": "Revokes the caller's calendar feed URL at once; calendar apps subscribed to it stop\nreceiving updates. Deleting a feed that does not exist is a no-op.",
+        "operationId": "v2_delete_calendar_feed",
+        "responses": {
+          "200": {
+            "description": "Feed revoked (or none existed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarFeedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "AUTHENTICATION_REQUIRED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/api/v2/me/conferences": {
       "get": {
         "tags": [
@@ -15884,7 +16119,7 @@
           "Registrations (v2)"
         ],
         "summary": "Register for a webinar / town hall (public when the profile enables registration).",
-        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns a one-time-visible admission token for joining as a viewer. No sign-in is needed; a\nsigned-in caller's account is linked to the registration. Which fields (email, organization,\ncustom fields) are required or accepted is set by the meeting profile. Repeating a request with\nthe same `idempotencyKey` returns 200 with the existing registration and no token. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
+        "description": "Registers an attendee for the whole meeting series or, with `conferenceId`, a single occurrence,\nand returns an admission token for joining as a viewer. No sign-in is needed; a signed-in caller's\naccount is linked to the registration. Which fields (email, organization, custom fields) are\nrequired or accepted is set by the meeting profile. When an email is given, the join link\n(`{app}/invite#<token>`, with a calendar invitation for a scheduled occurrence) is also emailed\nto it once (`emailDelivery`). Repeating a request with the same `idempotencyKey` returns 200 with\nthe existing registration and the same token (no second seat, no second email); a different\nrequest under the same key is IDEMPOTENCY_CONFLICT. Returns\nREGISTRATION_DISABLED (404) when registration is not available for the space and\nREGISTRATION_CLOSED when the chosen occurrence has ended or been cancelled, or the profile's\nregistration deadline has passed, and REGISTRATION_FULL when its capacity is reached;\nrate-limited per meeting space.",
         "operationId": "v2_register",
         "parameters": [
           {
@@ -15950,7 +16185,7 @@
             }
           },
           "409": {
-            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL",
+            "description": "REGISTRATION_CLOSED / REGISTRATION_DUPLICATE / REGISTRATION_FULL / IDEMPOTENCY_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -25994,6 +26229,39 @@
           }
         }
       },
+      "CalendarFeedResponse": {
+        "type": "object",
+        "description": "Audit MF2: the caller's private calendar feed (webcal / ICS subscription).",
+        "required": [
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "A feed exists (its URL works until it is replaced or deleted)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "lastUsedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "path": {
+            "type": "string",
+            "description": "The feed path relative to the API origin (`/api/v2/calendar-feeds/<token>.ics`), only\nwhen the feed is created. Subscribe to `https://<api host><path>` (or the same with\n`webcal://`).",
+            "nullable": true
+          },
+          "token": {
+            "type": "string",
+            "description": "The feed token, returned only when the feed is created (only its hash is stored).",
+            "nullable": true
+          }
+        }
+      },
       "CancelOwnRegistrationRequest": {
         "type": "object",
         "description": "`POST /api/v2/registrations/cancel` request: the registration's admission token.",
@@ -28373,6 +28641,7 @@
           "DEVICE_LINK_INVALID",
           "APP_NOT_FOUND",
           "OAUTH_REQUEST_INVALID",
+          "CALENDAR_FEED_NOT_FOUND",
           "DATABASE_ERROR",
           "INTERNAL_ERROR"
         ]
@@ -28444,6 +28713,23 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExtendConferenceRequest": {
+        "type": "object",
+        "description": "MF1: extend a live conference's scheduled end.",
+        "required": [
+          "minutes"
+        ],
+        "properties": {
+          "minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Minutes added to the scheduled end (or to now, when the scheduled end has already\npassed and the meeting is in its grace period): 1 to 240.",
+            "maximum": 240,
+            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -33491,7 +33777,7 @@
         "properties": {
           "admissionToken": {
             "type": "string",
-            "description": "Opaque admission token (shown once; only its hash is stored). Absent for an\nidempotent repeat.",
+            "description": "Opaque admission token (only its hash is stored). An idempotent repeat (same\n`idempotencyKey` and request) returns the same token while the registration is\nactive (audit M10); absent once it was cancelled or revoked.",
             "nullable": true
           },
           "conferenceId": {
@@ -33501,6 +33787,14 @@
           },
           "created": {
             "type": "boolean"
+          },
+          "emailDelivery": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmailDelivery"
+              }
+            ],
+            "nullable": true
           },
           "expiresAt": {
             "type": "string",

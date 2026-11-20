@@ -26,6 +26,7 @@ pub mod appointment_authorization;
 pub mod apps;
 pub mod artifacts;
 pub mod calendar;
+pub mod calendar_feed;
 pub mod collaboration;
 pub mod compat;
 pub mod conference;
