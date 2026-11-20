@@ -9247,7 +9247,7 @@ export namespace Numbering {
   };
   /** AVAILABLE: offered by a fresh observation (reservable, never guaranteed); STALE: the newest observation expired (not reservable until observed again). */
   export type SearchAvailability = "AVAILABLE" | "STALE";
-  /** Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway. Never a wildcard. */
+  /** Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway, cfmeet.organizations, cfmeet.notifications, cfmeet.admin-bridge. Never a wildcard. */
   export type ServiceId = string;
   /** SMS routing target (opaque CF Meet ids): a principal, an application, a shared-team or department inbox; bounded by the ownership class. */
   export type SmsTargetKind = "NONE" | "PRINCIPAL" | "APPLICATION" | "SHARED_TEAM" | "DEPARTMENT";

@@ -2368,7 +2368,7 @@ class RoutingTargets {
 /// One of: AVAILABLE, STALE.
 typedef SearchAvailability = String;
 
-/// Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway. Never a wildcard.
+/// Stable, product-independent identity of a deployable CF Meet backend service, e.g. cfmeet.calling, cfmeet.privacy-relay, cfmeet.telephony, cfmeet.platform-access, cfmeet.numbering, cfmeet.sms-gateway, cfmeet.messaging, cfmeet.developer-platform, cfmeet.api-gateway, cfmeet.organizations, cfmeet.notifications, cfmeet.admin-bridge. Never a wildcard.
 typedef ServiceId = String;
 
 /// SMS routing target (opaque CF Meet ids): a principal, an application, a shared-team or department inbox; bounded by the ownership class.
