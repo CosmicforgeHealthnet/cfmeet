@@ -99,6 +99,9 @@ fn openapi(caps: &[Capability]) -> Value {
             "x-cfmeet-state": cap.state(),
             "x-cfmeet-owner": cap.owner,
         });
+        if cap.contact_search {
+            op["x-contact-search"] = json!(true);
+        }
         if cap.method == Method::Post {
             op["requestBody"] = json!({
                 "required": true,
@@ -173,7 +176,8 @@ fn capabilities_doc(caps: &[Capability], openapi_sha: &str, matrix_sha: &str) ->
         "source_artifacts": {"openapi_sha256": openapi_sha, "capability_matrix_sha256": matrix_sha},
         "query_shapes": QueryShape::ALL.iter().map(|s| (s.as_str().to_string(), json!(s.params()))).collect::<Map<_, _>>(),
         "totals": {"capabilities": caps.len(), "by_state": by_state(caps)},
-        "capabilities": caps.iter().map(|c| json!({
+        "capabilities": caps.iter().map(|c| {
+            let mut v = json!({
             "id": c.id,
             "version": c.version,
             "module": c.module(),
@@ -212,7 +216,10 @@ fn capabilities_doc(caps: &[Capability], openapi_sha: &str, matrix_sha: &str) ->
             "feature_flag": c.feature_flag(),
             "blocker": c.blocker(),
             "source_tests": c.tests,
-        })).collect::<Vec<_>>(),
+        });
+            v["contact_search"] = json!(c.contact_search);
+            v
+        }).collect::<Vec<_>>(),
     })
 }
 

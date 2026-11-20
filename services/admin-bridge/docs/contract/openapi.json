@@ -1752,7 +1752,8 @@
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
         "x-cfmeet-state": "BLOCKED_DEPENDENCY",
-        "x-cfmeet-owner": "meeting-service"
+        "x-cfmeet-owner": "meeting-service",
+        "x-contact-search": true
       }
     },
     "/internal/cfmeet-admin/v1/accounts/users/{user_id}": {
@@ -37334,7 +37335,8 @@
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
         "x-cfmeet-state": "BLOCKED_DEPENDENCY",
-        "x-cfmeet-owner": "developer-platform"
+        "x-cfmeet-owner": "developer-platform",
+        "x-contact-search": true
       }
     },
     "/internal/cfmeet-admin/v1/partners/workspaces/{workspace_id}/users/{user_id}/sign-out": {
@@ -45549,7 +45551,8 @@
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
         "x-cfmeet-state": "BLOCKED_DEPENDENCY",
-        "x-cfmeet-owner": "platform-access"
+        "x-cfmeet-owner": "platform-access",
+        "x-contact-search": true
       }
     },
     "/internal/cfmeet-admin/v1/identity/audit": {
@@ -57948,7 +57951,8 @@
         "x-cfmeet-risk": "R1",
         "x-cfmeet-approval": "NONE",
         "x-cfmeet-state": "READ_ONLY",
-        "x-cfmeet-owner": "notifications"
+        "x-cfmeet-owner": "notifications",
+        "x-contact-search": true
       }
     },
     "/internal/cfmeet-admin/v1/notifications/suppressions/{suppression_id}/remove": {

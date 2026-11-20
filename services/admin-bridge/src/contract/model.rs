@@ -281,6 +281,9 @@ pub struct Capability {
     pub phase: Phase,
     /// True once the bridge serves this route in this commit.
     pub served: bool,
+    /// True when `q` may carry an email address or phone number (published as
+    /// `x-contact-search`; HQ sends those searches through its POST search path).
+    pub contact_search: bool,
     pub tests: Vec<&'static str>,
 }
 
