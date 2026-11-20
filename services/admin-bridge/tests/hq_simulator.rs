@@ -44,7 +44,7 @@ async fn discovery_reports_runtime_states_and_the_openapi_hash() {
             .to_string()
     };
     assert_eq!(state("bridge.datasets.read"), "READ_ONLY");
-    assert_eq!(state("messaging.reports.list"), "BLOCKED_DEPENDENCY");
+    assert_eq!(state("meetings.reports.list"), "BLOCKED_DEPENDENCY");
     assert_eq!(state("verification.partner-go-live.approve"), "DISABLED");
     // audited before the answer
     let audit = h.store.audit_entries();
