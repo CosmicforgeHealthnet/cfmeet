@@ -279,6 +279,9 @@ pub struct OperatorActivityFilter {
     pub operator: Option<String>,
     /// Exact action or a family prefix ending in `.`.
     pub action: Option<String>,
+    /// ADR 0067: `occurred_at >= since` / `occurred_at < until`.
+    pub since: Option<chrono::DateTime<Utc>>,
+    pub until: Option<chrono::DateTime<Utc>>,
 }
 
 /// Section 15 (PLT-009): every operator command, newest first — the OPERATOR events of
@@ -331,6 +334,8 @@ pub async fn operator_activity<C: ConnectionTrait>(
                AND ($2::text IS NULL OR operator = $2) \
                AND ($3::text IS NULL OR action = $3) AND ($4::text IS NULL OR action LIKE $4) \
                AND ($5::timestamptz IS NULL OR (occurred_at, id) < ($5, $6::uuid)) \
+               AND ($8::timestamptz IS NULL OR occurred_at >= $8) \
+               AND ($9::timestamptz IS NULL OR occurred_at < $9) \
              ORDER BY occurred_at DESC, id DESC LIMIT $7",
             vec![
                 filter.organization_id.into(),
@@ -340,6 +345,8 @@ pub async fn operator_activity<C: ConnectionTrait>(
                 before_at.into(),
                 before_id.into(),
                 (page.limit as i64 + 1).into(),
+                filter.since.into(),
+                filter.until.into(),
             ],
         ))
         .await?;

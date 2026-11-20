@@ -13,6 +13,7 @@ pub mod error;
 pub mod internal;
 pub mod middleware;
 pub mod operator;
+pub mod operator_reads;
 pub mod public;
 
 use axum::{
@@ -64,6 +65,7 @@ pub fn app(state: AppState) -> Router {
             "/internal/v1",
             internal::routes()
                 .merge(operator::routes())
+                .merge(operator_reads::routes())
                 .merge(crate::webhooks::migration::http::routes())
                 .merge(apps::operator_routes(state.build))
                 .fallback(not_found)
