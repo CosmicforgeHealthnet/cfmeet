@@ -263,9 +263,10 @@ async fn the_audit_window_is_validated_and_bounds_the_events() {
     assert!(older["items"][0]["seq"].as_i64().unwrap() < cursor);
 }
 
-/// No database needed: the registry admits `organization.operator-read` for the bridge.
+/// No database needed: the registry admits `organization.operator-read` (and
+/// `organization.administer`, for its commands) for the bridge.
 #[test]
-fn the_trust_bundle_admits_the_bridge_with_operator_read_only() {
+fn the_trust_bundle_admits_the_bridge_with_its_operator_permissions() {
     let (_verifier, peers) = common::verifier_and_peers();
     assert_eq!(peers.bridge.issuer().as_str(), "cfmeet.admin-bridge");
 }

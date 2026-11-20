@@ -207,3 +207,26 @@ With `ORGANIZATIONS_SERVICE_BINDINGS_ENABLED=true` (requires provisioning), no o
 **Operator rotation:** `POST /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}/rotate` (`organization.administer`, audited `scope.service_binding_rotated`).
 
 Audit actions (ids only): `scope.service_binding_provisioned`, `scope.service_binding_rotated`, `scope.service_binding_revoked`, `scope.service_binding_revocation_applied`. Migration `m20261113_000005_automatic_service_bindings` is additive.
+
+## 9. Admin bridge commands (ADR 0068 phase A4, contract 1.10.0)
+
+The HQ admin bridge (`cfmeet.admin-bridge`, verified `X-CF-Operator: hq:<staff>`) runs operator commands with `organization.administer`. For the bridge only (every other caller keeps the route's existing behaviour and answer):
+
+* `Idempotency-Key` (a UUID) is required (400 `VALIDATION_ERROR`); `expectedVersion` is required where the subject is versioned and the change happens only at that version, checked under the row lock (409 `VERSION_CONFLICT`, nothing done).
+* R3 commands require `X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest` (403 `APPROVAL_REQUIRED`).
+* The applied command is written to the append-only `organization_admin_operations` in the same transaction (operator, approver, approval reference, subject, resulting state and version). A repeated key for the same command and subject answers the current state without applying again; for anything else 409 `IDEMPOTENCY_CONFLICT`. `GET /internal/v1/operator/operations/{idempotencyKey}` (bridge only; 404 otherwise and for an unknown key) answers `{idempotency_key, outcome: APPLIED, source_status, source_version}`.
+* The answer is `{"status": "<STATE>", "version": "<n>" | null, "resource": {…}}` (ids, states, timestamps; never a name, email or Platform Access id).
+
+| Command (risk) | Route | `expectedVersion` | `status` / `version` |
+|---|---|---|---|
+| create (R2) | `POST /internal/v1/admin/organizations` | none (new) | `ACTIVE`, `1` |
+| suspend / reactivate / archive (R3) | `POST /internal/v1/organizations/{id}/suspend` · `/reactivate` · `/archive` | organization version | lifecycle status, organization version |
+| ownership recovery (R3) | `POST /internal/v1/admin/organizations/{id}/owners` | the user's current membership version, 0 for none | `ACTIVE`, membership version |
+| provisioning retry (R2) | `POST /internal/v1/admin/organizations/{id}/provisioning/retry` `{}` | none | provisioning state, `null` |
+| event replay (R2) | `POST /internal/v1/admin/event-delivery/replay` | none | `REPLAYED`, `null` |
+| member change (R3, bridge only) | `POST /internal/v1/admin/organizations/{id}/members/{membershipId}/change` | membership version | membership status, membership version |
+| team change (R3, bridge only) | `POST /internal/v1/admin/organizations/{id}/teams/{teamId}/change` | team version | team status, team version |
+| policy change (R3, bridge only) | `POST /internal/v1/admin/organizations/{id}/policies/change` | policy revision (0 = defaults) | `UPDATED` / `UNCHANGED`, revision |
+| binding change (R3, bridge only) | `POST /internal/v1/admin/organizations/{id}/scopes/primary/service-bindings/{service}/change` `{action: SET \| CLEAR}` | binding version (0 = none) | `BOUND` + version, or `REMOVED` / `REVOKED` + `null` |
+
+The organization export is not a bridge command: it returns the whole organization document (invitation addresses included) and there is no stored export to reference.

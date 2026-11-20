@@ -54,6 +54,7 @@ async fn migrations_apply_roll_back_and_reapply_and_own_only_organization_tables
         "organization_provisioning",
         "organization_scope_service_bindings",
         "organization_notification_publications",
+        "organization_admin_operations",
     ] {
         assert!(
             names.iter().any(|n| n == expected),

@@ -68,6 +68,8 @@ error_codes! {
     TeamNotFound = "TEAM_NOT_FOUND" => NOT_FOUND, "The team was not found.";
     TeamArchived = "TEAM_ARCHIVED" => CONFLICT, "The team is archived.";
     TeamNameTaken = "TEAM_NAME_TAKEN" => CONFLICT, "An active team of the organization already has this name.";
+    // ADR 0068 (admin bridge commands).
+    ApprovalRequired = "APPROVAL_REQUIRED" => FORBIDDEN, "This operation requires a second-person approval (X-CF-Approver).";
     // Infrastructure codes (unknown route / method, oversized body, unexpected failure).
     NotFound = "NOT_FOUND" => NOT_FOUND, "The resource was not found.";
     MethodNotAllowed = "METHOD_NOT_ALLOWED" => METHOD_NOT_ALLOWED, "The method is not allowed.";
