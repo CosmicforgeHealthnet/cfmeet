@@ -1,0 +1,107 @@
+{
+  "description": "One verification case (HQ's shared shape). PARTNER_GO_LIVE: a production-access request (subject_ref: the project); APP_REVIEW: an app, published from the same case. OPEN, CLAIMED, then APPROVED / REJECTED (PUBLISHED, SUSPENDED); CANCELLED: withdrawn by the partner (never listed, still readable). version increases on every transition and is the commands' expected_version. evidence: hashes only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "product",
+    "kind",
+    "subject_ref",
+    "state",
+    "version",
+    "assignee_ref",
+    "submitted_at",
+    "updated_at",
+    "evidence",
+    "approvals_required",
+    "partner_tenant_id"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "pattern": "^cfmeet:(PARTNER_GO_LIVE|APP_REVIEW):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "maxLength": 128
+    },
+    "product": {
+      "const": "cfmeet"
+    },
+    "kind": {
+      "enum": [
+        "PARTNER_GO_LIVE",
+        "APP_REVIEW"
+      ]
+    },
+    "subject_ref": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "state": {
+      "enum": [
+        "OPEN",
+        "CLAIMED",
+        "APPROVED",
+        "REJECTED",
+        "PUBLISHED",
+        "SUSPENDED",
+        "CANCELLED"
+      ]
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "assignee_ref": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|operator:[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$",
+      "maxLength": 132
+    },
+    "submitted_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "ref",
+          "sha256"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "USE_CASE_SUMMARY",
+              "APP_MANIFEST"
+            ]
+          },
+          "ref": {
+            "type": "string",
+            "pattern": "^[0-9a-f-]{36}:[a-z0-9-]{1,16}$",
+            "maxLength": 53
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "approvals_required": {
+      "const": 2
+    },
+    "partner_tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

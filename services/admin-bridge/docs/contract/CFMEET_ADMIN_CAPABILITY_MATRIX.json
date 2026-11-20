@@ -3671,8 +3671,8 @@
     "owner": "developer-platform",
     "method": "GET",
     "bridge_endpoint": "/verification/cases",
-    "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "source_endpoint": "GET /internal/v1/operator/verification/cases",
+    "state": "READ_ONLY",
     "permission": "verification.cases.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3681,8 +3681,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
-    "blocker": "Phase A3: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_reads_are_strict_hq_case_shapes"
+    ]
   },
   {
     "id": "verification.cases.read",
@@ -3690,8 +3692,8 @@
     "owner": "developer-platform",
     "method": "GET",
     "bridge_endpoint": "/verification/cases/{case_id}",
-    "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "source_endpoint": "GET /internal/v1/operator/verification/cases/{caseId}",
+    "state": "READ_ONLY",
     "permission": "verification.cases.read",
     "risk": "R1",
     "privacy": "INTERNAL",
@@ -3700,8 +3702,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
-    "blocker": "Phase A3: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_reads_are_strict_hq_case_shapes"
+    ]
   },
   {
     "id": "verification.case-history.list",
@@ -3709,8 +3713,8 @@
     "owner": "developer-platform",
     "method": "GET",
     "bridge_endpoint": "/verification/cases/{case_id}/history",
-    "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "source_endpoint": "GET /internal/v1/operator/verification/cases/{caseId}/history",
+    "state": "READ_ONLY",
     "permission": "verification.case-history.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -3719,8 +3723,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION",
-    "blocker": "Phase A3: new developer-platform operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_reads_are_strict_hq_case_shapes"
+    ]
   },
   {
     "id": "verification.case.claim",
@@ -3728,8 +3734,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/verification/cases/{case_id}/claim",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/{production-access-requests|apps}/{id}/review",
+    "state": "AVAILABLE",
     "permission": "verification.case.claim",
     "risk": "R2",
     "privacy": "INTERNAL",
@@ -3738,8 +3744,10 @@
     "idempotency_required": true,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_commands_reach_the_right_owner_route_once"
+    ]
   },
   {
     "id": "verification.partner-go-live.approve",
@@ -3747,8 +3755,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/verification/cases/{case_id}/partner-go-live/approve",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/production-access-requests/{requestId}/approve",
+    "state": "AVAILABLE",
     "permission": "verification.partner-go-live.approve",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3757,8 +3765,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_commands_reach_the_right_owner_route_once"
+    ]
   },
   {
     "id": "verification.partner-go-live.reject",
@@ -3766,8 +3776,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/verification/cases/{case_id}/partner-go-live/reject",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/production-access-requests/{requestId}/reject",
+    "state": "AVAILABLE",
     "permission": "verification.partner-go-live.reject",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3776,8 +3786,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_commands_reach_the_right_owner_route_once"
+    ]
   },
   {
     "id": "verification.partner-go-live.suspend",
@@ -3785,8 +3797,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/verification/cases/{case_id}/partner-go-live/suspend",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/production-access-requests/{requestId}/suspend",
+    "state": "AVAILABLE",
     "permission": "verification.partner-go-live.suspend",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3795,8 +3807,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_commands_reach_the_right_owner_route_once"
+    ]
   },
   {
     "id": "verification.app-review.approve",
@@ -3804,8 +3818,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/verification/cases/{case_id}/app-review/approve",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/apps/{appId}/approve",
+    "state": "AVAILABLE",
     "permission": "verification.app-review.approve",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3814,8 +3828,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_commands_reach_the_right_owner_route_once"
+    ]
   },
   {
     "id": "verification.app-review.reject",
@@ -3823,8 +3839,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/verification/cases/{case_id}/app-review/reject",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/apps/{appId}/reject",
+    "state": "AVAILABLE",
     "permission": "verification.app-review.reject",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3833,8 +3849,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_commands_reach_the_right_owner_route_once"
+    ]
   },
   {
     "id": "verification.app-review.publish",
@@ -3842,8 +3860,8 @@
     "owner": "developer-platform",
     "method": "POST",
     "bridge_endpoint": "/verification/cases/{case_id}/app-review/publish",
-    "source_endpoint": null,
-    "state": "DISABLED",
+    "source_endpoint": "POST /internal/v1/operator/apps/{appId}/publish",
+    "state": "AVAILABLE",
     "permission": "verification.app-review.publish",
     "risk": "R4",
     "privacy": "INTERNAL",
@@ -3852,8 +3870,10 @@
     "idempotency_required": true,
     "approval": "TWO_PERSON",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_VERIFICATION+ADMIN_BRIDGE_WRITES_ENABLED",
-    "blocker": "Phase A3: developer-platform endpoint exists; bridge wiring pending; two-person certification required before enabling",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "verification_commands_reach_the_right_owner_route_once"
+    ]
   },
   {
     "id": "verification.organization.decide",

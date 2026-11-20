@@ -661,6 +661,13 @@ No command is served by A3.0 itself; it is the core every A3+ family runs throug
   - The original command's purpose (`PURPOSE_NOT_ALLOWED` otherwise) and exact scope (`SCOPE_DENIED` otherwise) are required.
   - Result: `{idempotency_key, capability_id, status, source_status, source_version, settled_at}`.
   - HQ settles on `SUCCEEDED` and `FAILED`; `PENDING`, `SENT` and `UNKNOWN_OUTCOME` stay unknown.
+- **Verification served (A3.1–A3.3, contract 1.12.0).**
+  - `verification.cases.list`, `.cases.read` and `.case-history.list` relay the Developer Platform's verification views (`GET /internal/v1/operator/verification/cases…`), re-extracted strictly.
+  - Kinds: `PARTNER_GO_LIVE` (a production-access request) and `APP_REVIEW` (an app; publish is a step of the same case). There is no `APP_PUBLISH`.
+  - States: `OPEN`, `CLAIMED`, `APPROVED`, `REJECTED`, `PUBLISHED`, `SUSPENDED`, `CANCELLED` (withdrawn: never listed, still readable).
+  - `details` appears on `.read` only.
+  - `case.claim` (R2) and the R4 decisions (partner go-live approve, reject, suspend; app approve, reject, publish) take `expected_version` as the case's integer version and go to the owner's decision route. From the bridge, the owner requires `Idempotency-Key` and `expectedVersion`, accepts HQ's approver in place of its named-reviewer lists, and answers with the case.
+  - The owner records the command in `devplat_admin_operations` in the same transaction; that is the settlement record.
 - **Verification scope (A3.1+).** `verification.*` reads and commands are operator functions scoped to CF Meet's first-party Platform Access tenant (the one HQ enrols). The partner's tenant is the case field `partner_tenant_id`.
 - **Staff link (A3.2).**
   - Without `x-cf-operator-user-id`, an R4 decision is allowed and the owner records `link_status=UNLINKED`.

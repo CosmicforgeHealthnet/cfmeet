@@ -140,16 +140,24 @@ fn limit_of(limit: Option<u64>) -> Result<u64, ApiError> {
     }
 }
 
-/// `<updated_at micros>.<kind>.<uuid>`, newest first.
+/// `<updated_at micros>.<P|A>.<uuid>` (P: PARTNER_GO_LIVE, A: APP_REVIEW), newest first;
+/// only characters every cursor pattern allows.
 fn parse_cursor(c: &str) -> Option<(i64, String, Uuid)> {
     let mut parts = c.splitn(3, '.');
     let micros = parts.next()?.parse::<i64>().ok()?;
-    let kind = parts.next()?;
-    if kind != PARTNER_GO_LIVE && kind != APP_REVIEW {
-        return None;
-    }
-    let id = Uuid::parse_str(parts.next()?).ok()?;
-    Some((micros, kind.to_string(), id))
+    let kind = match parts.next()? {
+        "P" => PARTNER_GO_LIVE,
+        "A" => APP_REVIEW,
+        _ => return None,
+    };
+    let raw = parts.next()?;
+    let id = Uuid::parse_str(raw).ok()?;
+    (id.to_string() == raw).then(|| (micros, kind.to_string(), id))
+}
+
+fn cursor_of(micros: i64, kind: &str, id: Uuid) -> String {
+    let k = if kind == PARTNER_GO_LIVE { "P" } else { "A" };
+    format!("{micros}.{k}.{id}")
 }
 
 /// `GET /internal/v1/operator/verification/cases?limit=&cursor=`: the queue (every case but
@@ -192,7 +200,7 @@ pub async fn list(
         }
     }
     let next = (rows.len() as u64 > limit)
-        .then(|| last.map(|(m, k, i)| format!("{m}.{k}.{i}")))
+        .then(|| last.map(|(m, k, i)| cursor_of(m, &k, i)))
         .flatten();
     Ok(json!({"items": items, "next_cursor": next}))
 }
@@ -334,6 +342,20 @@ mod tests {
         ] {
             assert_eq!(parse_case_id(&bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn cursors_round_trip_with_plain_characters() {
+        let id = Uuid::new_v4();
+        let c = cursor_of(1_795_000_000_123_456, APP_REVIEW, id);
+        assert!(c
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'));
+        assert_eq!(
+            parse_cursor(&c),
+            Some((1_795_000_000_123_456, APP_REVIEW.to_string(), id))
+        );
+        assert_eq!(parse_cursor("1.PARTNER_GO_LIVE.x"), None);
     }
 
     #[test]
