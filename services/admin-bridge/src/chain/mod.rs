@@ -141,6 +141,12 @@ impl From<ErrorCode> for Refusal {
     }
 }
 
+impl From<ErrorCode> for Box<Refusal> {
+    fn from(code: ErrorCode) -> Self {
+        Box::new(Refusal::from(code))
+    }
+}
+
 fn store_down(_: StoreError) -> ErrorCode {
     ErrorCode::BridgeUnavailable
 }
@@ -392,7 +398,7 @@ impl Bridge {
         sec: &SecurityConfig,
         correlation_id: Uuid,
         now: DateTime<Utc>,
-    ) -> Result<Authorized, Refusal> {
+    ) -> Result<Authorized, Box<Refusal>> {
         let uri = req.uri();
         let h = &req.headers;
 
@@ -465,13 +471,15 @@ impl Bridge {
             },
         )?;
         let c = &staff.claims;
-        let who = |code: ErrorCode| Refusal {
-            code,
-            actor: Some((format!("hq:{}", c.sub), c.session_id.clone())),
-            capability: None,
-            purpose: None,
-            scope: Value::Null,
-            request_digest: Some(c.request_digest.clone()),
+        let who = |code: ErrorCode| -> Box<Refusal> {
+            Box::new(Refusal {
+                code,
+                actor: Some((format!("hq:{}", c.sub), c.session_id.clone())),
+                capability: None,
+                purpose: None,
+                scope: Value::Null,
+                request_digest: Some(c.request_digest.clone()),
+            })
         };
 
         // 5. Bound to this exact request.
@@ -515,11 +523,13 @@ impl Bridge {
             .routes
             .lookup(&req.method, &req.path)
             .ok_or_else(|| who(ErrorCode::CapabilityNotFound))?;
-        let at = |code: ErrorCode, query: Option<&Query>| Refusal {
-            capability: Some(capability.id.to_string()),
-            purpose: query.map(|q| q.purpose),
-            scope: query.map(scope_json).unwrap_or(Value::Null),
-            ..who(code)
+        let at = |code: ErrorCode, query: Option<&Query>| -> Box<Refusal> {
+            Box::new(Refusal {
+                capability: Some(capability.id.to_string()),
+                purpose: query.map(|q| q.purpose),
+                scope: query.map(scope_json).unwrap_or(Value::Null),
+                ..*who(code)
+            })
         };
         let query = request::parse_query(
             req.query.as_deref(),
