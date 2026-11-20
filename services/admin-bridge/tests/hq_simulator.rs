@@ -566,18 +566,19 @@ async fn health_reports_unconfigured_owners_honestly() {
     );
     let (status, v) = send(&h, &c).await;
     assert_eq!(status, 200, "{v}");
-    let comps = v["result"]["components"].as_array().unwrap();
-    let bridge = comps
-        .iter()
-        .find(|c| c["service"] == "admin-bridge")
-        .unwrap();
-    assert_eq!(bridge["status"], "OK");
-    let ms = comps
-        .iter()
-        .find(|c| c["service"] == "meeting-service")
-        .unwrap();
-    assert_eq!(ms["status"], "NOT_CONFIGURED");
-    assert!(ms["checked_at"].is_null() && ms["latency_ms"].is_null());
+    let r = &v["result"];
+    assert!(DateTime::parse_from_rfc3339(r["as_of"].as_str().unwrap()).is_ok());
+    // No owner probe is configured: the bridge vouches only for itself.
+    assert_eq!(r["status"], "UNKNOWN");
+    let services = r["services"].as_array().unwrap();
+    assert_eq!(
+        services.len(),
+        1,
+        "owners without a probe are omitted, never OK"
+    );
+    assert_eq!(services[0]["service"], "admin-bridge");
+    assert_eq!(services[0]["status"], "OK");
+    assert!(services[0]["checked_at"].is_string());
 }
 
 #[tokio::test]

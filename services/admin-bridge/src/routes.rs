@@ -1,7 +1,7 @@
 //! Routes served in phase A1: discovery, aggregate health, datasets and projection
 //! status. Every other capability is refused before it gets here (`served == false`).
 
-use std::{collections::BTreeMap, time::Instant};
+use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde_json::{json, Value};
@@ -99,57 +99,48 @@ async fn health(bridge: &Bridge) -> Answer {
     for (owner, url) in &bridge.health.urls {
         let (owner, url, client) = (*owner, url.clone(), bridge.health.client.clone());
         set.spawn(async move {
-            let started = Instant::now();
             let status = match client.get(&url).send().await {
                 Ok(r) if r.status().is_success() => "OK",
-                Ok(r) if r.status().is_server_error() => "UNAVAILABLE",
+                Ok(r) if r.status().is_server_error() => "DOWN",
                 Ok(_) => "DEGRADED",
-                Err(_) => "UNAVAILABLE",
+                Err(_) => "DOWN",
             };
-            (
-                owner,
-                status,
-                started.elapsed().as_millis().min(60_000) as i64,
-            )
+            (owner, status)
         });
     }
-    let mut probed: BTreeMap<Owner, (&'static str, i64)> = BTreeMap::new();
-    while let Some(Ok((owner, status, ms))) = set.join_next().await {
-        probed.insert(owner, (status, ms));
+    let mut probed: BTreeMap<Owner, &'static str> = BTreeMap::new();
+    while let Some(Ok((owner, status))) = set.join_next().await {
+        probed.insert(owner, status);
     }
-    let started = Instant::now();
     let db_ok = bridge.store.ping().await.is_ok();
-    let db_ms = started.elapsed().as_millis().min(60_000) as i64;
     let checked_at = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let mut components = vec![json!({
+    let mut services = vec![json!({
         "service": Owner::AdminBridge.as_str(),
-        "status": if db_ok { "OK" } else { "UNAVAILABLE" },
+        "status": if db_ok { "OK" } else { "DOWN" },
         "checked_at": checked_at,
-        "latency_ms": db_ms,
     })];
     let mut degraded = false;
-    for owner in Owner::ALL.iter().filter(|o| **o != Owner::AdminBridge) {
-        components.push(match probed.get(owner) {
-            Some((status, ms)) => {
-                degraded |= *status != "OK";
-                json!({"service": owner.as_str(), "status": status, "checked_at": checked_at, "latency_ms": ms})
-            }
-            None if bridge.health.urls.contains_key(owner) => {
-                degraded = true;
-                json!({"service": owner.as_str(), "status": "UNKNOWN", "checked_at": null, "latency_ms": null})
-            }
-            None => json!({"service": owner.as_str(), "status": "NOT_CONFIGURED", "checked_at": null, "latency_ms": null}),
-        });
+    // Only probed owners are listed: an owner without a probe is omitted, never OK.
+    for owner in Owner::ALL
+        .iter()
+        .filter(|o| bridge.health.urls.contains_key(o))
+    {
+        let status = probed.get(owner).copied().unwrap_or("UNKNOWN");
+        degraded |= status != "OK";
+        services
+            .push(json!({"service": owner.as_str(), "status": status, "checked_at": checked_at}));
     }
     let status = if !db_ok {
-        "UNAVAILABLE"
+        "DOWN"
     } else if degraded {
         "DEGRADED"
+    } else if bridge.health.urls.is_empty() {
+        "UNKNOWN"
     } else {
         "OK"
     };
     Answer {
-        result: json!({"status": status, "components": components}),
+        result: json!({"as_of": checked_at, "status": status, "services": services}),
         freshness: "LIVE",
     }
 }
