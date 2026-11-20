@@ -153,7 +153,8 @@ pub struct SuppressionQuery {
 
 /// `GET /internal/v1/operator/email-suppressions?address=…|digest=…` — the effective
 /// suppression of one recipient. The address is digested here with the service's own key
-/// and never stored, logged or returned; only the keyed digest leaves the service.
+/// and never stored, logged or returned; only the keyed digest leaves the service. `version`
+/// is the row version a bridge removal must name (`expectedVersion`).
 pub async fn suppressions(
     State(state): State<AppState>,
     caller: Caller,
@@ -182,17 +183,18 @@ pub async fn suppressions(
         recipient_digest: String,
         reason: String,
         created_at: DateTime<Utc>,
+        version: i64,
     }
     let rows: Vec<Row> = db::all(
         &state.db,
-        "SELECT recipient_digest, CASE WHEN reason = 'SOFT_BOUNCE' THEN 'HARD_BOUNCE' ELSE reason END AS reason, created_at
+        "SELECT recipient_digest, CASE WHEN reason = 'SOFT_BOUNCE' THEN 'HARD_BOUNCE' ELSE reason END AS reason, created_at, version
            FROM notif_email_suppressions
           WHERE recipient_digest = $1 AND (reason <> 'SOFT_BOUNCE' OR bounce_count >= 2)",
         vec![digest.into()],
     )
     .await?;
     Ok(json_ok(json!({
-        "items": rows.iter().map(|r| json!({ "digest": r.recipient_digest, "reason": r.reason, "createdAt": r.created_at })).collect::<Vec<_>>(),
+        "items": rows.iter().map(|r| json!({ "digest": r.recipient_digest, "reason": r.reason, "createdAt": r.created_at, "version": r.version })).collect::<Vec<_>>(),
         "nextCursor": null,
     })))
 }
