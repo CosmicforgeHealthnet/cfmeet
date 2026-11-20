@@ -243,6 +243,8 @@ pub struct Peers {
     pub gateway: Arc<ServiceTokenSigner>,
     /// Blueprint Section 7: the Organizations Service (FIRST_PARTY organization scopes).
     pub organizations: Arc<ServiceTokenSigner>,
+    /// ADR 0067: the admin bridge (operator reads with HQ attribution).
+    pub bridge: Arc<ServiceTokenSigner>,
     /// Correctly signing, but not in Platform Access's trust bundle.
     pub untrusted: Arc<ServiceTokenSigner>,
     /// Trusted Calling identity name, but signing with a key the bundle does not list.
@@ -340,6 +342,7 @@ pub fn service_auth_with(organizations_permissions: &[&str]) -> (ServiceAuthRunt
     let developer_platform = key("developer-platform-test-1");
     let gateway = key("api-gateway-test-1");
     let organizations = key("organizations-test-1");
+    let bridge = key("admin-bridge-test-1");
     let policy = TrustPolicy::from_json(
         &trust_bundle(
             cf_service_auth::services::PLATFORM_ACCESS,
@@ -384,6 +387,11 @@ pub fn service_auth_with(organizations_permissions: &[&str]) -> (ServiceAuthRunt
                     vec![operator.public_jwk()],
                     &["platform-identity.administer"],
                 ),
+                (
+                    cf_service_auth::services::ADMIN_BRIDGE,
+                    vec![bridge.public_jwk()],
+                    &["platform-identity.administer"],
+                ),
             ],
         ),
         &ServiceId::platform_access(),
@@ -414,6 +422,7 @@ pub fn service_auth_with(organizations_permissions: &[&str]) -> (ServiceAuthRunt
         developer_platform: signer(ServiceId::developer_platform(), developer_platform),
         gateway: signer(ServiceId::api_gateway(), gateway),
         organizations: signer(ServiceId::organizations(), organizations),
+        bridge: signer(ServiceId::admin_bridge(), bridge),
         untrusted: signer(ServiceId::telephony(), key("telephony-test-1")),
         rogue_calling: signer(ServiceId::calling(), key("calling-rogue-1")),
         clock,
