@@ -23,7 +23,7 @@ use crate::{
     store::{self, Event, OrgRow, PolicyRow},
 };
 
-fn policy_json(org: &OrgRow, row: Option<&PolicyRow>, doc: &PolicyDocument) -> Value {
+pub(super) fn policy_json(org: &OrgRow, row: Option<&PolicyRow>, doc: &PolicyDocument) -> Value {
     json!({
         "schemaVersion": 1,
         "organizationId": org.id,

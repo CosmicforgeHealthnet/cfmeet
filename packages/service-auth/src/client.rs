@@ -39,11 +39,17 @@ pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 /// `platform-identity.delegate`). `cf-forwarded-credential-id` names the gateway-forwarded
 /// partner credential of a Partner Users call (Platform Access honours it only under
 /// `platform-end-users.delegate`, cross-checks it against the signed delegated context and
-/// re-authenticates it live).
+/// re-authenticates it live). The four `x-cf-*` operator attribution headers
+/// (`crate::operator`, ADR 0068) are sent only by the admin bridge; every receiver refuses
+/// them from any other caller.
 pub const FORWARDABLE_REQUEST_HEADERS: &[&str] = &[
     "idempotency-key",
     "x-cf-delegated-actor",
     "cf-forwarded-credential-id",
+    "x-cf-operator",
+    "x-cf-approver",
+    "x-cf-approval-ref",
+    "x-cf-intent-digest",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

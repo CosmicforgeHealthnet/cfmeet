@@ -13,8 +13,13 @@ The API is the frozen internal contract
 | `organization.read` | Meeting Service, Calling, Messaging, Communications | detail / snapshot, members, user organizations, provisioning, resolve, evaluate, audit (actor) |
 | `organization.write` | Meeting Service | every mutation for an acting user |
 | `organization.act-for-user` (sensitive) | Meeting Service | `X-CF-Acting-User`, `X-CF-Acting-User-Verified-Email` |
-| `organization.administer` (sensitive) | operator console, Meeting Service (platform-admin facade) | admin listing / create / lifecycle |
+| `organization.administer` (sensitive) | operator console, Meeting Service (platform-admin facade), admin bridge | admin listing / create / lifecycle |
+| `organization.operator-read` (sensitive) | admin bridge (`cfmeet.admin-bridge`, ADR 0067) only | operator reads `GET /internal/v1/operator/organizations/{id}`, `…/members`, `…/teams`, `…/policies`, `GET /internal/v1/operator/audit-events`; each also needs `X-CF-Operator: hq:<staff>` |
 | `organization.migrate` (sensitive) | operator console, Meeting Service | import, reconciliation |
+
+Operator attribution (`X-CF-Operator`, `X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`)
+is accepted only from `cfmeet.admin-bridge`; from any other caller, or malformed, every route answers
+403 `ACTOR_NOT_ALLOWED`.
 
 Outbound (Section 7, only when provisioning is enabled): `platform-identity.provision-first-party`
 (receiver `cfmeet.platform-access`, grantable to `cfmeet.organizations` only) for

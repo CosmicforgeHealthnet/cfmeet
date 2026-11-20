@@ -1,0 +1,58 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "organization_id",
+    "name",
+    "slug",
+    "lifecycle_status",
+    "provisioning_state",
+    "member_count",
+    "created_at",
+    "updated_at",
+    "version"
+  ],
+  "properties": {
+    "organization_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "lifecycle_status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "provisioning_state": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "member_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

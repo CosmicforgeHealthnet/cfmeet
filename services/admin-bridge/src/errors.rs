@@ -46,6 +46,7 @@ codes! {
     RateLimited => ("RATE_LIMITED", 429, "per staff member, permission and scope limit reached"),
     AuditUnavailable => ("AUDIT_UNAVAILABLE", 503, "the audit row could not be written; nothing was done and no data is returned"),
     DatasetNotFound => ("DATASET_NOT_FOUND", 404, "unknown dataset id"),
+    ResourceNotFound => ("RESOURCE_NOT_FOUND", 404, "the owning service has no such resource"),
     OwnerUnavailable => ("OWNER_UNAVAILABLE", 503, "the owning service did not answer a read"),
     OwnerRefused => ("OWNER_REFUSED", 422, "the owning service refused the command (FAILED)"),
     UnknownOutcome => ("UNKNOWN_OUTCOME", 502, "a command was sent and no clear answer came back; settle by reading back, never resend"),

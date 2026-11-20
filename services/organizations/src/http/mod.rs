@@ -17,6 +17,7 @@ pub mod invitations;
 pub mod members;
 pub mod middleware;
 pub mod migration;
+pub mod operator;
 pub mod organizations;
 pub mod outbox;
 pub mod policies;
@@ -208,6 +209,17 @@ pub fn app(state: AppState) -> Router {
             "/admin/organizations/:id/scopes/primary/service-bindings/:service/rotate",
             post(bindings::rotate_binding),
         )
+        .route("/operator/organizations/:id", get(operator::organization))
+        .route(
+            "/operator/organizations/:id/members",
+            get(operator::members),
+        )
+        .route("/operator/organizations/:id/teams", get(operator::teams))
+        .route(
+            "/operator/organizations/:id/policies",
+            get(operator::policies),
+        )
+        .route("/operator/audit-events", get(operator::audit_events))
         .route("/admin/event-delivery", get(outbox::status))
         .route("/admin/event-delivery/replay", post(outbox::replay))
         .route(

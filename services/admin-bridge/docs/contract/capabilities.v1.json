@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.1.0",
+  "contract_version": "1.2.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "ce3a76aefd0f99d92b5c36c1586375ece915de394f6e7c531555983f4073a6e1",
-    "capability_matrix_sha256": "d2f710790007096f3ad620fcf1cea49a3fa0b4bf8fad87540aeac6fe95d0c609"
+    "openapi_sha256": "52fbc37f05c0cf5c9cce23ccc07cdd2c09bc53f31b56db7a619ed77d7a91e592",
+    "capability_matrix_sha256": "488ca2e27c383b70ffd6b2b99d2f22b98b054ec6fce8813f7e88d7243ab732dc"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 4,
+      "READ_ONLY": 11,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 128
+      "BLOCKED_DEPENDENCY": 121
     }
   },
   "capabilities": [
@@ -5527,9 +5527,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OrganizationPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "organizations.organizations.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -5538,8 +5538,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-      "blocker": "Phase A2: organizations endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "organizations_search_translates_and_minimizes"
+      ]
     },
     {
       "id": "organizations.organizations.read",
@@ -5579,9 +5581,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OrganizationDetail"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "organizations.organizations.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -5590,8 +5592,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-      "blocker": "Phase A2: organizations endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "organizations_detail_never_relays_contact_details"
+      ]
     },
     {
       "id": "organizations.organization.create",
@@ -5891,9 +5895,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OrganizationBindingPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "organizations.bindings.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -5902,8 +5906,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-      "blocker": "Phase A2: organizations endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "organizations_bindings_treat_absent_as_unbound"
+      ]
     },
     {
       "id": "organizations.binding.change",
@@ -6055,9 +6061,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OrganizationAuditPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "organizations.audit.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -6066,8 +6072,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-      "blocker": "Phase A2: organizations endpoint exists; bridge wiring pending",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "organizations_audit_maps_the_window_and_cursor"
+      ]
     },
     {
       "id": "organizations.global-audit.list",
@@ -6104,9 +6112,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OrganizationAuditPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "organizations.global-audit.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -6115,8 +6123,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-      "blocker": "Phase A2: new organizations operator endpoint required",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "organizations_global_audit_is_served"
+      ]
     },
     {
       "id": "organizations.provisioning.retry",
@@ -6256,9 +6266,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OrganizationMemberPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "organizations.members.read",
       "risk": "R1",
       "privacy": "PERSONAL",
@@ -6267,8 +6277,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-      "blocker": "Phase A2: new organizations operator endpoint required",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "organizations_members_are_opaque_user_ids"
+      ]
     },
     {
       "id": "organizations.teams.list",
@@ -6308,9 +6320,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/OrganizationTeamPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "organizations.teams.read",
       "risk": "R1",
       "privacy": "INTERNAL",
@@ -6319,8 +6331,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_ORGANIZATIONS",
-      "blocker": "Phase A2: new organizations operator endpoint required",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "organizations_teams_drop_free_text"
+      ]
     },
     {
       "id": "organizations.policies.read",

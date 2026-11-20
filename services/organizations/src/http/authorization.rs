@@ -501,6 +501,62 @@ pub async fn admin_audit_events(
     audit_page(&state, id, &q).await
 }
 
+/// Query of the admin bridge's cross-organization audit read.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OperatorAuditQuery {
+    /// Only events with `seq` below this (the previous page's `nextCursor`).
+    #[serde(default)]
+    pub cursor: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// Inclusive lower bound (RFC 3339).
+    #[serde(default)]
+    pub since: Option<String>,
+    /// Exclusive upper bound (RFC 3339).
+    #[serde(default)]
+    pub until: Option<String>,
+}
+
+/// Longest `since`..`until` window of the cross-organization audit read.
+pub const OPERATOR_AUDIT_MAX_WINDOW_DAYS: i64 = 31;
+
+/// One page of the audit history of every organization (newest first, `seq` order),
+/// for the admin bridge (`/internal/v1/operator/audit-events`).
+pub(super) async fn operator_audit_page(
+    state: &AppState,
+    q: &OperatorAuditQuery,
+) -> ApiResult<Response> {
+    let limit = page_limit(q.limit)?;
+    let since = audit_time(q.since.as_deref(), "since")?;
+    let until = audit_time(q.until.as_deref(), "until")?;
+    if let (Some(s), Some(u)) = (since, until) {
+        if u <= s {
+            return Err(ApiError::validation("until must be after since"));
+        }
+        if u - s > chrono::Duration::days(OPERATOR_AUDIT_MAX_WINDOW_DAYS) {
+            return Err(ApiError::validation(
+                "the since..until window must be at most 31 days",
+            ));
+        }
+    }
+    if q.cursor.is_some_and(|c| c < 1) {
+        return Err(ApiError::validation("cursor must be a positive sequence"));
+    }
+    let rows: Vec<AuditRow> = db::all(
+        &state.db,
+        "SELECT seq, id, organization_id, actor_kind, actor_user_id, actor_service, action, target_type, target_id, summary, request_id, correlation_id, occurred_at          FROM organization_audit_events WHERE ($1::bigint IS NULL OR seq < $1)            AND ($3::timestamptz IS NULL OR occurred_at >= $3) AND ($4::timestamptz IS NULL OR occurred_at < $4)          ORDER BY seq DESC LIMIT $2",
+        vec![
+            q.cursor.into(),
+            (limit + 1).into(),
+            since.into(),
+            until.into(),
+        ],
+    )
+    .await?;
+    audit_items(&rows, limit)
+}
+
 fn audit_items(rows: &[AuditRow], limit: i64) -> ApiResult<Response> {
     let more = rows.len() as i64 > limit;
     let items: Vec<Value> = rows

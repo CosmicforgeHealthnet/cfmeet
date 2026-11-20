@@ -2899,5 +2899,59 @@ pub fn catalog() -> Vec<Capability> {
         );
     }
 
-    c.into_iter().map(|b| b.0).collect()
+    let mut caps: Vec<Capability> = c.into_iter().map(|b| b.0).collect();
+    for (id, result, tests) in SERVED_OWNER_READS {
+        let cap = caps
+            .iter_mut()
+            .find(|c| c.id == *id)
+            .unwrap_or_else(|| panic!("{id}: not in the catalog"));
+        assert_eq!(cap.kind, Kind::Read, "{id}: owner reads only");
+        cap.result = Some(result);
+        cap.served = true;
+        cap.tests = tests.to_vec();
+    }
+    caps
 }
+
+/// Owner reads the bridge serves, by phase: (capability, result schema, covering tests).
+/// The owner endpoint must also be granted and reachable; until then the bridge answers
+/// `OWNER_UNAVAILABLE`, never empty data.
+#[allow(clippy::type_complexity)]
+const SERVED_OWNER_READS: &[(&str, &str, &[&str])] = &[
+    // A2.0 Organizations.
+    (
+        "organizations.organizations.search",
+        "OrganizationPage",
+        &["organizations_search_translates_and_minimizes"],
+    ),
+    (
+        "organizations.organizations.read",
+        "OrganizationDetail",
+        &["organizations_detail_never_relays_contact_details"],
+    ),
+    (
+        "organizations.audit.list",
+        "OrganizationAuditPage",
+        &["organizations_audit_maps_the_window_and_cursor"],
+    ),
+    (
+        "organizations.global-audit.list",
+        "OrganizationAuditPage",
+        &["organizations_global_audit_is_served"],
+    ),
+    (
+        "organizations.members.list",
+        "OrganizationMemberPage",
+        &["organizations_members_are_opaque_user_ids"],
+    ),
+    (
+        "organizations.teams.list",
+        "OrganizationTeamPage",
+        &["organizations_teams_drop_free_text"],
+    ),
+    (
+        "organizations.bindings.list",
+        "OrganizationBindingPage",
+        &["organizations_bindings_treat_absent_as_unbound"],
+    ),
+];
