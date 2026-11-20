@@ -32,27 +32,45 @@ The bridge **stays disabled**. Later phases add one `ADMIN_BRIDGE_GRANTS` row pe
 
 ## 3. Enabling for HQ (HQ stage S3), operator steps
 
-Enabling is **not automated yet**. It needs HQ's enrolment, the TLS material and the policy key mounted into the container. Until a dedicated `enable-admin-bridge` operation exists, do not hand-edit the container: safe defaults refuse it.
+Steps 1, 2 and 4 are operator steps; step 3 is the `activate-admin-bridge-hq` operation, which refuses to run until steps 1 and 2 are complete. Never hand-edit the container: safe defaults refuse `ADMIN_BRIDGE_ENABLED=true` until that operation is recorded.
 
 Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`) on `cfmeet-core-private`, with the runtime `DATABASE_URL` in a 0600 env file, never on the command line.
 
 1. **Enrol HQ.** Use the values HQ sends out of band; no secret passes through chat or tickets.
    - `enroll-cert --fingerprint <sha256 of HQ client cert DER> --not-before … --expires … --operator <you>`
-   - `enroll-hmac --kid <X-HQ-Key-ID> --key-file /secure/<kid>.key --expires … --operator <you>`. Only the sha256 is stored. The key file itself goes in `ADMIN_BRIDGE_HMAC_KEY_DIR` as `<kid>.key` (0400, owned by uid 10001). The file is **base64url text of at least 32 key bytes** (padding optional), the same file HQ reads as `CFMEET_BRIDGE_HMAC_KEY_FILE`; generate it once, for example `head -c 32 /dev/urandom | basenc --base64url -w0 | tr -d '='`, and deliver the same sealed file to both sides.
+   - `enroll-hmac --kid <X-HQ-Key-ID> --key-file /secure/<kid>.key --expires … --operator <you>`. Only the sha256 is stored. The key file itself is staged as `hmac/<kid>.key` (0400, owned by uid 10001; step 3), which the bridge reads as `ADMIN_BRIDGE_HMAC_KEY_DIR`. The file is **base64url text of at least 32 key bytes** (padding optional), the same file HQ reads as `CFMEET_BRIDGE_HMAC_KEY_FILE`; generate it once, for example `head -c 32 /dev/urandom | basenc --base64url -w0 | tr -d '='`, and deliver the same sealed file to both sides.
    - `enroll-staff-key --kid <jws kid> --public-key-hex … --issuer cosmicforge-hq --audience cfmeet-admin-bridge --expires … --operator <you>`
 2. **Access policy.**
    - `policy-ceiling --revision 1 > policy.json`, then edit it down to a READ-ONLY policy: the reads only, no command permission.
    - `policy-sign --key-file /secure/policy.pem --document policy.json`, **offline**, on the policy signer's machine.
    - `policy-put --revision 1 --document policy.json --signature … --key-id … --public-key-hex … --operator <you>`. This runs the same verification as the bridge: signature, revision, and ceiling.
-3. **Container settings** (the future `enable-admin-bridge` operation):
-   - `ADMIN_BRIDGE_ENABLED=true`
-   - `ADMIN_BRIDGE_POLICY_REVISION=1`, `ADMIN_BRIDGE_POLICY_PUBLIC_KEY_HEX`, `ADMIN_BRIDGE_POLICY_KEY_ID`
-   - `ADMIN_BRIDGE_HQ_WORKLOAD_URI` (HQ's single URI SAN, e.g. `cf://staging/product-admin/cfmeet`)
-   - `ADMIN_BRIDGE_ENROLLED_MARKETS`, `ADMIN_BRIDGE_ENROLLED_TENANTS`
-   - mounts for `ADMIN_BRIDGE_TLS_CERT_FILE`, `ADMIN_BRIDGE_TLS_KEY_FILE`, `ADMIN_BRIDGE_CLIENT_CA_FILE` and `ADMIN_BRIDGE_HMAC_KEY_DIR`
-4. **HQ connection: private tunnel only** (owner decision 2026-11-20). HQ connects only to a pinned private IP, so HQ staging reaches the bridge over a private tunnel (e.g. WireGuard) between the HQ staging host and the CF Meet host. Setting up the tunnel is a privileged operator step; the addresses move out of band, never via chat or git.
+3. **Stage the files and run `activate-admin-bridge-hq`** (`confirm=hq-enrolled-read-only`; needs the owner's go-ahead and an agreed release window). Stage everything on the host under `/opt/cfmeet-core/admin-bridge/` first. Every file and both directories are owned by uid 10001 (the bridge). Keys are 0400; nothing is group- or world-writable; there are no symlinks and no other files.
+   - `tls/server.crt`, `tls/server.key`, `tls/hq-client-ca.pem` (see the server certificate notes in step 4).
+   - `hmac/<X-HQ-Key-ID>.key`: the same base64url file as in step 1.
+   - `enable.json`, with exactly these keys (no secrets):
+     ```json
+     {"policy_revision": 1, "policy_key_id": "<key id>", "policy_public_key_hex": "<64 lowercase hex>",
+      "hq_workload_uri": "cf://staging/product-admin/cfmeet", "enrolled_markets": ["GLOBAL"],
+      "enrolled_tenants": ["<lowercase Platform Access tenant UUID>"],
+      "listen_address": "10.250.0.1", "allowed_source": "10.250.0.2"}
+     ```
+   The operation refuses, changing nothing, unless all of these hold:
+   - HQ has an active client certificate and an active staff-token key, each valid for at least another day.
+   - Every staged HMAC file's decoded sha256 equals its active enrolment.
+   - The pinned policy revision is stored, signed by `policy_key_id`, and no newer revision exists.
+   - Every file is sealed as described above.
+
+   It then:
+   1. Recreates the bridge with `ADMIN_BRIDGE_ENABLED=true` and writes still off, the policy, workload, scope and file settings, and `tls/` and `hmac/` mounted read-only under `/run/admin-bridge/`.
+   2. Checks that `/ready` reports `enabled: true` on the pinned revision.
+   3. Installs the relay from step 4.
+
+   Any failure removes the relay and restores the dark bridge.
+4. **HQ connection: private tunnel only** (owner decision 2026-11-20). Bring the tunnel up **before** step 3. HQ connects only to a pinned private IP, so HQ staging reaches the bridge over a private tunnel (e.g. WireGuard) between the HQ staging host and the CF Meet host. Setting up the tunnel is a privileged operator step; the addresses move out of band, never via chat or git.
    - Bring up the tunnel. Note the CF Meet host's tunnel address (`ADMIN_BRIDGE_HQ_LISTEN_ADDRESS`) and HQ's tunnel address (`ADMIN_BRIDGE_HQ_ALLOWED_SOURCE`). Both must be **RFC 1918 only**. 100.64/10 is refused by HQ, which treats it as shared CGNAT space; the tool refuses it, and public addresses, too. Suggested: a dedicated /30 such as `10.250.0.0/30`, with CF Meet at `10.250.0.1` and HQ at `10.250.0.2`.
-   - Install the passthrough relay `cfmeet-admin-bridge-hq-relay` from `admin_bridge_hq_relay_config(<listen>, <source>)`. It is an nginx `stream` relay with `listen <tunnel address>:8460; allow <HQ tunnel address>; deny all;`, and TLS is **not** terminated.
+   - `activate-admin-bridge-hq` installs the passthrough relay `cfmeet-admin-bridge-hq-relay` (step 3). Do not install it by hand. It is an nginx `stream` relay with `allow <HQ tunnel address>; deny all;`, and TLS is **not** terminated.
+     - It runs on its own network, `cfmeet-admin-bridge-hq-net`, joined to the private network, and is published **only** on `<CF Meet tunnel address>:8460`.
+     - Traffic arriving on the tunnel interface keeps its source address, so `allow` sees HQ's address.
    - On the host firewall, allow TCP 8460 only on the tunnel interface and only from HQ's tunnel address. Keep 8460 closed on every public interface.
    - Never add 8460 to `api.cfmeet.com`, the public site, or the private TLS proxy.
    - **Server certificate:** issue it from CF Meet's private admin-bridge CA with DNS SAN `admin-bridge.cfmeet.internal` (HQ uses it as SNI), never a public name. Give HQ the CA bundle and the leaf SHA-256 fingerprint out of band. HQ pins both, so send the new fingerprint **before** each rotation.
@@ -65,8 +83,8 @@ Run each tool as `admin-bridge-admin` from the image (`/app/admin-bridge-admin`)
 
 ## 4. Rollback
 
-- Set `ADMIN_BRIDGE_ENABLED=false`, or run `rollback` on the operation. Every HQ request then answers `503 BRIDGE_DISABLED`.
-- Remove the relay and the firewall rule. The tunnel can stay up: with the relay gone, nothing listens on 8460.
+- Run `rollback` right after `activate-admin-bridge-hq`. It removes the relay first, so HQ's way in closes, then restores the dark bridge. HQ then gets no answer on 8460, and any request that still reaches the bridge gets `503 BRIDGE_DISABLED`.
+- Remove the firewall rule. The tunnel can stay up: with the relay gone, nothing listens on 8460.
 - Grants added by `activate-admin-bridge` are undone by rolling that operation back.
 
 ## 5. Keys: rotation and revocation
