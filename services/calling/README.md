@@ -800,14 +800,24 @@ From the repository root: `make calling-migrate`, `make calling`.
 on versions it does not know), the notification-publications history, the additive
 gap-closure history (`calling_gap_closure_seaql_migrations`, `migration/src/gap/`) and the
 call-kind-offer history (`calling_call_kind_offer_seaql_migrations`,
-`migration/src/kind_offer/`: CF2, a voice call switched to video while it rings). The
+`migration/src/kind_offer/`: CF2, a voice call switched to video while it rings) and the
+admin-operations history (`calling_admin_operations_seaql_migrations`,
+`migration/src/admin_operations/`: ADR 0068 A4, the record of every command the HQ admin
+bridge relays — `calling_admin_operations` — and the limit row versions). The
 gap-closure history is fail-closed too in every image that reads it, so a change that must
 stay rollback-safe gets a history of its own that the previous image never reads; this
 image refuses to start until all of them are applied
-(`calling_migration::pending_migrations`). `reset` rolls the call-kind-offer and
-gap-closure histories back first; other subcommands concern the main history.
+(`calling_migration::pending_migrations`). `reset` rolls the admin-operations,
+call-kind-offer and gap-closure histories back first; other subcommands concern the main history.
 
 ## Administration
+
+The HQ admin bridge (`cfmeet.admin-bridge`, `calling.administer`) reaches the same
+operations as commands under `POST /internal/v1/operator/*` (ADR 0068 A4,
+`src/operator_commands.rs`): `Idempotency-Key`, `expectedVersion`, the second person's
+approval for R3 / R4, and a `calling_admin_operations` record in the change's transaction
+(read back with `GET /internal/v1/operator/operations/{key}`); `platform_admin` stays for
+emergencies.
 
 `platform_admin` administers what Calling owns. Identity (tenants … credentials, scopes,
 principals) is administered with **`platform-access-admin`** (services/platform-access);

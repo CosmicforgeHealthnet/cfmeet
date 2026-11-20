@@ -131,6 +131,17 @@ impl OperatorContext {
         })
     }
 
+    /// A command relayed by the HQ admin bridge (ADR 0068 A4): the audit actor is the
+    /// bridge's service identity (the HQ staff member and approver are recorded in
+    /// `calling_admin_operations`), and the correlation id is derived from the command's
+    /// `Idempotency-Key`, so the audit row and the operation record join.
+    pub fn bridge(idempotency_key: Uuid) -> Self {
+        Self {
+            operator: cf_service_auth::services::ADMIN_BRIDGE.to_string(),
+            correlation_id: format!("op_{}", idempotency_key.simple()),
+        }
+    }
+
     pub fn operator(&self) -> &str {
         &self.operator
     }
@@ -249,7 +260,7 @@ where
 }
 
 /// Bounded audit detail of a limit policy (numbers of the policy, never identities).
-fn limit_detail(level: &str, values: &LimitValues) -> Value {
+pub(crate) fn limit_detail(level: &str, values: &LimitValues) -> Value {
     json!({
         "level": level,
         "requestsPerMinute": values.requests_per_minute,

@@ -62,9 +62,10 @@ pub fn internal_routes() -> Router<AppState> {
         .route("/operator/audit", get(audit))
 }
 
-type OperatorExt = Option<Extension<BridgeOperator>>;
+pub(crate) type OperatorExt = Option<Extension<BridgeOperator>>;
 
-fn gate(caller: &InternalCaller, operator: &OperatorExt) -> Result<(), CallingError> {
+/// `calling.administer` and a named HQ operator (the bridge's reads and commands).
+pub(crate) fn gate(caller: &InternalCaller, operator: &OperatorExt) -> Result<(), CallingError> {
     caller.require_permission(InternalPermission::CallingAdminister)?;
     if operator.is_none() {
         tracing::warn!(
@@ -428,14 +429,15 @@ async fn limits(
                'maxConcurrentCommunications', l.max_concurrent_communications, \
                'telecomSpendDailyLimitMinor', l.telecom_spend_daily_limit_minor, \
                'telecomSpendMonthlyLimitMinor', l.telecom_spend_monthly_limit_minor, \
-               'updatedAt', l.updated_at) FROM platform_tenant_limits l WHERE l.tenant_id = t.id), \
+               'updatedAt', l.updated_at, 'version', l.version) \
+               FROM platform_tenant_limits l WHERE l.tenant_id = t.id), \
            'applications', COALESCE((SELECT json_agg(s.x) FROM (\
                SELECT json_build_object('applicationId', a.application_id, \
                  'requestsPerMinute', a.requests_per_minute, \
                  'maxConcurrentCommunications', a.max_concurrent_communications, \
                  'telecomSpendDailyLimitMinor', a.telecom_spend_daily_limit_minor, \
                  'telecomSpendMonthlyLimitMinor', a.telecom_spend_monthly_limit_minor, \
-                 'updatedAt', a.updated_at) AS x \
+                 'updatedAt', a.updated_at, 'version', a.version) AS x \
                FROM platform_application_limits a WHERE a.tenant_id = t.id \
                ORDER BY a.application_id LIMIT {}) s), '[]'::json)) AS doc, \
            NULL::timestamptz AS k_at, t.id AS k_id \
@@ -544,7 +546,7 @@ async fn recordings(
         'recordingId', r.id, 'callId', r.call_id, 'environmentId', r.environment_id, \
         'state', r.state, 'captureSource', r.capture_source, 'durationMs', r.duration_ms, \
         'sizeBytes', r.size_bytes, 'retentionUntil', r.retention_until, \
-        'createdAt', r.created_at, 'deletedAt', r.deleted_at) AS doc, \
+        'createdAt', r.created_at, 'deletedAt', r.deleted_at, 'version', r.version) AS doc, \
         r.created_at AS k_at, r.id AS k_id FROM call_recordings r WHERE r.tenant_id = $1";
     page(
         &state,

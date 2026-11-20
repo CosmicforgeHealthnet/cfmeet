@@ -74,6 +74,7 @@ pub fn internal_api() -> Router<AppState> {
         .merge(crate::organization_members::internal_routes())
         .merge(crate::account_privacy::internal_routes())
         .merge(crate::operator_reads::internal_routes())
+        .merge(crate::operator_commands::internal_routes())
 }
 
 fn cors_layer() -> CorsLayer {

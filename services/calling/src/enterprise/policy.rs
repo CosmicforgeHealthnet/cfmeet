@@ -721,6 +721,31 @@ impl EnterpriseService {
     }
 }
 
+/// The operator audit entry (ENTERPRISE_CAPABILITIES_SET) of a capability change.
+pub(crate) fn capabilities_audit_entry(
+    scope: CallScope,
+    view: &CallPolicyView,
+) -> crate::platform::operator::AuditEntry {
+    use crate::platform::operator::{AuditEntry, AuditTargetKind, OperatorAction};
+    let names: Vec<&'static str> = view
+        .rules
+        .admin_capabilities
+        .iter()
+        .map(|c| c.as_str())
+        .collect();
+    AuditEntry::new(
+        OperatorAction::EnterpriseCapabilitiesSet,
+        AuditTargetKind::Environment,
+        scope.environment_id().as_uuid(),
+    )
+    .scope(
+        Some(scope.tenant_id().as_uuid()),
+        Some(scope.application_id().as_uuid()),
+        Some(scope.environment_id().as_uuid()),
+    )
+    .detail(serde_json::json!({ "capabilities": names }))
+}
+
 impl EnterpriseService {
     /// OPERATOR ONLY (`platform_admin`): sets the administrative capabilities of the
     /// environment's baseline (default) policy, creating the baseline from the built-in
@@ -746,26 +771,10 @@ impl EnterpriseService {
         scope: CallScope,
         capabilities: Vec<AdminCapability>,
     ) -> EnterpriseResult<CallPolicyView> {
-        use crate::platform::operator::{self, AuditEntry, AuditTargetKind, OperatorAction};
+        use crate::platform::operator;
         let txn = self.begin().await?;
         let view = self.set_capabilities_in(&txn, scope, capabilities).await?;
-        let names: Vec<&'static str> = view
-            .rules
-            .admin_capabilities
-            .iter()
-            .map(|c| c.as_str())
-            .collect();
-        let entry = AuditEntry::new(
-            OperatorAction::EnterpriseCapabilitiesSet,
-            AuditTargetKind::Environment,
-            scope.environment_id().as_uuid(),
-        )
-        .scope(
-            Some(scope.tenant_id().as_uuid()),
-            Some(scope.application_id().as_uuid()),
-            Some(scope.environment_id().as_uuid()),
-        )
-        .detail(serde_json::json!({ "capabilities": names }));
+        let entry = capabilities_audit_entry(scope, &view);
         operator::record(&txn, operator, &entry, self.now())
             .await
             .map_err(|e| EnterpriseError::Database {
@@ -776,7 +785,10 @@ impl EnterpriseService {
         Ok(view)
     }
 
-    async fn set_capabilities_in(
+    /// The change of [`operator_set_capabilities`](Self::operator_set_capabilities) in the
+    /// caller's transaction (the admin bridge, ADR 0068 A4, records its audit entry,
+    /// [`capabilities_audit_entry`], in that same transaction).
+    pub(crate) async fn set_capabilities_in(
         &self,
         txn: &sea_orm::DatabaseTransaction,
         scope: CallScope,
