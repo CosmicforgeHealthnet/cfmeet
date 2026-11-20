@@ -1,4 +1,4 @@
-# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.13.0)
+# CF Meet Admin Bridge signing profile (HQ interface v1, contract 1.14.0)
 
 Generated from `services/admin-bridge/src` by `admin-bridge-contract generate`; do not edit.
 Design: `docs/admin/cfmeet-admin-bridge.md` §3. Test vectors: `fixtures/`.
@@ -207,18 +207,34 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `calling.webhook-keys.list`
 - `calling.audit.list`
 - `communications.profiles.read`
+- `communications.profile.suspend`
+- `communications.profile.restore`
 - `communications.reports.list`
+- `communications.report.review`
 - `communications.holds.list`
 - `communications.audit.list`
 - `communications.metrics.read`
+- `communications.backfill.run`
+- `communications.events.replay`
 - `organizations.organizations.search`
 - `organizations.organizations.read`
+- `organizations.organization.create`
+- `organizations.organization.suspend`
+- `organizations.organization.archive`
+- `organizations.organization.reactivate`
+- `organizations.ownership.recover`
 - `organizations.bindings.list`
+- `organizations.binding.change`
 - `organizations.audit.list`
 - `organizations.global-audit.list`
+- `organizations.provisioning.retry`
+- `organizations.events.replay`
 - `organizations.members.list`
 - `organizations.teams.list`
 - `organizations.policies.read`
+- `organizations.member.change`
+- `organizations.team.change`
+- `organizations.policies.change`
 - `partners.workspaces.search`
 - `partners.workspaces.read`
 - `partners.workspace-activity.list`
@@ -260,8 +276,12 @@ Any other 5xx after a command was sent (`UNKNOWN_OUTCOME`, `INTERNAL`, `OWNER_UN
 - `verification.app-review.publish`
 - `notifications.deliveries.list`
 - `notifications.failed-deliveries.list`
+- `notifications.delivery.retry`
 - `notifications.suppressions.list`
+- `notifications.suppression.remove`
 - `notifications.routing.read`
+- `notifications.routing.change`
+- `notifications.reroute.cancel`
 - `notifications.providers.read`
 - `privacy.requests.list`
 - `privacy.requests.read`

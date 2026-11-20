@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organization_id",
+        "lifecycle_state",
+        "lifecycle_reason",
+        "provisioning_state",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "organization_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "lifecycle_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "lifecycle_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500
+        },
+        "provisioning_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after organizations.organization.reactivate; status: ACTIVE."
+    }
+  }
+}

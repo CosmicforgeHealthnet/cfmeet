@@ -1,0 +1,71 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "organization_id",
+        "membership_id",
+        "user_id",
+        "role",
+        "membership_state",
+        "version",
+        "updated_at"
+      ],
+      "properties": {
+        "organization_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "membership_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid"
+        },
+        "user_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "membership_state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "version": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after organizations.member.change; status: ACTIVE, SUSPENDED, REMOVED."
+    }
+  }
+}

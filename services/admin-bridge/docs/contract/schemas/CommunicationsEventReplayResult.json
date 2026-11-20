@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "requeued"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "requeued": {
+          "type": "integer"
+        }
+      },
+      "description": "The resource after communications.events.replay; status: REQUEUED."
+    }
+  }
+}

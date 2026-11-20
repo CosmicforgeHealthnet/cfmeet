@@ -2975,6 +2975,29 @@ pub fn catalog() -> Vec<Capability> {
         );
         cap.contact_search = true;
     }
+    // Owner commands served from their rows (contract::owner_commands).
+    for row in super::owner_commands::COMMANDS {
+        let cap = caps
+            .iter_mut()
+            .find(|c| c.id == row.id)
+            .unwrap_or_else(|| panic!("{}: not in the catalog", row.id));
+        assert_eq!(cap.kind, Kind::Command, "{}: commands only", row.id);
+        assert_eq!(cap.owner, row.owner, "{}: owner", row.id);
+        cap.served = true;
+        cap.source_endpoint = Some(row.source);
+        cap.body = Some(row.body_schema);
+        cap.result = Some(row.result_schema);
+        cap.tests = vec!["owner_commands_follow_their_rows"];
+        if matches!(
+            cap.owner_status,
+            OwnerStatus::ExistsNotGranted
+                | OwnerStatus::New
+                | OwnerStatus::CliToApi
+                | OwnerStatus::DbToApi
+        ) {
+            cap.owner_status = OwnerStatus::Exists;
+        }
+    }
     // bridge.operations.read: whoever may run a command may read its operation back, for
     // that command's purposes (the readback also checks the operation's own purpose).
     let mut roles: Vec<Role> = Vec::new();

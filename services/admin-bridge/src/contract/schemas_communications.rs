@@ -81,6 +81,7 @@ pub fn insert(m: &mut Map<String, Value>) {
                 "reporter_cfmeet_id": nullable_cfmeet_id,
                 "target_cfmeet_id": nullable_cfmeet_id,
                 "target_report_count": count,
+                "version": {"type": "integer", "minimum": 1, "description": "1 while open, 2 once reviewed: communications.report.review's expected_version."},
                 "review": {"anyOf": [{"type": "null"}, bare(json!({
                     "decision": {"enum": ["DISMISSED", "ACTIONED"]},
                     "reason": {"enum": ["NO_VIOLATION", "ABUSE", "SECURITY", "LEGAL", "OTHER"]},

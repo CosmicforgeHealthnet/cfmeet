@@ -8,6 +8,7 @@
     "reporter_cfmeet_id",
     "target_cfmeet_id",
     "target_report_count",
+    "version",
     "review",
     "created_at"
   ],
@@ -41,6 +42,11 @@
     "target_report_count": {
       "type": "integer",
       "minimum": 0
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1 while open, 2 once reviewed: communications.report.review's expected_version."
     },
     "review": {
       "anyOf": [

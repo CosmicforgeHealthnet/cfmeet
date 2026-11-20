@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "channel",
+        "mode",
+        "version",
+        "canary_percent",
+        "fence_at",
+        "changed_at"
+      ],
+      "properties": {
+        "category": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "channel": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "mode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "canary_percent": {
+          "type": "integer"
+        },
+        "fence_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "changed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after notifications.routing.change; status: OFF, SHADOW, ACTIVE."
+    }
+  }
+}

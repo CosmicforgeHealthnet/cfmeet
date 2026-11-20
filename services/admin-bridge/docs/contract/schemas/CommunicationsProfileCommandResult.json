@@ -1,0 +1,71 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "resource"
+  ],
+  "properties": {
+    "operation": {
+      "$ref": "#/components/schemas/OperationReadback"
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cfmeet_id",
+        "activation_state",
+        "held",
+        "hold",
+        "version",
+        "updated_at"
+      ],
+      "properties": {
+        "cfmeet_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:@-]{1,128}$"
+        },
+        "activation_state": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "held": {
+          "type": "boolean"
+        },
+        "hold": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "reason",
+            "active",
+            "updated_at"
+          ],
+          "properties": {
+            "reason": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "updated_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "version": {
+          "type": "integer"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "The resource after communications.profile.restore; status: RESTORED, SUSPENDED."
+    }
+  }
+}
