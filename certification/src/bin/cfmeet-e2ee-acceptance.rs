@@ -996,13 +996,15 @@ impl Journey {
         self.pass("new_phone_fresh_keys_future_messages_only_and_replies");
 
         // ---- WhatsApp: a recipient's new device, offline when the message is sent.
-        // B links a second browser that publishes one KeyPackage and goes offline. A's
+        // B signs in on a second browser that publishes one KeyPackage and goes offline. A's
         // phone adds every new device of the members before it sends (from the published
         // KeyPackage, nobody else online), then goes offline too; B's browser opens later
         // and reads it.
         let mut b_web2 = self.sign_in(&b, "web-2b", "WEB", "WEB").await?;
-        self.declare(&mut b_web2).await?;
-        self.link(&b_web2, &b_web).await?;
+        // ADR 0067: a browser is trusted by its own sign-in (no link step).
+        if self.declare(&mut b_web2).await?["trust"] != "TRUSTED" {
+            bail!("B's new browser was not trusted by its sign-in");
+        }
         let mut m_b2 = self.enroll(&b_web2, 1).await?;
         for (s, m) in [
             (&a_web1, &mut m_web1),
@@ -1028,8 +1030,10 @@ impl Journey {
         // A third browser of B with NO KeyPackage: nobody could add it, and nobody else is
         // online. It joins by itself from the GroupInfo the last committer published.
         let mut b_web3 = self.sign_in(&b, "web-3b", "WEB", "WEB").await?;
-        self.declare(&mut b_web3).await?;
-        self.link(&b_web3, &b_web).await?;
+        // ADR 0067: a browser is trusted by its own sign-in (no link step).
+        if self.declare(&mut b_web3).await?["trust"] != "TRUSTED" {
+            bail!("B's new browser was not trusted by its sign-in");
+        }
         let mut m_b3 = self.enroll(&b_web3, 0).await?;
         let st = self
             .relay(

@@ -1,7 +1,10 @@
-//! B2: cached "allowed" personal send decisions.
+//! B2: cached "allowed" personal group send decisions.
 //!
-//! Every one-to-one message (and every personal group message) asks Communications whether
-//! the sender may still send (`require_send`, twice per E2EE send). The answer changes only
+//! Every personal group message asks Communications whether the sender's account may still
+//! send (`require_send`, `PersonalActivity`, twice per E2EE send). One-to-one sends
+//! (`MessageSend`) are NOT cached: a block must refuse the very next message, and the
+//! events below reach Messaging through Communications' asynchronous outbox relay, so a
+//! cached allow could outlive a block by the relay delay. The answer changes only
 //! when a block, a contact, a privacy setting or an account's status changes — and
 //! Communications announces each of those to Messaging as a durable event
 //! (`communications.block.changed`, `communications.connection.*`,
@@ -58,7 +61,8 @@ static CACHE: LazyLock<Mutex<HashMap<Key, Entry>>> = LazyLock::new(Default::defa
 
 fn action_code(action: Action) -> Option<u8> {
     match action {
-        Action::MessageSend => Some(1),
+        // A one-to-one send is never cached: a block takes effect at once (privacy
+        // guarantee), while the invalidating event reaches Messaging asynchronously.
         Action::PersonalActivity => Some(2),
         _ => None,
     }
@@ -208,7 +212,7 @@ mod tests {
 
     #[test]
     fn only_send_decisions_are_cacheable() {
-        assert_eq!(action_code(Action::MessageSend), Some(1));
+        assert_eq!(action_code(Action::MessageSend), None);
         assert_eq!(action_code(Action::PersonalActivity), Some(2));
         assert_eq!(action_code(Action::DirectCall), None);
         assert_eq!(action_code(Action::MessageNotification), None);
