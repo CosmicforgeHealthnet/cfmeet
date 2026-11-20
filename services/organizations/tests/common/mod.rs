@@ -210,7 +210,8 @@ pub struct Peers {
     pub rogue_meeting: Arc<ServiceTokenSigner>,
     /// The Notification Service: `organization-invitations.read` only (X5).
     pub notifications: Arc<ServiceTokenSigner>,
-    /// The HQ admin bridge (ADR 0068): `organization.operator-read` only.
+    /// The HQ admin bridge (ADR 0068): `organization.operator-read` (reads) and
+    /// `organization.administer` (commands).
     pub bridge: Arc<ServiceTokenSigner>,
 }
 
@@ -248,7 +249,7 @@ pub fn verifier_and_peers() -> (Arc<ServiceTokenVerifier>, Peers) {
                 "organization-invitations.read",
             ]),
             issuer(cf_service_auth::services::ADMIN_BRIDGE, &bridge, &[
-                "organization.operator-read",
+                "organization.operator-read", "organization.administer",
             ]),
         ],
     })
@@ -345,6 +346,18 @@ impl<'a> Call<'a> {
     pub fn operator(self, staff: &str) -> Self {
         let value = format!("hq:{staff}");
         self.header("x-cf-operator", &value)
+    }
+
+    /// The second person of an HQ two-person approval (`X-CF-Approver: hq:<approver>`,
+    /// approval reference and intent digest).
+    pub fn approved(self, approver: &str) -> Self {
+        let value = format!("hq:{approver}");
+        self.header("x-cf-approver", &value)
+            .header("x-cf-approval-ref", "apr-0001")
+            .header(
+                "x-cf-intent-digest",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
     }
 
     pub fn idem(mut self, key: &str) -> Self {
