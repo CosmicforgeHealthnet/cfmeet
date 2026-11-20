@@ -618,3 +618,38 @@ fn no_schema_uses_a_key_hq_treats_as_personal_data() {
         .collect();
     assert!(banned.is_empty(), "properties HQ would refuse: {banned:?}");
 }
+
+/// Agreed with HQ Track B: `x-contact-search` marks exactly the searches whose `q` may carry
+/// an email address or phone number.
+#[test]
+fn contact_searches_are_flagged_in_openapi() {
+    let openapi = rendered("openapi.json");
+    let mut flagged = Vec::new();
+    for item in openapi["paths"].as_object().unwrap().values() {
+        for op in item.as_object().unwrap().values() {
+            if op.get("x-contact-search") == Some(&json!(true)) {
+                assert_eq!(
+                    op["x-cfmeet-query-shape"], "SCOPED_SEARCH",
+                    "{}",
+                    op["operationId"]
+                );
+                flagged.push(op["operationId"].as_str().unwrap().to_string());
+            } else {
+                assert!(
+                    op.get("x-contact-search").is_none(),
+                    "only true is published"
+                );
+            }
+        }
+    }
+    flagged.sort();
+    assert_eq!(
+        flagged,
+        [
+            "accounts.users.search",
+            "identity.partner-users.list",
+            "notifications.suppressions.list",
+            "partners.users.list"
+        ]
+    );
+}
