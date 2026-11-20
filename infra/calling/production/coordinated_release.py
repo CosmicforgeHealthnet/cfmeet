@@ -948,6 +948,14 @@ GRANT UPDATE ON admin_rate_limits, admin_dataset_days, admin_projections TO {run
 GRANT DELETE ON admin_security_claims, admin_rate_limits TO {runtime};
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO {runtime};
 GRANT SELECT ON admin_bridge_seaql_migrations TO {runtime};
+-- A3.0 operations ledger (once its migration has run): insert and the send-once
+-- transitions its trigger allows; never DELETE or TRUNCATE.
+DO $$
+BEGIN
+    IF to_regclass('public.admin_operations') IS NOT NULL THEN
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE ON admin_operations TO {runtime}';
+    END IF;
+END $$;
 DO $$
 DECLARE bad TEXT;
 BEGIN
@@ -956,7 +964,8 @@ BEGIN
      WHERE grantee = '{runtime}'
        AND (privilege_type IN ('TRUNCATE', 'REFERENCES', 'TRIGGER')
             OR (privilege_type IN ('UPDATE', 'DELETE')
-                AND table_name IN ('admin_audit_entries', 'admin_revocations', 'admin_policy_revisions')));
+                AND table_name IN ('admin_audit_entries', 'admin_revocations', 'admin_policy_revisions'))
+            OR (privilege_type = 'DELETE' AND table_name = 'admin_operations'));
     IF bad IS NOT NULL THEN
         RAISE EXCEPTION 'admin bridge runtime role has forbidden privileges: %', bad;
     END IF;
@@ -1550,6 +1559,9 @@ def safe_defaults():
     # ...and switched on for HQ (reads only) after activate-admin-bridge-hq.
     if done('activate-admin-bridge-hq'):
         rules['admin-bridge']['ADMIN_BRIDGE_ENABLED'] = (None, 'false', 'true')
+    # ...and HQ commands after activate-admin-bridge-hq-commands (HQ stage S6).
+    if done('activate-admin-bridge-hq-commands'):
+        rules['admin-bridge']['ADMIN_BRIDGE_WRITES_ENABLED'] = (None, 'false', 'true')
     # CF Meet Platform "Build" flags: off until their activation is recorded (platform_operations).
     for name, flags in platform_ops.safe_default_rules(done).items():
         rules.setdefault(name, {}).update(flags)
@@ -2260,6 +2272,56 @@ def activate_admin_bridge_hq(sha, run_id, confirm):
         ('admin-bridge', overrides, {'mounts': [(str(ADMIN_BRIDGE_ROOT / 'tls'), ADMIN_BRIDGE_TLS_TARGET),
                                                 (str(ADMIN_BRIDGE_ROOT / 'hmac'), ADMIN_BRIDGE_HMAC_TARGET)]})],
         post=admitted)
+
+
+# HQ stage S6 (owner gate G1, 2026-11-20: HQ may read and modify): commands on. The policy
+# signer first stores a NEW signed revision that adds the command permissions (policy-put,
+# offline signature) and the operator updates enable.json's policy_revision to it.
+ADMIN_BRIDGE_COMMANDS_CONFIRM = 'hq-commands-two-person'
+ADMIN_BRIDGE_LEDGER_SQL = "SELECT to_regclass('public.admin_operations') IS NOT NULL;"
+
+
+def activate_admin_bridge_hq_commands(sha, run_id, confirm):
+    """Switches HQ commands on (ADMIN_BRIDGE_WRITES_ENABLED=true) at a newer signed policy
+    revision. Refuses, changing nothing, unless the bridge is enabled for HQ, the operations
+    ledger exists, the revision is newer than the running one, stored, signed by the
+    configured key and the newest, and HQ is still fully enrolled. Every command keeps its
+    own gates: module switch, policy permission, two-person approval for R3/R4."""
+    if confirm != ADMIN_BRIDGE_COMMANDS_CONFIRM:
+        raise RuntimeError('activate-admin-bridge-hq-commands needs confirm=%s (owner go-ahead, HQ stage S6)'
+                           % ADMIN_BRIDGE_COMMANDS_CONFIRM)
+    has_signing_identity('admin-bridge')
+    running = env_of('admin-bridge')
+    if running.get('ADMIN_BRIDGE_ENABLED') != 'true':
+        raise RuntimeError('The bridge is not enabled for HQ: run activate-admin-bridge-hq first')
+    record = json.loads((ADMIN_BRIDGE_ROOT / 'enable.json').read_text())
+    admin_bridge_enable_settings(record)  # the same validation as at enablement
+    revision = record['policy_revision']
+    current = int(running.get('ADMIN_BRIDGE_POLICY_REVISION') or 0)
+    if revision <= current:
+        raise RuntimeError('enable.json policy_revision %d is not newer than the running revision %d: '
+                           'put the signed revision that adds the command permissions first' % (revision, current))
+    if record['policy_key_id'] != running.get('ADMIN_BRIDGE_POLICY_KEY_ID') \
+            or record['policy_public_key_hex'] != running.get('ADMIN_BRIDGE_POLICY_PUBLIC_KEY_HEX'):
+        raise RuntimeError('The policy signing key differs from the running one: rotate it separately')
+    db = SERVICES['admin-bridge']['db']
+    if release.db_sql(db, ADMIN_BRIDGE_LEDGER_SQL).strip() != 't':
+        raise RuntimeError('The operations ledger (admin_operations) is missing: release the A3 bridge first')
+    digests = admin_bridge_material()
+    state = json.loads(release.db_sql(db, ADMIN_BRIDGE_ENROLMENT_SQL))
+    problems = admin_bridge_enrolment_problems(state, digests, revision, record['policy_key_id'])
+    if problems:
+        raise RuntimeError('HQ is not ready for commands: ' + '; '.join(problems))
+    emit('adminBridgeHqCommands', {'policyRevision': revision, 'previousRevision': current})
+
+    def on_new_revision():
+        ready = admin_bridge_ready_document()
+        if ready.get('enabled') is not True or ready.get('policy_revision') != revision:
+            raise RuntimeError('The bridge did not come up on policy revision %d' % revision)
+
+    apply_activation('activate-admin-bridge-hq-commands', sha, run_id, [
+        ('admin-bridge', {'ADMIN_BRIDGE_WRITES_ENABLED': 'true', 'ADMIN_BRIDGE_POLICY_REVISION': str(revision)})],
+        post=on_new_revision)
 
 
 def activate_admin_bridge_owner(operation):
@@ -3404,6 +3466,8 @@ ACTIVATIONS = {
     'activate-admin-bridge-hq': (('activate-admin-bridge',), activate_admin_bridge_hq),
     # The other owner families (grants, owner URL, modules), each after activate-admin-bridge.
     **{op: (('activate-admin-bridge',), activate_admin_bridge_owner(op)) for op in ADMIN_BRIDGE_OWNERS},
+    # HQ stage S6: commands on at a newer signed policy (confirm=hq-commands-two-person).
+    'activate-admin-bridge-hq-commands': (('activate-admin-bridge-hq',), activate_admin_bridge_hq_commands),
     # Notification Service N0-1: the missing Hub preference grant (meeting notices fail closed).
     'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),
     # Notification Service N0-6: public host refuses the Meeting Service operator routes.
