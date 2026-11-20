@@ -185,7 +185,7 @@ async fn privacy_requests_complete_only_when_every_service_reports() {
     let (status, v) = send(
         &h,
         &privacy_command(
-            &format!("/privacy/requests/{id}/services/messaging/complete"),
+            &format!("/privacy/requests/{id}/services/{}/complete", services[1]),
             "privacy.request.complete-service",
             serde_json::json!({"operation_id": key, "expected_version": version, "outcome": "LEGAL_HOLD"}),
             "staff-0200",
@@ -197,7 +197,7 @@ async fn privacy_requests_complete_only_when_every_service_reports() {
     let (_, v) = send(
         &h,
         &privacy_command(
-            &format!("/privacy/requests/{id}/services/numbering/complete"),
+            &format!("/privacy/requests/{id}/services/not-a-tracked-service/complete"),
             "privacy.request.complete-service",
             serde_json::json!({"operation_id": uuid::Uuid::new_v4(), "expected_version": 1, "outcome": "DONE"}),
             "staff-0201",

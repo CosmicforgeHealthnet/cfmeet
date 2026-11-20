@@ -49,25 +49,32 @@ CREATE TABLE admin_privacy_request_services (
         ((outcome = 'PENDING') = (recorded_at IS NULL) AND (recorded_at IS NULL) = (recorded_by IS NULL))
 );
 
-CREATE FUNCTION admin_privacy_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+CREATE FUNCTION admin_privacy_requests_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
-        RAISE EXCEPTION '%: rows are never deleted', TG_TABLE_NAME USING ERRCODE = 'check_violation';
+        RAISE EXCEPTION 'admin_privacy_requests: rows are never deleted' USING ERRCODE = 'check_violation';
     END IF;
-    IF TG_TABLE_NAME = 'admin_privacy_request_services' AND OLD.outcome <> 'PENDING' THEN
-        RAISE EXCEPTION 'admin_privacy_request_services: a recorded outcome never changes'
-            USING ERRCODE = 'check_violation';
-    END IF;
-    IF TG_TABLE_NAME = 'admin_privacy_requests' AND (NEW.request_id, NEW.kind, NEW.subject_ref, NEW.created_by, NEW.created_at)
+    IF (NEW.request_id, NEW.kind, NEW.subject_ref, NEW.created_by, NEW.created_at)
         IS DISTINCT FROM (OLD.request_id, OLD.kind, OLD.subject_ref, OLD.created_by, OLD.created_at) THEN
         RAISE EXCEPTION 'admin_privacy_requests: only the state may change' USING ERRCODE = 'check_violation';
     END IF;
     RETURN NEW;
 END $$;
+CREATE FUNCTION admin_privacy_request_services_guard() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'admin_privacy_request_services: rows are never deleted' USING ERRCODE = 'check_violation';
+    END IF;
+    IF OLD.outcome <> 'PENDING' OR (NEW.request_id, NEW.service) IS DISTINCT FROM (OLD.request_id, OLD.service) THEN
+        RAISE EXCEPTION 'admin_privacy_request_services: a recorded outcome never changes'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END $$;
 CREATE TRIGGER tr_admin_privacy_requests_guard BEFORE UPDATE OR DELETE ON admin_privacy_requests
-    FOR EACH ROW EXECUTE FUNCTION admin_privacy_guard();
+    FOR EACH ROW EXECUTE FUNCTION admin_privacy_requests_guard();
 CREATE TRIGGER tr_admin_privacy_request_services_guard BEFORE UPDATE OR DELETE ON admin_privacy_request_services
-    FOR EACH ROW EXECUTE FUNCTION admin_privacy_guard();
+    FOR EACH ROW EXECUTE FUNCTION admin_privacy_request_services_guard();
 CREATE TRIGGER tr_admin_privacy_requests_truncate BEFORE TRUNCATE ON admin_privacy_requests
     FOR EACH STATEMENT EXECUTE FUNCTION admin_append_only();
 CREATE TRIGGER tr_admin_privacy_request_services_truncate BEFORE TRUNCATE ON admin_privacy_request_services
@@ -77,7 +84,8 @@ CREATE TRIGGER tr_admin_privacy_request_services_truncate BEFORE TRUNCATE ON adm
 const DOWN: &str = r#"
 DROP TABLE IF EXISTS admin_privacy_request_services;
 DROP TABLE IF EXISTS admin_privacy_requests;
-DROP FUNCTION IF EXISTS admin_privacy_guard();
+DROP FUNCTION IF EXISTS admin_privacy_request_services_guard();
+DROP FUNCTION IF EXISTS admin_privacy_requests_guard();
 "#;
 
 #[async_trait::async_trait]
