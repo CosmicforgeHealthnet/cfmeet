@@ -1074,49 +1074,35 @@ async fn policy_stub(h: &mut Harness, c: &Customer) -> PolicyStub {
     PolicyStub { calls, allow }
 }
 
-/// B2: an allowed one-to-one send decision is reused (one Communications check for many
-/// messages); a block event from Communications invalidates it at once (the next send is
-/// checked again and refused); a refusal is never cached.
+/// A one-to-one send is checked with Communications every time, never served from the B2
+/// cache: a block refuses the very next message even before Communications' asynchronous
+/// event reaches Messaging (privacy guarantee), and a refusal is never remembered.
 #[tokio::test]
-async fn allowed_send_decisions_are_cached_until_a_communications_event() {
+async fn one_to_one_send_decisions_are_never_cached_so_a_block_refuses_at_once() {
     use std::sync::atomic::Ordering;
     let Some(mut h) = Harness::new().await else {
         return;
     };
     let c = h.first_party(true);
-    let (conv, mut alice, bob) = h.e2ee_direct(&c).await;
-    // The Communications event inbox is its own history (`CommunicationsMigrator`).
-    use messaging_migration::MigratorTrait as _;
-    messaging_migration::CommunicationsMigrator::up(h.conn(), None)
-        .await
-        .unwrap();
+    let (conv, mut alice, _bob) = h.e2ee_direct(&c).await;
     let stub = policy_stub(&mut h, &c).await;
-    for text in ["one", "two", "three"] {
+    for text in ["one", "two"] {
         let sent = h.send_e2ee(&c, &conv, &mut alice, text).await;
         assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
     }
-    assert_eq!(
-        stub.calls.load(Ordering::SeqCst),
-        1,
-        "one check, then cached"
-    );
+    let checked = stub.calls.load(Ordering::SeqCst);
+    assert!(checked >= 2, "every send is checked, got {checked}");
 
-    // Bob blocks Alice in Communications: the durable event reaches Messaging.
+    // Bob blocks Alice in Communications; its durable event has NOT reached Messaging yet.
     stub.allow.store(false, Ordering::SeqCst);
-    let event = json!({"schemaVersion": 1, "eventId": Uuid::new_v4(), "aggregateId": Uuid::new_v4(),
-        "version": 2, "type": "communications.block.changed",
-        "data": {"actorPrincipalId": bob.principal, "targetPrincipalId": alice.principal, "blocked": true}});
-    let applied = hub(&h, &c, bob.principal, "events", event).await;
-    assert_eq!(applied.status, StatusCode::OK, "{}", applied.text);
     let refused = h.send_e2ee(&c, &conv, &mut alice, "after the block").await;
     assert_eq!(refused.code(), "DELIVERY_REFUSED", "{}", refused.text);
-    assert_eq!(stub.calls.load(Ordering::SeqCst), 2);
-    // A refusal is not remembered: once allowed again the next send is checked and sent.
     let refused = h.send_e2ee(&c, &conv, &mut alice, "still blocked").await;
     assert_eq!(refused.code(), "DELIVERY_REFUSED", "{}", refused.text);
-    assert_eq!(stub.calls.load(Ordering::SeqCst), 3);
+    // A refusal is not remembered: once allowed again the next send is checked and sent.
     stub.allow.store(true, Ordering::SeqCst);
+    let before = stub.calls.load(Ordering::SeqCst);
     let sent = h.send_e2ee(&c, &conv, &mut alice, "unblocked").await;
     assert_eq!(sent.status, StatusCode::CREATED, "{}", sent.text);
-    assert_eq!(stub.calls.load(Ordering::SeqCst), 4);
+    assert!(stub.calls.load(Ordering::SeqCst) > before);
 }

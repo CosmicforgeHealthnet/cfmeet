@@ -150,10 +150,10 @@ pub async fn require_send<C: ConnectionTrait>(
     if targets.len() != 1 {
         return Err(Error::code(ErrorCode::DeliveryRefused));
     }
-    // B2: an allowed decision is reused briefly; any block / contact / privacy / account
-    // event about either principal invalidates it on every instance (`send_cache`).
-    send_cache::require_cached(
-        db,
+    // Never served from the B2 cache: a block must refuse the very next one-to-one
+    // message, and the Communications event that would invalidate a cached allow is
+    // delivered asynchronously (outbox relay), so a cached decision could outlive it.
+    require(
         state,
         ctx,
         Action::MessageSend,
