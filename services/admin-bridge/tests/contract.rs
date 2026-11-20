@@ -114,24 +114,37 @@ fn risky_commands_need_two_people_versions_and_idempotency() {
 }
 
 #[test]
-fn nothing_is_served_before_the_runtime_exists() {
-    // A0: the contract only. A1 flips the platform reads to served.
+fn a1_serves_exactly_the_platform_reads() {
+    let served: Vec<&str> = catalog()
+        .iter()
+        .filter(|c| c.served)
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(
+        served,
+        [
+            "bridge.capabilities.read",
+            "bridge.health.read",
+            "bridge.datasets.read",
+            "hq.projections.status"
+        ]
+    );
     for c in catalog() {
-        assert!(
-            !c.served,
-            "{} is marked served before the runtime exists",
-            c.id
-        );
-        assert!(
-            c.blocker().is_some(),
-            "{}: unserved capability needs a blocker",
-            c.id
-        );
-        assert!(
-            matches!(c.state(), State::Disabled | State::BlockedDependency),
-            "{}",
-            c.id
-        );
+        if c.served {
+            assert_eq!(c.state(), State::ReadOnly, "{}", c.id);
+            assert!(c.blocker().is_none() && !c.tests.is_empty(), "{}", c.id);
+        } else {
+            assert!(
+                c.blocker().is_some(),
+                "{}: unserved capability needs a blocker",
+                c.id
+            );
+            assert!(
+                matches!(c.state(), State::Disabled | State::BlockedDependency),
+                "{}",
+                c.id
+            );
+        }
     }
 }
 
@@ -466,4 +479,48 @@ fn source_sync_ceiling_is_exactly_feed_status_and_datasets() {
             "hq.projections.read": ["event-sync"]
         })
     );
+}
+
+/// HQ classifies reads by id suffix and shape (agreed with HQ Track B): collections end in
+/// `.list` / `.search` and are paged or searched; nothing else may end that way.
+#[test]
+fn collections_and_only_collections_end_in_list_or_search() {
+    for c in catalog() {
+        if c.kind == Kind::Command {
+            assert!(
+                !c.id.ends_with(".list") && !c.id.ends_with(".search"),
+                "{}: a command named like a collection",
+                c.id
+            );
+            continue;
+        }
+        let collection = c.id.ends_with(".list") || c.id.ends_with(".search");
+        let paged = matches!(
+            c.shape,
+            QueryShape::ScopedPage | QueryShape::ScopedWindow | QueryShape::ScopedSearch
+        );
+        if collection {
+            assert!(
+                paged,
+                "{}: a collection must be paged, windowed or searched",
+                c.id
+            );
+            assert_eq!(c.method, Method::Get, "{}", c.id);
+        }
+        if c.id.ends_with(".search") {
+            assert_eq!(c.shape, QueryShape::ScopedSearch, "{}", c.id);
+        }
+    }
+}
+
+/// HQ treats every non-GET as a COMMAND unless it is on its reviewed POST-read list. Adding a
+/// read-type POST here requires telling HQ first.
+#[test]
+fn read_type_posts_are_exactly_the_ones_hq_reviewed() {
+    let posts: Vec<&str> = catalog()
+        .into_iter()
+        .filter(|c| c.method == Method::Post && c.kind != Kind::Command)
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(posts, ["hq.events.ack", "pricing.charges.simulate"]);
 }

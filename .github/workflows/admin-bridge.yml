@@ -6,7 +6,8 @@ name: Admin Bridge service
 # contract is generated from the catalog, checked for drift and refused when it breaks
 # compatibility with main.
 #
-# Phase A0: contract only. Nothing here deploys anywhere.
+# Phase A1: the runtime (security chain, audit, health, discovery, datasets), off by
+# default. Nothing here deploys anywhere.
 
 on:
   push:
@@ -14,11 +15,13 @@ on:
     paths:
       - "services/admin-bridge/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
       - ".github/workflows/admin-bridge.yml"
   pull_request:
     paths:
       - "services/admin-bridge/**"
       - "packages/service-auth/**"
+      - "packages/migration-guard/**"
       - ".github/workflows/admin-bridge.yml"
   workflow_dispatch:
 
@@ -61,6 +64,9 @@ jobs:
                services/admin-bridge/Cargo.toml; then
             echo "::error::services/admin-bridge depends on another service's source"; exit 1
           fi
+          if grep -rn -i -P 'CREATE TABLE (?!admin_)' services/admin-bridge/migration/src; then
+            echo "::error::services/admin-bridge creates a table outside its domain (admin_ only)"; exit 1
+          fi
 
   contract:
     name: contract drift / compatibility / tests
@@ -94,5 +100,88 @@ jobs:
       - name: SHA256SUMS
         working-directory: services/admin-bridge/docs/contract
         run: sha256sum --check --strict SHA256SUMS
-      - name: Tests
+      - name: Tests (database tests run in the postgres job)
+        env:
+          CFMEET_SKIP_DB_TESTS: "1"
         run: cargo test --workspace --locked
+
+  postgres:
+    name: PostgreSQL store / migrations / roles
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/admin-bridge -> target
+          key: postgres
+      - name: Tests (store, triggers, audit chain)
+        run: cargo test --workspace --locked
+      - name: Migrations up / reset / up, admin_ tables only
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/admin_bridge_migration_smoke
+          APP_ENV: test
+        run: |
+          set -euo pipefail
+          cargo build --locked -p admin-bridge-migration
+          psql -h 127.0.0.1 -U postgres -c "CREATE DATABASE admin_bridge_migration_smoke"
+          ./target/debug/admin-bridge-migration up
+          ./target/debug/admin-bridge-migration reset
+          ./target/debug/admin-bridge-migration up
+          q() { psql -h 127.0.0.1 -U postgres -d admin_bridge_migration_smoke -tAc "$1"; }
+          test "$(q "SELECT count(*) FROM admin_bridge_seaql_migrations")" = "$(grep -c '^pub mod m20' migration/src/lib.rs)"
+          test "$(q "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'admin_bridge_seaql_migrations' AND tablename !~ '^admin_'")" = "0"
+      - name: Least-privilege roles rehearsal (deploy/db-roles.sql)
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -U postgres -d postgres -X -v step=roles             -v migrator_password=migrator -v runtime_password=runtime -f deploy/db-roles.sql
+          DATABASE_URL=postgres://admin_bridge_migrator:migrator@127.0.0.1:5432/cfmeet_admin_bridge             ./target/debug/admin-bridge-migration up
+          psql -h 127.0.0.1 -U postgres -d cfmeet_admin_bridge -X -v step=grants -f deploy/db-roles.sql
+          # Idempotent.
+          psql -h 127.0.0.1 -U postgres -d cfmeet_admin_bridge -X -v step=grants -f deploy/db-roles.sql
+          rt() { PGPASSWORD=runtime psql -h 127.0.0.1 -U admin_bridge_runtime -d cfmeet_admin_bridge -X -v ON_ERROR_STOP=1 -tAc "$1"; }
+          must_fail() { if rt "$1" >/dev/null 2>&1; then echo "::error::runtime role could run: $1"; exit 1; fi; }
+          rt "INSERT INTO admin_security_claims (kind, value, keep_until) VALUES ('NONCE', 'n1', now())"
+          rt "DELETE FROM admin_security_claims WHERE kind = 'NONCE'"
+          rt "INSERT INTO admin_audit_entries (entry_hash, previous_hash, correlation_id, occurred_at, actor, method, path, scope, decision, http_status, detail) VALUES (repeat('a', 64), repeat('0', 64), gen_random_uuid(), now(), 'hq:x', 'GET', '/x', 'null'::json, 'ALLOWED', 200, 'null'::json)"
+          must_fail "UPDATE admin_audit_entries SET decision = 'X_Y'"
+          must_fail "DELETE FROM admin_audit_entries"
+          must_fail "TRUNCATE admin_audit_entries"
+          must_fail "DELETE FROM admin_revocations"
+          must_fail "UPDATE admin_policy_revisions SET key_id = 'x'"
+          must_fail "UPDATE admin_remote_principals SET material = repeat('b', 64)"
+          must_fail "CREATE TABLE admin_rogue (id int)"
+          must_fail "DROP TABLE admin_projections"
+          echo "runtime role is least-privilege"
+
+
+  docker:
+    name: Docker image (repository-root context; never pushed or deployed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        working-directory: .
+        run: docker build -f services/admin-bridge/Dockerfile -t cfmeet-admin-bridge:ci .
+      - name: three binaries, uid 10001, off by default, no key material
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint /bin/ls cfmeet-admin-bridge:ci /app | tr '\n' ' ')" = "admin-bridge admin-bridge-admin admin-bridge-migration "
+          test "$(docker run --rm --entrypoint /usr/bin/id cfmeet-admin-bridge:ci -u)" = "10001"
+          docker run --rm -e CF_RUNTIME_ENVIRONMENT=production cfmeet-admin-bridge:ci ./admin-bridge --check-config | grep -q '"enabled":false'
+          if docker run --rm --entrypoint /bin/sh cfmeet-admin-bridge:ci -c 'grep -rlI --exclude-dir=proc --exclude-dir=sys -- "PRIVATE KEY-----" / 2>/dev/null'; then
+            echo "::error::private key material in the image"; exit 1
+          fi

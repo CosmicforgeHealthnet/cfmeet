@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Admin Bridge (HQ interface v1)",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Private HQ -> CF Meet admin bridge. Transport, signing, staff assertion and authorization rules: signing-profile.md. Artifact state never authorizes anything at runtime."
   },
   "servers": [
@@ -238,7 +238,7 @@
         "x-cfmeet-permission": "bridge.capabilities.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "admin-bridge"
       }
     },
@@ -470,7 +470,7 @@
         "x-cfmeet-permission": "bridge.health.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "admin-bridge"
       }
     },
@@ -748,7 +748,7 @@
         "x-cfmeet-permission": "bridge.datasets.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "admin-bridge"
       }
     },
@@ -1489,7 +1489,7 @@
         "x-cfmeet-permission": "hq.projections.read",
         "x-cfmeet-risk": "R0",
         "x-cfmeet-approval": "NONE",
-        "x-cfmeet-state": "BLOCKED_DEPENDENCY",
+        "x-cfmeet-state": "READ_ONLY",
         "x-cfmeet-owner": "admin-bridge"
       }
     },

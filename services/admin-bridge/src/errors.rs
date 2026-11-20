@@ -16,6 +16,7 @@ macro_rules! codes {
 
 codes! {
     BridgeDisabled => ("BRIDGE_DISABLED", 503, "ADMIN_BRIDGE_ENABLED is off"),
+    BridgeUnavailable => ("BRIDGE_UNAVAILABLE", 503, "the bridge's own database is unavailable; nothing was done"),
     RequestShapeInvalid => ("REQUEST_SHAPE_INVALID", 400, "path too long, encoded or dot segments, or a malformed request line"),
     BodyTooLarge => ("BODY_TOO_LARGE", 413, "body over 32 KiB"),
     ClientCertificateRefused => ("CLIENT_CERTIFICATE_REFUSED", 401, "no client certificate, wrong URI name, or fingerprint not enrolled and live"),

@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "a537059765e3b3d06e9432d00a8aa319ea26275d947b5adff1ac5c9eb5eb8056",
-    "capability_matrix_sha256": "ae8ac8b3ff37186c0b20fae9ac7455eb41aa2e6712941d846deeb6a304295d0d"
+    "openapi_sha256": "ce3a76aefd0f99d92b5c36c1586375ece915de394f6e7c531555983f4073a6e1",
+    "capability_matrix_sha256": "d2f710790007096f3ad620fcf1cea49a3fa0b4bf8fad87540aeac6fe95d0c609"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 246,
     "by_state": {
-      "READ_ONLY": 0,
+      "READ_ONLY": 4,
       "AVAILABLE": 0,
       "DISABLED": 114,
-      "BLOCKED_DEPENDENCY": 132
+      "BLOCKED_DEPENDENCY": 128
     }
   },
   "capabilities": [
@@ -100,7 +100,7 @@
       "result_schema": {
         "$ref": "#/components/schemas/Discovery"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "bridge.capabilities.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -109,8 +109,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED",
-      "blocker": "Phase A1: bridge route not implemented yet",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "discovery_reports_runtime_states_and_the_openapi_hash"
+      ]
     },
     {
       "id": "bridge.health.read",
@@ -148,7 +150,7 @@
       "result_schema": {
         "$ref": "#/components/schemas/Health"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "bridge.health.read",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -157,8 +159,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED",
-      "blocker": "Phase A1: bridge route not implemented yet",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "health_reports_unconfigured_owners_honestly"
+      ]
     },
     {
       "id": "bridge.datasets.read",
@@ -211,7 +215,7 @@
       "result_schema": {
         "$ref": "#/components/schemas/Dataset"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "bridge.datasets.read",
       "risk": "R0",
       "privacy": "INTERNAL",
@@ -220,8 +224,11 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED",
-      "blocker": "Phase A1: bridge route not implemented yet",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "datasets_are_null_not_zero_until_sources_report",
+        "worker_identity_reads_datasets_with_the_workload_acr"
+      ]
     },
     {
       "id": "hq.events.feed",
@@ -349,7 +356,7 @@
       "result_schema": {
         "$ref": "#/components/schemas/ProjectionStatus"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "hq.projections.read",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -358,8 +365,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED",
-      "blocker": "Phase A1: bridge route not implemented yet",
-      "source_tests": []
+      "blocker": null,
+      "source_tests": [
+        "projection_status_is_unavailable_until_owner_events"
+      ]
     },
     {
       "id": "accounts.users.search",

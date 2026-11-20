@@ -563,7 +563,8 @@ Agreed with the `centralize-admin` session building `services/cfmeet-admin` (202
 
 | Contract version | Commit on `main` | Notes |
 |---|---|---|
-| 1.0.0 (A0) | *recorded when A0 merges* | Contract only. Every capability is DISABLED or BLOCKED_DEPENDENCY; nothing is served |
+| 1.0.0 (A0) | `7325f30447891ed91ac0b421c8eb363a9c356609` (merge of #121, 2026-11-20) | Contract only. Every capability is DISABLED or BLOCKED_DEPENDENCY; nothing is served |
+| 1.1.0 (A1) | *recorded when A1 merges* | Runtime. `bridge.capabilities.read`, `bridge.health.read`, `bridge.datasets.read` and `hq.projections.status` are READ_ONLY; new error code `BRIDGE_UNAVAILABLE`. Additive over 1.0.0 |
 
 HQ pins a merged commit on `main` (the branch CF Meet production deploys from) and recomputes `SHA256SUMS`. The running bridge reports the sha256 of its own `openapi.json` in `bridge.capabilities.read`; HQ trusts runtime states only when it equals the pinned hash.
 
