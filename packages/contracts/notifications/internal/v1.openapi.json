@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Notification Service internal API",
-    "version": "1.4.0",
-    "description": "Internal signed API of the unified Notification Service (cfmeet.notifications; blueprint Document 4 §3.3): I1–I11, the optional I12 (approved under D-15) and I13 (roadmap N9, the Messaging push-registration facade and D-1b copy) and I3c (1.3.0, gap audit C1: the cancellation of a call ring). Frozen by roadmap N1 before the service exists (lifecycle experimental). Every route except I12 requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle (x-cfmeet-internal-permission); durable jti nonces; request binding emitted from day one. Never routed by public ingress. Health (/health, /ready with routingProtocol and per-lane heartbeats) is not counted as an API. 1.4.0 (ADR 0063 partner push, phase B5; all of it only while NOTIFICATIONS_PARTNER_PUSH_ENABLED is on, default off: the provider routes answer 404 and the partner shapes are refused exactly as before): N-P1 the push provider vault under /internal/v1/push/providers/{tenantId}/{applicationId}/{environmentId}[/{provider}[/verify]] (notifications-push-provider.manage, Developer Console only; the credential arrives sealed with packages/notification-client seal_push_credential for exactly that scope, is stored sealed under the service's data keys, and is never returned or logged); N-P2 I13 also accepts platform-principal subjects (APNS / APNS_VOIP / FCM, keyed by scope, principal, installation and platform); N-P3 I3 also accepts a platform-principal recipient (APNS_VOIP PushKit pushes on topic <bundleId>.voip, FCM high-priority data messages, with that scope's own credential only; recipientStatus); N-P4 platform-principal:<environmentId>:<principalId> recipients of messaging.message.created (cfmeet.notifications.event 1.5.0) are delivered with the partner's credential; N-P5 per-scope counters notif_partner_push_sent_total / notif_partner_push_failed_total{environment,lane,platform[,class]}."
+    "version": "1.5.0",
+    "description": "Internal signed API of the unified Notification Service (cfmeet.notifications; blueprint Document 4 §3.3): I1–I11, the optional I12 (approved under D-15) and I13 (roadmap N9, the Messaging push-registration facade and D-1b copy) and I3c (1.3.0, gap audit C1: the cancellation of a call ring). Frozen by roadmap N1 before the service exists (lifecycle experimental). Every route except I12 requires a packages/service-auth token whose issuer holds the stated permission in the receiver's trust bundle (x-cfmeet-internal-permission); durable jti nonces; request binding emitted from day one. Never routed by public ingress. Health (/health, /ready with routingProtocol and per-lane heartbeats) is not counted as an API. 1.4.0 (ADR 0063 partner push, phase B5; all of it only while NOTIFICATIONS_PARTNER_PUSH_ENABLED is on, default off: the provider routes answer 404 and the partner shapes are refused exactly as before): N-P1 the push provider vault under /internal/v1/push/providers/{tenantId}/{applicationId}/{environmentId}[/{provider}[/verify]] (notifications-push-provider.manage, Developer Console only; the credential arrives sealed with packages/notification-client seal_push_credential for exactly that scope, is stored sealed under the service's data keys, and is never returned or logged); N-P2 I13 also accepts platform-principal subjects (APNS / APNS_VOIP / FCM, keyed by scope, principal, installation and platform); N-P3 I3 also accepts a platform-principal recipient (APNS_VOIP PushKit pushes on topic <bundleId>.voip, FCM high-priority data messages, with that scope's own credential only; recipientStatus); N-P4 platform-principal:<environmentId>:<principalId> recipients of messaging.message.created (cfmeet.notifications.event 1.5.0) are delivered with the partner's credential; N-P5 per-scope counters notif_partner_push_sent_total / notif_partner_push_failed_total{environment,lane,platform[,class]}. 1.5.0 (ADR 0067, admin bridge): operator attribution (X-CF-Operator, X-CF-Approver, X-CF-Approval-Ref, X-CF-Intent-Digest) accepted only from cfmeet.admin-bridge and refused on every route from any other caller (403 FORBIDDEN); the admin bridge's operator reads GET /internal/v1/operator/deliveries and /failed-deliveries (time window, newest first), /email-suppressions (by address or digest; keyed digest only) and /providers (status only, never credentials), each requiring notifications.administer and X-CF-Operator."
   },
   "paths": {
     "/internal/v1/notification-events": {
@@ -3183,6 +3183,695 @@
           },
           "503": {
             "description": "UNAVAILABLE (Retry-After): database, or the service holds no HPKE key to open sealed credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/deliveries": {
+      "get": {
+        "operationId": "operatorListDeliveries",
+        "summary": "List deliveries (admin bridge)",
+        "description": "The admin bridge's time-window list of deliveries, newest first (keyset cursor <created_at micros>.<delivery id>). Window at most 31 days when both bounds are given. PII-free: no address, handle, code, token or rendered text.",
+        "tags": [
+          "Operations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "notifications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member this read is for (hq:<staff>); accepted only from cfmeet.admin-bridge.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "deliveryId",
+                          "notificationId",
+                          "category",
+                          "lane",
+                          "channel",
+                          "status",
+                          "attempts",
+                          "createdAt"
+                        ],
+                        "properties": {
+                          "deliveryId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "notificationId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "category": {
+                            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Category"
+                          },
+                          "lane": {
+                            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Lane"
+                          },
+                          "channel": {
+                            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Channel"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "PENDING",
+                              "DEFERRED",
+                              "DISPATCHING",
+                              "SENT",
+                              "DELIVERED",
+                              "FAILED",
+                              "EXPIRED",
+                              "CANCELLED",
+                              "SUPPRESSED",
+                              "SHADOW"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "lastErrorClass": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 64
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "completedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^[0-9]{1,20}\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: the issuer does not hold notifications.administer (cfmeet.admin-bridge only), X-CF-Operator is missing or malformed, or operator attribution came from another caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/failed-deliveries": {
+      "get": {
+        "operationId": "operatorListFailedDeliveries",
+        "summary": "List failed deliveries (admin bridge)",
+        "description": "Like operatorListDeliveries, restricted to FAILED deliveries.",
+        "tags": [
+          "Operations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "notifications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member this read is for (hq:<staff>); accepted only from cfmeet.admin-bridge.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "deliveryId",
+                          "notificationId",
+                          "category",
+                          "lane",
+                          "channel",
+                          "status",
+                          "attempts",
+                          "createdAt"
+                        ],
+                        "properties": {
+                          "deliveryId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "notificationId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                          },
+                          "category": {
+                            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Category"
+                          },
+                          "lane": {
+                            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Lane"
+                          },
+                          "channel": {
+                            "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Channel"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "PENDING",
+                              "DEFERRED",
+                              "DISPATCHING",
+                              "SENT",
+                              "DELIVERED",
+                              "FAILED",
+                              "EXPIRED",
+                              "CANCELLED",
+                              "SUPPRESSED",
+                              "SHADOW"
+                            ]
+                          },
+                          "attempts": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "lastErrorClass": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 64
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "completedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^[0-9]{1,20}\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: the issuer does not hold notifications.administer (cfmeet.admin-bridge only), X-CF-Operator is missing or malformed, or operator attribution came from another caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/email-suppressions": {
+      "get": {
+        "operationId": "operatorFindEmailSuppression",
+        "summary": "Find an email suppression (admin bridge)",
+        "description": "Exactly one of address (digested with the service's key, never stored, logged or returned) or digest (64 hex). Returns the effective suppression of that recipient by keyed digest only.",
+        "tags": [
+          "Operations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "notifications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member this read is for (hq:<staff>); accepted only from cfmeet.admin-bridge.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "address",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 254
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{64}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The effective suppression of the recipient (zero or one item); only the keyed digest is returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "maxItems": 1,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "digest",
+                          "reason",
+                          "createdAt"
+                        ],
+                        "properties": {
+                          "digest": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "COMPLAINED",
+                              "HARD_BOUNCE",
+                              "MANUAL"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: the issuer does not hold notifications.administer (cfmeet.admin-bridge only), X-CF-Operator is missing or malformed, or operator attribution came from another caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE (Retry-After).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/providers": {
+      "get": {
+        "operationId": "operatorGetProviderStatus",
+        "summary": "Provider status (admin bridge)",
+        "description": "Per-channel provider status from configuration and the last day of deliveries (DEGRADED when the latest delivery failed within the hour). Never a credential, key or provider response body.",
+        "tags": [
+          "Operations"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "notifications.administer",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The HQ staff member this read is for (hq:<staff>); accepted only from cfmeet.admin-bridge.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "providers",
+                    "checkedAt"
+                  ],
+                  "properties": {
+                    "providers": {
+                      "type": "array",
+                      "maxItems": 8,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "channel",
+                          "configured",
+                          "status",
+                          "lastSuccessAt",
+                          "lastFailureAt",
+                          "lastErrorClass",
+                          "recentDeliveries"
+                        ],
+                        "properties": {
+                          "channel": {
+                            "type": "string",
+                            "enum": [
+                              "EMAIL",
+                              "PUSH"
+                            ]
+                          },
+                          "configured": {
+                            "type": "boolean"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "OK",
+                              "DEGRADED",
+                              "UNKNOWN",
+                              "NOT_CONFIGURED"
+                            ]
+                          },
+                          "lastSuccessAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "lastFailureAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "lastErrorClass": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "maxLength": 64
+                          },
+                          "recentDeliveries": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "checkedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid or replayed service token (INTERNAL_AUTHENTICATION_FAILED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN: the issuer does not hold notifications.administer (cfmeet.admin-bridge only), X-CF-Operator is missing or malformed, or operator attribution came from another caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/notifications/common/v1.schema.json#/$defs/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE (Retry-After).",
             "content": {
               "application/json": {
                 "schema": {
