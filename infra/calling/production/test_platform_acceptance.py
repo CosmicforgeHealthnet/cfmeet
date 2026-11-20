@@ -92,10 +92,11 @@ class FakePlatform:
             return 422, {'error': {'code': 'VALIDATION_ERROR'}}
         for uid, u in self.users.items():
             if u['env'] == env and u['externalId'] == body['externalId']:
-                return 200, {'user': dict(u, id=uid)}
+                return 200, dict(u, id=uid)
         uid = self.id('u')
         self.users[uid] = dict(env=env, externalId=body['externalId'], displayName=body.get('displayName'), status='ACTIVE')
-        return 201, {'user': dict(self.users[uid], id=uid)}
+        # Contract: POST /v1/users answers the EndUser itself (not wrapped).
+        return 201, dict(self.users[uid], id=uid)
 
     def visible_user(self, env, uid):
         u = self.users.get(uid)
@@ -191,8 +192,8 @@ class FakePlatform:
                 return 200, {'environmentId': env, 'origins': self.origins.get(env, [])}
             if feature == 'test-user-tokens':
                 status, created = self.new_user(env, body)
-                _, minted = self.mint(env, created['user']['id'], body['grants'])
-                return 201, dict(minted, user=created['user'])
+                _, minted = self.mint(env, created['id'], body['grants'])
+                return 201, dict(minted, user=created)
             if method == 'POST':
                 return 422, {'error': {'code': 'VALIDATION_ERROR'}}
             return 200, {'items': self.push.get(env, [])}
@@ -212,8 +213,8 @@ class FakePlatform:
                 if not self.on('tokens'):
                     return self.nf()
                 _, created = self.new_user(env, body)
-                status, minted = self.mint(env, created['user']['id'], body['grants'])
-                return status, dict(minted, user=created['user'])
+                status, minted = self.mint(env, created['id'], body['grants'])
+                return status, dict(minted, user=created)
             m = re.fullmatch(r'/v1/users/(\w+)(/tokens|/revoke-sessions)?', bare)
             u = self.visible_user(env, m.group(1))
             if u is None:
@@ -229,7 +230,7 @@ class FakePlatform:
             if method == 'DELETE':
                 del self.users[m.group(1)]
                 return 204, {}
-            return 200, {'user': dict(u, id=m.group(1))}
+            return 200, dict(u, id=m.group(1))
         if bare == '/v1/conversations' and method == 'POST':
             conv = self.id('conv')
             self.conversations[conv] = dict(env=env, members={headers['CF-Acting-Principal'], body['counterpartPrincipalId']})

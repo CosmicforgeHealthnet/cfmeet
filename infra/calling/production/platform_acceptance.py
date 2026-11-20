@@ -285,7 +285,9 @@ class Journey:
         if display_name:
             body['displayName'] = display_name
         status, value = t['machine'].call('POST', '/v1/users', body, expected=(200, 201))
-        user = value.get('user') or {}
+        # Contract: the Users API answers the EndUser itself (Platform Access's internal
+        # router wraps it in {"user": ...}; the Developer Platform unwraps it).
+        user = value if isinstance(value, dict) else {}
         if status == 201 and user.get('id'):
             self.undo(t['machine'], 'DELETE', '/v1/users/%s' % user['id'])
         return status, user
@@ -302,17 +304,17 @@ class Journey:
         _, customer = self.create_user(t, 'customer-%s-%s' % (t['label'].lower(), self.tag), 'Acceptance customer')
         self.check('users %s: second user created' % label, bool(customer.get('id')), fatal=True)
         _, got = machine.call('GET', '/v1/users/%s' % rider['id'])
-        self.check('users %s: read by id' % label, (got.get('user') or {}).get('id') == rider['id'])
+        self.check('users %s: read by id' % label, got.get('id') == rider['id'])
         _, listed = machine.call('GET', '/v1/users?externalId=%s' % rider['externalId'])
         self.check('users %s: list by externalId' % label, [u.get('id') for u in listed.get('items', [])] == [rider['id']])
         _, patched = machine.call('PATCH', '/v1/users/%s' % rider['id'], {'displayName': 'Acceptance rider %s' % label})
         self.check('users %s: profile updated' % label,
-                   (patched.get('user') or {}).get('displayName') == 'Acceptance rider %s' % label)
+                   patched.get('displayName') == 'Acceptance rider %s' % label)
         status, value = machine.call('POST', '/v1/users', {'externalId': PHONE_LIKE_ID}, expected=(201, 422))
         self.check('users %s: phone-number externalId refused (422)' % label,
                    status == 422 and code(value) == 'VALIDATION_ERROR')
         if status == 201:
-            self.undo(machine, 'DELETE', '/v1/users/%s' % (value.get('user') or {}).get('id'))
+            self.undo(machine, 'DELETE', '/v1/users/%s' % value.get('id'))
         _, console = t['console'].call('GET', '/v1/environments/%s/users' % t['env']['id'])
         self.check('users %s: console lists the environment\'s users' % label,
                    rider['id'] in [u.get('id') for u in console.get('items', [])])
