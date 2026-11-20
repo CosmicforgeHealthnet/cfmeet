@@ -224,6 +224,18 @@ async fn authenticate(
             ));
         }
     };
+    // ADR 0068: operator attribution only from the admin bridge, on every internal route.
+    if crate::services::admin_operator::attribution_refused(
+        ctx.authenticated_service(),
+        &parts.headers,
+    ) {
+        return Err(error(
+            StatusCode::FORBIDDEN,
+            "FORBIDDEN",
+            "Internal permission denied.",
+            ctx.request_id().as_str(),
+        ));
+    }
     if ctx.require_permission(permission).is_err() {
         tracing::warn!(
             caller = ctx.authenticated_service().as_str(),

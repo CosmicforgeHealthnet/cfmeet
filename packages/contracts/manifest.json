@@ -1178,6 +1178,17 @@
       "description": "Frozen by Notification Service roadmap N1 (D-13) before implementation; experimental until implemented (N6: X1, X2; N12: X6, X7). Meeting Service / Account owner APIs for the Notification Service only: resolveAccountContacts (account-contacts.read), resolveConferenceRecipients (meeting-notification-recipients.read), claimCriticalSendLeases and completeCriticalSends (account-route-lease.claim). 1.1.0 (N6): X2 answers `joinPath` and `endsAt`. X1 and X2 are served by services/meeting-service from N6 (PR #76), X6 and X7 from N12, only while NOTIFICATION_OWNER_API_ENABLED=true."
     },
     {
+      "id": "cfmeet.meeting-service.admin-operator-api",
+      "version": "1.0.0",
+      "kind": "openapi",
+      "path": "meeting-service/admin-operator/v1.openapi.json",
+      "owner": "meeting-service",
+      "visibility": "internal",
+      "lifecycle": "experimental",
+      "authority": "contract-first",
+      "description": "1.0.0 (ADR 0068, admin bridge, phase A2.5): the Meeting Service's operator reads for cfmeet.admin-bridge only, each requiring X-CF-Operator: account search and detail (email matched, never returned; masked on detail), sessions, devices, MFA status and security history under account.administer; meeting spaces, conferences, live conferences, participants and the conference audit under meeting.administer. Served by services/meeting-service only while ADMIN_OPERATOR_API_ENABLED=true; operator attribution from any other caller is refused on every internal route."
+    },
+    {
       "id": "cfmeet.messaging.notification-owner-api",
       "version": "1.0.0",
       "kind": "openapi",

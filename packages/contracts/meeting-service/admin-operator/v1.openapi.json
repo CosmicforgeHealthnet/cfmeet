@@ -1,0 +1,2054 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "CF Meet Meeting Service / Account — admin bridge operator reads",
+    "version": "1.0.0",
+    "description": "Operator reads the Meeting Service (Account authority and conferences) exposes to cfmeet.admin-bridge only (ADR 0068, design §6.1–6.2): account search and detail, sessions, devices, MFA status and security history (account.administer), meeting spaces, conferences, live conferences, participants and the conference audit (meeting.administer). Every request also needs X-CF-Operator: hq:<staff>. Served only while ADMIN_OPERATOR_API_ENABLED=true. Minimal by construction: ids, states, counts and times; never a password hash, token, session label, device key, MFA secret or recovery code, IP address, location, message content or media."
+  },
+  "tags": [
+    {
+      "name": "Accounts",
+      "description": "Account authority reads (account.administer)."
+    },
+    {
+      "name": "Meetings",
+      "description": "Meeting and conference reads (meeting.administer)."
+    }
+  ],
+  "paths": {
+    "/internal/v1/operator/accounts/users": {
+      "get": {
+        "operationId": "operatorSearchUsers",
+        "summary": "Search users (admin bridge)",
+        "description": "Exact email or user id, username prefix or display-name substring. The email is matched, never returned.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Q"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUserPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}": {
+      "get": {
+        "operationId": "operatorGetUser",
+        "summary": "Get a user (admin bridge)",
+        "description": "One account; the email address only masked.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorUserDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/sessions": {
+      "get": {
+        "operationId": "operatorListUserSessions",
+        "summary": "List a user's sessions (admin bridge)",
+        "description": "Account sessions: method, times, revocation. No client label, no token.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSessionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/devices": {
+      "get": {
+        "operationId": "operatorListUserDevices",
+        "summary": "List a user's devices (admin bridge)",
+        "description": "Account devices: class, platform, trust, state, times. No label, key or digest.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorDevicePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/mfa": {
+      "get": {
+        "operationId": "operatorGetUserMfa",
+        "summary": "Get a user's MFA status (admin bridge)",
+        "description": "TOTP enrolment state and the count of unused recovery codes. Never a secret or a code.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorMfa"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/accounts/users/{userId}/security-events": {
+      "get": {
+        "operationId": "operatorListUserSecurityEvents",
+        "summary": "List a user's security history (admin bridge)",
+        "description": "Newest first by sequence; window at most 31 days. Never the event detail or request id.",
+        "tags": [
+          "Accounts"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "account.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/UserId"
+          },
+          {
+            "$ref": "#/components/parameters/Since"
+          },
+          {
+            "$ref": "#/components/parameters/Until"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSecurityEventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no account.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/spaces": {
+      "get": {
+        "operationId": "operatorSearchSpaces",
+        "summary": "Search meeting spaces (admin bridge)",
+        "description": "By id, meeting code or title substring. No description, passcode or policy documents.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Q"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorSpacePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences": {
+      "get": {
+        "operationId": "operatorSearchConferences",
+        "summary": "Search conferences (admin bridge)",
+        "description": "Conferences of the spaces matching q (id, meeting code or title), or the conference with that id.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Q"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorConferencePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences/{conferenceId}": {
+      "get": {
+        "operationId": "operatorGetConference",
+        "summary": "Get a conference (admin bridge)",
+        "description": "State, times and participant counts. No room names or provider ids.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ConferenceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorConference"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/conferences/{conferenceId}/participants": {
+      "get": {
+        "operationId": "operatorListConferenceParticipants",
+        "summary": "List conference participants (admin bridge)",
+        "description": "No guest identity, external reference, credential or denial note.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/ConferenceId"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorParticipantPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/live": {
+      "get": {
+        "operationId": "operatorListLiveConferences",
+        "summary": "List live conferences (admin bridge)",
+        "description": "Conferences whose status is LIVE.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorConferencePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/meetings/audit-events": {
+      "get": {
+        "operationId": "operatorListConferenceAudit",
+        "summary": "List the conference audit (admin bridge)",
+        "description": "Newest first; window at most 31 days. Never actor or target references, metadata or request ids.",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "cfServiceAuth": []
+          }
+        ],
+        "x-cfmeet-internal-permission": "meeting.administer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Operator"
+          },
+          {
+            "$ref": "#/components/parameters/Since"
+          },
+          {
+            "$ref": "#/components/parameters/Until"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperatorAuditEventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR: a missing or invalid query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INTERNAL_AUTHENTICATION_FAILED: missing, invalid or replayed service token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "INTERNAL_PERMISSION_DENIED (no meeting.administer), OPERATOR_REQUIRED (no valid X-CF-Operator from cfmeet.admin-bridge).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UNAVAILABLE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cfServiceAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CF-Service-Authorization",
+        "description": "Bearer EdDSA service token from packages/service-auth; audience cfmeet.meeting-service; issuer must be cfmeet.admin-bridge holding the stated permission in the receiver's trust bundle."
+      }
+    },
+    "parameters": {
+      "Operator": {
+        "name": "X-CF-Operator",
+        "in": "header",
+        "required": true,
+        "description": "The HQ staff member the admin bridge reads for (ADR 0068). Accepted only from cfmeet.admin-bridge; operator attribution from any other caller is refused on every internal route of the service.",
+        "schema": {
+          "type": "string",
+          "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+        }
+      },
+      "UserId": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ConferenceId": {
+        "name": "conferenceId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Q": {
+        "name": "q",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "maxLength": 128
+        }
+      },
+      "Since": {
+        "name": "since",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "Until": {
+        "name": "until",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "requestId": {
+                "type": "string",
+                "maxLength": 100
+              }
+            }
+          }
+        }
+      },
+      "OperatorUser": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "username",
+          "displayName",
+          "role",
+          "status",
+          "createdAt",
+          "lastLoginAt"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastLoginAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorUserDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "username",
+          "displayName",
+          "role",
+          "status",
+          "createdAt",
+          "lastLoginAt",
+          "emailMasked",
+          "emailVerified",
+          "authType",
+          "locale",
+          "timezone"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastLoginAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "emailMasked": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "First character of the local part and of the domain label, the top-level domain kept (a***@e***.com). Never the address."
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "authType": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 35
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "OperatorSession": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "authMethod",
+          "authenticatedAt",
+          "createdAt",
+          "lastRefreshedAt",
+          "expiresAt",
+          "revokedAt",
+          "revokeReason"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authMethod": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "authenticatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastRefreshedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revokeReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "OperatorDevice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deviceId",
+          "deviceClass",
+          "platform",
+          "trust",
+          "trustedVia",
+          "trustedAt",
+          "state",
+          "createdAt",
+          "lastSeenAt",
+          "revokedAt",
+          "revokeReason"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "deviceClass": {
+            "enum": [
+              "WEB",
+              "MOBILE"
+            ]
+          },
+          "platform": {
+            "enum": [
+              "WEB",
+              "IOS",
+              "ANDROID"
+            ]
+          },
+          "trust": {
+            "enum": [
+              "UNTRUSTED",
+              "TRUSTED"
+            ]
+          },
+          "trustedVia": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "trustedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revokeReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "OperatorMfa": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "totp",
+          "recoveryCodesRemaining"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "totp": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "state",
+              "enrolledAt",
+              "confirmedAt"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "NOT_ENROLLED",
+                  "PENDING_CONFIRMATION",
+                  "ENABLED"
+                ]
+              },
+              "enrolledAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "confirmedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "recoveryCodesRemaining": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OperatorSecurityEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "eventId",
+          "sequence",
+          "eventType",
+          "outcome",
+          "actorKind",
+          "actorUserId",
+          "sessionId",
+          "occurredAt"
+        ],
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "eventType": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "outcome": {
+            "enum": [
+              "SUCCESS",
+              "FAILURE",
+              "DENIED"
+            ]
+          },
+          "actorKind": {
+            "enum": [
+              "USER",
+              "ADMIN",
+              "SYSTEM",
+              "ANONYMOUS"
+            ]
+          },
+          "actorUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorSpace": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "spaceId",
+          "meetingCode",
+          "title",
+          "meetingType",
+          "status",
+          "ownerUserId",
+          "organizationId",
+          "createdAt",
+          "updatedAt",
+          "archivedAt",
+          "version"
+        ],
+        "properties": {
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "meetingCode": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "meetingType": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "ownerUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "archivedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OperatorConference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conferenceId",
+          "spaceId",
+          "title",
+          "kind",
+          "status",
+          "scheduledStartAt",
+          "scheduledEndAt",
+          "startedAt",
+          "endedAt",
+          "terminationReason",
+          "locked",
+          "recordingState",
+          "transcriptionState",
+          "participantsAdmitted",
+          "participantsTotal",
+          "createdAt",
+          "version"
+        ],
+        "properties": {
+          "conferenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "scheduledStartAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "scheduledEndAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "terminationReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "recordingState": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "transcriptionState": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "participantsAdmitted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "participantsTotal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "OperatorParticipant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "participantId",
+          "identityType",
+          "userId",
+          "displayName",
+          "role",
+          "admissionState",
+          "requestedAt",
+          "admittedAt",
+          "removedAt",
+          "bannedAt"
+        ],
+        "properties": {
+          "participantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identityType": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "role": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "admissionState": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "admittedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "removedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "bannedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorAuditEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "eventId",
+          "spaceId",
+          "conferenceId",
+          "actorType",
+          "action",
+          "targetType",
+          "occurredAt"
+        ],
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "spaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conferenceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "actorType": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "action": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "targetType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperatorUserPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorUser"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next user id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorSessionPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorSession"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next session id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorDevicePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorDevice"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next device id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorSecurityEventPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorSecurityEvent"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Sequence of the last item; the next page has lower sequences."
+          }
+        }
+      },
+      "OperatorSpacePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorSpace"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next space id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorConferencePage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorConference"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next conference id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorParticipantPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorParticipant"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Next participant id (keyset, id order)."
+          }
+        }
+      },
+      "OperatorAuditEventPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/OperatorAuditEvent"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "<micros>.<uuid> of the last item; the next page is older."
+          }
+        }
+      }
+    }
+  }
+}

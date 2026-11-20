@@ -612,6 +612,9 @@ async fn verified_scope<'a>(
         .verify_request(&hop.method, &hop.path, headers)
         .await
         .map_err(|_| ApiError::Unauthorized("Internal authentication failed".into()))?;
+    if crate::services::admin_operator::attribution_refused(ctx.authenticated_service(), headers) {
+        return Err(ApiError::Forbidden("Internal permission denied".into()));
+    }
     ctx.require_permission(permission)
         .map_err(|_| ApiError::Forbidden("Internal permission denied".into()))?;
     let scope = ctx
