@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CF Meet Developer Platform internal API",
-    "version": "1.13.0",
-    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read. 1.13.0 (ADR 0068 A3): the verification queue in HQ's case shape (GET /internal/v1/operator/verification/cases, /{caseId}, /{caseId}/history), production-access and app decisions from the admin bridge (Idempotency-Key, expectedVersion, HQ two-person approval instead of the named reviewers, recorded in the same transaction) and GET /internal/v1/operator/operations/{idempotencyKey}."
+    "version": "1.14.0",
+    "description": "HTTP surface of services/developer-platform: GET /health, GET /ready, the service-authenticated /internal/v1 API and (cfmeet.developer-platform.http-api) the gateway-forwarded customer API under /v1. Every /internal/v1 path, unknown ones included, requires a valid Ed25519 service token whose issuer the Developer Platform's trust bundle grants the route's permission. Customers never reach this service directly: the API Gateway authenticates them (Platform Access credentials, or the CF Meet session verified through the Meeting Service bridge) and forwards a signed request. Section 53: POST /internal/v1/platform/events (developer-event.publish) ingests committed producer events for central customer webhooks, and the gateway-forwarded machine webhook API is served at Calling's public paths (/v1/webhooks*, /v1/webhook-deliveries/{delivery_id}/replay) for the cut-over. 1.5.0 Section 53 §9.1 / §19.3 webhook migration operator routes under /internal/v1/operator/webhook-migration/** (status, dry-run inventory, resumable import, reconcile, shadow report, cutover check, rotation acknowledgements, takeover, rollback export, rollback). 1.6.0 (Part VI Chapters 10–13): usage fact ingestion, stream watermarks and reconciliation (developer-event.publish), entitlement snapshots with caller restrictions, operator production-access decisions, overrides, first-party scope grants, usage operations, cost-centre usage, support profiles and the forwarded /v1/usage and /v1/limits. 1.7.0 (Chapters 14–18): conflicting event replays refused (CONFLICTING_REPLAY) and GET /internal/v1/operator/ingestion/health. 1.8.0 (Part VI §19.4): forwardedListUsage / forwardedGetLimits answer the PUBLISHED Calling contract of GET /v1/usage and GET /v1/limits (platform/usage UsageList / Limits, Calling's parameters and VALIDATION_ERROR rules): Calling's metered call facts projected from the unified ledger and the gateway-enforced REQUEST_RATE; Calling-only detail stays at GET /v1/calling/usage and GET /v1/calling/limits. 1.9.0 (Blueprint Section 15, PLT-009): operator-only reads GET /internal/v1/operator/organizations (list / search) and GET /internal/v1/operator/activity (organization-scoped and platform-level operator commands); platform-level operator commands are now audited. 1.11.0 (ADR 0065): operator app review /internal/v1/operator/apps* (flag DEVELOPER_PLATFORM_APPS_ENABLED). 1.12.0 (ADR 0068, admin bridge): X-CF-Operator also names an HQ staff member (hq:<staff>) when the caller is cfmeet.admin-bridge, operator attribution headers from any other caller (the operator console's legacy X-CF-Operator excepted) are refused with INTERNAL_PERMISSION_DENIED; operator reads of a workspace's projects, environments, members, invitations (no address), push credential details, webhook subscriptions (endpoint host only) and webhook deliveries, app search, app versions and app installations; since / until on the operator activity read. 1.13.0 (ADR 0068 A3): the verification queue in HQ's case shape (GET /internal/v1/operator/verification/cases, /{caseId}, /{caseId}/history), production-access and app decisions from the admin bridge (Idempotency-Key, expectedVersion, HQ two-person approval instead of the named reviewers, recorded in the same transaction) and GET /internal/v1/operator/operations/{idempotencyKey}. 1.14.0 (ADR 0068 A4): admin bridge partner and app commands — workspace state (R3), support tier and incident record (POST support-profile for the bridge), usage reprocess (unversioned), push key disable and webhook delivery retry (admin bridge only), app suspend / lift-suspension — answering AdminCommandResult {status, version, resource} and recorded for GET /internal/v1/operator/operations/{idempotencyKey} (source_version null when unversioned); reads of a workspace's usage and of recorded incidents; push-provider state and version."
   },
   "tags": [
     {
@@ -56,11 +56,11 @@
     },
     {
       "name": "Operator: verification",
-      "description": "ADR 0068 A3: the verification queue HQ reviews (partner go-live and app review cases) in HQ's shared case shape."
+      "description": "ADR 0068 A3: the verification queue in HQ's shared case shape (production-access requests and app reviews)."
     },
     {
       "name": "Operator: admin bridge",
-      "description": "ADR 0068 A3: records of commands relayed by the HQ admin bridge, read to settle an unknown outcome."
+      "description": "ADR 0068: admin bridge settlement records, partner commands and reads served to the HQ admin bridge."
     }
   ],
   "paths": {
@@ -975,7 +975,7 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0068: push credential details (provider identifiers and fingerprints); never the credential itself. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: push credential details (provider identifiers and fingerprints); never the credential itself. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`). ADR 0068 A4: state (ACTIVE | DISABLED), disabledAt and the row version (the expectedVersion of the disable command).",
         "parameters": [
           {
             "name": "X-CF-Operator",
@@ -1253,13 +1253,13 @@
             "serviceToken": []
           }
         ],
-        "description": "Restrict, suspend, reactivate or close an organization. SUSPENDED / CLOSED withdraw machine access in Platform Access first; reactivation restores it after the state is recorded. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event.",
+        "description": "Restrict, suspend, reactivate or close an organization. SUSPENDED / CLOSED withdraw machine access in Platform Access first; reactivation restores it after the state is recorded. Permission `developer-platform.administer` (operator console only); every command names its human operator and writes an OPERATOR activity event. ADR 0068 A4 (`partners.workspace.state.change`, R3): from cfmeet.admin-bridge, `expectedVersion` (the workspace version) and HQ's approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`; POLICY_VIOLATION without) are required and the change happens only at that version (VERSION_CONFLICT otherwise, nothing done). ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named human operator (^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$), recorded in the organization's activity history.",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -1272,15 +1272,62 @@
             "schema": {
               "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": false,
+            "description": "HQ's second person (hq:<staff>, never the operator). Required from cfmeet.admin-bridge for R3 / R4 commands.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": false,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": false,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/Organization"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -3784,7 +3831,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 55: rebuild daily rollups from the immutable facts. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`.",
+        "description": "Section 55: rebuild daily rollups from the immutable facts. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A4 (`partners.usage.reprocess`, R2): from cfmeet.admin-bridge the rollups are unversioned (no `expectedVersion`); status REPROCESSED, version null; resource {environmentId, from, to, removed, rebuilt}. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
         "parameters": [
           {
             "name": "x-cf-operator",
@@ -3792,17 +3839,39 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "not": {
+                        "required": [
+                          "resource"
+                        ]
+                      }
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -3820,6 +3889,9 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -4151,7 +4223,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 57: support tier / reference. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`.",
+        "description": "Section 57: support tier / reference. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A4 (`partners.support-tier.change`, R2): from cfmeet.admin-bridge, `expectedVersion` is required (the support profile version; 0 when none was ever set) and the change happens only at that version. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
         "parameters": [
           {
             "name": "organizationId",
@@ -4167,17 +4239,34 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult (status: the resulting support tier).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -4195,6 +4284,104 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorSupportProfileRequest"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Operator: organizations"
+        ],
+        "summary": "Set an organization's support profile (POST)",
+        "operationId": "operatorPostSupportProfile",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4: the same command as PUT, for the admin bridge (which sends every command as POST). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A4 (`partners.support-tier.change`, R2): from cfmeet.admin-bridge, `expectedVersion` is required (the support profile version; 0 when none was ever set) and the change happens only at that version. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
+        "parameters": [
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "x-cf-operator",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult (status: the resulting support tier).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -4222,7 +4409,7 @@
             "serviceToken": []
           }
         ],
-        "description": "Section 57: the last known platform incident affecting the organization (reference only). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`.",
+        "description": "Section 57: the last known platform incident affecting the organization (reference only). Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. ADR 0068 A4 (`partners.incident.record`, R2): from cfmeet.admin-bridge, `expectedVersion` is required (the support profile version; 0 when none was ever set); status RECORDED. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
         "parameters": [
           {
             "name": "organizationId",
@@ -4238,17 +4425,34 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@-]{0,99}$"
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required from cfmeet.admin-bridge: HQ's command id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "OK.",
+            "description": "OK. From cfmeet.admin-bridge: AdminCommandResult (status RECORDED).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                  "oneOf": [
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/SupportProfile"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                    }
+                  ]
                 }
               }
             }
@@ -4266,6 +4470,12 @@
             "$ref": "#/components/responses/Error"
           },
           "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
             "$ref": "#/components/responses/Error"
           }
         },
@@ -4942,7 +5152,7 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0065: review (SUBMITTED → IN_REVIEW) | approve (IN_REVIEW → APPROVED) | reject (safe reason code) | publish (APPROVED → PUBLISHED) | suspend (any → SUSPENDED; Platform Access revokes every grant). Every command but suspend needs a reviewer named in DEVELOPER_PLATFORM_APP_REVIEWERS (POLICY_VIOLATION otherwise) and `x-cf-operator-user-id`; a member of the app's workspace never decides it (SELF_APPROVAL_FORBIDDEN). Every transition syncs the Platform Access client status and is audited. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. Flag DEVELOPER_PLATFORM_APPS_ENABLED. ADR 0068 A3, from cfmeet.admin-bridge: `Idempotency-Key` and `expectedVersion` are required and the change happens only at that version (VERSION_CONFLICT otherwise); every decision but `review` needs the HQ approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`, POLICY_VIOLATION without), which replaces the named-reviewer list; `x-cf-operator-user-id` is optional (a linked member of the partner's workspace is refused, SELF_APPROVAL_FORBIDDEN; unlinked is recorded); a repeated key returns the resource without applying twice, the same key for another command is VERSION_CONFLICT.",
+        "description": "ADR 0065: review (SUBMITTED → IN_REVIEW) | approve (IN_REVIEW → APPROVED) | reject (safe reason code) | publish (APPROVED → PUBLISHED) | suspend (any → SUSPENDED; Platform Access revokes every grant). Every command but suspend needs a reviewer named in DEVELOPER_PLATFORM_APP_REVIEWERS (POLICY_VIOLATION otherwise) and `x-cf-operator-user-id`; a member of the app's workspace never decides it (SELF_APPROVAL_FORBIDDEN). Every transition syncs the Platform Access client status and is audited. Permission `developer-platform.administer`. Requires a named human operator in `x-cf-operator`. Flag DEVELOPER_PLATFORM_APPS_ENABLED. ADR 0068 A3, from cfmeet.admin-bridge: `Idempotency-Key` and `expectedVersion` are required and the change happens only at that version (VERSION_CONFLICT otherwise); every decision but `review` needs the HQ approver (`X-CF-Approver`, `X-CF-Approval-Ref`, `X-CF-Intent-Digest`, POLICY_VIOLATION without), which replaces the named-reviewer list; `x-cf-operator-user-id` is optional (a linked member of the partner's workspace is refused, SELF_APPROVAL_FORBIDDEN; unlinked is recorded); a repeated key returns the resource without applying twice, the same key for another command is VERSION_CONFLICT. ADR 0068 A4: `suspend` (`apps.app.suspend`, R3; every install is withdrawn) and `lift-suspension` (`apps.app.lift-suspension`, R3, admin bridge only: INTERNAL_PERMISSION_DENIED for the operator console; SUSPENDED → the status the app had when it was suspended) answer cfmeet.admin-bridge with AdminCommandResult (status: the app's resulting status) and need HQ's approver.",
         "parameters": [
           {
             "name": "appId",
@@ -4962,7 +5172,8 @@
                 "approve",
                 "reject",
                 "publish",
-                "suspend"
+                "suspend",
+                "lift-suspension"
               ]
             }
           },
@@ -4992,6 +5203,36 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": false,
+            "description": "HQ's second person (hq:<staff>, never the operator). Required from cfmeet.admin-bridge for R3 / R4 commands.",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": false,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": false,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
           }
         ],
         "requestBody": {
@@ -5006,7 +5247,7 @@
         },
         "responses": {
           "200": {
-            "description": "OK. From cfmeet.admin-bridge: the verification case as HQ sees it (VerificationCaseDetail).",
+            "description": "OK. From cfmeet.admin-bridge: the verification case as HQ sees it (VerificationCaseDetail) for review / approve / reject / publish; AdminCommandResult for suspend / lift-suspension.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5016,6 +5257,9 @@
                     },
                     {
                       "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/VerificationCaseDetail"
+                    },
+                    {
+                      "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
                     }
                   ]
                 }
@@ -5313,6 +5557,440 @@
               "application/json": {
                 "schema": {
                   "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminOperationRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/push-providers/{pushProviderId}/disable": {
+      "post": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "Disable a partner push key",
+        "operationId": "operatorDisablePushKey",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4 (`partners.push-key.disable`, R3): admin bridge only (INTERNAL_PERMISSION_DENIED for any other caller). Deletes the credential from the Notification Service vault and keeps its metadata DISABLED (the partner sees status FAILED, lastError DISABLED_BY_OPERATOR; uploading again re-enables push). `expectedVersion` (the row version) and HQ's approver are required; the row is locked at that version while the vault is asked (VERSION_CONFLICT otherwise, nothing done). Never returns key material, key identifiers or the fingerprint. 404 when push credentials are off, 503 without the Notification Service. Status DISABLED. Permission `developer-platform.administer`. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>, ADR 0068).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "pushProviderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            },
+            "description": "`pushProviderId` of the operator push-provider read."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-CF-Approver",
+            "in": "header",
+            "required": true,
+            "description": "HQ's second person (hq:<staff>, never the operator).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "X-CF-Approval-Ref",
+            "in": "header",
+            "required": true,
+            "description": "HQ's approval reference.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-CF-Intent-Digest",
+            "in": "header",
+            "required": true,
+            "description": "HQ's intent digest (hex SHA-256).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/PushKeyDisableRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/webhook-deliveries/{deliveryId}/retry": {
+      "post": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "Retry a dead-lettered webhook delivery",
+        "operationId": "operatorRetryWebhookDelivery",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4 (`partners.webhook-delivery.retry`, R2): admin bridge only (INTERNAL_PERMISSION_DENIED for any other caller). A NEW delivery of a FAILED delivery's event to its still ACTIVE subscription (INVALID_STATE otherwise), like a customer replay; the new delivery's id is the Idempotency-Key. Unversioned: no `expectedVersion`; the body is empty or `{}`. Status RETRIED, version null; resource {deliveryId, retryOf, subscriptionId, environmentId, state (PENDING | SHADOW), createdAt}. 404 when webhooks are off or the delivery is not the workspace's. Permission `developer-platform.administer`. ADR 0068 A4, from cfmeet.admin-bridge: `Idempotency-Key` is required; the answer is AdminCommandResult (`status` the resulting state, `version` the resulting row version as a string); a repeated key returns the result without applying twice, the same key for another command or subject is VERSION_CONFLICT; the command is recorded in the same transaction (GET /internal/v1/operator/operations/{idempotencyKey}).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The admin bridge's HQ staff member (hq:<staff>, ADR 0068).",
+            "schema": {
+              "type": "string",
+              "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "deliveryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "HQ's command id (the settlement key of GET /internal/v1/operator/operations/{idempotencyKey}).",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "maxProperties": 0
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/AdminCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/organizations/{organizationId}/usage": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "A workspace's usage",
+        "operationId": "operatorGetOrganizationUsage",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4 (`partners.usage.read`): the workspace's metered usage per environment and usage type over [since, until) (UTC days touched by the window, at most 31; default the last 30 days) from the daily rollups. Offset-paginated over a stable order (environment, usage type). Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (inclusive, RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorUsageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/v1/operator/incidents": {
+      "get": {
+        "tags": [
+          "Operator: admin bridge"
+        ],
+        "summary": "Recorded platform incidents",
+        "operationId": "operatorListIncidents",
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "description": "ADR 0068 A4 (`partners.incidents.list`): every platform incident recorded against a workspace (POST …/organizations/{organizationId}/incidents), newest first, keyset-paginated; optionally one workspace (404 when unknown) and a window on the record time. Reference and times only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "parameters": [
+          {
+            "name": "X-CF-Operator",
+            "in": "header",
+            "required": true,
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "schema": {
+              "type": "string",
+              "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
+            }
+          },
+          {
+            "name": "organizationId",
+            "in": "query",
+            "required": false,
+            "description": "Only this workspace.",
+            "schema": {
+              "$ref": "https://schemas.cfmeet.com/platform/common/v1.schema.json#/$defs/Uuid"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Window start (inclusive, RFC 3339); at most 31 days with `until`.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false,
+            "description": "Window end (exclusive, RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`nextCursor` of the previous page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "https://schemas.cfmeet.com/platform-developer/control/v1.schema.json#/$defs/OperatorIncidentList"
                 }
               }
             }

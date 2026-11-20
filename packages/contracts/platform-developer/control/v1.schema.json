@@ -1930,6 +1930,11 @@
         "reason": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A4: admin bridge only (required there), the workspace version the change applies to."
         }
       }
     },
@@ -3762,6 +3767,11 @@
         "supportReference": {
           "type": "string",
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ADR 0068 A4: admin bridge only (required there), the support profile version the change applies to; 0 when the workspace has no support profile yet."
         }
       }
     },
@@ -3780,6 +3790,11 @@
         "occurredAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ADR 0068 A4: admin bridge only (required there), the support profile version the change applies to; 0 when the workspace has no support profile yet."
         }
       }
     },
@@ -5926,7 +5941,7 @@
       }
     },
     "AppDecisionRequest": {
-      "description": "ADR 0065: an operator app decision (reject / suspend: safe reason code).",
+      "description": "ADR 0065: an operator app decision (reject / suspend / lift-suspension: safe reason code).",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -6684,7 +6699,10 @@
         "lastVerifiedAt",
         "lastErrorCode",
         "createdAt",
-        "updatedAt"
+        "updatedAt",
+        "state",
+        "disabledAt",
+        "version"
       ],
       "properties": {
         "pushProviderId": {
@@ -6771,6 +6789,25 @@
         "updatedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "DISABLED"
+          ],
+          "description": "ADR 0068 A4: DISABLED by HQ (deleted from the vault)."
+        },
+        "disabledAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The row version (the expectedVersion of partners.push-key.disable)."
         }
       }
     },
@@ -7685,7 +7722,7 @@
       }
     },
     "AdminOperationRecord": {
-      "description": "ADR 0068 A3: an applied admin bridge command (outcome is always APPLIED; a key never applied is 404).",
+      "description": "ADR 0068 A3 / A4: an applied admin bridge command (outcome is always APPLIED; a key never applied is 404). source_status: the case state as HQ sees it for the A3 verification decisions, otherwise the command's resulting state (as its AdminCommandResult status); source_version: the resulting row version, null for unversioned subjects (a webhook delivery retry, a usage reprocess).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -7707,8 +7744,219 @@
           "pattern": "^[A-Z][A-Z_]{1,23}$"
         },
         "source_version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,19}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AdminCommandResult": {
+      "description": "ADR 0068 A4: the answer of an admin bridge command: the resulting state (upper snake), the resulting row version as a string (null when the subject is unversioned) and a small closed resource (ids, states, timestamps; never an address, name, content or secret).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "version",
+        "resource"
+      ],
+      "properties": {
+        "status": {
           "type": "string",
-          "pattern": "^[0-9]{1,19}$"
+          "pattern": "^[A-Z][A-Z_]{1,23}$"
+        },
+        "version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{1,19}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource": {
+          "type": "object",
+          "maxProperties": 24,
+          "propertyNames": {
+            "pattern": "^[a-z][A-Za-z]{0,39}$"
+          }
+        }
+      }
+    },
+    "PushKeyDisableRequest": {
+      "description": "ADR 0068 A4: HQ disables a partner push credential (R3).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedVersion"
+      ],
+      "properties": {
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "ADR 0068 A4: admin bridge only (required there), the row version the change applies to."
+        },
+        "reasonCode": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$",
+          "description": "Default OPERATOR_DISABLED."
+        }
+      }
+    },
+    "OperatorIncident": {
+      "description": "ADR 0068 A4: a platform incident recorded against a workspace (reference and times only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "incidentRecordId",
+        "organizationId",
+        "incidentRef",
+        "occurredAt",
+        "recordedAt"
+      ],
+      "properties": {
+        "incidentRecordId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "organizationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "incidentRef": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 160
+        },
+        "occurredAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 40
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "OperatorIncidentList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorIncident"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "OperatorUsage": {
+      "description": "ADR 0068 A4: a workspace's metered usage of one environment and usage type over the window (quantities and counts only).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "environmentId",
+        "environmentKind",
+        "usageType",
+        "unit",
+        "quantity",
+        "factCount"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environmentKind": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "usageType": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "unit": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "quantity": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "factCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "OperatorUsageList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextCursor",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/OperatorUsage"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date",
+          "description": "First UTC day of the window."
+        },
+        "to": {
+          "type": "string",
+          "format": "date",
+          "description": "Last UTC day of the window."
         }
       }
     }

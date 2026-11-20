@@ -1678,3 +1678,147 @@ async fn hq_reviews_and_publishes_an_app_with_two_people_and_no_named_reviewer()
         .await;
     assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.json);
 }
+
+// ---------------------------------------------------------------------------------------
+// ADR 0068 A4: suspension and its lifting from HQ through the admin bridge
+// ---------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn hq_suspends_a_published_app_and_lifts_the_suspension_with_two_people() {
+    let Some(w) = world(all_on()).await else {
+        return;
+    };
+    let c = &w.c;
+    let (owner, _) = c.sessions.sign_in("owner@hq-suspend.example");
+    let (_, project, _) = workspace(c, &owner).await;
+    publish_app(&w, &owner, project, manifest()).await;
+    let hq = ("x-cf-operator", "hq:staff-0001");
+    let second = [
+        ("x-cf-approver", "hq:staff-0002"),
+        ("x-cf-approval-ref", "appr-9"),
+        (
+            "x-cf-intent-digest",
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        ),
+    ];
+    let v = c
+        .count(&format!(
+            "SELECT version FROM devplat_apps WHERE app_id = '{project}'"
+        ))
+        .await;
+    // R3: without the second person, refused.
+    let key = Uuid::new_v4().to_string();
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "suspend"),
+            &[hq, ("idempotency-key", &key)],
+            Some(json!({ "expectedVersion": v })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.json);
+    // A stale version.
+    let mut headers = vec![hq, ("idempotency-key", key.as_str())];
+    headers.extend(second);
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "suspend"),
+            &headers,
+            Some(json!({ "expectedVersion": v - 1 })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.json);
+    // Suspended: the standard answer, Platform Access told.
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "suspend"),
+            &headers,
+            Some(json!({ "expectedVersion": v, "reasonCode": "POLICY_BREACH" })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    conforms(&format!("{CTRL}AdminCommandResult"), &r.json);
+    assert_eq!(r.json["status"], "SUSPENDED");
+    assert_eq!(r.json["version"], (v + 1).to_string());
+    assert_eq!(r.json["resource"]["appId"], json!(project));
+    assert_eq!(
+        w.oauth.clients.lock().unwrap().last().unwrap().1["status"],
+        "SUSPENDED"
+    );
+    let replay = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "suspend"),
+            &headers,
+            Some(json!({ "expectedVersion": v, "reasonCode": "POLICY_BREACH" })),
+        )
+        .await;
+    assert_eq!(replay.status, StatusCode::OK, "{}", replay.json);
+    assert_eq!(replay.json["status"], "SUSPENDED");
+    let rec = c
+        .bridge(&format!("/internal/v1/operator/operations/{key}"), &[hq])
+        .await;
+    assert_eq!(rec.json["source_status"], "SUSPENDED");
+    assert_eq!(rec.json["source_version"], (v + 1).to_string());
+
+    // The console never lifts a suspension.
+    let r = c
+        .operator_as(
+            Method::POST,
+            &decide(project, "lift-suspension"),
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.json);
+    // Lifting (R3): back to PUBLISHED.
+    let lift = Uuid::new_v4().to_string();
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "lift-suspension"),
+            &[hq, ("idempotency-key", &lift)],
+            Some(json!({ "expectedVersion": v + 1 })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY, "{}", r.json);
+    let mut headers = vec![hq, ("idempotency-key", lift.as_str())];
+    headers.extend(second);
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "lift-suspension"),
+            &headers,
+            Some(json!({ "expectedVersion": v + 1 })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    conforms(&format!("{CTRL}AdminCommandResult"), &r.json);
+    assert_eq!(r.json["status"], "PUBLISHED");
+    assert_eq!(
+        w.oauth.clients.lock().unwrap().last().unwrap().1["status"],
+        "PUBLISHED"
+    );
+    let rec = c
+        .bridge(&format!("/internal/v1/operator/operations/{lift}"), &[hq])
+        .await;
+    assert_eq!(rec.json["source_status"], "PUBLISHED");
+    // Not suspended any more: a definite refusal.
+    let r = c
+        .bridge_send(
+            Method::POST,
+            &decide(project, "lift-suspension"),
+            &[
+                hq,
+                ("idempotency-key", &Uuid::new_v4().to_string()),
+                second[0],
+                second[1],
+                second[2],
+            ],
+            Some(json!({ "expectedVersion": v + 2 })),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::CONFLICT, "{}", r.json);
+}
