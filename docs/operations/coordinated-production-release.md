@@ -50,6 +50,20 @@ database (wherever the Meeting container's `DATABASE_URL` points) is only *read*
 
 ## Operations
 
+Server-audit follow-up: `activate-database-capacity` prepares the core PostgreSQL server
+for `activate-database-pools`. Its `confirm=restart-core-database` acknowledges a brief
+connection interruption. It rounds the live pool plan plus reserved/operator connections
+to the next 32, refuses more than 256 connections, and requires 16 MiB of available memory
+per additional backend plus 2 GiB of headroom. A health failure restores the previous
+setting. Roll application pools back before rolling capacity back. This operation changes
+only `cfmeet-core-db`; it never restarts the Meeting Service's separate database.
+
+Meeting Service releases and activation clones mount `/opt/cfmeet-core/logs/meeting-service`
+at `/var/log/cfmeet` and set `CFMEET_LOG_DIRECTORY`. The image retains fifteen daily log
+files, covering today and the previous fourteen days; replacement containers keep the same
+host directory. Existing logs inside old containers are retained with those rollback
+containers; the new retention window begins when this release starts writing to the mount.
+
 | Operation | Changes production | What it does |
 |---|---|---|
 | `inspect` | no | MemAvailable, disk, memory use, every CF Meet container (state, image, image revision label (`revision`; the container's own, possibly stale, label is `containerLabelRevision`), limits, networks, ports, env **names**, non-secret flag values), migration histories of every database, mail credential presence (booleans), the release journal and a resource-gate preview. |

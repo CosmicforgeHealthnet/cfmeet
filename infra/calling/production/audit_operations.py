@@ -1,0 +1,113 @@
+"""Server-audit operations. Host state and credentials never leave the VPS."""
+import time
+
+import production as p
+
+LOG_TARGET = '/var/log/cfmeet'
+CAPACITY_OPERATION = 'activate-database-capacity'
+CAPACITY_CONFIRM = 'restart-core-database'
+MAX_CONNECTIONS = 256
+BACKEND_MEMORY_MIB = 16
+MEMORY_RESERVE_MIB = 2048
+
+
+def persistent_meeting_logs(cfg):
+    """Keep logs outside every replacement container, including activation clones."""
+    source = p.ROOT / 'logs' / 'meeting-service'
+    root = p.ROOT.resolve()
+    if not source.resolve().is_relative_to(root) or source.is_symlink():
+        raise RuntimeError('Unexpected persistent log directory')
+    host = cfg.setdefault('HostConfig', {})
+    for bind in host.get('Binds') or []:
+        parts = bind.split(':')
+        if len(parts) > 1 and parts[1] == LOG_TARGET:
+            if parts[0] != str(source) or (len(parts) > 2 and 'ro' in parts[2].split(',')):
+                raise RuntimeError('Conflicting meeting log mount')
+            break
+    else:
+        mounts = host.setdefault('Mounts', [])
+        mounted = [m for m in mounts if m.get('Target') == LOG_TARGET]
+        if mounted and any(m.get('Source') != str(source) or m.get('ReadOnly') for m in mounted):
+            raise RuntimeError('Conflicting meeting log mount')
+        if not mounted:
+            mounts.append(dict(Type='bind', Source=str(source), Target=LOG_TARGET, ReadOnly=False))
+    # The Meeting image currently runs as root. Respect a numeric non-root deployment.
+    user = (cfg.get('User') or '0').split(':')
+    if not all(part.isdigit() for part in user):
+        raise RuntimeError('Meeting log ownership requires a numeric container user')
+    p.run('install', '-d', '-m', '0750', '-o', user[0], '-g', user[-1], str(source))
+    env = dict(item.split('=', 1) for item in cfg.get('Env', []))
+    env['CFMEET_LOG_DIRECTORY'] = LOG_TARGET
+    cfg['Env'] = [key + '=' + value for key, value in env.items()]
+
+
+def capacity_target(plan, current, reserved, available_mib, headroom):
+    """Smallest rounded capacity that covers every pool, within a bounded RAM budget."""
+    required = sum(plan.values()) + reserved + headroom
+    target = max(current, ((required + 31) // 32) * 32)
+    if target > MAX_CONNECTIONS:
+        raise RuntimeError('Connection plan exceeds the reviewed 256-connection ceiling')
+    needed = (target - current) * BACKEND_MEMORY_MIB + MEMORY_RESERVE_MIB
+    if target > current and available_mib < needed:
+        raise RuntimeError('Insufficient available memory for the database capacity increase')
+    return target
+
+
+def wait_database(cr):
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        try:
+            return int(cr.release.db_sql('postgres', 'SHOW max_connections;').strip())
+        except (RuntimeError, ValueError):
+            time.sleep(1)
+    raise RuntimeError('Core database did not become ready within 90 seconds')
+
+
+def set_capacity(cr, capacity):
+    if not isinstance(capacity, int) or not 10 <= capacity <= MAX_CONNECTIONS:
+        raise RuntimeError('Invalid reviewed database capacity')
+    cr.release.db_sql('postgres', 'ALTER SYSTEM SET max_connections = %d;' % capacity)
+    # Only the CF Meet-owned core database. No other postgres container is touched.
+    p.run('docker', 'restart', '--time', '60', 'cfmeet-core-db')
+    if wait_database(cr) != capacity:
+        raise RuntimeError('Core database did not apply its connection capacity')
+
+
+def activate_database_capacity(cr, sha, run_id, confirm):
+    """Briefly restart core Postgres before increasing any application pool. Roll back
+    the setting if health/regression fails. Pool activation stays a separate operation."""
+    if confirm != CAPACITY_CONFIRM:
+        raise RuntimeError('Database capacity needs confirm=restart-core-database (brief connection interruption)')
+    cr.require_release(sha)
+    current = int(cr.release.db_sql('postgres', 'SHOW max_connections;').strip())
+    reserved = int(cr.release.db_sql('postgres', 'SHOW superuser_reserved_connections;').strip())
+    overrides = {n: {cr.POOL_SETTINGS[n][0]: v} for n, v in cr.DATABASE_POOLS.items()}
+    plan = cr.pool_plan(cr.running_envs(), overrides)
+    target = capacity_target(plan, current, reserved, cr.mem_available_mib(), cr.POOL_HEADROOM)
+    entry = cr.begin(CAPACITY_OPERATION, sha, run_id, False)
+    entry['databaseCapacity'] = dict(before=current, after=target)
+    cr.commit(entry)
+    try:
+        if target != current:
+            set_capacity(cr, target)
+        p.regression()
+    except Exception:
+        try:
+            if target != current:
+                set_capacity(cr, current)
+        finally:
+            entry['status'] = 'failed'
+            cr.commit(entry)
+        raise
+    entry['status'] = 'done'
+    cr.commit(entry)
+    cr.emit('databaseCapacity', dict(before=current, after=target, poolConnections=sum(plan.values())))
+
+
+def restore_capacity(cr, record):
+    """Refuse to reduce capacity while application pools still need it. Roll pools back first."""
+    before = record['before']
+    reserved = int(cr.release.db_sql('postgres', 'SHOW superuser_reserved_connections;').strip())
+    if cr.pool_budget_errors(cr.pool_plan(cr.running_envs(), {}), before, reserved):
+        raise RuntimeError('Roll back application pools before reducing database capacity')
+    set_capacity(cr, before)

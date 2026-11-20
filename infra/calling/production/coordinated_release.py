@@ -60,6 +60,7 @@ import notification_operations as notif_ops
 import key_rotation
 import platform_operations as platform_ops
 import integrate_operations as integrate_ops
+import audit_operations
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -1268,6 +1269,8 @@ def deploy(name, image_id, sha, run_id, entry):
         added = release_env_defaults(name, p.env_of(c)) if name in RELEASE_ENV_DEFAULTS else {}
         added.update(RELEASE_PINNED_ENV.get(name, {}))
         cfg = release.clone(c, container, image_id, added, False)
+        if name == 'meeting-service':
+            audit_operations.persistent_meeting_logs(cfg)
         labels = cfg.setdefault('Labels', {}) or {}
         cfg['Labels'] = labels
         # The cloned container labels would shadow the new image's OCI labels (Docker keeps
@@ -1610,7 +1613,7 @@ def rollback(sha, run_id):
     candidates = [e for e in journal if e['status'] in ('done', 'failed')
                   and (e['components'] or e.get('routing') or e.get('edge') or e.get('notificationRouting')
                        or e.get('notificationFence') or e.get('preferenceAuthority')
-                       or e.get('edgeLimits') or e.get('platformEdge'))]
+                       or e.get('edgeLimits') or e.get('platformEdge') or e.get('databaseCapacity'))]
     if not candidates:
         raise RuntimeError('Nothing to roll back')
     entry = candidates[-1]
@@ -1644,6 +1647,8 @@ def rollback(sha, run_id):
         notif_ops.undo_fence(sys.modules[__name__], entry['notificationFence'], run_id)
     if entry.get('preferenceAuthority'):
         notif_ops.undo_preference_authority(sys.modules[__name__], entry['preferenceAuthority'], run_id)
+    if entry.get('databaseCapacity'):
+        audit_operations.restore_capacity(sys.modules[__name__], entry['databaseCapacity'])
     for component in reversed(entry['components']):
         restore(component, run_id)
         commit(entry)
@@ -1666,6 +1671,8 @@ def recreate(name, overrides, bundle, run_id, entry, extra=None):
     container = SERVICES[name]['container']
     c = p.inspect(container)
     cfg = release.clone(c, container, c['Image'], overrides, False)
+    if name == 'meeting-service':
+        audit_operations.persistent_meeting_logs(cfg)
     if bundle:
         set_mount(cfg, bundle[0], bundle[1])
     for source, target in (extra or {}).get('mounts', ()):
@@ -2947,6 +2954,7 @@ ACTIVATIONS = {
     'activate-account-privacy': ((), activate_account_privacy),
     # B6 / C5: the bigger database pools, only within the core database's connection budget.
     'activate-database-pools': ((), activate_database_pools),
+    audit_operations.CAPACITY_OPERATION: ((), _platform(audit_operations.activate_database_capacity)),
     # Notification Service N6: owner read APIs (X1-X5) granted to cfmeet.notifications.
     'activate-notifications-owners': ((), lambda sha, run_id, confirm: notif_ops.activate_owners(
         sys.modules[__name__], sha, run_id, confirm)),

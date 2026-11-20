@@ -42,6 +42,9 @@ pub struct Account {
 /// Simulated canonical owners for the Sections 9-23 private routes.
 #[derive(Default)]
 pub struct World {
+    /// Rendezvous the two fresh account/block owner reads; a sequential policy
+    /// implementation times out instead of passing the overlap regression test.
+    pub policy_read_barrier: Option<Arc<tokio::sync::Barrier>>,
     pub conversations: BTreeMap<Uuid, MockConversation>,
     /// idempotency key -> (call id, initiator, targets, kind)
     pub launches: BTreeMap<String, (Uuid, Uuid, Vec<Uuid>, String)>,
@@ -533,6 +536,20 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
         .and_then(|d| d.initiating_principal().map(|p| p.principal_id))
         .unwrap_or_default();
     let path = request.uri().path().to_owned();
+    if matches!(
+        path.as_str(),
+        "/internal/v1/accounts/communications/status" | "/internal/v1/communications/blocks/check"
+    ) {
+        let barrier = s.world.read().unwrap().policy_read_barrier.clone();
+        if let Some(barrier) = barrier {
+            if tokio::time::timeout(Duration::from_secs(5), barrier.wait())
+                .await
+                .is_err()
+            {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+        }
+    }
     let b = to_bytes(request.into_body(), 16384).await.unwrap();
     let body: Value = if b.is_empty() {
         json!({})

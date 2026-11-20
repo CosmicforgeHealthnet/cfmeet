@@ -12,6 +12,43 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
+#[tokio::test]
+async fn send_policy_overlaps_fresh_owner_reads_and_still_refuses_a_new_block() {
+    use cf_communications_policy::{Action, PolicyCheck};
+    let h = Harness::new().await;
+    let a = h.profile(&h.account()).await;
+    let b = h.profile(&h.account()).await;
+    h.connected(&a, &b).await;
+    h.world.write().unwrap().policy_read_barrier =
+        Some(std::sync::Arc::new(tokio::sync::Barrier::new(2)));
+    let request = PolicyCheck {
+        action: Action::MessageSend,
+        actor_principal_id: a.principal_id,
+        target_principal_id: b.principal_id,
+        credential_issued_at: None,
+        credential_principal_id: None,
+        conversation_id: None,
+        mentioned: None,
+    };
+    assert!(
+        h.state
+            .check_policy(&h.scope, &request)
+            .await
+            .unwrap()
+            .allowed
+    );
+    *h.blocked.write().unwrap() = true;
+    assert!(
+        !h.state
+            .check_policy(&h.scope, &request)
+            .await
+            .unwrap()
+            .allowed
+    );
+    h.world.write().unwrap().policy_read_barrier = None;
+    h.close().await;
+}
+
 struct User {
     account: VerifiedAccount,
     profile: Profile,
