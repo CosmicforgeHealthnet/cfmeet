@@ -188,6 +188,9 @@ async fn template(admin: &str) -> String {
             migration::AccountPrivacyMigrator::up(&tmpl, None)
                 .await
                 .expect("account-privacy migrations apply");
+            migration::AccountPhoneMigrator::up(&tmpl, None)
+                .await
+                .expect("account-phone migrations apply");
             tmpl.close().await.ok();
             name
         })

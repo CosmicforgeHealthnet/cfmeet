@@ -63,7 +63,7 @@ pub struct UpdateAccountProfileRequest {
 /// Returns the signed-in account's profile: username, display name, avatar reference, time
 /// zone, locale, email verification and the canonical account status. The Account is the
 /// authority for these fields; the Communications profile shows the same display name and
-/// avatar. Phone verification is not available yet (`PROVIDER_BLOCKED`, never required).
+/// avatar. Phone verification is optional and requires an independently configured SMS provider.
 #[utoipa::path(
     get, path = "/api/v2/me/profile", tag = "Account profile (v2)", operation_id = "v2_get_my_profile",
     responses(
@@ -80,10 +80,7 @@ pub async fn get_my_profile(
     let record = profile::load(&state.db, user.user_id)
         .await?
         .ok_or_else(signed_out)?;
-    Ok(Json(AccountProfile::of(
-        &record,
-        state.require_email_verification,
-    )))
+    Ok(Json(profile_with_phone(&state, &record).await?))
 }
 
 /// Update my profile
@@ -147,10 +144,7 @@ pub async fn update_my_profile(
             .detail(serde_json::json!({ "fields": change.fields() })),
     )
     .await;
-    Ok(Json(AccountProfile::of(
-        &updated,
-        state.require_email_verification,
-    )))
+    Ok(Json(profile_with_phone(&state, &updated).await?))
 }
 
 /// Set the avatar address through the profile update, so the Hub projection follows.
@@ -182,10 +176,7 @@ async fn set_avatar(
             .detail(serde_json::json!({ "fields": ["avatarUrl"] })),
     )
     .await;
-    Ok(AccountProfile::of(
-        &updated,
-        state.require_email_verification,
-    ))
+    profile_with_phone(state, &updated).await
 }
 
 /// Upload my avatar
@@ -302,4 +293,15 @@ fn signed_out() -> ApiError {
         ErrorCode::AuthenticationRequired,
         "Sign in to perform this action",
     )
+}
+
+async fn profile_with_phone(
+    state: &AppState,
+    record: &crate::models::users::Model,
+) -> ApiResult<AccountProfile> {
+    let mut result = AccountProfile::of(record, state.require_email_verification);
+    result.phone_verification.status = crate::services::account_phone::view(&state.db, record.id)
+        .await?
+        .status;
+    Ok(result)
 }

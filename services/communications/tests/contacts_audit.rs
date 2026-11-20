@@ -681,3 +681,58 @@ async fn kf2_the_about_line_is_validated_and_versioned() {
     assert!(cleared["about"].is_null());
     h.close().await;
 }
+
+#[tokio::test]
+async fn verified_phone_discovery_hides_unknown_private_and_blocked_accounts() {
+    let h = Harness::new().await;
+    let (a, b) = (user(&h).await, user(&h).await);
+    let scope = h.delegated(&a.account);
+    let request = json!({"phoneNumber":"+393331234567"});
+    not_found(
+        h.state
+            .resolve_phone(&scope, &a.profile, request.clone())
+            .await,
+    );
+    h.world
+        .write()
+        .unwrap()
+        .discoverable_phones
+        .insert("+393331234567".into(), b.account.account_reference.clone());
+    let found = h
+        .state
+        .resolve_phone(&scope, &a.profile, request.clone())
+        .await
+        .unwrap();
+    assert_eq!(found["cfMeetId"], json!(h.public_id(&b.profile).await));
+    assert!(found.get("accountReference").is_none());
+    assert!(found.get("phoneNumber").is_none());
+    h.state
+        .set_block(&b.profile, &a.profile, true, Uuid::new_v4())
+        .await
+        .unwrap();
+    not_found(
+        h.state
+            .resolve_phone(&scope, &a.profile, request.clone())
+            .await,
+    );
+    assert!(matches!(
+        h.state
+            .resolve_phone(&scope, &a.profile, json!({"phoneNumber":"invalid"}))
+            .await,
+        Err(Error::Validation)
+    ));
+    let mut limited = false;
+    for _ in 0..20 {
+        if matches!(
+            h.state
+                .resolve_phone(&scope, &a.profile, request.clone())
+                .await,
+            Err(Error::RateLimited)
+        ) {
+            limited = true;
+            break;
+        }
+    }
+    assert!(limited);
+    h.close().await;
+}

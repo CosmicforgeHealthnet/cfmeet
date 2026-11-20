@@ -6,6 +6,8 @@
  * (a "+" next to the paperclip, private chats only) creates one.
  */
 import { useState } from "react";
+import Image from "next/image";
+import LinkPreviewDialog from "./LinkPreviewDialog";
 import { BarChart3, Check, ExternalLink, Link2, MapPin, Plus, UserRound } from "lucide-react";
 import { Popover } from "radix-ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -26,7 +28,7 @@ export function RichContentView({ rich, mine, onVote, onMessageContact }: {
     const p = rich.preview;
     return (
       <a href={p.url} target="_blank" rel="noopener noreferrer nofollow" className={cn(card(mine), "flex items-center gap-2.5 hover:opacity-90")} data-testid="link-preview">
-        <Link2 className="size-4 shrink-0 opacity-70" />
+        {p.imageDataUrl ? <Image src={p.imageDataUrl} alt="" width={80} height={45} unoptimized className="rounded-md object-cover" /> : <Link2 className="size-4 shrink-0 opacity-70" />}
         <span className="min-w-0"><span className="block truncate text-sm font-medium">{p.title ?? p.siteName ?? p.url}</span>{p.description ? <span className="line-clamp-2 block text-xs opacity-75">{p.description}</span> : null}<span className="block truncate text-xs opacity-70">{p.siteName ?? p.url}</span></span>
       </a>
     );
@@ -84,7 +86,7 @@ const field = "h-10 w-full rounded-xl border border-border bg-background px-3 te
 
 /** "+" in a private chat's composer: share a poll, your location or a contact. */
 export function ShareMenu({ disabled, onSend }: { disabled: boolean; onSend: (payload: RichPayload) => Promise<void> }) {
-  const [open, setOpen] = useState<"poll" | "location" | "contact" | null>(null);
+  const [open, setOpen] = useState<"poll" | "location" | "contact" | "link" | null>(null);
   const [menu, setMenu] = useState(false);
   const item = "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-muted";
   return (
@@ -95,13 +97,14 @@ export function ShareMenu({ disabled, onSend }: { disabled: boolean; onSend: (pa
         </Popover.Trigger>
         <Popover.Portal>
           <Popover.Content side="top" align="start" sideOffset={6} className="z-50 w-48 rounded-xl border border-border bg-popover p-1.5 shadow-xl">
+            <button type="button" className={item} onClick={() => { setMenu(false); setOpen("link"); }}><Link2 className="size-4 text-muted-foreground" />Link card</button>
             <button type="button" className={item} data-testid="share-poll" onClick={() => { setMenu(false); setOpen("poll"); }}><BarChart3 className="size-4 text-muted-foreground" />Poll</button>
             <button type="button" className={item} data-testid="share-location" onClick={() => { setMenu(false); setOpen("location"); }}><MapPin className="size-4 text-muted-foreground" />Location</button>
             <button type="button" className={item} data-testid="share-contact" onClick={() => { setMenu(false); setOpen("contact"); }}><UserRound className="size-4 text-muted-foreground" />Contact</button>
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      {open ? <ShareDialog kind={open} onClose={() => setOpen(null)} onSend={onSend} /> : null}
+      {open === "link" ? <LinkPreviewDialog onClose={() => setOpen(null)} onSend={onSend} /> : open ? <ShareDialog kind={open} onClose={() => setOpen(null)} onSend={onSend} /> : null}
     </>
   );
 }

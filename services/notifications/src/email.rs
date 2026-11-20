@@ -1287,12 +1287,21 @@ pub async fn apply_provider_event(
                     .map_err(internal)?;
                 }
                 "BOUNCED" => {
+                    let reason = if payload.pointer("/data/bounce/type").and_then(Value::as_str)
+                        == Some("Permanent")
+                    {
+                        "HARD_BOUNCE"
+                    } else {
+                        "SOFT_BOUNCE"
+                    };
                     db::exec(
                         db_conn,
-                        "INSERT INTO notif_email_suppressions (recipient_digest, reason, bounce_count) VALUES ($1, 'SOFT_BOUNCE', 1)
+                        "INSERT INTO notif_email_suppressions (recipient_digest, reason, bounce_count) VALUES ($1, $2, 1)
                          ON CONFLICT (recipient_digest) DO UPDATE SET bounce_count = notif_email_suppressions.bounce_count + 1,
+                             reason = CASE WHEN notif_email_suppressions.reason IN ('COMPLAINED','MANUAL','HARD_BOUNCE')
+                                           THEN notif_email_suppressions.reason ELSE EXCLUDED.reason END,
                              updated_at = now()",
-                        vec![digest.into()],
+                        vec![digest.into(), reason.into()],
                     )
                     .await
                     .map_err(internal)?;

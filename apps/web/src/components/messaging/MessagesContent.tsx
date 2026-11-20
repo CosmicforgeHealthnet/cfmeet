@@ -14,6 +14,8 @@ import SavedMessages, { SAVED_KEY } from "./SavedMessages";
 import ChatInfoExtras from "./ChatInfoExtras";
 import { ArchivedHeader, ArchivedRow, ChatListToggles } from "./ChatListControls";
 import { RichContentView, ShareMenu } from "./RichMessages";
+import PrivateShares from "./PrivateShares";
+import { isLiveStatus, statusPostId } from "@/lib/messaging/private-shares";
 import { arrangeChats, pinnedCount } from "@/lib/messaging/chat-list";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
@@ -1161,7 +1163,7 @@ export default function MessagesContent() {
   return <PersonalMessages />;
 }
 
-type ListFilter = "ALL" | "UNREAD" | SecurityProfile;
+type ListFilter = "ALL" | "UNREAD" | "STATUS" | SecurityProfile;
 
 function PersonalMessages() {
   const engine = useEngine();
@@ -1173,6 +1175,7 @@ function PersonalMessages() {
   const [filter, setFilter] = useState<ListFilter>("ALL");
   const [securityOpen, setSecurityOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [shareMode, setShareMode] = useState<"status" | "broadcast" | null>(null);
   const [starredOpen, setStarredOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const capabilities = useHubCapabilities();
@@ -1189,12 +1192,18 @@ function PersonalMessages() {
   const tabCounter = useQueryClient();
   useEffect(() => { tabCounter.setQueryData(["messaging", "unread-chats"], unreadTotal); }, [tabCounter, unreadTotal]);
   const archivedChats = s.conversations.filter((c) => c.archived);
+  const statusCopies = new Set<string>();
   const conversations = arrangeChats(s.conversations, showArchived && archivedChats.length > 0).filter((conversation) => {
+    const post = statusPostId(conversation.groupTitle);
+    if (post) {
+      if (filter !== "STATUS" || !isLiveStatus(conversation) || statusCopies.has(post)) return false;
+      statusCopies.add(post);
+    } else if (filter === "STATUS") return false;
     const matchesSearch = conversation.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
-    const matchesFilter = filter === "ALL" || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected : conversation.securityProfile === filter);
+    const matchesFilter = filter === "ALL" || filter === "STATUS" || (filter === "UNREAD" ? conversation.unreadCount > 0 && conversation.id !== selected : conversation.securityProfile === filter);
     return matchesSearch && matchesFilter;
   });
-  const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["PRIVATE_E2EE", "Private"], ["MANAGED", "Managed"]];
+  const filters: [ListFilter, string][] = [["ALL", "All"], ["UNREAD", unreadTotal ? `Unread ${unreadTotal}` : "Unread"], ["STATUS", "Status"], ["PRIVATE_E2EE", "Private"], ["MANAGED", "Managed"]];
 
   if (s.phase === "locked") {
     return (
@@ -1223,6 +1232,10 @@ function PersonalMessages() {
             <div className="flex items-center justify-between gap-2">
               <h1 className="text-2xl font-bold tracking-tight">Chats</h1>
               <div className="flex items-center">
+                {s.phase === "ready" ? <>
+                  <button type="button" aria-label="Post a status" title="Post a status" onClick={() => setShareMode("status")} className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><History className="size-5" /></button>
+                  <button type="button" aria-label="Send a broadcast" title="Send a broadcast" onClick={() => setShareMode("broadcast")} className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted"><SendHorizontal className="size-5" /></button>
+                </> : null}
                 {s.phase === "ready" ? (
                   <button type="button" aria-label="Security and devices" title="Security and devices" onClick={() => setSecurityOpen(true)} aria-expanded={securityOpen} aria-controls="device-security-settings" data-testid="device-settings-toggle" className="flex size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"><ShieldCheck className="size-5" /></button>
                 ) : null}
@@ -1339,6 +1352,7 @@ function PersonalMessages() {
       {s.phase === "error" ? <p className="border-t border-border px-4 py-2 text-sm text-destructive" data-testid="messaging-error">Messaging error: {s.detail}</p> : null}
 
       <NewConversation engine={engine} onCreated={setSelected} open={composeOpen} setOpen={setComposeOpen} />
+      {shareMode ? <PrivateShares engine={engine} mode={shareMode} onClose={() => { if (shareMode === "status") setFilter("STATUS"); setShareMode(null); }} /> : null}
       <SavedMessages open={starredOpen} onOpenChange={setStarredOpen} onOpenChat={setSelected}
         chatTitle={(id) => s.conversations.find((c) => c.id === id)?.title ?? "Chat"}
         messageText={(id, messageId) => s.messages[id]?.find((m) => m.messageId === messageId)?.text ?? null} />

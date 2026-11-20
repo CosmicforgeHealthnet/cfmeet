@@ -46,7 +46,7 @@
     },
     {
       "name": "communications",
-      "description": "cfmeet.communications.http-api 1.9.0"
+      "description": "cfmeet.communications.http-api 1.10.0"
     }
   ],
   "paths": {

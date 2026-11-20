@@ -653,6 +653,39 @@ async fn provider_webhooks_drive_delivery_evidence_and_suppression() {
             .as_deref(),
         Some("DELIVERED")
     );
+    // A provider-confirmed permanent bounce suppresses STANDARD immediately,
+    // rather than waiting for a second transient failure. Duplicate webhooks
+    // cannot increase the counter.
+    let permanent = json!({"type":"email.bounced","data":{"email_id":provider_id,"bounce":{"type":"Permanent"}}});
+    assert!(notifications::email::apply_provider_event(
+        &h.db,
+        &h.state.metrics,
+        "resend",
+        "permanent-1",
+        &permanent
+    )
+    .await
+    .unwrap());
+    assert!(!notifications::email::apply_provider_event(
+        &h.db,
+        &h.state.metrics,
+        "resend",
+        "permanent-1",
+        &permanent
+    )
+    .await
+    .unwrap());
+    assert_eq!(
+        h.text("SELECT reason FROM notif_email_suppressions")
+            .await
+            .as_deref(),
+        Some("HARD_BOUNCE")
+    );
+    assert_eq!(
+        h.count("SELECT bounce_count::bigint FROM notif_email_suppressions")
+            .await,
+        1
+    );
     // Forged signature.
     let (mut hd, body) = post("msg_2", "email.complained");
     hd.insert("svix-signature", "v1,AAAA".parse().unwrap());

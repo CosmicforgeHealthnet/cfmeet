@@ -13,6 +13,7 @@ import { BadgeCheck, Check, Copy, Hash, Mail } from "lucide-react";
 import { useHubProfile } from "@/hooks/v2/useCommunications";
 import { communicationsService as hub } from "@/services/v2/communications.service";
 import EmailCodeConfirm from "./EmailCodeConfirm";
+import PhoneSettings from "./PhoneSettings";
 import { getErrorMessage } from "@/utils/error";
 import {
   Dialog,
@@ -62,6 +63,7 @@ export default function AccountProfileSettings() {
       {/* Remount on a new server version so the form starts from the saved values. */}
       <ProfileEditor key={`${profile.data.userId}:${profile.data.profileUpdatedAt ?? ""}:${profile.data.username}`} profile={profile.data} />
       <YourData />
+      <PhoneSettings email={profile.data.email} />
       <DangerZone profile={profile.data} />
     </div>
   );

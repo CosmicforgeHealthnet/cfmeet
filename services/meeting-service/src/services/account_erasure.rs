@@ -78,6 +78,7 @@ pub async fn export(state: &AppState, user_id: Uuid) -> ApiResult<Value> {
                                      WHERE user_id = $1 ORDER BY seq DESC LIMIT 1000", user_id).await?,
         // S2: the other services' data about the account, in the same document.
         "elsewhere": crate::services::account_privacy::export_elsewhere(db, user_id).await,
+        "phone": rows(db, "SELECT phone_e164, verified_at, discoverable FROM account_phone_bindings WHERE user_id = $1", user_id).await?,
     }))
 }
 
@@ -117,6 +118,8 @@ pub async fn erase(state: &AppState, user_id: Uuid, session: Option<Uuid>) -> Ap
             "DELETE FROM account_avatars WHERE user_id = $1",
             vec![user_id.into()],
         ),
+        ("DELETE FROM account_phone_challenges WHERE user_id = $1", vec![user_id.into()]),
+        ("DELETE FROM account_phone_bindings WHERE user_id = $1", vec![user_id.into()]),
         (
             "UPDATE meeting_members SET status = 'REVOKED', revoked_at = now() WHERE user_id = $1 AND status = 'ACTIVE'",
             vec![user_id.into()],

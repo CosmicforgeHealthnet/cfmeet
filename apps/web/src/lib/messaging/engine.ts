@@ -41,6 +41,7 @@ import { KEY_PACKAGE_TARGET, WAITING_NOTE, beforeJoinNote, joinerEntry, keyPacka
 import { inboxFlags, type InboxFlags } from "./chat-list";
 import { linkPreviewFor, richContent, richSummary, type RichContent, type RichPayload, type VoteRecord } from "./rich-content";
 import { conversationTitle, decodeGroupTitle, encodeGroupTitle, groupTitleFromRecords, isGroupTitleText, normalizeTitle } from "./conversation-title";
+import { statusPostId } from "./private-shares";
 
 export type SecurityProfile = "MANAGED" | "PRIVATE_E2EE";
 /** `needs-signin`: this sign-in is too old to register the browser; the standard sign-in flow takes over. */
@@ -68,6 +69,7 @@ export type ConversationView = {
   groupReady: boolean;
   createdAt: string;
   members: string[];
+  expiresAt: string | null;
   title: string;
   transparency: "VERIFIED" | "UNPINNED" | "NOT_APPLICABLE";
   version: number;
@@ -161,6 +163,7 @@ type ServerConversation = {
   securityProfile: SecurityProfile;
   lifecycleState: string;
   createdAt: string;
+  expiresAt?: string | null;
   encryption: { mlsGroupId: string | null; serverCanReadContent: boolean };
   members?: { principalId: string; role?: string; state?: string }[];
   version?: number;
@@ -1160,6 +1163,7 @@ export class MessagingEngine {
         mlsGroupId: c.encryption.mlsGroupId,
         groupReady,
         createdAt: c.createdAt,
+        expiresAt: c.expiresAt ?? null,
         members,
         title: "",
         transparency: c.securityProfile === "PRIVATE_E2EE" ? (this.snapshot.ktPinned ? "VERIFIED" : "UNPINNED") : "NOT_APPLICABLE",
@@ -1199,6 +1203,10 @@ export class MessagingEngine {
 
   /** Direct chat: the other person (alias, then name); group: its name, else its other members. */
   private titleOf(v: ConversationView): string {
+    if (statusPostId(v.groupTitle)) {
+      const owner = v.ownerPrincipalId;
+      return owner === this.snapshot.identity?.principalId ? "Your status" : `Status from ${owner ? this.snapshot.names[owner] ?? "a contact" : "a contact"}`;
+    }
     return conversationTitle({ contextClass: v.contextClass, serverTitle: v.serverTitle, groupTitle: v.groupTitle, members: v.members, me: this.snapshot.identity?.principalId, names: this.snapshot.names });
   }
 
@@ -1253,7 +1261,7 @@ export class MessagingEngine {
   async createConversation(
     userIds: string[],
     profile: SecurityProfile,
-    options: { cfMeetIds?: string[]; title?: string } = {},
+    options: { cfMeetIds?: string[]; title?: string; expiresAt?: string; retentionSeconds?: number; announcementOnly?: boolean } = {},
   ): Promise<string> {
     const people = userIds.length ? (await identityApi.resolve(userIds)).people.map((p) => p.principalId) : [];
     const contacts = options.cfMeetIds ?? [];
@@ -1265,13 +1273,17 @@ export class MessagingEngine {
       ? people.length
         ? { contextClass: "DIRECT", counterpartPrincipalId: people[0], securityProfile: profile, ...disclosure }
         : { contextClass: "DIRECT", counterpartCfMeetId: contacts[0], securityProfile: profile, ...disclosure }
-      : { contextClass: "GROUP", securityProfile: profile, ...disclosure, ...(title && profile === "MANAGED" ? { title: title.slice(0, 120) } : {}) };
+      : { contextClass: "GROUP", securityProfile: profile, ...disclosure, ...(title && profile === "MANAGED" ? { title: title.slice(0, 120) } : {}),
+          ...(options.expiresAt ? { expiresAt: options.expiresAt, expiryGraceSeconds: 0 } : {}),
+          ...(options.retentionSeconds ? { retentionSeconds: options.retentionSeconds } : {}) };
     const conv = await relay<ServerConversation>("POST", "v1/conversations", body, `web-${uuid()}`);
     if (conv.securityProfile !== profile) {
       // Never silently accept another profile than the one the user chose.
       throw new MessagingApiError(0, "PROFILE_NOT_GRANTED", conv.securityProfile);
     }
     this.server.set(conv.conversationId, conv);
+    // Lock a status before adding its audience: recipients may read but never post.
+    if (options.announcementOnly) await this.setAnnouncementOnly(conv.conversationId, true);
     let principals = people;
     if (!direct) {
       for (const p of people) await relay("POST", `v1/conversations/${conv.conversationId}/members`, { principalId: p });
@@ -1288,7 +1300,11 @@ export class MessagingEngine {
     if (profile === "PRIVATE_E2EE") {
       await this.establishGroup(conv, principals);
       // The name travels inside the encrypted group, after the members' devices were added.
-      if (title && !direct) await this.shareGroupTitle(conv.conversationId, title.slice(0, 120)).catch(() => {});
+      if (title && !direct) {
+        const shared = this.shareGroupTitle(conv.conversationId, title.slice(0, 120));
+        if (statusPostId(title)) await shared;
+        else await shared.catch(() => {});
+      }
     }
     this.subscribeConversation(conv);
     await this.refreshConversations();
@@ -1468,11 +1484,12 @@ export class MessagingEngine {
    */
   async sendRich(conversationId: string, payload: RichPayload): Promise<void> {
     const conv = this.server.get(conversationId);
-    if (!conv) return;
+    if (!conv) throw new MessagingApiError(0, "NOT_FOUND", "That chat is no longer available.");
     if (conv.securityProfile !== "PRIVATE_E2EE") throw new MessagingApiError(0, "PRIVATE_CHATS_ONLY", null);
     await this.enqueue(conversationId, async () => {
       await this.sendEncrypted(conv, payload, []);
-      await this.sync(conversationId);
+      // A read outage after publication must not encourage duplicate broadcast sends.
+      await this.sync(conversationId).catch(() => {});
     });
   }
 

@@ -22,6 +22,7 @@ const BINARIES: [&str; 13] = [
     env!("CARGO_BIN_EXE_platform-build-migration"),
     env!("CARGO_BIN_EXE_meeting-audit-migration"),
     env!("CARGO_BIN_EXE_account-privacy-migration"),
+    env!("CARGO_BIN_EXE_account-phone-migration"),
 ];
 
 const UNSUPPORTED_DATABASE_URL: &str = "sec015-no-such-driver://guard-check/none";

@@ -78,6 +78,7 @@ pub struct World {
     pub access_calls: usize,
     /// The Account's verified email addresses (lower case) -> account reference.
     pub verified_emails: BTreeMap<String, String>,
+    pub discoverable_phones: BTreeMap<String, String>,
 }
 /// One account's preference document in the mock Notification Service (U6 / U7 rules:
 /// absent = everything enabled, one document version bumped by every write).
@@ -585,8 +586,15 @@ async fn owner(HttpState(s): HttpState<Owners>, request: Request) -> Response {
         },
         // KF1: the Account's verified-email lookup.
         "/internal/v1/accounts/communications/email-lookup" => {
-            let email = body["email"].as_str().unwrap_or_default().to_owned();
-            match s.world.read().unwrap().verified_emails.get(&email) {
+            let world = s.world.read().unwrap();
+            let matched = if let Some(phone) = body["phoneNumber"].as_str() {
+                world.discoverable_phones.get(phone)
+            } else {
+                world
+                    .verified_emails
+                    .get(body["email"].as_str().unwrap_or_default())
+            };
+            match matched {
                 Some(r) => json!({"schemaVersion":1,"found":true,"accountReference":r}),
                 None => json!({"schemaVersion":1,"found":false}),
             }

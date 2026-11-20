@@ -53,6 +53,7 @@ pub const BINARIES: &[&str] = &[
     "gap-closure-migration",
     "meeting-audit-migration",
     "account-privacy-migration",
+    "account-phone-migration",
     "calling",
     "calling-migration",
     "messaging",
@@ -369,6 +370,7 @@ impl Stack {
             db::migrate(&self.bin("meeting-audit-migration"), &url)?;
             // S2: account-deletion erasure jobs, required at startup.
             db::migrate(&self.bin("account-privacy-migration"), &url)?;
+            db::migrate(&self.bin("account-phone-migration"), &url)?;
         }
         self.db_urls.insert(service.to_string(), url.clone());
         // §21.1: every service provisioned by `provision-service-database.sh` runs under

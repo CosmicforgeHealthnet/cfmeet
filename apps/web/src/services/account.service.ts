@@ -17,9 +17,15 @@ import type {
  * operation in the served contract; the type is kept here until the web sign-in screens move
  * to the one-time-code flow, so the existing screens keep compiling unchanged.
  */
-export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT" | "DISABLE_MFA";
+export type StepUpPurpose = "DEACTIVATE_ACCOUNT" | "CHANGE_EMAIL" | "DELETE_ACCOUNT" | "DISABLE_MFA" | "MANAGE_PHONE";
+export type PhoneStatus = { status: "PROVIDER_BLOCKED" | "NOT_LINKED" | "VERIFIED"; phoneNumber: string | null; discoverable: boolean };
 
 export const accountService = {
+  phone: async () => (await apiV2.get<PhoneStatus>("/me/phone")).data,
+  requestPhone: async (phoneNumber: string, stepUpToken: string) => (await apiV2.post<{ challengeId: string }>("/me/phone/verification", { phoneNumber, stepUpToken })).data,
+  confirmPhone: async (challengeId: string, code: string) => (await apiV2.post<PhoneStatus>("/me/phone/confirm", { challengeId, code })).data,
+  phonePrivacy: async (discoverable: boolean) => (await apiV2.patch<PhoneStatus>("/me/phone", { discoverable })).data,
+  removePhone: async (stepUpToken: string) => (await apiV2.delete("/me/phone", { data: { stepUpToken } })).data,
   getProfile: async () => (await apiV2.get<AccountProfile>("/me/profile")).data,
 
   updateProfile: async (patch: UpdateAccountProfileRequest) =>

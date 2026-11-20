@@ -516,6 +516,7 @@ async fn dispatch_inner(
             s.visible_profile(scope, p, &target, false).await
         }
         ("POST", ["discovery", "email", "resolve"]) => s.resolve_email(scope, p, body(&r)).await,
+        ("POST", ["discovery", "phone", "resolve"]) => s.resolve_phone(scope, p, body(&r)).await,
         ("GET", ["profiles", public_id]) => {
             s.limit_attempt(p, "discovery.resolve", 120).await?;
             let target = s

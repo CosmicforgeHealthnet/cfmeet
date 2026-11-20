@@ -32,6 +32,8 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
   const router = useRouter();
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
+  const [phoneMode, setPhoneMode] = useState(false);
+  const [phoneChallenge, setPhoneChallenge] = useState("");
   const [code, setCode] = useState("");
   const [username, setUsername] = useState("");
   const [remember, setRemember] = useState(true);
@@ -52,10 +54,11 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
 
   const sendCode = async () => {
     const address = email.trim();
-    if (!EMAIL_RE.test(address)) { setError("Enter a valid email address."); return; }
+    if (phoneMode ? !/^\+[1-9]\d{7,14}$/.test(address) : !EMAIL_RE.test(address)) { setError(phoneMode ? "Enter your linked number with its country code, for example +393331234567." : "Enter a valid email address."); return; }
     setBusy(true); setError(null);
     try {
-      await authService.requestCode(address);
+      if (phoneMode) setPhoneChallenge((await authService.requestPhoneCode(address)).challengeId);
+      else await authService.requestCode(address);
       setEmail(address); setCode(""); setStep("code"); setCooldown(RESEND_SECONDS);
     } catch (e) { setError(getErrorMessage(e, "We couldn't send the code. Try again.")); }
     finally { setBusy(false); }
@@ -65,7 +68,9 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
     if (!/^\d{6}$/.test(value)) return;
     setBusy(true); setError(null);
     try {
-      const res = await authService.verifyCode(email, value, remember);
+      const res = phoneMode
+        ? await authService.verifyPhoneCode(phoneChallenge, value, remember)
+        : await authService.verifyCode(email, value, remember);
       if (res.is_new_account) { setStep("username"); return; }
       router.push(returnPath());
     } catch (e) {
@@ -137,12 +142,12 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
     return (
       <div>
         <button type="button" onClick={() => { setStep("email"); setError(null); }} className="-ml-2 mb-4 inline-flex h-9 items-center gap-1.5 rounded-xl px-2 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">
-          <ArrowLeft className="size-4" />Use a different email
+          <ArrowLeft className="size-4" />{phoneMode ? "Use a different number" : "Use a different email"}
         </button>
         <span className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary"><Mail className="size-6" /></span>
-        <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">Check your email</h1>
+        <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">{phoneMode ? "Check your phone" : "Check your email"}</h1>
         <p className="mt-2 text-base text-muted-foreground">
-          We sent a 6-digit code to <span className="font-semibold text-foreground">{email}</span>. Enter it below, or tap the link in the email.
+          {phoneMode ? <>If this number is linked to an account, a 6-digit code will arrive at <span className="font-semibold text-foreground">{email}</span>.</> : <>We sent a 6-digit code to <span className="font-semibold text-foreground">{email}</span>. Enter it below, or tap the link in the email.</>}
         </p>
         {error ? <p role="alert" className="mt-5 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p> : null}
         <div className="mt-6 flex justify-center">
@@ -155,7 +160,7 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
         </div>
         <Button type="button" className="mt-6 h-12 w-full rounded-xl text-base shadow-none" loading={busy} disabled={code.length !== 6} onClick={() => void verify()}>Continue</Button>
         <p className="mt-5 text-center text-sm text-muted-foreground">
-          Didn&apos;t get it? Check spam, or{" "}
+          {phoneMode ? "Didn't get it? " : "Didn't get it? Check spam, or "}
           {cooldown > 0 ? <span>send a new code in {cooldown}s</span>
             : <button type="button" disabled={busy} onClick={() => void sendCode()} className="font-semibold text-primary hover:underline">send a new code</button>}
         </p>
@@ -183,14 +188,15 @@ export default function SignIn({ mode = "signin" }: { mode?: "signin" | "signup"
       {error ? <p role="alert" className="mb-4 rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</p> : null}
 
       <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); void sendCode(); }} noValidate>
-        <AuthInput label="Email" type="email" autoComplete="email" placeholder="you@example.com" value={email}
+        <AuthInput label={phoneMode ? "Linked phone number" : "Email"} type={phoneMode ? "tel" : "email"} autoComplete={phoneMode ? "tel" : "email"} placeholder={phoneMode ? "+393331234567" : "you@example.com"} value={email}
           onChange={(e) => { setEmail(e.target.value); setError(null); }} />
         <label htmlFor="remember-me" className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
           <Checkbox id="remember-me" checked={remember} onCheckedChange={(c) => setRemember(c === true)} />
           Keep me signed in on this device
         </label>
-        <Button type="submit" className="h-12 w-full rounded-xl text-base shadow-none" loading={busy}>Continue with email</Button>
+        <Button type="submit" className="h-12 w-full rounded-xl text-base shadow-none" loading={busy}>{phoneMode ? "Continue with phone" : "Continue with email"}</Button>
       </form>
+      {mode === "signin" && process.env.NEXT_PUBLIC_PHONE_ACCOUNTS_ENABLED === "true" ? <button type="button" disabled={busy} className="mt-4 w-full text-sm font-semibold text-primary" onClick={() => { setPhoneMode(!phoneMode); setEmail(""); setError(null); }}>{phoneMode ? "Use email instead" : "Sign in with a linked phone number"}</button> : null}
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
         {mode === "signup" ? "Already have an account? " : "New to CF Meet? "}

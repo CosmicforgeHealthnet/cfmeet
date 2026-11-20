@@ -61,6 +61,7 @@ import key_rotation
 import platform_operations as platform_ops
 import integrate_operations as integrate_ops
 import audit_operations
+import provider_operations
 
 WORK = p.ROOT / 'coordinated'
 BACKUPS = p.ROOT / 'backups'
@@ -164,7 +165,7 @@ SERVICES = {
                     'organization-integration-migration', 'account-communications-migration',
                     'lifecycle-delivery-migration', 'notification-fence-migration',
                     'gap-closure-migration', 'platform-build-migration', 'meeting-audit-migration',
-                    'account-privacy-migration'],
+                    'account-privacy-migration','account-phone-migration'],
         history=['seaql_migrations'], existing=True),
     'developer-platform': _service('cfmeet-developer-platform', 8098, '/ready', tls=8455,
         db='cfmeet_developer_platform', role='developer_platform', migrations=['developer-platform-migration'],
@@ -1325,6 +1326,8 @@ def safe_defaults():
     webhook delivery may be `active` once activate-developer-webhooks is recorded. Production
     auto-approval and every provider-dependent switch stay fixed."""
     rules = copy.deepcopy(SAFE_DEFAULTS)
+    # SMS credentials and owner acceptance are required before a future activation.
+    rules.setdefault('meeting-service', {})['PHONE_ACCOUNTS_ENABLED'] = (None, '', 'false', 'true') if done(provider_operations.PHONE_OPERATION) else (None, '', 'false')
     rules['developer-platform-worker'] = dict(rules['developer-platform'])
     if done('activate-developer-webhooks'):
         for name in ('developer-platform', 'developer-platform-worker'):
@@ -1373,6 +1376,11 @@ def safe_default_violations(envs):
         for var, allowed in rules.items():
             if env.get(var) not in allowed:
                 violations.append('%s %s' % (name, var))
+    for replica in notif_ops.REPLICAS:
+        if not done(provider_operations.NATIVE_OPERATION):
+            for key, value in (envs.get(replica) or {}).items():
+                if value and key.startswith(('NOTIFICATIONS_PUSH_APNS_', 'NOTIFICATIONS_PUSH_FCM_')):
+                    violations.append(replica + ' ' + key)
     # The push adapters switch on from their credential variables whatever
     # MESSAGING_PUSH_PROVIDER says (services/messaging/src/config/mod.rs): none may be present.
     messaging = envs.get('messaging') or {}
@@ -2955,6 +2963,8 @@ ACTIVATIONS = {
     # B6 / C5: the bigger database pools, only within the core database's connection budget.
     'activate-database-pools': ((), activate_database_pools),
     audit_operations.CAPACITY_OPERATION: ((), _platform(audit_operations.activate_database_capacity)),
+    provider_operations.PHONE_OPERATION: ((), _platform(provider_operations.activate_phone)),
+    provider_operations.NATIVE_OPERATION: ((), _platform(provider_operations.activate_native_push)),
     # Notification Service N6: owner read APIs (X1-X5) granted to cfmeet.notifications.
     'activate-notifications-owners': ((), lambda sha, run_id, confirm: notif_ops.activate_owners(
         sys.modules[__name__], sha, run_id, confirm)),
@@ -3044,6 +3054,7 @@ def run(operation, sha, run_id, confirm=''):
             raise RuntimeError('diagnose takes no confirmation')
         mail_ops.diagnose(sys.modules[__name__], sha, run_id)
         notif_ops.notification_diagnostics(sys.modules[__name__])
+        provider_operations.resend_domain_facts(sys.modules[__name__])
     elif operation == 'developer-access-review':
         # One audited operator decision (or read) by a named reviewer; no image change.
         developer_access.review(sys.modules[__name__], sha, run_id, confirm)
@@ -3098,6 +3109,7 @@ def run(operation, sha, run_id, confirm=''):
         checks = notifications_acceptance.run(run_id, emit)
         emit('notificationsAcceptanceSummary', checks)
         notif_ops.notification_diagnostics(sys.modules[__name__])
+        provider_operations.resend_domain_facts(sys.modules[__name__])
         if any(v != 'PASS' for v in checks.values()):
             raise RuntimeError('Notification acceptance failed')
     elif operation == platform_ops.ACCEPTANCE:

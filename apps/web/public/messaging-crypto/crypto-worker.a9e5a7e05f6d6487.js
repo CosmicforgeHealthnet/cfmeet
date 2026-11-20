@@ -180,7 +180,15 @@ function linkPreview(v) {
     fail("PAYLOAD_INVALID");
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") fail("PAYLOAD_INVALID");
-  return { url: parsed.href, title: optStr(v.title, 200), description: optStr(v.description, 300), siteName: optStr(v.siteName, 100) };
+  const result = { url: parsed.href, title: optStr(v.title, 200), description: optStr(v.description, 300), siteName: optStr(v.siteName, 100) };
+  if (v.imageDataUrl !== undefined && v.imageDataUrl !== null) {
+    const image = str(v.imageDataUrl, 24576, 32);
+    // Inline JPEG only: never fetch a recipient's IP-revealing remote image,
+    // execute an SVG, or accept an unbounded attachment in a preview.
+    if (!/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(image)) fail("PAYLOAD_INVALID");
+    result.imageDataUrl = image;
+  }
+  return result;
 }
 function coordinate(v, limit) {
   return typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= limit ? Math.round(v * 1e6) / 1e6 : fail("PAYLOAD_INVALID");
