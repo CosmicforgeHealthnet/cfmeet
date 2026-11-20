@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   KEY_PACKAGE_STOCK,
   KEY_PACKAGE_TARGET,
+  BEFORE_JOIN_PREVIEW,
   WAITING_PREVIEW,
   beforeJoinNote,
   chatPreview,
@@ -14,6 +15,7 @@ import {
   keyPackagesToPublish,
   missingDevices,
   removalPlan,
+  sentBeforeJoin,
 } from "../src/lib/messaging/e2ee-membership.ts";
 
 const alice = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -66,9 +68,23 @@ test("a verified joiner is named to the worker with its exact key", () => {
 });
 
 test("older history: a clear placeholder, pointing to the other device when there is one", () => {
-  assert.match(beforeJoinNote(true), /other device/);
-  assert.match(beforeJoinNote(false), /before this device was linked/);
-  assert.doesNotMatch(beforeJoinNote(false), /other device/);
+  assert.match(beforeJoinNote(true), /^Sent before this browser joined\./);
+  assert.match(beforeJoinNote(true), /bring over older messages from your other device/);
+  assert.equal(beforeJoinNote(false), "Sent before this browser joined.");
+  assert.doesNotMatch(beforeJoinNote(false), /other device|linked|Waiting/);
+});
+
+test("a message sent before this browser joined never waits forever", () => {
+  const joinedAt = "2026-11-19T10:00:00Z";
+  assert.equal(sentBeforeJoin("2026-11-19T09:59:59Z", joinedAt), true);
+  assert.equal(sentBeforeJoin("2026-11-19T10:00:01Z", joinedAt), false);
+  // Unknown join time or send time: it may still arrive, so it keeps waiting.
+  assert.equal(sentBeforeJoin("2026-11-19T09:00:00Z", null), false);
+  assert.equal(sentBeforeJoin(null, joinedAt), false);
+  const summary = { lifecycle: "ACTIVE", previewText: null, attachmentCount: 0, createdAt: "2026-11-19T09:00:00Z" };
+  assert.equal(chatPreview({ e2ee: true, groupReady: false, loaded: true, latest: undefined, summary, joinedAt }), BEFORE_JOIN_PREVIEW);
+  // Sent after this browser joined: it can still arrive.
+  assert.equal(chatPreview({ e2ee: true, groupReady: false, loaded: true, latest: undefined, summary: { ...summary, createdAt: "2026-11-19T11:00:00Z" }, joinedAt }), WAITING_PREVIEW);
 });
 
 test("the chat list never shows a blank bar for a private message", () => {
@@ -84,9 +100,8 @@ test("the chat list never shows a blank bar for a private message", () => {
   const latest = (extra) => ({ text: null, file: null, note: null, state: "delivered", ...extra });
   assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ text: "hi" }), summary }), "hi");
   assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ file: { name: "a.pdf" } }), summary }), "📎 a.pdf");
-  for (const state of ["unreadable", "before-join"]) {
-    assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ state, note: "a long explanation" }), summary }), WAITING_PREVIEW);
-  }
+  assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ state: "unreadable", note: "a long explanation" }), summary }), WAITING_PREVIEW);
+  assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ state: "before-join", note: "a long explanation" }), summary }), BEFORE_JOIN_PREVIEW);
   assert.equal(chatPreview({ e2ee: true, groupReady: true, loaded: true, latest: latest({ state: "removed", note: "Message deleted" }), summary }), "Message deleted");
   // Server-readable chats and deleted / empty chats as before.
   assert.equal(chatPreview({ e2ee: false, groupReady: false, loaded: false, latest: undefined, summary: { ...summary, previewText: "managed" } }), "managed");

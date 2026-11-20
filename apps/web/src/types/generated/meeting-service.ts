@@ -4,7 +4,7 @@
 /* eslint-disable */
 
 export const CONTRACT_TITLE = "CosmicForge RTC API";
-export const CONTRACT_VERSION = "1.7.0";
+export const CONTRACT_VERSION = "1.8.0";
 
 /** Access-policy configuration (no secrets). */
 export interface AccessConfig {
@@ -1404,7 +1404,10 @@ export interface DeviceView {
   /** `TRUSTED` or `UNTRUSTED`. */
   trust: string;
   trustedAt?: string | null;
-  /** `BOOTSTRAP`, `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only). */
+  /**
+   * `BOOTSTRAP` (trusted by its own sign-in: the account's first device, or any browser,
+   * ADR 0067), `DEVICE_APPROVAL` or `EMAIL_STEP_UP` (trusted devices only).
+   */
   trustedVia?: string | null;
 }
 
