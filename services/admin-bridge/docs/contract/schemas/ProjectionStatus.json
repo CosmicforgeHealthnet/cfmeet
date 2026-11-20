@@ -1,0 +1,78 @@
+{
+  "description": "Freshness and coverage of every bridge projection (owner events -> summaries). Until owner events are wired (phase A7) every projection reports UNAVAILABLE.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "projections"
+  ],
+  "properties": {
+    "projections": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "freshness",
+          "coverage",
+          "last_event_at",
+          "lag_seconds",
+          "open_gaps",
+          "quarantined"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.]{0,63}$"
+          },
+          "freshness": {
+            "enum": [
+              "LIVE",
+              "RECENT",
+              "STALE",
+              "PARTIAL",
+              "UNKNOWN",
+              "UNAVAILABLE"
+            ]
+          },
+          "coverage": {
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "NONE"
+            ]
+          },
+          "last_event_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "lag_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "open_gaps": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "quarantined": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

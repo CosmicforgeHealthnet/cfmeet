@@ -1,0 +1,2 @@
+# Contract artifacts are pinned byte-for-byte by HQ (sha256). Never convert line endings.
+docs/contract/** text eol=lf

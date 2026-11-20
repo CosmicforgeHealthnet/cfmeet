@@ -1,0 +1,11 @@
+{
+  "contract_version": "1.0",
+  "product": "cfmeet",
+  "correlation_id": "2f4e6a8c-0b1d-4e3f-9a5b-7c9d1e3f5a7b",
+  "as_of": "2026-11-19T10:00:00Z",
+  "freshness": "UNAVAILABLE",
+  "error": {
+    "code": "SCOPE_DENIED",
+    "message": "market, organization, zone or tenant outside the assertion scopes or the enrolled scope"
+  }
+}

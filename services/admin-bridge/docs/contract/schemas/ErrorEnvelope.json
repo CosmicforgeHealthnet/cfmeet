@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "product",
+    "correlation_id",
+    "as_of",
+    "freshness",
+    "error"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "product": {
+      "const": "cfmeet"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "freshness": {
+      "enum": [
+        "LIVE",
+        "RECENT",
+        "STALE",
+        "PARTIAL",
+        "UNKNOWN",
+        "UNAVAILABLE"
+      ]
+    },
+    "error": {
+      "$ref": "#/components/schemas/Error"
+    }
+  }
+}

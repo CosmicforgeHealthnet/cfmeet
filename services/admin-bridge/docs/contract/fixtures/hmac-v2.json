@@ -1,0 +1,12 @@
+{
+  "description": "HMAC v2 and request_digest test vector (GET, empty body). The secret is a fixture value.",
+  "secret_utf8": "fixture-only-hmac-secret-not-for-use-0123456789",
+  "method": "GET",
+  "uri": "/internal/cfmeet-admin/v1/datasets/cfmeet.engagement_daily?market=GLOBAL&organization=cfmeet&zone=production&tenant=cfmeet-first-party&purpose=metrics-read&limit=31&start=2026-11-01T00:00:00Z&end=2026-11-19T00:00:00Z",
+  "timestamp": 1795000000,
+  "nonce": "00112233445566778899aabbccddeeff",
+  "body_utf8": "",
+  "canonical": "2\ncosmicforge-hq-cfmeet-admin\nGET\n/internal/cfmeet-admin/v1/datasets/cfmeet.engagement_daily?market=GLOBAL&organization=cfmeet&zone=production&tenant=cfmeet-first-party&purpose=metrics-read&limit=31&start=2026-11-01T00:00:00Z&end=2026-11-19T00:00:00Z\n1795000000\n00112233445566778899aabbccddeeff\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "signature": "2077332dfe0738995c52af10995e8826ab2235f8f7ea74c7b443bc24a10f6a3a",
+  "request_digest": "233c5cf6ac1e6bec45195cd155f450b041d759a6b20394518d236f8eae2c69f3"
+}
