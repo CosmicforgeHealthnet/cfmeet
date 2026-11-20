@@ -29,7 +29,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use cf_service_auth::{headers, InternalPermission, InternalServiceContext};
+use cf_service_auth::{headers, InternalPermission, InternalServiceContext, OperatorAttribution};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -748,11 +748,17 @@ pub async fn require_acting(
 
 /// The authenticated internal caller of the current request.
 #[derive(Debug, Clone)]
-pub struct InternalCaller(InternalServiceContext);
+pub struct InternalCaller(InternalServiceContext, Option<OperatorAttribution>);
 
 impl InternalCaller {
     pub fn context(&self) -> &InternalServiceContext {
         &self.0
+    }
+
+    /// The HQ staff member the admin bridge acts for (ADR 0068); `None` for every other
+    /// caller (attribution from any other caller is refused before any handler runs).
+    pub fn operator(&self) -> Option<&OperatorAttribution> {
+        self.1.as_ref()
     }
 
     /// Fails with INTERNAL_PERMISSION_DENIED unless Messaging's trust bundle grants
@@ -803,6 +809,25 @@ pub async fn require_internal_service(
         .await;
     match verified {
         Ok(ctx) => {
+            // ADR 0068: operator attribution (X-CF-Operator / -Approver / -Approval-Ref /
+            // -Intent-Digest) is accepted only from the admin bridge, well formed, never a
+            // self-approval; from any other caller, on any internal route, it is refused.
+            let operator = match OperatorAttribution::from_headers(
+                ctx.authenticated_service(),
+                request.headers(),
+            ) {
+                Ok(operator) => operator,
+                Err(error) => {
+                    tracing::warn!(caller = %ctx.authenticated_service(), reason = %error,
+                        route = route_pattern(&request), "operator attribution refused");
+                    let context = RequestContext::generate();
+                    let response = scoped(context.clone(), async {
+                        ApiError::code(ErrorCode::InternalPermissionDenied).into_response()
+                    })
+                    .await;
+                    return with_request_id(response, &context);
+                }
+            };
             let context = RequestContext {
                 request_id: ctx.request_id().clone(),
                 correlation_id: ctx.correlation_id().clone(),
@@ -811,7 +836,9 @@ pub async fn require_internal_service(
             let span = tracing::info_span!("internal_request", request_id = %context.request_id,
                 correlation_id = %context.correlation_id, caller = %ctx.authenticated_service(),
                 method = %request.method(), route = route_pattern(&request));
-            request.extensions_mut().insert(InternalCaller(ctx));
+            request
+                .extensions_mut()
+                .insert(InternalCaller(ctx, operator));
             let mut response = scoped(context.clone(), next.run(request).instrument(span)).await;
             if let Ok(value) = HeaderValue::from_str(context.request_id.as_str()) {
                 response.headers_mut().insert(headers::REQUEST_ID, value);
