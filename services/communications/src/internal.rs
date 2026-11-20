@@ -346,15 +346,7 @@ pub async fn review_report(
     Extension(ctx): Extension<InternalServiceContext>,
     Json(input): Json<ReviewReport>,
 ) -> Result<Json<Value>> {
-    let valid = match input.decision.as_str() {
-        "DISMISSED" => input.reason == "NO_VIOLATION" && !input.hold_target,
-        "ACTIONED" => matches!(
-            input.reason.as_str(),
-            "ABUSE" | "SECURITY" | "LEGAL" | "OTHER"
-        ),
-        _ => false,
-    };
-    if !valid {
+    if !crate::operator_commands::valid_review(&input.decision, &input.reason, input.hold_target) {
         return Err(Error::Validation);
     }
     let scope = auth::delegated(&ctx)?;

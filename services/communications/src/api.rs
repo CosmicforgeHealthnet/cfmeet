@@ -130,6 +130,31 @@ pub fn app(state: State) -> Router {
             "/internal/v1/communications/operator/metrics",
             get(crate::operator::metrics),
         )
+        // ADR 0068 A4: the admin bridge's operator commands and their settlement record.
+        .route(
+            "/internal/v1/communications/operator/profiles/:cf_meet_id/suspend",
+            post(crate::operator_commands::suspend_profile),
+        )
+        .route(
+            "/internal/v1/communications/operator/profiles/:cf_meet_id/restore",
+            post(crate::operator_commands::restore_profile),
+        )
+        .route(
+            "/internal/v1/communications/operator/reports/:report_id/review",
+            post(crate::operator_commands::review_report),
+        )
+        .route(
+            "/internal/v1/communications/operator/backfill",
+            post(crate::operator_commands::run_backfill),
+        )
+        .route(
+            "/internal/v1/communications/operator/replay",
+            post(crate::operator_commands::replay_event),
+        )
+        .route(
+            "/internal/v1/operator/operations/:idempotency_key",
+            get(crate::operator_commands::operation_record),
+        )
         .route(
             "/internal/v1/communications/verification/callback",
             post(crate::internal::phone_deferred),

@@ -438,6 +438,65 @@ pub async fn contacts_audit_ready<C: ConnectionTrait>(db: &C) -> Result<bool, Db
         .await?;
     Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == ContactsAudit.name())
 }
+/// ADR 0068 phase A4: the admin bridge's operations ledger
+/// (`communication_admin_operations`). A TENTH separate history: the previous image checks
+/// the contacts-audit history has exactly its one migration, so appending there would stop
+/// it after a rollback. Never merge them.
+pub struct AdminOperationsMigrator;
+#[async_trait::async_trait]
+impl MigratorTrait for AdminOperationsMigrator {
+    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
+        vec![Box::new(AdminOperations)]
+    }
+    fn migration_table_name() -> DynIden {
+        Alias::new("communications_admin_operations_seaql_migrations").into_iden()
+    }
+}
+struct AdminOperations;
+impl MigrationName for AdminOperations {
+    fn name(&self) -> &str {
+        "m20261120_000001_admin_operations"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for AdminOperations {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.get_connection()
+            .execute_unprepared(include_str!("../sql/011_admin_operations.sql"))
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Communications migrations are forward-only; retain data on application rollback"
+                .into(),
+        ))
+    }
+}
+/// Whether the admin-operations history is fully applied.
+pub async fn admin_operations_ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
+    let row = db
+        .query_one(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT to_regclass('communications_admin_operations_seaql_migrations') IS NOT NULL AS ready"
+                .to_owned(),
+        ))
+        .await?;
+    if !row
+        .map(|r| r.try_get::<bool>("", "ready"))
+        .transpose()?
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let rows = db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT version FROM communications_admin_operations_seaql_migrations".to_owned(),
+        ))
+        .await?;
+    Ok(rows.len() == 1 && rows[0].try_get::<String>("", "version")? == AdminOperations.name())
+}
 /// Apply the foundation history, then the unified, device-session, timeline-realtime,
 /// notification-publications, preference-authority and group-invitation ones.
 pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Result<(), DbErr> {
@@ -449,7 +508,8 @@ pub async fn up_all(db: &sea_orm_migration::sea_orm::DatabaseConnection) -> Resu
     PreferenceAuthorityMigrator::up(db, None).await?;
     GroupInvitationPolicyMigrator::up(db, None).await?;
     ShortIdsMigrator::up(db, None).await?;
-    ContactsAuditMigrator::up(db, None).await
+    ContactsAuditMigrator::up(db, None).await?;
+    AdminOperationsMigrator::up(db, None).await
 }
 /// Everything this image needs: every earlier history and the N10 preference-authority
 /// one.
@@ -458,6 +518,7 @@ pub async fn ready<C: ConnectionTrait>(db: &C) -> Result<bool, DbErr> {
         || !group_invitation_ready(db).await?
         || !short_ids_ready(db).await?
         || !contacts_audit_ready(db).await?
+        || !admin_operations_ready(db).await?
     {
         return Ok(false);
     }

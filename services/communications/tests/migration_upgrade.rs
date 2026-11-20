@@ -2,9 +2,9 @@
 //! Production 2026-11-18: the S9 history's backfill updated existing `communication_privacy`
 //! rows without advancing their version and the version guard aborted the migration.
 use communications_migration::{
-    ContactsAuditMigrator, DeviceSessionMigrator, GroupInvitationPolicyMigrator, Migrator,
-    MigratorTrait, NotificationPublicationsMigrator, PreferenceAuthorityMigrator, ShortIdsMigrator,
-    TimelineRealtimeMigrator, UnifiedMigrator,
+    AdminOperationsMigrator, ContactsAuditMigrator, DeviceSessionMigrator,
+    GroupInvitationPolicyMigrator, Migrator, MigratorTrait, NotificationPublicationsMigrator,
+    PreferenceAuthorityMigrator, ShortIdsMigrator, TimelineRealtimeMigrator, UnifiedMigrator,
 };
 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 use uuid::Uuid;
@@ -164,6 +164,13 @@ async fn the_group_invitation_history_upgrades_existing_privacy_rows_without_tou
     );
     db.execute_unprepared(&insert).await.unwrap();
     ContactsAuditMigrator::up(&db, None).await.unwrap();
+    // The previous (contacts-audit) image checks its own histories only: it still starts
+    // before the A4 admin-operations history exists; this image needs that one too.
+    assert!(communications_migration::contacts_audit_ready(&db)
+        .await
+        .unwrap());
+    assert!(!communications_migration::ready(&db).await.unwrap());
+    AdminOperationsMigrator::up(&db, None).await.unwrap();
     assert!(communications_migration::ready(&db).await.unwrap());
     let feed = |db: sea_orm::DatabaseConnection| async move {
         db.query_all(Statement::from_string(
