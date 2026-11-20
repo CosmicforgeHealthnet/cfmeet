@@ -333,6 +333,56 @@ impl Store for PgStore {
             .collect()
     }
 
+    async fn audit_window(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<(AuditDraft, AuditReceipt)>> {
+        let rows = self
+            .db
+            .query_all(stmt(
+                "SELECT sequence, entry_hash, correlation_id, occurred_at, actor, session_id, capability, method, path,                  purpose, scope::text AS scope, decision, http_status, request_digest, approval_id, approver,                  detail::text AS detail FROM admin_audit_entries                  WHERE occurred_at >= $1 AND occurred_at < $2 AND ($3::bigint IS NULL OR sequence > $3)                  ORDER BY sequence ASC LIMIT $4",
+                vec![start.into(), end.into(), after.into(), i64::from(limit).into()],
+            ))
+            .await
+            .map_err(unavailable)?;
+        rows.iter()
+            .map(|r| {
+                let scope: String = get(r, "scope")?;
+                let detail: String = get(r, "detail")?;
+                let status: i32 = get(r, "http_status")?;
+                Ok((
+                    AuditDraft {
+                        correlation_id: get(r, "correlation_id")?,
+                        occurred_at: get(r, "occurred_at")?,
+                        actor: get(r, "actor")?,
+                        session_id: get(r, "session_id")?,
+                        capability: get(r, "capability")?,
+                        method: get(r, "method")?,
+                        path: get(r, "path")?,
+                        purpose: get(r, "purpose")?,
+                        scope: serde_json::from_str(&scope)
+                            .map_err(|_| StoreError::Invalid("scope"))?,
+                        decision: get(r, "decision")?,
+                        http_status: u16::try_from(status)
+                            .map_err(|_| StoreError::Invalid("status"))?,
+                        request_digest: get(r, "request_digest")?,
+                        approval_id: get(r, "approval_id")?,
+                        approver: get(r, "approver")?,
+                        detail: serde_json::from_str(&detail)
+                            .map_err(|_| StoreError::Invalid("detail"))?,
+                    },
+                    AuditReceipt {
+                        sequence: get(r, "sequence")?,
+                        entry_hash: get(r, "entry_hash")?,
+                    },
+                ))
+            })
+            .collect()
+    }
+
     async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome> {
         let inserted = self
             .db
@@ -453,6 +503,244 @@ impl Store for PgStore {
             .await
             .map_err(unavailable)?;
         rows.iter().map(operation_row).collect()
+    }
+
+    async fn local_command(
+        &self,
+        op: &Operation,
+        change: &LocalChange,
+    ) -> StoreResult<LocalOutcome> {
+        let now = op.created_at.trunc_subsecs(6);
+        let txn = self.db.begin().await.map_err(unavailable)?;
+        let inserted = txn
+            .execute(stmt(
+                "INSERT INTO admin_operations (principal_sub, idempotency_key, operation_id, capability, owner, \
+                 purpose, scope, intent_sha256, target, expected_version, approval_id, correlation_id, status, \
+                 created_at) VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8, $9, $10, $11, $12, 'PENDING', $13) \
+                 ON CONFLICT DO NOTHING",
+                vec![
+                    op.principal_sub.clone().into(),
+                    op.idempotency_key.into(),
+                    op.operation_id.into(),
+                    op.capability.clone().into(),
+                    op.owner.clone().into(),
+                    op.purpose.clone().into(),
+                    json_text(&op.scope).into(),
+                    op.intent_sha256.clone().into(),
+                    op.target.clone().into(),
+                    op.expected_version.clone().into(),
+                    op.approval_id.clone().into(),
+                    op.correlation_id.into(),
+                    now.into(),
+                ],
+            ))
+            .await
+            .map_err(unavailable)?
+            .rows_affected();
+        if inserted != 1 {
+            txn.rollback().await.map_err(unavailable)?;
+            return match self
+                .operation(&op.principal_sub, op.idempotency_key)
+                .await?
+            {
+                Some(existing) => Ok(LocalOutcome::Existing(Box::new(existing))),
+                None => Ok(LocalOutcome::VersionTaken),
+            };
+        }
+        let actor = format!("hq:{}", op.principal_sub);
+        let applied: Result<(String, i64), &'static str> = match change {
+            LocalChange::PrivacyRegister { kind, subject_ref } => {
+                let n = txn
+                    .execute(stmt(
+                        "INSERT INTO admin_privacy_requests (request_id, kind, subject_ref, state, created_by, \
+                         created_at, updated_at, version) VALUES ($1, $2, $3, 'OPEN', $4, $5, $5, 1) \
+                         ON CONFLICT DO NOTHING",
+                        vec![op.operation_id.into(), kind.clone().into(), (*subject_ref).into(), actor.clone().into(), now.into()],
+                    ))
+                    .await
+                    .map_err(unavailable)?
+                    .rows_affected();
+                if n == 1 {
+                    for service in PRIVACY_SERVICES {
+                        txn.execute(stmt(
+                            "INSERT INTO admin_privacy_request_services (request_id, service, outcome) VALUES ($1, $2, 'PENDING')",
+                            vec![op.operation_id.into(), service.into()],
+                        ))
+                        .await
+                        .map_err(unavailable)?;
+                    }
+                    Ok(("OPEN".into(), 1))
+                } else {
+                    Err("VERSION_CONFLICT")
+                }
+            }
+            LocalChange::PrivacyRecord {
+                request_id,
+                service,
+                outcome,
+                expected_version,
+            } => {
+                let row = txn
+                    .query_one(stmt(
+                        "SELECT state, version FROM admin_privacy_requests WHERE request_id = $1 FOR UPDATE",
+                        vec![(*request_id).into()],
+                    ))
+                    .await
+                    .map_err(unavailable)?;
+                match row {
+                    None => Err("RESOURCE_NOT_FOUND"),
+                    Some(r) => {
+                        let (state, version): (String, i64) =
+                            (get(&r, "state")?, get(&r, "version")?);
+                        if state != "OPEN" || version != *expected_version {
+                            Err("VERSION_CONFLICT")
+                        } else {
+                            let n = txn
+                                .execute(stmt(
+                                    "UPDATE admin_privacy_request_services SET outcome = $3, recorded_by = $4, recorded_at = $5 \
+                                     WHERE request_id = $1 AND service = $2 AND outcome = 'PENDING'",
+                                    vec![(*request_id).into(), service.clone().into(), outcome.clone().into(), actor.clone().into(), now.into()],
+                                ))
+                                .await
+                                .map_err(unavailable)?
+                                .rows_affected();
+                            if n != 1 {
+                                Err("VERSION_CONFLICT")
+                            } else {
+                                let r = txn
+                                    .query_one(stmt(
+                                        "UPDATE admin_privacy_requests SET version = version + 1, updated_at = $2, \
+                                           state = CASE WHEN EXISTS (SELECT 1 FROM admin_privacy_request_services \
+                                             WHERE request_id = $1 AND outcome = 'PENDING') THEN 'OPEN' ELSE 'COMPLETE' END, \
+                                           completed_at = CASE WHEN EXISTS (SELECT 1 FROM admin_privacy_request_services \
+                                             WHERE request_id = $1 AND outcome = 'PENDING') THEN NULL ELSE $2 END \
+                                         WHERE request_id = $1 RETURNING state, version",
+                                        vec![(*request_id).into(), now.into()],
+                                    ))
+                                    .await
+                                    .map_err(unavailable)?
+                                    .ok_or(StoreError::Invalid("no row"))?;
+                                Ok((get(&r, "state")?, get(&r, "version")?))
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        let outcome = match &applied {
+            Ok((status, version)) => {
+                txn.execute(stmt(
+                    "UPDATE admin_operations SET status = 'SENT', sent_at = $3 WHERE principal_sub = $1 AND idempotency_key = $2",
+                    vec![op.principal_sub.clone().into(), op.idempotency_key.into(), now.into()],
+                ))
+                .await
+                .map_err(unavailable)?;
+                txn.execute(stmt(
+                    "UPDATE admin_operations SET status = 'SUCCEEDED', source_status = $3, source_version = $4, settled_at = $5 \
+                     WHERE principal_sub = $1 AND idempotency_key = $2",
+                    vec![
+                        op.principal_sub.clone().into(),
+                        op.idempotency_key.into(),
+                        status.clone().into(),
+                        version.to_string().into(),
+                        now.into(),
+                    ],
+                ))
+                .await
+                .map_err(unavailable)?;
+                LocalOutcome::Applied {
+                    status: status.clone(),
+                    version: *version,
+                }
+            }
+            Err(code) => {
+                txn.execute(stmt(
+                    "UPDATE admin_operations SET status = 'FAILED', source_status = 'REFUSED', error_code = $3, settled_at = $4 \
+                     WHERE principal_sub = $1 AND idempotency_key = $2",
+                    vec![op.principal_sub.clone().into(), op.idempotency_key.into(), (*code).into(), now.into()],
+                ))
+                .await
+                .map_err(unavailable)?;
+                LocalOutcome::Refused(code)
+            }
+        };
+        txn.commit().await.map_err(unavailable)?;
+        Ok(outcome)
+    }
+
+    async fn privacy_requests(
+        &self,
+        after: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<PrivacyRequest>> {
+        let (t, id) = match after {
+            Some((t, id)) => (Some(t), Some(id)),
+            None => (None, None),
+        };
+        let rows = self
+            .db
+            .query_all(stmt(
+                "SELECT request_id FROM admin_privacy_requests \
+                 WHERE ($1::timestamptz IS NULL OR (created_at, request_id) > ($1::timestamptz, $2::uuid)) \
+                 ORDER BY created_at, request_id LIMIT $3",
+                vec![t.into(), id.into(), i64::from(limit).into()],
+            ))
+            .await
+            .map_err(unavailable)?;
+        let mut out = Vec::new();
+        for r in rows {
+            let id: uuid::Uuid = get(&r, "request_id")?;
+            if let Some(p) = self.privacy_request(id).await? {
+                out.push(p);
+            }
+        }
+        Ok(out)
+    }
+
+    async fn privacy_request(&self, id: uuid::Uuid) -> StoreResult<Option<PrivacyRequest>> {
+        let Some(r) = self
+            .db
+            .query_one(stmt(
+                "SELECT request_id, kind, subject_ref, state, created_by, created_at, updated_at, completed_at, version \
+                 FROM admin_privacy_requests WHERE request_id = $1",
+                vec![id.into()],
+            ))
+            .await
+            .map_err(unavailable)?
+        else {
+            return Ok(None);
+        };
+        let services = self
+            .db
+            .query_all(stmt(
+                "SELECT service, outcome, recorded_by, recorded_at FROM admin_privacy_request_services \
+                 WHERE request_id = $1 ORDER BY service",
+                vec![id.into()],
+            ))
+            .await
+            .map_err(unavailable)?
+            .iter()
+            .map(|s| {
+                Ok(PrivacyService {
+                    service: get(s, "service")?,
+                    outcome: get(s, "outcome")?,
+                    recorded_by: get(s, "recorded_by")?,
+                    recorded_at: get(s, "recorded_at")?,
+                })
+            })
+            .collect::<StoreResult<Vec<_>>>()?;
+        Ok(Some(PrivacyRequest {
+            request_id: get(&r, "request_id")?,
+            kind: get(&r, "kind")?,
+            subject_ref: get(&r, "subject_ref")?,
+            state: get(&r, "state")?,
+            created_by: get(&r, "created_by")?,
+            created_at: get(&r, "created_at")?,
+            updated_at: get(&r, "updated_at")?,
+            completed_at: get(&r, "completed_at")?,
+            version: get(&r, "version")?,
+            services,
+        }))
     }
 
     async fn cleanup(&self, now: DateTime<Utc>) -> StoreResult<CleanupStats> {

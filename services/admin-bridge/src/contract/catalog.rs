@@ -2805,7 +2805,9 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         get("privacy.requests.list", "/privacy/requests", Q::ScopedPage)
             .at(AdminBridge, S::Local, P::A7)
-            .risk(R::R1, V::OperationsMinimized),
+            .risk(R::R1, V::OperationsMinimized)
+            .result("PrivacyRequestPage")
+            .served(&["privacy_requests_complete_only_when_every_service_reports"]),
     );
     c.push(
         get(
@@ -2815,12 +2817,17 @@ pub fn catalog() -> Vec<Capability> {
         )
         .at(AdminBridge, S::Local, P::A7)
         .uuid("request_id")
-        .risk(R::R1, V::OperationsMinimized),
+        .risk(R::R1, V::OperationsMinimized)
+        .result("PrivacyRequest")
+        .served(&["privacy_requests_complete_only_when_every_service_reports"]),
     );
     c.push(
         cmd("privacy.request.register", "/privacy/requests")
             .at(AdminBridge, S::Local, P::A7)
-            .risk(R::R3, V::Personal),
+            .risk(R::R3, V::Personal)
+            .body("PrivacyRegisterRequest")
+            .result("PrivacyCommandResult")
+            .served(&["privacy_requests_complete_only_when_every_service_reports"]),
     );
     c.push(
         cmd(
@@ -2829,7 +2836,10 @@ pub fn catalog() -> Vec<Capability> {
         )
         .at(AdminBridge, S::Local, P::A7)
         .uuid("request_id")
-        .risk(R::R4, V::Personal),
+        .risk(R::R4, V::Personal)
+        .body("PrivacyCompleteServiceRequest")
+        .result("PrivacyCommandResult")
+        .served(&["privacy_requests_complete_only_when_every_service_reports"]),
     );
 
     // ---- 6.15 Operations ---------------------------------------------------------
@@ -2839,7 +2849,9 @@ pub fn catalog() -> Vec<Capability> {
             get("operations.health.read", "/operations/health", Q::Scoped),
             P::A2,
         )
-        .risk(R::R0, V::OperationsMinimized),
+        .risk(R::R0, V::OperationsMinimized)
+        .result("Health")
+        .served(&["operations_health_is_the_aggregate_health"]),
     );
     c.push(
         op(
@@ -2921,7 +2933,9 @@ pub fn catalog() -> Vec<Capability> {
     c.push(
         get("audit.entries.list", "/audit/entries", Q::ScopedWindow)
             .at(AdminBridge, S::Local, P::A2)
-            .risk(R::R1, V::OperationsMinimized),
+            .risk(R::R1, V::OperationsMinimized)
+            .result("AuditEntryPage")
+            .served(&["audit_entries_page_the_hash_chained_audit"]),
     );
 
     // ---- 6.17 Telecom (read-only while telecom is off) ---------------------------

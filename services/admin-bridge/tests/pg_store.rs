@@ -790,3 +790,127 @@ async fn operations_are_sent_once_settled_once_and_never_deleted() {
     assert!(open.iter().all(|o| !o.status.settled()));
     db.drop().await;
 }
+
+#[tokio::test]
+async fn privacy_requests_change_with_their_operation_in_one_transaction() {
+    use admin_bridge::store::{LocalChange, LocalOutcome, OpStatus};
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let s = &db.store;
+    let key = Uuid::new_v4();
+    let mut register = operation(key, &format!("admin-bridge:privacy-request:{key}"), "0");
+    register.capability = "privacy.request.register".into();
+    register.owner = "admin-bridge".into();
+    let subject = Uuid::new_v4();
+    let out = s
+        .local_command(
+            &register,
+            &LocalChange::PrivacyRegister {
+                kind: "ERASURE".into(),
+                subject_ref: subject,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        out,
+        LocalOutcome::Applied {
+            status: "OPEN".into(),
+            version: 1
+        }
+    );
+    let op = s.operation("staff-0001", key).await.unwrap().unwrap();
+    assert_eq!(
+        (op.status, op.source_version.as_deref()),
+        (OpStatus::Succeeded, Some("1"))
+    );
+    let p = s.privacy_request(key).await.unwrap().unwrap();
+    assert_eq!(
+        (
+            p.kind.as_str(),
+            p.state.as_str(),
+            p.subject_ref,
+            p.services.len()
+        ),
+        ("ERASURE", "OPEN", subject, 7)
+    );
+    assert!(matches!(
+        s.local_command(
+            &register,
+            &LocalChange::PrivacyRegister {
+                kind: "ERASURE".into(),
+                subject_ref: subject
+            }
+        )
+        .await
+        .unwrap(),
+        LocalOutcome::Existing(_)
+    ));
+
+    // A stale version is refused and recorded FAILED with nothing changed.
+    let k2 = Uuid::new_v4();
+    let mut record = operation(k2, &format!("admin-bridge:privacy-request:{key}"), "5");
+    record.owner = "admin-bridge".into();
+    let stale = LocalChange::PrivacyRecord {
+        request_id: key,
+        service: "messaging".into(),
+        outcome: "DONE".into(),
+        expected_version: 5,
+    };
+    assert_eq!(
+        s.local_command(&record, &stale).await.unwrap(),
+        LocalOutcome::Refused("VERSION_CONFLICT")
+    );
+    assert_eq!(
+        s.operation("staff-0001", k2).await.unwrap().unwrap().status,
+        OpStatus::Failed
+    );
+    assert_eq!(s.privacy_request(key).await.unwrap().unwrap().version, 1);
+
+    // Every service's outcome completes the request.
+    let mut version = 1;
+    for service in admin_bridge::store::PRIVACY_SERVICES {
+        let k = Uuid::new_v4();
+        let mut op = operation(
+            k,
+            &format!("admin-bridge:privacy-request:{key}"),
+            &version.to_string(),
+        );
+        op.owner = "admin-bridge".into();
+        let change = LocalChange::PrivacyRecord {
+            request_id: key,
+            service: service.into(),
+            outcome: "DONE".into(),
+            expected_version: version,
+        };
+        match s.local_command(&op, &change).await.unwrap() {
+            LocalOutcome::Applied { version: v, .. } => version = v,
+            other => panic!("{service}: {other:?}"),
+        }
+    }
+    let p = s.privacy_request(key).await.unwrap().unwrap();
+    assert_eq!((p.state.as_str(), p.version), ("COMPLETE", 8));
+    assert!(p.completed_at.is_some());
+    assert_eq!(s.privacy_requests(None, 10).await.unwrap().len(), 1);
+    // Guards: outcomes never change, rows are never deleted.
+    assert!(db
+        .exec(
+            "UPDATE admin_privacy_request_services SET outcome = 'LEGAL_HOLD'",
+            vec![]
+        )
+        .await
+        .is_err());
+    assert!(db
+        .exec("DELETE FROM admin_privacy_requests", vec![])
+        .await
+        .is_err());
+    assert!(db
+        .exec(
+            "UPDATE admin_privacy_requests SET subject_ref = gen_random_uuid()",
+            vec![]
+        )
+        .await
+        .is_err());
+    db.drop().await;
+}

@@ -26,6 +26,7 @@ struct Inner {
     datasets: Vec<DatasetDay>,
     projections: Vec<ProjectionRow>,
     operations: Vec<Operation>,
+    privacy: Vec<PrivacyRequest>,
 }
 
 #[derive(Default)]
@@ -233,6 +234,30 @@ impl Store for MemoryStore {
         Ok(v)
     }
 
+    async fn audit_window(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+        after: Option<i64>,
+        limit: u32,
+    ) -> StoreResult<Vec<(AuditDraft, AuditReceipt)>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .audit
+            .iter()
+            .filter(|(d, r)| {
+                d.occurred_at >= start
+                    && d.occurred_at < end
+                    && after.is_none_or(|a| r.sequence > a)
+            })
+            .take(limit as usize)
+            .cloned()
+            .collect())
+    }
+
     async fn begin_operation(&self, op: &Operation) -> StoreResult<BeginOutcome> {
         self.check()?;
         let mut inner = self.inner.lock().unwrap();
@@ -330,6 +355,141 @@ impl Store for MemoryStore {
         open.sort_by_key(|o| o.created_at);
         open.truncate(limit as usize);
         Ok(open)
+    }
+
+    async fn local_command(
+        &self,
+        op: &Operation,
+        change: &LocalChange,
+    ) -> StoreResult<LocalOutcome> {
+        self.check()?;
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(existing) = inner.operations.iter().find(|o| {
+            o.principal_sub == op.principal_sub && o.idempotency_key == op.idempotency_key
+        }) {
+            return Ok(LocalOutcome::Existing(Box::new(existing.clone())));
+        }
+        if inner.operations.iter().any(|o| {
+            o.target == op.target
+                && o.expected_version == op.expected_version
+                && o.status != OpStatus::Failed
+        }) {
+            return Ok(LocalOutcome::VersionTaken);
+        }
+        let now = op.created_at;
+        let applied: Result<(String, i64), &'static str> = match change {
+            LocalChange::PrivacyRegister { kind, subject_ref } => {
+                if inner
+                    .privacy
+                    .iter()
+                    .any(|p| p.request_id == op.operation_id)
+                {
+                    Err("VERSION_CONFLICT")
+                } else {
+                    inner.privacy.push(PrivacyRequest {
+                        request_id: op.operation_id,
+                        kind: kind.clone(),
+                        subject_ref: *subject_ref,
+                        state: "OPEN".into(),
+                        created_by: format!("hq:{}", op.principal_sub),
+                        created_at: now,
+                        updated_at: now,
+                        completed_at: None,
+                        version: 1,
+                        services: PRIVACY_SERVICES
+                            .iter()
+                            .map(|s| PrivacyService {
+                                service: s.to_string(),
+                                outcome: "PENDING".into(),
+                                recorded_by: None,
+                                recorded_at: None,
+                            })
+                            .collect(),
+                    });
+                    Ok(("OPEN".into(), 1))
+                }
+            }
+            LocalChange::PrivacyRecord {
+                request_id,
+                service,
+                outcome,
+                expected_version,
+            } => {
+                match inner
+                    .privacy
+                    .iter_mut()
+                    .find(|p| p.request_id == *request_id)
+                {
+                    None => Err("RESOURCE_NOT_FOUND"),
+                    Some(p) if p.version != *expected_version || p.state != "OPEN" => {
+                        Err("VERSION_CONFLICT")
+                    }
+                    Some(p) => match p.services.iter_mut().find(|s| s.service == *service) {
+                        None => Err("RESOURCE_NOT_FOUND"),
+                        Some(s) if s.outcome != "PENDING" => Err("VERSION_CONFLICT"),
+                        Some(s) => {
+                            s.outcome = outcome.clone();
+                            s.recorded_by = Some(format!("hq:{}", op.principal_sub));
+                            s.recorded_at = Some(now);
+                            p.version += 1;
+                            p.updated_at = now;
+                            if p.services.iter().all(|s| s.outcome != "PENDING") {
+                                p.state = "COMPLETE".into();
+                                p.completed_at = Some(now);
+                            }
+                            Ok((p.state.clone(), p.version))
+                        }
+                    },
+                }
+            }
+        };
+        let mut row = op.clone();
+        match applied {
+            Ok((status, version)) => {
+                row.status = OpStatus::Succeeded;
+                row.sent_at = Some(now);
+                row.settled_at = Some(now);
+                row.source_status = Some(status.clone());
+                row.source_version = Some(version.to_string());
+                inner.operations.push(row);
+                Ok(LocalOutcome::Applied { status, version })
+            }
+            Err(code) => {
+                row.status = OpStatus::Failed;
+                row.settled_at = Some(now);
+                row.source_status = Some("REFUSED".into());
+                row.error_code = Some(code.into());
+                inner.operations.push(row);
+                Ok(LocalOutcome::Refused(code))
+            }
+        }
+    }
+
+    async fn privacy_requests(
+        &self,
+        after: Option<(DateTime<Utc>, uuid::Uuid)>,
+        limit: u32,
+    ) -> StoreResult<Vec<PrivacyRequest>> {
+        self.check()?;
+        let mut all = self.inner.lock().unwrap().privacy.clone();
+        all.sort_by_key(|p| (p.created_at, p.request_id));
+        Ok(all
+            .into_iter()
+            .filter(|p| after.is_none_or(|a| (p.created_at, p.request_id) > a))
+            .take(limit as usize)
+            .collect())
+    }
+
+    async fn privacy_request(&self, id: uuid::Uuid) -> StoreResult<Option<PrivacyRequest>> {
+        self.check()?;
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .privacy
+            .iter()
+            .find(|p| p.request_id == id)
+            .cloned())
     }
 
     async fn cleanup(&self, now: DateTime<Utc>) -> StoreResult<CleanupStats> {

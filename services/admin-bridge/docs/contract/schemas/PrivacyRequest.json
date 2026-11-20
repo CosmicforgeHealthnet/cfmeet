@@ -1,0 +1,115 @@
+{
+  "description": "One data-subject request tracked across the services that hold the person's data (design §6.14). OPEN until every service has an outcome, then COMPLETE. The bridge keeps the kind, the opaque CF Meet account id and each service's outcome only. version increases on every change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_id",
+    "kind",
+    "subject_ref",
+    "state",
+    "created_by",
+    "created_at",
+    "updated_at",
+    "completed_at",
+    "version",
+    "services"
+  ],
+  "properties": {
+    "request_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "enum": [
+        "ACCESS",
+        "ERASURE",
+        "CORRECTION",
+        "RESTRICTION"
+      ]
+    },
+    "subject_ref": {
+      "type": "string",
+      "format": "uuid",
+      "description": "The CF Meet account id the request is about."
+    },
+    "state": {
+      "enum": [
+        "OPEN",
+        "COMPLETE"
+      ]
+    },
+    "created_by": {
+      "type": "string",
+      "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "services": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "service",
+          "outcome",
+          "recorded_by",
+          "recorded_at"
+        ],
+        "properties": {
+          "service": {
+            "enum": [
+              "meeting-service",
+              "messaging",
+              "calling",
+              "communications",
+              "organizations",
+              "developer-platform",
+              "notifications"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "PENDING",
+              "DONE",
+              "NOT_HELD",
+              "LEGAL_HOLD"
+            ]
+          },
+          "recorded_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"
+          },
+          "recorded_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  }
+}

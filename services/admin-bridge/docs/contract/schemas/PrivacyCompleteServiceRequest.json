@@ -1,0 +1,36 @@
+{
+  "description": "Record one service's outcome after its owner action, at the request's version. A recorded outcome never changes. TWO_PERSON.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "expected_version",
+    "outcome"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "expected_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "outcome": {
+      "enum": [
+        "DONE",
+        "NOT_HELD",
+        "LEGAL_HOLD"
+      ]
+    },
+    "reason_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}

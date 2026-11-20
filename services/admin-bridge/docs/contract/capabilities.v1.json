@@ -1,13 +1,13 @@
 {
   "contract": "cfmeet-admin-bridge",
-  "contract_version": "1.12.0",
+  "contract_version": "1.13.0",
   "envelope_version": "1.0",
   "product": "cfmeet",
   "hq_principal": "cosmicforge-hq-cfmeet-admin",
   "bridge_base_path": "/internal/cfmeet-admin/v1",
   "source_artifacts": {
-    "openapi_sha256": "472ed7e0cc974c5e26ebe1aa241748cba5f06fc002c7073c1264abc386a52cb3",
-    "capability_matrix_sha256": "a2132d1e6cbcc55e43ce45e2700bc30148c76d3b962f148c1912249e39c2ae07"
+    "openapi_sha256": "3ab74a91f4533682eb682d3ba0a667c5729068a2a6f09863db14ee7e8e502320",
+    "capability_matrix_sha256": "4d41c670dc968ea0852878a7027752e245d852b5bd419a077a5fdb6261405991"
   },
   "query_shapes": {
     "SCOPED": [
@@ -51,10 +51,10 @@
   "totals": {
     "capabilities": 247,
     "by_state": {
-      "READ_ONLY": 92,
-      "AVAILABLE": 7,
-      "DISABLED": 107,
-      "BLOCKED_DEPENDENCY": 41
+      "READ_ONLY": 96,
+      "AVAILABLE": 9,
+      "DISABLED": 105,
+      "BLOCKED_DEPENDENCY": 37
     }
   },
   "capabilities": [
@@ -12362,9 +12362,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PrivacyRequestPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "privacy.requests.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -12373,8 +12373,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY",
-      "blocker": "Phase A7: bridge route not implemented yet",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "privacy_requests_complete_only_when_every_service_reports"
+      ],
       "contact_search": false
     },
     {
@@ -12412,9 +12414,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PrivacyRequest"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "privacy.requests.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -12423,8 +12425,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY",
-      "blocker": "Phase A7: bridge route not implemented yet",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "privacy_requests_complete_only_when_every_service_reports"
+      ],
       "contact_search": false
     },
     {
@@ -12454,14 +12458,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PrivacyRegisterRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PrivacyCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "privacy.request.register",
       "risk": "R3",
       "privacy": "PERSONAL",
@@ -12470,8 +12474,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A7: bridge route not implemented yet; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "privacy_requests_complete_only_when_every_service_reports"
+      ],
       "contact_search": false
     },
     {
@@ -12511,14 +12517,14 @@
         "cfmeet.security_admin"
       ],
       "request_body": {
-        "not": {}
+        "$ref": "#/components/schemas/PrivacyCompleteServiceRequest"
       },
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/PrivacyCommandResult"
       },
-      "matrix_state": "DISABLED",
+      "matrix_state": "AVAILABLE",
       "permission": "privacy.request.complete-service",
       "risk": "R4",
       "privacy": "PERSONAL",
@@ -12527,8 +12533,10 @@
       "idempotency_required": true,
       "approval": "TWO_PERSON",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_PRIVACY+ADMIN_BRIDGE_WRITES_ENABLED",
-      "blocker": "Phase A7: bridge route not implemented yet; two-person certification required before enabling",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "privacy_requests_complete_only_when_every_service_reports"
+      ],
       "contact_search": false
     },
     {
@@ -12563,9 +12571,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/Health"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "operations.health.read",
       "risk": "R0",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -12574,8 +12582,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_OPERATIONS",
-      "blocker": "Phase A2: bridge route not implemented yet",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "operations_health_is_the_aggregate_health"
+      ],
       "contact_search": false
     },
     {
@@ -12958,9 +12968,9 @@
       "success_status": 200,
       "success_media": "application/json",
       "result_schema": {
-        "not": {}
+        "$ref": "#/components/schemas/AuditEntryPage"
       },
-      "matrix_state": "BLOCKED_DEPENDENCY",
+      "matrix_state": "READ_ONLY",
       "permission": "audit.entries.read",
       "risk": "R1",
       "privacy": "OPERATIONS_MINIMIZED",
@@ -12969,8 +12979,10 @@
       "idempotency_required": false,
       "approval": "NONE",
       "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_AUDIT",
-      "blocker": "Phase A2: bridge route not implemented yet",
-      "source_tests": [],
+      "blocker": null,
+      "source_tests": [
+        "audit_entries_page_the_hash_chained_audit"
+      ],
       "contact_search": false
     },
     {

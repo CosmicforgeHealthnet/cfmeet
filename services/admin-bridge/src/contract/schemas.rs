@@ -120,6 +120,136 @@ pub fn components() -> Map<String, Value> {
         }),
     );
 
+    m.insert(
+        "AuditEntryPage".into(),
+        json!({
+            "description": "The bridge's hash-chained audit of HQ requests (allowed and refused), oldest first. next_cursor is the last sequence. Never a body, a request digest or a path.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["items", "next_cursor"],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["sequence", "correlation_id", "occurred_at", "actor", "capability_id", "method", "purpose", "decision", "http_status", "approval_id", "approver"],
+                        "properties": {
+                            "sequence": {"type": "integer", "minimum": 1},
+                            "correlation_id": {"type": "string", "format": "uuid"},
+                            "occurred_at": date_time.clone(),
+                            "actor": {"type": "string", "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|unauthenticated)$", "maxLength": 160},
+                            "capability_id": {"type": ["string", "null"], "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*){1,3}$", "maxLength": 96},
+                            "method": {"enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+                            "purpose": {"type": ["string", "null"], "pattern": "^[a-z][a-z-]{1,63}$"},
+                            "decision": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
+                            "http_status": {"type": "integer", "minimum": 100, "maximum": 599},
+                            "approval_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9._:-]{1,128}$"},
+                            "approver": {"type": ["string", "null"], "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"}
+                        }
+                    }
+                },
+                "next_cursor": {"type": ["string", "null"], "pattern": "^[0-9]{1,19}$"}
+            }
+        }),
+    );
+
+    let services = json!({"enum": ["meeting-service", "messaging", "calling", "communications", "organizations", "developer-platform", "notifications"]});
+    m.insert(
+        "PrivacyRequest".into(),
+        json!({
+            "description": "One data-subject request tracked across the services that hold the person's data (design §6.14). OPEN until every service has an outcome, then COMPLETE. The bridge keeps the kind, the opaque CF Meet account id and each service's outcome only. version increases on every change.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["request_id", "kind", "subject_ref", "state", "created_by", "created_at", "updated_at", "completed_at", "version", "services"],
+            "properties": {
+                "request_id": {"type": "string", "format": "uuid"},
+                "kind": {"enum": ["ACCESS", "ERASURE", "CORRECTION", "RESTRICTION"]},
+                "subject_ref": {"type": "string", "format": "uuid", "description": "The CF Meet account id the request is about."},
+                "state": {"enum": ["OPEN", "COMPLETE"]},
+                "created_by": {"type": "string", "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"},
+                "created_at": date_time.clone(),
+                "updated_at": date_time.clone(),
+                "completed_at": nullable_date_time.clone(),
+                "version": {"type": "integer", "minimum": 1},
+                "services": {
+                    "type": "array",
+                    "minItems": 7,
+                    "maxItems": 7,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["service", "outcome", "recorded_by", "recorded_at"],
+                        "properties": {
+                            "service": services.clone(),
+                            "outcome": {"enum": ["PENDING", "DONE", "NOT_HELD", "LEGAL_HOLD"]},
+                            "recorded_by": {"type": ["string", "null"], "pattern": "^hq:[A-Za-z0-9._:@-]{1,128}$"},
+                            "recorded_at": nullable_date_time.clone()
+                        }
+                    }
+                }
+            }
+        }),
+    );
+    m.insert(
+        "PrivacyRequestPage".into(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["items", "next_cursor"],
+            "properties": {
+                "items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/PrivacyRequest"}},
+                "next_cursor": {"type": ["string", "null"], "pattern": CURSOR_PATTERN}
+            }
+        }),
+    );
+    m.insert(
+        "PrivacyRegisterRequest".into(),
+        json!({
+            "description": "Register a request (expected_version 0: a new resource; its request_id is the operation_id). Every service starts PENDING. TWO_PERSON.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation_id", "expected_version", "kind", "subject_ref"],
+            "properties": {
+                "operation_id": {"type": "string", "format": "uuid"},
+                "expected_version": {"const": 0},
+                "kind": {"enum": ["ACCESS", "ERASURE", "CORRECTION", "RESTRICTION"]},
+                "subject_ref": {"type": "string", "format": "uuid"},
+                "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
+                "note": {"type": "string", "minLength": 1, "maxLength": 500}
+            }
+        }),
+    );
+    m.insert(
+        "PrivacyCompleteServiceRequest".into(),
+        json!({
+            "description": "Record one service's outcome after its owner action, at the request's version. A recorded outcome never changes. TWO_PERSON.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation_id", "expected_version", "outcome"],
+            "properties": {
+                "operation_id": {"type": "string", "format": "uuid"},
+                "expected_version": {"type": "integer", "minimum": 1},
+                "outcome": {"enum": ["DONE", "NOT_HELD", "LEGAL_HOLD"]},
+                "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$"},
+                "note": {"type": "string", "minLength": 1, "maxLength": 500}
+            }
+        }),
+    );
+    m.insert(
+        "PrivacyCommandResult".into(),
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["operation", "resource"],
+            "properties": {
+                "operation": {"$ref": "#/components/schemas/OperationReadback"},
+                "resource": {"$ref": "#/components/schemas/PrivacyRequest"}
+            }
+        }),
+    );
+
     let metric_names: Vec<&str> = {
         let mut v: Vec<&str> = DATASETS
             .iter()

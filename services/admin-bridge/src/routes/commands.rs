@@ -24,7 +24,9 @@ use crate::chain::{Answer, Authorized, Bridge};
 use crate::contract::model::{Approval, Owner};
 use crate::errors::ErrorCode;
 use crate::owners::{ApprovalHeaders, CommandCall, CommandOutcome};
-use crate::store::{AuditDraft, BeginOutcome, OpStatus, Operation, Settlement};
+use crate::store::{
+    AuditDraft, BeginOutcome, LocalChange, LocalOutcome, OpStatus, Operation, Settlement,
+};
 
 /// A `PENDING` row older than this was never sent (the request that recorded it is gone).
 pub const PENDING_GRACE_SECONDS: i64 = 120;
@@ -650,4 +652,92 @@ pub fn status_and_version(v: &Value) -> Option<Applied> {
         source_version,
         view: v.clone(),
     })
+}
+
+/// A command on the bridge's OWN data ([`LocalChange`]): the operation and the change are
+/// written in one transaction, so the outcome is always SUCCEEDED or FAILED, never unknown.
+/// Replays and conflicts behave exactly as for owner commands. `view` renders the resource
+/// after a success.
+pub async fn execute_local(
+    bridge: &Bridge,
+    auth: &Authorized,
+    target: String,
+    expected_version: String,
+    operation_id: Uuid,
+    change: LocalChange,
+) -> Result<Operation, ErrorCode> {
+    let key = auth
+        .idempotency_key
+        .ok_or(ErrorCode::IdempotencyKeyRequired)?;
+    if operation_id != key {
+        return Err(ErrorCode::CommandBodyInvalid);
+    }
+    let intent = intent_sha256(auth);
+    let sub = auth.staff.claims.sub.clone();
+    let replay = |op: Operation| -> Result<Operation, ErrorCode> {
+        if op.intent_sha256 != intent {
+            return Err(ErrorCode::IdempotencyConflict);
+        }
+        match op.status {
+            OpStatus::Succeeded => Ok(op),
+            OpStatus::Failed => Err(stored_code(&op)),
+            _ => Err(ErrorCode::UnknownOutcome),
+        }
+    };
+    if let Some(op) = auth.existing.clone() {
+        return replay(op);
+    }
+    let op = Operation {
+        principal_sub: sub.clone(),
+        idempotency_key: key,
+        operation_id,
+        capability: auth.capability.id.to_string(),
+        owner: crate::contract::model::BRIDGE_OWNER.to_string(),
+        purpose: auth.query.purpose.as_str().to_string(),
+        scope: scope_of(auth),
+        intent_sha256: intent.clone(),
+        target,
+        expected_version,
+        approval_id: auth
+            .staff
+            .claims
+            .approval
+            .as_ref()
+            .map(|a| a.approval_id.clone()),
+        correlation_id: auth.correlation_id,
+        status: OpStatus::Pending,
+        source_status: None,
+        source_version: None,
+        error_code: None,
+        created_at: auth.now,
+        sent_at: None,
+        settled_at: None,
+    };
+    let outcome = bridge
+        .store
+        .local_command(&op, &change)
+        .await
+        .map_err(|_| ErrorCode::BridgeUnavailable)?;
+    let result = match outcome {
+        LocalOutcome::Existing(existing) => return replay(*existing),
+        LocalOutcome::VersionTaken => return Err(ErrorCode::VersionConflict),
+        LocalOutcome::Applied { .. } | LocalOutcome::Refused(_) => bridge
+            .store
+            .operation(&sub, key)
+            .await
+            .map_err(|_| ErrorCode::BridgeUnavailable)?
+            .ok_or(ErrorCode::Internal)?,
+    };
+    let (decision, status) = match result.status {
+        OpStatus::Succeeded => ("SUCCEEDED".to_string(), 200),
+        _ => {
+            let e = stored_code(&result);
+            (e.code().to_string(), e.status())
+        }
+    };
+    audit_outcome(bridge, auth, &result, &decision, status).await;
+    match result.status {
+        OpStatus::Succeeded => Ok(result),
+        _ => Err(stored_code(&result)),
+    }
 }

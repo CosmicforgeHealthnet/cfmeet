@@ -5,6 +5,7 @@ pub mod calling;
 pub mod commands;
 pub mod communications;
 pub mod identity;
+pub mod local;
 pub mod meetings;
 pub mod messaging;
 pub mod notifications;
@@ -57,6 +58,9 @@ pub async fn dispatch(bridge: &Bridge, auth: &Authorized) -> Result<Answer, Erro
         return answer;
     }
     if let Some(answer) = verification::dispatch(bridge, auth).await {
+        return answer;
+    }
+    if let Some(answer) = local::dispatch(bridge, auth).await {
         return answer;
     }
     match auth.capability.id {
@@ -139,6 +143,11 @@ impl HealthProbe {
             .expect("http client");
         HealthProbe { urls, client }
     }
+}
+
+/// The aggregate health answer (`bridge.health.read`, `operations.health.read`).
+pub async fn health_answer(bridge: &Bridge) -> Answer {
+    health(bridge).await
 }
 
 async fn health(bridge: &Bridge) -> Answer {
