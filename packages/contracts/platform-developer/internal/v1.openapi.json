@@ -623,13 +623,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: the workspace's projects, newest first, keyset-paginated (no description, labels or support address). Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: the workspace's projects, newest first, keyset-paginated (no description, labels or support address). Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -709,13 +709,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: every environment of the workspace's projects, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: every environment of the workspace's projects, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -795,13 +795,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: workspace memberships (opaque CF Meet user ids; no name or address), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: workspace memberships (opaque CF Meet user ids; no name or address), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -881,13 +881,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: invitations without the invitee's address or token, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: invitations without the invitee's address or token, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -967,13 +967,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: push credential details (provider identifiers and fingerprints); never the credential itself. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: push credential details (provider identifiers and fingerprints); never the credential itself. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -1053,13 +1053,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: live webhook subscriptions with the endpoint host only (never the URL path or query, the signing secret or the description), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: live webhook subscriptions with the endpoint host only (never the URL path or query, the signing secret or the description), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -1139,13 +1139,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: webhook delivery outcomes in an optional window (no payload, no response body), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: webhook delivery outcomes in an optional window (no payload, no response body), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -4653,13 +4653,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: apps whose current manifest name contains `q` (case-insensitive, wildcards literal) or whose id equals `q`, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: apps whose current manifest name contains `q` (case-insensitive, wildcards literal) or whose id equals `q`, newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -4739,13 +4739,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: the app's manifest versions (name and distribution only), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: the app's manifest versions (name and distribution only), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
@@ -4825,13 +4825,13 @@
             "serviceToken": []
           }
         ],
-        "description": "ADR 0067: the app's installation grants (opaque targets, scope counts), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
+        "description": "ADR 0068: the app's installation grants (opaque targets, scope counts), newest first. Read-only. Permission `developer-platform.administer` AND a named operator (`X-CF-Operator`).",
         "parameters": [
           {
             "name": "X-CF-Operator",
             "in": "header",
             "required": true,
-            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0067) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
+            "description": "The named operator: the admin bridge's HQ staff member (hq:<staff>, ADR 0068) or the operator console's human operator. Attribution headers from any other caller are refused (INTERNAL_PERMISSION_DENIED).",
             "schema": {
               "type": "string",
               "pattern": "^(hq:[A-Za-z0-9._:@-]{1,128}|[A-Za-z0-9][A-Za-z0-9._@-]{0,99})$"
