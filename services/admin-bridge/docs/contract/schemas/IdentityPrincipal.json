@@ -1,0 +1,77 @@
+{
+  "description": "One principal (identity record; partner users are kind EXTERNAL_APPLICATION_PRINCIPAL). Its external reference is never relayed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "principal_id",
+    "tenant_id",
+    "application_id",
+    "environment_id",
+    "kind",
+    "linked_service_account_id",
+    "status",
+    "tombstoned_at",
+    "revision",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "principal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "application_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "environment_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "kind": {
+      "enum": [
+        "NATIVE_CF_USER",
+        "EXTERNAL_APPLICATION_PRINCIPAL",
+        "ENTERPRISE_MEMBER",
+        "SERVICE_ACCOUNT",
+        "TELEPHONE_ENDPOINT",
+        "TEMPORARY_EXTERNAL_PARTICIPANT",
+        "BOT_OR_SERVICE"
+      ]
+    },
+    "linked_service_account_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+    },
+    "tombstoned_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

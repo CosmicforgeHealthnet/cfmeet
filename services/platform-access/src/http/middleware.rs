@@ -10,6 +10,15 @@
 //! On success the request runs in the signed hop's request / correlation context and the
 //! caller is available through [`InternalCaller`]. Diagnostics (reason, kid, issuer) are
 //! logged; tokens never are. Spans carry the matched ROUTE PATTERN, never the path.
+//!
+//! Operator attribution (ADR 0068): `X-CF-Operator` / `X-CF-Approver` /
+//! `X-CF-Approval-Ref` / `X-CF-Intent-Digest` are read once here:
+//! * from `cfmeet.admin-bridge`: strict `hq:<staff>` attribution
+//!   (`cf_service_auth::OperatorAttribution`), required on every bridge request;
+//! * from the operator console: the legacy named operator (`X-CF-Operator` only, checked
+//!   by the administration handlers); approval headers are refused;
+//! * from any other caller: any of the four headers is refused
+//!   (`INTERNAL_PERMISSION_DENIED`), never silently ignored.
 
 use std::future::Future;
 
@@ -20,8 +29,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use cf_service_auth::{
-    headers, CorrelationId, DelegatedPlatformContext, InternalPermission, InternalServiceContext,
-    RequestId,
+    headers, operator as attribution, services, CorrelationId, DelegatedPlatformContext,
+    InternalPermission, InternalServiceContext, OperatorAttribution, RequestId,
 };
 use tracing::Instrument;
 
@@ -90,11 +99,16 @@ pub async fn request_id_middleware(request: Request, next: Next) -> Response {
 
 /// The authenticated internal caller of the current request.
 #[derive(Debug, Clone)]
-pub struct InternalCaller(InternalServiceContext);
+pub struct InternalCaller(InternalServiceContext, Option<OperatorAttribution>);
 
 impl InternalCaller {
     pub fn context(&self) -> &InternalServiceContext {
         &self.0
+    }
+
+    /// The admin bridge's verified HQ operator attribution (`None` for every other caller).
+    pub fn bridge_operator(&self) -> Option<&OperatorAttribution> {
+        self.1.as_ref()
     }
 
     /// Fails with `INTERNAL_PERMISSION_DENIED` unless THIS service's trust policy grants
@@ -143,6 +157,36 @@ impl<S: Send + Sync> FromRequestParts<S> for InternalCaller {
     }
 }
 
+/// Applies the attribution rule of this module to a verified caller.
+fn attribution_of(
+    ctx: &InternalServiceContext,
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<OperatorAttribution>, &'static str> {
+    let caller = ctx.authenticated_service();
+    if caller.as_str() == services::ADMIN_BRIDGE {
+        return OperatorAttribution::from_headers(caller, headers)
+            .map_err(|_| "bridge attribution malformed or incomplete");
+    }
+    let present = |h: &axum::http::HeaderName| headers.contains_key(h);
+    if caller.as_str() == services::OPERATOR_CONSOLE {
+        if [
+            &attribution::APPROVER,
+            &attribution::APPROVAL_REF,
+            &attribution::INTENT_DIGEST,
+        ]
+        .into_iter()
+        .any(present)
+        {
+            return Err("approval attribution is accepted only from the admin bridge");
+        }
+        return Ok(None);
+    }
+    if attribution::ALL_HEADERS.iter().any(present) {
+        return Err("operator attribution from a caller that may not claim an operator");
+    }
+    Ok(None)
+}
+
 /// The request-target path as received (before any `Router::nest` prefix stripping),
 /// which is what a signer binds in `htu`.
 pub(crate) fn received_path(request: &Request) -> String {
@@ -181,7 +225,28 @@ pub async fn require_internal_service(
                 method = %request.method(),
                 route = route_pattern(&request),
             );
-            request.extensions_mut().insert(InternalCaller(ctx));
+            let operator = match attribution_of(&ctx, request.headers()) {
+                Ok(a) => a,
+                Err(reason) => {
+                    crate::metrics::inc(
+                        "platform_access_permission_denied_total",
+                        &[("permission", "operator-attribution")],
+                    );
+                    tracing::warn!(caller = %ctx.authenticated_service(), reason, "operator attribution refused");
+                    let request_id = context.request_id.clone();
+                    let mut response = scoped(context, async {
+                        AccessError::Refused(ErrorCode::InternalPermissionDenied).into_response()
+                    })
+                    .await;
+                    if let Ok(value) = HeaderValue::from_str(request_id.as_str()) {
+                        response.headers_mut().insert(headers::REQUEST_ID, value);
+                    }
+                    return response;
+                }
+            };
+            request
+                .extensions_mut()
+                .insert(InternalCaller(ctx, operator));
             let request_id = context.request_id.clone();
             let mut response = scoped(context, next.run(request).instrument(span)).await;
             if let Ok(value) = HeaderValue::from_str(request_id.as_str()) {
