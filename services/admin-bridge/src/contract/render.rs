@@ -468,6 +468,8 @@ On error `result` is absent. Missing data is `null` or `UNAVAILABLE`, never zero
             e.meaning()
         ));
     }
+    // HQ parses this section: its definite-refusal set must equal these "- `CODE`" bullets
+    // exactly (and the "## Error codes" table above). Keep both formats.
     s.push_str("
 ## Command outcomes
 
