@@ -1858,7 +1858,7 @@
     "method": "GET",
     "bridge_endpoint": "/communications/profiles/{cfmeet_id}",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "communications.profiles.read",
     "risk": "R1",
     "privacy": "PERSONAL",
@@ -1867,8 +1867,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-    "blocker": "Phase A2: new communications operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "communications_profile_never_relays_contact_fields"
+    ]
   },
   {
     "id": "communications.profile.suspend",
@@ -1915,7 +1917,7 @@
     "method": "GET",
     "bridge_endpoint": "/communications/reports",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "communications.reports.read",
     "risk": "R1",
     "privacy": "SAFETY_EVIDENCE",
@@ -1924,8 +1926,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-    "blocker": "Phase A2: communications endpoint exists; grant to cfmeet.admin-bridge and operator attribution pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "communications_reports_and_holds_page_by_time_cursor"
+    ]
   },
   {
     "id": "communications.report.review",
@@ -1953,7 +1957,7 @@
     "method": "GET",
     "bridge_endpoint": "/communications/holds",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "communications.holds.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1962,8 +1966,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-    "blocker": "Phase A2: new communications operator endpoint required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "communications_reports_and_holds_page_by_time_cursor"
+    ]
   },
   {
     "id": "communications.audit.list",
@@ -1972,7 +1978,7 @@
     "method": "GET",
     "bridge_endpoint": "/communications/audit",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "communications.audit.read",
     "risk": "R1",
     "privacy": "OPERATIONS_MINIMIZED",
@@ -1981,8 +1987,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-    "blocker": "Phase A2: communications keeps this in its database only; operator read API required",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "communications_audit_maps_the_window_and_drops_details"
+    ]
   },
   {
     "id": "communications.metrics.read",
@@ -1991,7 +1999,7 @@
     "method": "GET",
     "bridge_endpoint": "/communications/metrics",
     "source_endpoint": null,
-    "state": "BLOCKED_DEPENDENCY",
+    "state": "READ_ONLY",
     "permission": "communications.metrics.read",
     "risk": "R0",
     "privacy": "INTERNAL",
@@ -2000,8 +2008,10 @@
     "idempotency_required": false,
     "approval": "NONE",
     "feature_flag": "ADMIN_BRIDGE_ENABLED+ADMIN_BRIDGE_MODULE_COMMUNICATIONS",
-    "blocker": "Phase A2: communications endpoint exists; bridge wiring pending",
-    "tests": []
+    "blocker": null,
+    "tests": [
+      "communications_metrics_are_an_hq_summary"
+    ]
   },
   {
     "id": "communications.backfill.run",
