@@ -406,6 +406,14 @@ async fn hq_reprocesses_usage_and_reads_a_workspace_usage() {
         )
         .await;
     standard(&again, "REPROCESSED");
+    assert_eq!(
+        c.count(
+            "SELECT count(*) FROM devplat_operator_audit WHERE operator = 'hq:staff-0001'              AND action = 'usage.rollups_rebuilt'"
+        )
+        .await,
+        1,
+        "audited once, under the HQ staff member"
+    );
     let rec = record(&c, &key).await;
     assert_eq!(rec["source_status"], "REPROCESSED");
     assert!(rec["source_version"].is_null());
