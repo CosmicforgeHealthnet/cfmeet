@@ -317,6 +317,8 @@ const CLASSIFIED: &[(&str, Probe)] = &[
         "POST /internal/v1/webhook-migration/rollback/deliveries",
         Probe::Body,
     ),
+    ("POST /internal/v1/account-privacy/erasure", Probe::Body),
+    ("POST /internal/v1/account-privacy/export", Probe::Body),
     ("POST /v1/blocks", Probe::Body),
     ("DELETE /v1/blocks/{block_id}", Probe::HiddenPath),
     ("POST /v1/calls/{call_id}/abuse-reports", Probe::Body),
@@ -1114,7 +1116,9 @@ async fn every_mutable_operation_refuses_missing_insufficient_and_malformed_requ
                     peers.developer_platform.clone()
                 } else if permission == "calling-abuse-reports.review" {
                     peers.operator_console.clone()
-                } else if permission.starts_with("calling-organization-member.") {
+                } else if permission.starts_with("calling-organization-member.")
+                    || permission == "calling-account.privacy"
+                {
                     peers.meeting_service.clone()
                 } else {
                     peers.privacy_relay.clone()
