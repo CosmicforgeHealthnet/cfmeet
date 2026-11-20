@@ -53,6 +53,14 @@
     {
       "name": "Operator: apps",
       "description": "ADR 0065: app review (named reviewers, no self-review), publication and suspension."
+    },
+    {
+      "name": "Operator: verification",
+      "description": "ADR 0068 A3: the verification queue HQ reviews (partner go-live and app review cases) in HQ's shared case shape."
+    },
+    {
+      "name": "Operator: admin bridge",
+      "description": "ADR 0068 A3: records of commands relayed by the HQ admin bridge, read to settle an unknown outcome."
     }
   ],
   "paths": {
