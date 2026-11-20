@@ -662,6 +662,54 @@ ADMIN_BRIDGE_GRANTS = (
     ('activate-admin-bridge', 'organizations', 'admin-bridge', ('organization.administer', 'organization.operator-read')),
 )
 
+# The other owners the bridge reads (A2) and commands (A3), one activation per owner family:
+# the owner grants (each permission the owner's bridge routes check; the bridge-only ones
+# are refused to every other issuer by the registry), the owner's private TLS base URL on
+# the bridge and the module switches those owners serve. The bridge stays as enabled or
+# disabled as it was; commands also need ADMIN_BRIDGE_WRITES_ENABLED (not set here).
+ADMIN_BRIDGE_OWNERS = {
+    'activate-admin-bridge-notifications': {
+        'grants': [(replica, ('notifications.administer', 'notifications-observability.read'))
+                   for replica in ('notifications', 'notifications-2')],
+        'urls': {'CF_NOTIFICATIONS_BASE_URL': 'notifications'},
+        'modules': ('NOTIFICATIONS',),
+    },
+    # Partner reads span both owners (keys, service accounts, websites and users live in
+    # Platform Access); verification (A3) is the Developer Platform's.
+    'activate-admin-bridge-partners': {
+        'grants': [('developer-platform', ('developer-platform.administer',)),
+                   ('platform-access', ('platform-identity.administer',))],
+        'urls': {'CF_DEVELOPER_PLATFORM_BASE_URL': 'developer-platform',
+                 'CF_PLATFORM_ACCESS_BASE_URL': 'platform-access'},
+        'modules': ('PARTNERS', 'IDENTITY', 'APPS', 'VERIFICATION'),
+    },
+    'activate-admin-bridge-communications': {
+        'grants': [('communications', ('communications.administer',))],
+        'urls': {'CF_COMMUNICATIONS_BASE_URL': 'communications'},
+        'modules': ('COMMUNICATIONS',),
+    },
+    # The Meeting Service mounts its operator routes only with ADMIN_OPERATOR_API_ENABLED.
+    'activate-admin-bridge-meetings': {
+        'grants': [('meeting-service', ('account.administer', 'meeting.administer'))],
+        'urls': {'CF_MEETING_SERVICE_BASE_URL': 'meeting-service'},
+        'modules': ('ACCOUNTS', 'MEETINGS'),
+        'owner_env': {'meeting-service': {'ADMIN_OPERATOR_API_ENABLED': 'true'}},
+    },
+    'activate-admin-bridge-messaging': {
+        'grants': [('messaging', ('messaging-firstparty.administer',))],
+        'urls': {'CF_MESSAGING_BASE_URL': 'messaging'},
+        'modules': ('MESSAGING',),
+    },
+    'activate-admin-bridge-calling': {
+        'grants': [('calling', ('calling.administer',))],
+        'urls': {'CF_CALLING_BASE_URL': 'calling'},
+        'modules': ('CALLING',),
+    },
+}
+ADMIN_BRIDGE_GRANTS += tuple((op, receiver, 'admin-bridge', permissions)
+                             for op, spec in ADMIN_BRIDGE_OWNERS.items()
+                             for receiver, permissions in spec['grants'])
+
 # (operation, receiver, issuer, permissions): final-production-activation-runbook §2,
 # organizations-cutover-runbook (Organizations bundle) and the developer-platform gateway
 # activation checklist §4. Every row is checked against packages/service-auth/src/permissions.rs
@@ -1494,6 +1542,11 @@ def safe_defaults():
     # HQ admin bridge: the Organizations module after activate-admin-bridge (its grants).
     if done('activate-admin-bridge'):
         rules['admin-bridge']['ADMIN_BRIDGE_MODULE_ORGANIZATIONS'] = (None, 'false', 'true')
+    # ...and each other owner family's modules after its own activation.
+    for op, spec in ADMIN_BRIDGE_OWNERS.items():
+        if done(op):
+            for module in spec['modules']:
+                rules['admin-bridge']['ADMIN_BRIDGE_MODULE_' + module] = (None, 'false', 'true')
     # ...and switched on for HQ (reads only) after activate-admin-bridge-hq.
     if done('activate-admin-bridge-hq'):
         rules['admin-bridge']['ADMIN_BRIDGE_ENABLED'] = (None, 'false', 'true')
@@ -2207,6 +2260,24 @@ def activate_admin_bridge_hq(sha, run_id, confirm):
         ('admin-bridge', overrides, {'mounts': [(str(ADMIN_BRIDGE_ROOT / 'tls'), ADMIN_BRIDGE_TLS_TARGET),
                                                 (str(ADMIN_BRIDGE_ROOT / 'hmac'), ADMIN_BRIDGE_HMAC_TARGET)]})],
         post=admitted)
+
+
+def activate_admin_bridge_owner(operation):
+    """One owner family for the HQ admin bridge (ADR 0068, ADMIN_BRIDGE_OWNERS): grant the
+    owner permissions in each owner's trust bundle (merged; nothing dropped), set the owner
+    switch it needs, point the bridge at the owners' private TLS routes and switch on their
+    modules. Failure restores every container."""
+    spec = ADMIN_BRIDGE_OWNERS[operation]
+
+    def run(sha, run_id, confirm):
+        has_signing_identity('admin-bridge')
+        for owner in spec['urls'].values():
+            tls_route_present(SERVICES[owner]['tls'])
+        bridge = {var: private_url(SERVICES[owner]['tls']) for var, owner in spec['urls'].items()}
+        bridge.update({'ADMIN_BRIDGE_MODULE_' + m: 'true' for m in spec['modules']})
+        changes = [(owner, env) for owner, env in spec.get('owner_env', {}).items()]
+        apply_activation(operation, sha, run_id, changes + [('admin-bridge', bridge)])
+    return run
 
 
 PUBLIC_SITE = Path('/etc/nginx/sites-available/api.cfmeet.com')
@@ -3331,6 +3402,8 @@ ACTIVATIONS = {
     'activate-admin-bridge': ((), activate_admin_bridge),
     # Runbook §3: switched on for HQ, read-only, with the tunnel-only relay (confirm=hq-enrolled-read-only).
     'activate-admin-bridge-hq': (('activate-admin-bridge',), activate_admin_bridge_hq),
+    # The other owner families (grants, owner URL, modules), each after activate-admin-bridge.
+    **{op: (('activate-admin-bridge',), activate_admin_bridge_owner(op)) for op in ADMIN_BRIDGE_OWNERS},
     # Notification Service N0-1: the missing Hub preference grant (meeting notices fail closed).
     'activate-meeting-notice-preferences': ((), activate_meeting_notice_preferences),
     # Notification Service N0-6: public host refuses the Meeting Service operator routes.

@@ -814,6 +814,74 @@ def enable_record(**changes):
     return record
 
 
+class AdminBridgeOwners(unittest.TestCase):
+    """ADR 0068: one activation per owner family the bridge reads and commands."""
+
+    def test_each_owner_family_grants_only_the_permissions_its_bridge_routes_check(self):
+        expected = {
+            'activate-admin-bridge-notifications': {
+                ('notifications', ('notifications.administer', 'notifications-observability.read')),
+                ('notifications-2', ('notifications.administer', 'notifications-observability.read'))},
+            'activate-admin-bridge-partners': {
+                ('developer-platform', ('developer-platform.administer',)),
+                ('platform-access', ('platform-identity.administer',))},
+            'activate-admin-bridge-communications': {('communications', ('communications.administer',))},
+            'activate-admin-bridge-meetings': {('meeting-service', ('account.administer', 'meeting.administer'))},
+            'activate-admin-bridge-messaging': {('messaging', ('messaging-firstparty.administer',))},
+            'activate-admin-bridge-calling': {('calling', ('calling.administer',))},
+        }
+        for op, rows in expected.items():
+            got = {(g[1], g[3]) for g in cr.GRANTS if g[0] == op}
+            self.assertEqual(got, rows, op)
+            self.assertTrue(all(g[2] == 'admin-bridge' for g in cr.GRANTS if g[0] == op))
+            self.assertEqual(cr.ACTIVATIONS[op][0], ('activate-admin-bridge',))
+        bridge_rows = tuple(g for g in cr.GRANTS if g[2] == 'admin-bridge')
+        self.assertEqual(cr.validate_grants(permission_registry(), bridge_rows), [])
+        modules = [m for spec in cr.ADMIN_BRIDGE_OWNERS.values() for m in spec['modules']]
+        self.assertEqual(len(modules), len(set(modules)), 'each module has one owner activation')
+        self.assertTrue(set(modules) <= set(cr.ADMIN_BRIDGE_MODULES))
+        workflow = (REPO / '.github/workflows/cfmeet-coordinated-release.yml').read_text()
+        for op in expected:
+            self.assertIn(op + ',', workflow)
+
+    def test_an_owner_activation_points_the_bridge_at_the_owner_and_switches_its_modules(self):
+        applied = []
+        env = {'CF_RUNTIME_ENVIRONMENT': 'production', 'CF_SERVICE_AUTH_KEY_ID': 'k', 'CF_SERVICE_AUTH_PRIVATE_KEY_FILE': '/f'}
+        routes = []
+        with patch.object(cr, 'env_of', lambda name: env),                 patch.object(cr, 'tls_route_present', lambda port: routes.append(port)),                 patch.object(cr, 'apply_activation', lambda op, sha, run, changes, **kw: applied.append((op, changes))):
+            cr.ACTIVATIONS['activate-admin-bridge-meetings'][1]('a' * 40, '1', '')
+            cr.ACTIVATIONS['activate-admin-bridge-partners'][1]('a' * 40, '1', '')
+        (op, changes), (op2, changes2) = applied
+        self.assertEqual(op, 'activate-admin-bridge-meetings')
+        self.assertEqual(changes, [
+            ('meeting-service', {'ADMIN_OPERATOR_API_ENABLED': 'true'}),
+            ('admin-bridge', {'CF_MEETING_SERVICE_BASE_URL': cr.private_url(cr.SERVICES['meeting-service']['tls']),
+                              'ADMIN_BRIDGE_MODULE_ACCOUNTS': 'true', 'ADMIN_BRIDGE_MODULE_MEETINGS': 'true'})])
+        self.assertEqual(changes2, [('admin-bridge', {
+            'CF_DEVELOPER_PLATFORM_BASE_URL': cr.private_url(cr.SERVICES['developer-platform']['tls']),
+            'CF_PLATFORM_ACCESS_BASE_URL': cr.private_url(cr.SERVICES['platform-access']['tls']),
+            'ADMIN_BRIDGE_MODULE_PARTNERS': 'true', 'ADMIN_BRIDGE_MODULE_IDENTITY': 'true',
+            'ADMIN_BRIDGE_MODULE_APPS': 'true', 'ADMIN_BRIDGE_MODULE_VERIFICATION': 'true'})])
+        self.assertEqual(set(routes), {cr.SERVICES[o]['tls'] for o in ('meeting-service', 'developer-platform', 'platform-access')})
+        # Never the master switch or writes.
+        for _, ch in applied:
+            for _, overrides in ch:
+                self.assertNotIn('ADMIN_BRIDGE_ENABLED', overrides)
+                self.assertNotIn('ADMIN_BRIDGE_WRITES_ENABLED', overrides)
+        with patch.object(cr, 'env_of', lambda name: dict(env, CF_RUNTIME_ENVIRONMENT='staging')),                 patch.object(cr, 'apply_activation', side_effect=AssertionError('must not apply')):
+            with self.assertRaisesRegex(RuntimeError, 'signing identity'):
+                cr.ACTIVATIONS['activate-admin-bridge-calling'][1]('a' * 40, '1', '')
+
+    def test_a_module_may_be_on_only_after_its_owner_activation(self):
+        calling = dict(cr.SERVICES['admin-bridge']['env'], ADMIN_BRIDGE_MODULE_CALLING='true')
+        with patch.object(cr, 'done', lambda op: op == 'activate-admin-bridge'):
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': calling}), ['admin-bridge ADMIN_BRIDGE_MODULE_CALLING'])
+        with patch.object(cr, 'done', lambda op: op in ('activate-admin-bridge', 'activate-admin-bridge-calling')):
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': calling}), [])
+            messaging = dict(calling, ADMIN_BRIDGE_MODULE_MESSAGING='true')
+            self.assertEqual(cr.safe_default_violations({'admin-bridge': messaging}), ['admin-bridge ADMIN_BRIDGE_MODULE_MESSAGING'])
+
+
 class AdminBridgeHq(unittest.TestCase):
     """Runbook §3: activate-admin-bridge-hq switches the bridge on for HQ, read-only."""
 
